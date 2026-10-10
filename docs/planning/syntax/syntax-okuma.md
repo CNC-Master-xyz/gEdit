@@ -88,7 +88,7 @@ The feeds, the index position and the `G74` arguments are illustrative only. `T0
 | File extensions | `.MIN` main program, `.SUB` user subprogram, `.SSB` system subprogram (supplied with the control), `.SDF` schedule program |
 | File name | Up to 16 alphanumeric characters, starting with a letter, plus an extension of up to 3 letters. Hyphens appear in the manual's examples (`SHAFT-A.MIN`). |
 | Tape/serial header | First line `$<FILENAME>.<EXT>%`, for example `$FLANGE-OP1.MIN%`. Programs on tape end with `%` **(verify)**. Whether files stored on disk or USB keep the header: **(verify)**. A `$` at the start of a later line is not a header: it continues the block above (§3.1). |
-| Program name | `O` + up to 4 characters: letters and digits if the first character is a letter, digits only if the first character is a digit. Names are compared as text, so `O0123` ≠ `O123` and `O0` ≠ `O00`. With an option parameter a subprogram name may have up to 16 characters; the profile's `CALL`/`O` patterns stop at 4. |
+| Program name | `O` + up to 4 characters: letters and digits if the first character is a letter, digits only if the first character is a digit. Names are compared as text, so `O0123` ≠ `O123` and `O0` ≠ `O00`. With an option parameter a subprogram name may have up to 16 characters. Since bug-fix round 1 the program map and the `CALL`/`MODIN` targets read up to 16 (`O` followed by letters and digits starting with a letter, or by digits only; `O1000ABC` is no name), leniently, although the manual allows the long form for subprograms only; the detection rule for a `CALL` stays at 4 characters. |
 | Program-name block | Contains nothing else. Whether a comment on the same line is accepted: **(verify)**; CAM posts put the comment on the next line. |
 | Main program | The `O` name is optional. Ends with `M02` or `M30`. |
 | Subprogram | The `O` name is mandatory. Ends with `RTS`. A `.SUB` file can hold several `O` programs **(verify)**. |
@@ -541,7 +541,7 @@ The target must be in the same program.
 | C-axis / live tool | `M110`, `M109` | "C-axis on/off" |
 | Cycle | `G7[1-4]`, `G7[78]`, `G18[1-9]`, `G3[1-5]` (threads) | Cycle name |
 | LAP call | `G8[5-8]` | "LAP rough/finish" + shape name |
-| Subprogram call | `CALL O…`, `MODIN O…`, the G-code macros `G161`–`G171` and `G205`–`G214` (§7.1) | Target, or the macro code |
+| Subprogram call | `CALL O…`, `MODIN O…`, the G-code macros `G161`–`G176` and `G205`–`G214` (§7.1) | Target, or the macro code |
 | Stops | `M00`, `M01` | Stop / optional stop |
 | End | `M02`, `M30`, `RTS`, `END` (schedule) | End |
 
@@ -556,7 +556,7 @@ Severity: **E** = likely error, **W** = warning, **I** = info.
 1. **E** Sequence name not followed by a space or tab (`N100G00`).
 2. **E** `/` anywhere other than block start or directly after the sequence name.
 3. **E** Program-name block (`O…`) contains other words.
-4. **E** `O` name longer than 4 characters, or starting with a digit and containing a letter. The same rule applies to `N` names.
+4. **E** `O` name longer than 4 characters (not built; the program map accepts 16, see §2.2), or starting with a digit and containing a letter. The same rule applies to `N` names.
 5. **E** Control statement (`GOTO`, `CALL`, `RTS`, `MODIN`, `MODOUT`, …) not followed by a space or tab. Comparison or logical operator without spaces.
 6. **E** `GOTO`/`IF` target sequence name missing in the same program. **E** Duplicate sequence names used as jump targets.
 7. **E** Main program (`.MIN`) without `M02`/`M30`. **E** Subprogram without `RTS`. **E** `MODIN` without a `MODOUT` in the same program.
@@ -707,6 +707,7 @@ A new `okuma.ts` should follow §3.8.
 Unlike §11.1–§11.6, this is the state of the M8 profile, not of the code before M3.
 
 - **`$` continuation lines are read as part of their block, not joined.** The profile declares the leading marker (`syntax.continuationStart`, plan §7.16 #27), and the modal interpreter and the three bundled scripts read a line that starts with `$` as part of the block above it (§3.1), so the lead on the `$` line of a `G71` block stays a lead. The tokenizer still reads the line on its own, so a code counts from the line it stands on: a thread code written on a `$` line would not cover an `F` on the block's first line. Renumbering leaves such lines alone only because `$` is in `skipStartingWith`, a list the user can edit in the form; with `$` taken out of it, renumbering numbers the line and cuts it off its block (M8 re-review, [TODO.md](../../../TODO.md)). ~~The profile's marker also requires a blank after the `$`, which the manuals do not~~ — **fixed, `dec/int`**: the pattern now tells a continuation line from the `$NAME.MIN%` header by the `%`, not by a blank, so `$H1.8 …` (the manuals' own layout) is read as a continuation and its lead stays a lead.
+- **Program and call names of up to 16 characters are read leniently** (bug-fix round 1): the manual allows the long form for subprogram names by option, the program map and the program start take it for every `O` name. `G171`–`G176` are listed as calls like `G161`–`G170`.
 - **One program-map item per line.** `NEND M02` is listed as the program end, with the name in its text, not as the label `NEND` (§8).
 - **The `E` feed of a shape block** is neither scaled nor reported by the feed script: an `E` word can also be a dwell or a lead change, and only being inside a LAP shape tells them apart (§6.4). The feeds of a LAP condition change (`FA=`, `FB=`) are reported and left as written.
 - **What a G-code macro's words mean** (§7.1) depends on the machine's setup; the map lists the call and nothing reads its arguments.

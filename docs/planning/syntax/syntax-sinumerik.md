@@ -130,7 +130,7 @@ CAM output usually does not contain them.
 
 ### 3.1 Block anatomy
 
-Since M9 the tokenizers, the grammar, Renumber and the jumps agree with this section: a main block `:123` is a block number token (the colon stays when renumbered, and `GOTOF :123` names it), an indexed address (`S[2]=`, `LIMS[2]=`, §3.2) is one word with an `index`, and `1.5EX3` is one number (§3.3).
+Since M9 the tokenizers, the grammar, Renumber and the jumps agree with this section: a main block `:123` is a block number token (the colon stays when renumbered, and `GOTOF :123` names it; written without the blank, `GOTOF:123` is the jump to that block too, not a label named `GOTOF`, since bug-fix round 1), an indexed address (`S[2]=`, `LIMS[2]=`, §3.2) is one word with an `index`, and `1.5EX3` is one number (§3.3).
 
 ```
 [/n] [N123 | :123] [LABEL:] word word … [; comment]
@@ -267,9 +267,9 @@ The G groups, their members, which of them are modal and which is the control's 
 | `SOFT` / `BRISK` / `DRIVE` | Jerk-limited / step (the reset state) / speed-dependent acceleration, modal | 21 | [P §4.3.21, p.1233] |
 | `FFWON` / `FFWOF` | Feed-forward control on/off | 24 | |
 | `COMPON` / `COMPCURV` / `COMPCAD` / `COMPSURF` / `COMPOF` | Compressor for short linear blocks; `COMPOF` is the reset state | 30 | [P §4.3.30, p.1236]. Usually switched by `CYCLE832` (see `G642`) |
-| `G601` / `G602` / `G603` | Block change at fine / coarse exact stop / at the end of interpolation | 12 | Missing from the database |
-| `DYNNORM` / `DYNPOS` / `DYNROUGH` / `DYNSEMIFIN` / `DYNFINISH` / `DYNPREC` | Dynamics response per technology | 59 | Missing from the database |
-| `CTOL=` / `OTOL=` / `ADIS=` | Contour tolerance (a length) / orientation tolerance (an angle) / rounding distance; a negative tolerance clears it | – | Missing from the database |
+| `G601` / `G602` / `G603` | Block change at fine / coarse exact stop / at the end of interpolation | 12 | In the database since bug-fix round 1 (marked for the owner's review) |
+| `DYNNORM` / `DYNPOS` / `DYNROUGH` / `DYNSEMIFIN` / `DYNFINISH` / `DYNPREC` | Dynamics response per technology | 59 | In the database |
+| `CTOL=` / `OTOL=` / `ADIS=` | Contour tolerance (a length) / orientation tolerance (an angle) / rounding distance; a negative tolerance clears it | – | `CTOL=` and `OTOL=` are in the database since bug-fix round 1 (marked for the owner's review; Scale Feed does not read them as feeds); `ADIS=` is still missing |
 
 ### 4.2 Plane, units, dimensions, feed type
 
@@ -302,7 +302,7 @@ The G groups, their members, which of them are modal and which is the control's 
 | `G505`–`G599` | Further settable work offsets; how many a control has is machine data | 8 | [P §4.3.8, p.1229] |
 | `G53` / `G153` / `SUPA` | Suppress offsets for this block: the programmable and settable frames / and the base frames / and handwheel, external and preset offsets | 9 | Used for safe retract before tool change [P §4.3.9, p.1229] |
 | `G58` / `G59` | Programmable **axial** offsets (replace / add), not work offsets as on Fanuc | 3 | Their axis words are offsets, not positions |
-| `G74` / `G75` | Reference-point approach / approach a fixed machine point (`G75 X0 Z0 FP=n`): the axis value is not a position | 2 | Common in milling posts as a retract; not allowed while radius compensation or a transformation is active. Missing from the database |
+| `G74` / `G75` | Reference-point approach / approach a fixed machine point (`G75 X0 Z0 FP=n`): the axis value is not a position | 2 | Common in milling posts as a retract; not allowed while radius compensation or a transformation is active. In the database (`FP=` itself is not). |
 | `TRANS` / `ATRANS` | Programmable translation (absolute / additive) | 3 (non-modal, own block; the frame it sets stays) | `TRANS` alone resets the programmable frame [P §4.3.4, p.1227] |
 | `ROT` / `AROT` | Programmable rotation around axes, or `RPL=` in plane | 3 | Used for 3+2 when the post does not use `CYCLE800` |
 | `SCALE` / `ASCALE`, `MIRROR` / `AMIRROR` | Scaling / mirroring | 3 | Rare in CAM output |
@@ -317,7 +317,7 @@ The G groups, their members, which of them are modal and which is the control's 
 | `ORIWKS` / `ORIMKS` | Orientation in workpiece / machine coordinates | |
 | `ORIAXES` / `ORIVECT` | Interpolate orientation axis-wise / as a vector (great circle) | |
 | `A3= B3= C3=` | Tool direction vector (alternative to rotary axis words) | Also `A2/B2/C2` (angles), `A4`…`C8`, `LEAD`/`TILT`/`THETA` |
-| `ORIEULER` / `ORIRPY`, `ORIPATH` / `ORIPLANE` / `ORICURVE`, `ORIRESET(…)` | How orientation angles are read / interpolated; `ORIRESET` only while `TRAORI` is on | Missing from the database |
+| `ORIEULER` / `ORIRPY`, `ORIPATH` / `ORIPLANE` / `ORICURVE`, `ORIRESET(…)` | How orientation angles are read / interpolated; `ORIRESET` only while `TRAORI` is on | In the database, except `ORICURVE`. |
 | `TRANSMIT` / `TRACYL` / `TRAANG` | Face-end (polar) / peripheral-surface / inclined-axis transformation for mill-turn | Named in [M] as control functions |
 
 ### 4.5 Spindle, tool, M functions
@@ -466,7 +466,7 @@ The turning cycles of the 4.92 cycle list [P §3.25.1.2, p.1043]:
 | `CYCLE62` | Contour call for the contour cycles | | [P §3.25.1.12, p.1064] |
 | `CYCLE95` | Stock removal along a contour subprogram (described in its own section, though the overview table leaves it out) | `FF1`, `FF2`, `FF3` (arguments 6–8: roughing, plunging, finishing) | [P §3.25.1.28, p.1096–1098] |
 
-`CYCLE93` (groove) and `CYCLE97` (thread) are not in the 4.92 list; they are recognized by name and stay marked for verification until their parameters are in the database. The 01/2008 cycles manual gives both: `CYCLE93` has 18 parameters (`SPD, SPL, WIDG, DIAG, STA1, ANG1, ANG2, RCO1, RCO2, RCI1, RCI2, FAL1, FAL2, IDEP, DTB, VARI, _VRT, _DN`), `CYCLE97` 17, lead first (`PIT, MPIT, SPL, FPL, DM1, DM2, APP, ROP, TDEP, FAL, IANG, NSP, NRC, NID, VARI, NUMT, _VRT`). `POCKET3/4`, `SLOT1/2`, `CYCLE61` (face milling), `CYCLE72` (contour milling) are milling cycles: show them in the map as "cycle". The measuring cycles (`CYCLE961`–`CYCLE998`, `CYCLE150`) read their inputs from `_` variables in the 2008 version and take bracketed arguments in 4.92.
+`CYCLE93` (groove) and `CYCLE97` (thread) are not in the 4.92 list; they were recognized by name only until bug-fix round 1, which put their arguments into the database from the 01/2008 cycles manual (marked for the owner's review; `CYCLE93 SPD` is not called a diameter). The manual gives both: `CYCLE93` has 18 parameters (`SPD, SPL, WIDG, DIAG, STA1, ANG1, ANG2, RCO1, RCO2, RCI1, RCI2, FAL1, FAL2, IDEP, DTB, VARI, _VRT, _DN`), `CYCLE97` 17, lead first (`PIT, MPIT, SPL, FPL, DM1, DM2, APP, ROP, TDEP, FAL, IANG, NSP, NRC, NID, VARI, NUMT, _VRT`). `POCKET3/4`, `SLOT1` and `CYCLE61` (face milling) have their arguments in the database since bug-fix round 1 (also marked for review); `SLOT2` and `CYCLE72` (contour milling) are milling cycles shown in the map as "cycle" only. The measuring cycles (`CYCLE961`–`CYCLE998`, `CYCLE150`) read their inputs from `_` variables in the 2008 version and take bracketed arguments in 4.92.
 
 A thread or tapping cycle whose lead is one of its own arguments does not take anything from the feed in force; `CYCLE840` with ENC = 1 does, which is why the database marks only `CYCLE840` with `pitchFeed` among the calls.
 

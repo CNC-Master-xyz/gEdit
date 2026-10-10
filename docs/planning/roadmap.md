@@ -65,7 +65,7 @@ Status: shipped. Every row below exists, except what §10 of [phase-1-implementa
 
 ## Phase 2: Real CAM output, safely (done)
 
-Status: **M13 on `main`; Phase 2 done** (2026-10-09). The exit criteria of §2.2 of [phase-2-implementation.md](phase-2-implementation.md#22-phase-2-exit-criteria-testable) are checked by the cumulative runtime suite, with programs and golden results in `tests/fixtures/exit2/`. What was not built is listed under [What Phase 2 did not do](#what-phase-2-did-not-do). Release 1.0 (v1.0.0) was prepared on 2026-10-10: the draft is built by the release workflow, and the owner checks the installers on the three platforms and publishes it.
+Status: **M13 on `main`; Phase 2 done** (2026-10-09). The exit criteria of §2.2 of [phase-2-implementation.md](phase-2-implementation.md#22-phase-2-exit-criteria-testable) are checked by the cumulative runtime suite, with programs and golden results in `tests/fixtures/exit2/`. What was not built is listed under [What Phase 2 did not do](#what-phase-2-did-not-do). Release 1.0 (v1.0.0) was prepared on 2026-10-10: the tag is on `65d801a`, the release workflow has built the draft, and the owner checks the installers on the three platforms and publishes it (still a draft).
 
 Exit criteria: users can open the real output of their posts in all six dialects and trust what the editor reads, check a program before it goes to the machine, shift an address value without corrupting cycle depths, compare re-posted programs without numbering noise, check that the wait codes of a multi-channel program match, and describe their own machines, dialects and codes. Fanuc lathe output and Okuma OSP and Sinumerik turning are supported; Sinumerik milling is added in M9. The testable version is §2.2 of [phase-2-implementation.md](phase-2-implementation.md#22-phase-2-exit-criteria-testable), which also records the scope decision for every row below (§2.1) and what was deferred or cut (§11).
 
@@ -94,7 +94,8 @@ Releases (accepted 2026-10-01; [D70](phase-2-implementation.md#101-decided-by-th
 | v0.4 | M10 | published |
 | v0.5 | M11 | published |
 | v0.6 | M12, the owner answers of 2026-10-07 and 2026-10-08 | not cut on its own: folded into 1.0 (owner decision of 2026-10-09, one release at the end) |
-| 1.0 | M12, M12.5, M13, the Phase 2 exit, and Phase 3 (P3a, P3b); everything since v0.5.0 | prepared 2026-10-10 as v1.0.0: the CHANGELOG entry and the version are in, the tag starts the release workflow, which builds the draft; the owner checks the installers on the three platforms and publishes |
+| 1.0 | M12, M12.5, M13, the Phase 2 exit, and Phase 3 (P3a, P3b); everything since v0.5.0 | tagged 2026-10-10 as v1.0.0 on `65d801a`; the release workflow has built the draft with all its files; the owner checks the installers on the three platforms and publishes it (not published yet) |
+| next | Bug-fix round 1 (`71f38d7`, on `main`) | no version cut yet; its changes are under `## Unreleased` in the CHANGELOG |
 
 Row by row:
 
@@ -158,7 +159,7 @@ Status: **done (2026-10-10); the plan of record is [phase-3-implementation.md](p
 
 ### Bug-fix round 1 (done, no release)
 
-Status: **done on the integration branch (2026-10-10); the plan of record is [bugfix-round-1.md](bugfix-round-1.md).** Between Phase 3 and the release the owner asked for the known bugs and risks to be fixed first. The round is not a phase and adds no feature row: it fixed the items of the "Bugs and risks" part of [TODO.md](../../TODO.md) (data safety, scripts and platform, performance, NC correctness, UI), filled the Fanuc, Sinumerik, Klartext and Okuma code databases from the control manuals (every new entry marked for the owner's review), re-cut the ribbon into seven tabs, and was checked by an NC review, a code review and a skeptic pass with their fix batches. It lands on `main` under *Unreleased* in the [CHANGELOG](../../CHANGELOG.md); v1.0.0 is still the next release. What it left is in the backlog below and in [TODO.md](../../TODO.md).
+Status: **done and on `main` (2026-10-10, `71f38d7`; CI and the runtime suite, 149 of 149 scenarios, green on `main`); the plan of record is [bugfix-round-1.md](bugfix-round-1.md).** Between Phase 3 and the release the owner asked for the known bugs and risks to be fixed first. The round is not a phase and adds no feature row: it fixed the items of the "Bugs and risks" part of [TODO.md](../../TODO.md) (data safety, scripts and platform, performance, NC correctness, UI), filled the Fanuc, Sinumerik, Klartext and Okuma code databases from the control manuals (every new entry marked for the owner's review), re-cut the ribbon into seven tabs, and was checked by an NC review, a code review and a skeptic pass with their fix batches. It is on `main` under *Unreleased* in the [CHANGELOG](../../CHANGELOG.md); v1.0.0 is still the release the owner has to publish, and the round gets no release of its own yet. What it left is in the backlog below and in [TODO.md](../../TODO.md).
 
 ## Phase 4: Comfort and geometry
 

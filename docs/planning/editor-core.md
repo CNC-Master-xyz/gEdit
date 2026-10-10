@@ -128,7 +128,7 @@ A file that is data rather than a program (more than 10 % NUL bytes between the 
 ### Backup on save and crash recovery
 `P2 · S · Core`
 
-**Status:** shipped in M7 (Phase 2), with more than is described here: see [Never losing work](../user/README.md#never-losing-work).
+**Status:** shipped in M7 (Phase 2), with more than is described here: see [Never losing work](../user/README.md#never-losing-work). Bug-fix round 1 added the sweep of the backup folder: a space limit (default 500 MB, oldest copies first, the newest copy of every file always kept) and the expiry of the history of a deleted file after 90 days, both settings. Only histories on the backups' own volume can expire; a file on a stick, a share or another disk is never judged gone because it cannot be found, a history is checked twice before it is deleted, two folders that share a key never expire, no pass runs while `settings.json` is unreadable, and at most one pass runs every 10 minutes. Recovery snapshots are discarded after a restore only when the restored document has written its own new snapshot, and a lasting status item shows while snapshots cannot be written.
 
 - Backup: before overwriting, copy the previous file to `name.ext.bak` (setting: off / one backup / N timestamped copies in a backup folder).
 - Recovery: modified buffers are written to a recovery folder every 30 s (never over the original). After a crash, gEdit offers to restore them on the next start.

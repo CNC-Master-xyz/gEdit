@@ -144,7 +144,7 @@ A row or finding with `line` (and optionally `document`) jumps there on click. `
 `P1 · S · Core`
 
 - Interpreter path is configurable (settings). The default is `python3`, or `python` on Windows. A virtual environment works by pointing to its interpreter. At startup, gEdit checks the version (3.9 or newer) and shows a clear message if Python is missing. Script features are then disabled, and the rest of the editor keeps working.
-- Default timeout 60 s (per-script override in the header). A Cancel button in the panel kills the process.
+- Default timeout 60 s (per-script override in the header). A Cancel button in the panel kills the process. Since bug-fix round 1 the whole tree is ended on Stop, timeout and Quit, on Windows through a Job Object as `killpg` does on Unix (a program a script left running after it ended by itself survives, as on Unix), and an app started from the Dock or Finder adds the folders of the login shell's `PATH` to the script's own, except when `GEDIT_PYTHON` or the interpreter setting names the interpreter. A script header changed since the last scan (`input`, `output`) is rescanned before the run. Quit waits 300 ms for a running script.
 - stdout is capped (for example 200 MB) to protect the UI.
 - The backend runs scripts asynchronously (already the case) and keeps the child handle so it can cancel.
 
@@ -171,7 +171,7 @@ Scripts are normal programs that run with the user's rights. gEdit cannot sandbo
 
 ## Bundled script library
 
-Standard-library Python only, so no pip install is needed. Shared code lives in `gedit_nc.py` next to the bundled scripts (context loading, profile-aware tokenizer, number formatting, modal interpreter). The app adds the bundled folder to `PYTHONPATH`, so user scripts can `import gedit_nc` too.
+Standard-library Python only, so no pip install is needed. Shared code lives in `gedit_nc.py` next to the bundled scripts (context loading, profile-aware tokenizer, number formatting, modal interpreter). The app adds the bundled folder to `PYTHONPATH`, so user scripts can `import gedit_nc` too. The lexer of `gedit_nc` (`_nc_lex.py`) has a fast path for lines without strings, brackets or comments (bug-fix round 1); it gives exactly the tokens of the full path, which a differential fuzz of 61.6 million reads and a run over a large body of programs confirmed, and the bundled scripts need about two thirds of the time on a 300,000-line program.
 
 | Script | Phase | Output | Status | Spec |
 |---|---|---|---|---|

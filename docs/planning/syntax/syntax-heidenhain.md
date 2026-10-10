@@ -28,8 +28,8 @@ The German manual prints some examples with a decimal comma (`DL+0,2`). This doc
 
 **Deliberately excluded:**
 
-- FK free contour programming (`FL`, `FC`, `FLT`, `FCT`, `FPOL`, …). This is shop-floor input. The tokenizer should only recognise the words so they are not flagged as errors.
-- SL/contour pocket cycles (14, 20–25, 27–29, 39, 270–275), pattern cycles (220/221), probing cycles, and turning, grinding, gear and imbalance cycles (8xx).
+- FK free contour programming (`FL`, `FC`, `FLT`, `FCT`, `FPOL`, …). This is shop-floor input. The tokenizer only recognises the words so they are not flagged as errors; address arithmetic leaves the absolute FK points (`P1X` … `P3Z`, `CCX`, `CCY`) as written and warns that the contour has to be checked.
+- SL/contour pocket cycles (20, 27–29, 39, 270–275; cycles 14 and 21–25 are in the code database since bug-fix round 1, with cycle 20 still open), pattern cycles (220/221), probing cycles, and turning, grinding, gear and imbalance cycles (8xx).
 - Palette tables and tool, preset or datum *tables* (`.T`, `.TCH`, `.PR`, `.D`, `.P`, `.TAB`). gEdit may open them as plain text later.
 - Q-parameter I/O and system functions (FN 14 and above: `FN 16 F-PRINT`, `FN 18 SYSREAD`, table access, SQL). Highlight them, but give them no semantics.
 - Machine-builder specific cycles and M functions.
@@ -233,7 +233,7 @@ Working plane: the tool axis in `TOOL CALL` sets it (Z → XY, Y → ZX, X → Y
 | M6 | Tool change (machine-dependent). **Not** used for tool detection: `TOOL CALL` performs the change | end | – |
 | M8 / M9 | Coolant on / off | start / end | coolant group |
 | M13 / M14 | Spindle CW / CCW **and** coolant on | start | spindle+coolant |
-| M89 | Modal cycle call (the manual: machine-dependent, set by a machine parameter; on the owner's controls it is this call, the owner, 2026-10-08): it runs the cycle defined last after every following positioning block until `M99` on the last position or the next `CYCL DEF` | – | – (gEdit reads it as a modal call: the block that carries `M89` runs the cycle itself, the manual says to write the first call with it; no longer `verify`, so hover describes it) |
+| M89 | Modal cycle call (the manual: machine-dependent, set by a machine parameter; on the owner's controls it is this call, the owner, 2026-10-08): it runs the cycle defined last after every following positioning block until `M99` on the last position or the next `CYCL DEF` | – | – (gEdit reads it as a modal call: the block that carries `M89` runs the cycle itself, the manual says to write the first call with it; no longer `verify`, so hover describes it; polar moves `LP`, `CP` and `CTP` run it too since bug-fix round 1) |
 | M91 | Coordinates in this block refer to machine zero | start | block only. Tool length is not applied; incremental values refer to the last `M91` position |
 | M92 | Coordinates refer to a machine-builder reference position | start | block only. Tool length is not applied |
 | M94 | Reduce rotary-axis display below 360° | start | block |
@@ -253,10 +253,10 @@ M functions that take effect at block start run before those at block end. Other
 | Code | Meaning | Notes |
 |---|---|---|
 | `PLANE SPATIAL SPA… SPB… SPC… <MOVE\|TURN\|STAY> …` | Tilt the working plane by spatial angles (rotations about machine X, Y, Z) | All three angles are mandatory, even if 0, and one of `MOVE`/`TURN`/`STAY` is mandatory. `MOVE [DIST d] F…\|FMAX\|FAUTO` swivels with compensating motion. `TURN [MB n\|MB MAX] F…\|FMAX` swivels rotary axes only. `STAY` means the angles go to Q120–Q122 and a separate `L A+Q120 …` positions. Optional `SEQ+/-` (solution choice) and `COORD ROT` (the default) or `TABLE ROT`. The `F` of a `MOVE`/`TURN` is the swivel feed, not the path feed |
-| `PLANE PROJECTED / EULER / VECTOR / POINTS / RELATIV / AXIAL` | Other plane definitions | CAM mostly uses SPATIAL, sometimes VECTOR or AXIAL |
+| `PLANE PROJECTED / EULER / VECTOR / POINTS / RELATIV / AXIAL` | Other plane definitions | CAM mostly uses SPATIAL, sometimes VECTOR or AXIAL. Since bug-fix round 1 the three points of `PLANE POINTS P1X+0 P1Y+0 P1Z+0 …` are words with a value (not unknown text), and the Klartext word pattern takes a number with a decimal comma (`241,781`) as one word, so a double click selects all of it |
 | `PLANE RESET [MOVE\|TURN\|STAY …]` | Reset the tilted plane (also resets cycle 19) | The manual says to reset with this: zero angles reset only the angles, not the function. gEdit reads a `PLANE SPATIAL`, `PROJECTED` or `EULER` and a cycle 19 with every angle zero as no tilt all the same (the owner, 2026-10-08), since the plane is then the untilted one. It takes `MOVE`/`TURN`/`STAY` as well |
 | `CYCL DEF 19.0 … / 19.1 A… B… C… [F…] [distance]` | Older tilt cycle | The owner's older programs emit it. The feed and the safety distance are used when the control swivels by itself. Reset: define it again with all angles 0, then once more with no angle. Whether the angles are spatial or axis angles is a machine parameter |
-| `M128 [F…]` / `M129` | TCPM on/off (older form) | see §4.5. The `F` of `M128` is the feed of the compensating moves, not the path feed |
+| `M128 [F…]` / `M129` | TCPM on/off (older form) | see §4.5. The `F` of `M128` is the feed of the compensating moves, not the path feed. Since bug-fix round 1 the code database marks such function `F` words (`M128 F`, `M140 … F`, `PLANE … F`, cycle 19 `F`) with `ownWords`, and both interpreters, Scale Feed and the tool list skip the whole word, so the path feed in force is not replaced by it |
 | `FUNCTION TCPM F TCP\|F CONT AXIS POS\|AXIS SPAT PATHCTRL AXIS\|PATHCTRL VECTOR [REFPNT …]` | TCPM with explicit feed interpretation / rotary meaning / interpolation | Modal until `FUNCTION RESET TCPM`; reset automatically on program select. Like `M128`, it must be switched off before a `TOOL CALL` and before `M91`/`M92` |
 | `LN X Y Z [NX NY NZ] [TX TY TZ] [R0\|RL\|RR] F M` | Line with 3D tool compensation | Words in X,Y,Z / NX,NY,NZ / TX,TY,TZ order. The normals are all or none, and a block that carries them repeats all three every time. An `LN` with `TX TY TZ` and **no** normal is valid for peripheral milling with RL/RR under TCPM. TX/TY/TZ = normalised tool orientation (numbers only), ignored unless `M128` or `FUNCTION TCPM` is on. CAM should write 7 decimals; a vector component lies within ±9.99999999. Without TCPM, the offset is applied along the normal by the sum of the delta values |
 
@@ -372,7 +372,7 @@ Shared Q parameters:
 These orders are the same in the -07 and -08 cycle manuals, and `heidenhain.json` follows them.
 | 262–267 | Thread milling variants | Optional, only if posts emit them (verify) |
 
-Pocket and stud cycles (251–258) and face milling (232/233) are only emitted by some posts in "cycle output" mode. Highlight them generically, with no special support.
+Pocket and stud cycles (251–258) and face milling (232/233) are only emitted by some posts in "cycle output" mode. Cycles 251–254, 256 and 257 have their parameters in the code database since bug-fix round 1 (marked for the owner's review); the others are highlighted generically.
 
 ### 6.4 Other DEF-active cycles CAM may emit
 
@@ -387,7 +387,7 @@ Pocket and stud cycles (251–258) and face milling (232/233) are only emitted b
 | 19 tilt (old) | see §4.6 |
 | 247 preset | Q-style, one parameter `Q339` |
 
-Reset values are 0. The owner's CAM post writes 7, 9 and 247 with `PLANE`, the owner's older programs 19 and 7; the database has none of them yet, and hover cannot reach a sub-block such as `32.1` ([TODO.md](../../../TODO.md)).
+Reset values are 0. The owner's CAM post writes 7, 9 and 247 with `PLANE`, the owner's older programs 19 and 7; the database has them (7–11, 19, 26, 32 and 247).
 
 ---
 
@@ -557,7 +557,9 @@ Lines to surface. In CAM files, most of them carry a block-number prefix.
 
 ---
 
-## 11. Gaps in the current gEdit implementation
+## 11. Gaps in the editor before Phase 1 (historical)
+
+**Historical.** This section records the editor as it was before Phase 1 (September 2026); the files named below have since been removed or rewritten. What shipped is described in the user guide, and the profile, the code database and the grammar now carry what is listed here as missing.
 
 Files reviewed:
 

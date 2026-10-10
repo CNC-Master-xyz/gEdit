@@ -50,7 +50,7 @@ The core has a TypeScript version. Bundled scripts share a small standard-librar
 ### Renumber blocks
 `P1 · M · Core` (basic) · `P2 · S · Core` (advanced options)
 
-**Status:** basic options shipped in Phase 1 and M6; the advanced options (spaces or column, `everyNth`, skip rules, start trigger and the like) are deferred to Phase 4. Klartext has no dialog; see [Renumber Blocks…](../user/transformations.md#renumber-blocks).
+**Status:** basic options shipped in Phase 1 and M6; since bug-fix round 1 a line that continues the block above it (an Okuma `$` line) is never numbered, also when `$` is not in the skip list; the advanced options (spaces or column, `everyNth`, skip rules, start trigger and the like) are deferred to Phase 4. Klartext has no dialog; see [Renumber Blocks…](../user/transformations.md#renumber-blocks).
 
 Adds block numbers where missing and makes existing ones consecutive. It uses the profile's numbering settings. A small form can open before the run to change start and increment for this run only (setting).
 
@@ -76,7 +76,7 @@ Edge cases:
 ### Remove block numbers
 `P1 · S · Core`
 
-**Status:** shipped in Phase 1; since M6 it keeps the numbers that a jump or cycle points at (option on by default).
+**Status:** shipped in Phase 1; since M6 it keeps the numbers that a jump or cycle points at (option on by default). Since bug-fix round 1 it also recognises the Sinumerik jump written without a blank (`GOTOB:20`, `GOTOF:20`) and writes a row for it.
 
 Removes the block number and the space after it at the start of each block, in the selection or the whole file. Keeps skip marks (`/N100 G0` → `/G0`). The command is not offered for profiles where numbers are mandatory (Klartext), and says why.
 
@@ -125,7 +125,7 @@ Removes comments according to the profile's comment syntax (`( )` for Fanuc, `;`
 ### Convert case
 `P1 · S · Monaco + Core`
 
-**Status:** shipped in Phase 1; since M13 it asks before it writes lower case for a dialect whose controls expect upper case.
+**Status:** shipped in Phase 1; since M13 it asks before it writes lower case for a dialect whose controls expect upper case. Since bug-fix round 1 it keeps every program name and number as written (`<name>`, `O1234`, `:1234`, file headers, the target of an Okuma `CALL`), because the control may tell upper from lower case in them; the results panel says how many it left.
 
 Uppercase or lowercase for the selection or the whole file. Monaco's actions cover the selection. The core version adds "exclude comments and strings", which is the default for uppercase.
 
@@ -177,7 +177,7 @@ Reads a text file with one `search<delimiter>replacement` pair per line. The del
 ### Scale feed rates
 `P1 · M · Script`
 
-**Status:** shipped in Phase 1 (`scale_feed.py`); lathe-aware since M6.
+**Status:** shipped in Phase 1 (`scale_feed.py`); lathe-aware since M6; since bug-fix round 1 the `F` of a function (Klartext `M128 F`, `M140 … F`, `PLANE … F`, cycle 19) is left as written and reported, and the tool list does not count it as a feed.
 
 Multiplies feed values by a percentage. Options: percentage, decimals (or keep original), minimum and maximum clamp, and "only change values above X" / "only below Y". Scope and output target come from the [framework](#transform-framework).
 
@@ -192,7 +192,7 @@ Edge cases:
 ### Scale spindle speeds
 `P1 · S · Script`
 
-**Status:** shipped in Phase 1 (`scale_speed.py`); lathe-aware since M6.
+**Status:** shipped in Phase 1 (`scale_speed.py`); lathe-aware since M6; since bug-fix round 1 it scales the Klartext cutting speed `VC:` under the constant-surface-speed choice, like `SVC=`.
 
 Same options as feed scaling, with speeds written as integers by default.
 
@@ -206,7 +206,7 @@ Edge cases:
 ### Arithmetic on address values
 `P2 · M · Script`
 
-**Status:** shipped in M10 (WP10.4), on the Python interpreter, with a refusal for every cycle it cannot judge.
+**Status:** shipped in M10 (WP10.4), on the Python interpreter, with a refusal for every cycle it cannot judge. Since bug-fix round 1 it leaves the absolute points of a Klartext FK contour (`P1X`…`P3Z`, `CCX`, `CCY`) as written and lists them with a warning (moving them is on the backlog), and on the Fanuc lathe `G69` (turret mirror) no longer ends a coordinate rotation (`G68.1`/`G69.1`).
 
 Adds, subtracts, multiplies or divides the values of selected addresses (checkboxes for X Y Z I J K A B C R F S, plus free text for other names). Options: clamp to a minimum and maximum, number format, and case handling of addresses. Typical uses: shift Z after a stock change, flip a sign, or convert a value scale.
 

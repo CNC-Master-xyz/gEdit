@@ -15,14 +15,20 @@ person on a real machine can see.
 - [ ] The tag ruleset on `refs/tags/v*` (only the owner may create, update or delete) and the
       branch protection on `main` are still in place (see CONTRIBUTING.md, Releases).
 - [ ] `npm run versions:check` agrees with the tag you are about to push (`vX.Y.Z`).
-- [ ] Optional: Actions > Release > Run workflow on `main` (a dry run) builds the bundles
-      as workflow artifacts without touching any release.
+- [ ] Optional: Actions > Release > Run workflow on `main` (a dry run, about 8 minutes) builds the
+      bundles as workflow artifacts without touching any release. The same run is how a change to
+      the bundles or to `release.yml` is tried on a branch first (see CONTRIBUTING.md).
 
 ## Tag and draft
 
 - [ ] `git tag vX.Y.Z && git push origin vX.Y.Z`.
 - [ ] The Release run is green. A draft release for the tag exists, with the notes from the
-      CHANGELOG entry, the bundles and `SHA256SUMS`.
+      CHANGELOG entry, the bundles and `SHA256SUMS` (seven files for a normal release: the
+      `.dmg`, the `.msi`, the NSIS `.exe`, the `.deb`, the `.rpm`, the `.AppImage` and the
+      checksums). The run has already checked on the Linux `.deb` that the program is
+      `/usr/bin/gedit-nc` (not `gedit`, which is GNOME's editor), that the desktop entry starts
+      `gedit-nc` and that the package is not called `gedit` (it is `g-edit`), and on the macOS
+      app that its ad-hoc signature is intact; nothing to redo by hand.
 
 ## On each platform
 
@@ -37,11 +43,12 @@ purpose).
 | macOS: the `.dmg` was downloaded from the draft **through a browser** (so it is quarantined, as a user's would be) and, after the Open Anyway step in the notes, the app opens | [ ] | | |
 | Windows: on a machine with Smart App Control on, the installer is blocked with no way past; the notes say so | | [ ] | |
 | Linux: the `.AppImage` starts on a current Ubuntu (FUSE 2 present or installed as the notes say) | | | [ ] |
+| Linux: after installing the `.deb` (or `.rpm`) the program starts as `gedit-nc` from a terminal and from the application menu as *gEdit*, and the system's own `gedit` (GNOME's editor) is untouched | | | [ ] |
 | **Open**: a Fanuc program and a Klartext program open in tabs, the dialect in the status bar is right, the program map is filled | [ ] | [ ] | [ ] |
 | **Edit**: type a change, undo it, type it again; the tab shows it as modified | [ ] | [ ] | [ ] |
 | **Save byte-exact**: open a sample and save it with no edit; the file's hash is the same as before (`shasum -a 256`, `sha256sum`, `certutil -hashfile <file> SHA256`) | [ ] | [ ] | [ ] |
 | **Close guard**: close the window with a modified tab; gEdit asks, Cancel keeps it open, Discard closes (on a Mac also Cmd+Q and Dock > Quit) | [ ] | [ ] | [ ] |
-| **A script with Python**: Tools > Tool list on a sample shows its table in the Results panel | [ ] | [ ] | [ ] |
+| **A script with Python**: Tools tab, *Built-in Scripts* group, Tool list on a sample shows its table in the Results panel; a script from the Scripts tab runs too | [ ] | [ ] | [ ] |
 | **A script without Python**: on a machine or account where Python 3.9+ is not installed, the script commands are disabled with a message and everything else still works | [ ] | [ ] | [ ] |
 | About shows the version of the tag | [ ] | [ ] | [ ] |
 
