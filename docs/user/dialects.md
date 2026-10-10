@@ -217,7 +217,7 @@ show nothing that says "lathe", and it then opens as a mill: the turret tool cha
 not appear in the program map, and the `P`/`Q` of a `G70`–`G73` are never rewritten.
 **Set the dialect by hand when the status bar shows the wrong one.** The transformations
 know they are out of their depth there — renumbering or removing the block numbers of such
-a program asks first and lists every `P`/`Q` it will not touch — and `Tools ▸ Tool list`
+a program asks first and lists every `P`/`Q` it will not touch — and `Tools ▸ Built-in Scripts ▸ Tool list`
 says to open the file with a lathe profile.
 
 The dialect of the document is shown in the status bar. Click it to change it — the
@@ -250,7 +250,7 @@ for, for instance a conversational format with its own program start, or an old 
 control with its own cycles. gEdit still has to read them as something, so it takes the
 closest dialect, and **says that it is a guess**: the dialect item in the status bar carries
 a question mark, `Fanuc T?` where it would say `Fanuc T`. Hover it: *Dialect uncertain: this
-program fits none of the dialects well. It is read as Fanuc (ISO) lathe, the closest guess.
+program fits none of the dialects well. It is read as Fanuc T, the closest guess.
 Click to choose the dialect, or keep the guess.* Opening the file also writes this once in
 the status line.
 
@@ -303,7 +303,7 @@ question mark or lose it.
 | Program start / end | `O1234`, `:1234`, or a name in `<angle brackets>` / `M30`, `M2` | the same | `BEGIN PGM name` / `END PGM` |
 | Renumber defaults | start 10, step 10, no padding, at most 99999 and then starting over, restart at each program start, skip `%`, `O` and comment lines | the same | consecutive from 0, step 1 |
 | Jumps that point at a block number | `M98 Q`, `GOTO`; `M99 P` and the `P`/`Q` of `G70`–`G73` are listed, never rewritten | `M98 Q`, `G70`–`G73` `P`/`Q`, `GOTO`; `M99 P` is listed, never rewritten | none — `CALL LBL` points at a label, not at a block number |
-| Code help entries | 140 codes (7 not verified yet) and 25 addresses | 138 codes (10 not verified yet) and 26 addresses in system A, 140 codes (7 not verified yet) in system B | 114 codes (1 not verified yet) and 34 addresses |
+| Code help entries | 158 codes (7 not verified yet) and 25 addresses | 154 codes (10 not verified yet) and 26 addresses in system A, 156 codes (7 not verified yet) in system B | 131 codes (none not verified yet) and 44 addresses |
 
 And the profiles of the other two controls (the Sinumerik milling profile has the same
 columns as the turning one, with the differences in
@@ -324,7 +324,7 @@ columns as the turning one, with the differences in
 | Program start / end | `O` plus up to four letters or digits, on a line of its own / `M02`, `M30`, and `RTS` for a subprogram | the `%_N_NAME_MPF` or `%NAME_MPF` header or `PROC name` / `M30`, `M2`, and `M17` or `RET` for a subprogram |
 | Renumber defaults | start 10, step 10, no padding, at most 9999 and then it stops, restart at each `O` program, skip `$`, `%`, `O` and comment lines; a name such as `NLAP1` is never renumbered | start 10, step 10, no padding, at most 2147483647 (the control's limit) and then it stops (the control wants every number once), restart at each program start, skip `%`, `;`, `PROC`, `DEF` and `EXTERN` lines; a label is never renumbered |
 | Jumps that point at a block number | `GOTO N…`, `IF […] N…`, and a LAP call (`G85`–`G88`) whose shape starts at a numbered block | `GOTOF`, `GOTOB`, `GOTO` and `GOTOC` followed by `N…` or by a main block `:20`; a jump to a label goes by its name |
-| Code help entries | 164 codes (6 not verified yet) and 28 addresses | 203 codes (6 not verified yet) and 20 addresses, for turning and milling alike |
+| Code help entries | 173 codes (6 not verified yet) and 28 addresses | 234 codes (3 not verified yet) and 20 addresses, for turning and milling alike |
 
 The extensions row is what the Open and Save As dialogs list for each dialect on Windows
 and Linux; which of them count in detection is under
@@ -336,8 +336,7 @@ whatever the dialect — see [transformations.md](transformations.md#renumber-bl
 against the control's own documentation: the hover leaves it out and the completion list
 marks it (see [Code help](README.md#code-help)). On Okuma that is six entries: `G36`/`G37`,
 whose format no manual gives, `G107`/`G108`, and `G142`/`G143`, which only an older code
-table names; on Sinumerik it is five: `CYCLE93`, `CYCLE97`, `G942`, `G952` and `M19` (`M6`
-is the tool change that loads the tool selected with `T`); on Klartext there is none: `M89`
+table names; on Sinumerik it is three: `G942`, `G952` and `M19`; on Klartext there is none: `M89`
 is the modal cycle call, which calls the cycle defined last after every positioning block
 until `M99` or the next cycle definition.
 
@@ -768,17 +767,15 @@ and keeps it. `GOTOF:20` and `GOTOB:20`, written without a blank, are followed l
 **Recognised, but not explained yet.** These are read and coloured correctly, and the code
 help either leaves them out or marks them as not verified:
 
-- the older cycles `CYCLE93` and `CYCLE97`, whose parameters the database does not describe
-  yet; completion offers them, marked as not verified (`CYCLE87`–`CYCLE89` are explained).
-  `CYCLE940`, `CYCLE98` and `CYCLE62` are explained, their parameters not yet;
-  the pocket, slot and other milling cycles (`CYCLE61`, `POCKET3`, `SLOT1` …) are coloured and
-  listed in the program map as calls, with no code help at all (`CYCLE800` and `CYCLE832`
-  are explained);
+- cycles: `CYCLE940`, `CYCLE98` and `CYCLE62` are explained, their parameters not yet; the
+  other milling cycles (`CYCLE64`, `CYCLE70`, `CYCLE72`, `CYCLE76`–`CYCLE79`, `CYCLE899`,
+  `SLOT2`, `LONGHOLE` …) are coloured and listed in the program map as calls, with no code
+  help at all (`CYCLE93`, `CYCLE97`, `CYCLE800`, `CYCLE832`, `CYCLE61`, `POCKET3`, `POCKET4`
+  and `SLOT1` are explained, with their arguments);
 - `G942` and `G952`, which the manual only lists;
-- `M6` and `M19`: how a tool change is carried out and where an orientation stops are set up
-  on the machine;
-- synchronized actions (`WHEN … DO`) and the coordination of several channels (`WAITM`,
-  `WAITE`, `SETM`);
+- `M19`: where an orientation stops is set up on the machine;
+- synchronized actions (`WHEN … DO`). The channel commands (`WAITM`, `WAITMC`, `WAITE`,
+  `SETM`, `CLEARM`) are explained, and [Channels](channels.md) can check their waits;
 - the lines a control's cycle screens write into a program (marked `*RO*` or `*HD*`) get no
   special treatment; CAM output does not usually contain them.
 
@@ -828,8 +825,6 @@ and listed as a call without code help. The profile lists `A`, `B` and
 `C` as axes and as angles, so the scripts read the rotary axes of a five-axis machine in
 degrees. `TRAORI` is tool centre point control and not a coordinate frame; `TRAFOOF` ends it
 and `TRANSMIT`, `TRACYL` and `TRAANG` too; `CYCLE800` is a tilted plane, which is a frame.
-The profile's `M6` entry is not verified yet, so its hover says the database does not
-describe it.
 
 **A mill-turn program stays with the turning profile.** A lathe with a driven tool and a
 `Y` axis writes `TRANSMIT`, `TRACYL`, `LIMS=` or `G96`, and a Siemens file is sent to turning
@@ -967,7 +962,7 @@ the dialects give them:
 | **Fanuc lathe** | The same, except that it has no `G43.4` or `G43.5`; its cycles are not shifted by address arithmetic (a lathe's `R` may be incremental or absolute by a machine parameter), they are refused and listed |
 | **Heidenhain Klartext** | Cycles 200 to 209, 240 and 262 hold `Q203`, the surface, which a Z shift moves; **202** (boring), **208** (bore milling) and **262** (thread milling) are described. The pole `CC` is shifted with an `X` or `Y` shift. `PLANE` needs `MOVE`, `TURN` or `STAY`, and `TOOL CALL` and `M91`/`M92` are refused while `M128` is on. A modal call (`M89`) runs on polar moves (`LP`, `CP`, `CTP`) as well as on `L` moves. The tool axis comes from `TOOL CALL`, which decides the plane. Address arithmetic leaves the absolute points of an FK contour as written and warns. `END PGM` is the closing record and takes no skip mark. Cycle 19 and `PLANE SPATIAL` with all angles zero never end the tilted plane for the scripts, so everything after one is treated as inside a frame |
 | **Okuma OSP lathe** | A limit of eight M codes in a block; `G96` and `G97` need `S`; `M110` stands alone; `G140`, `G141`, `G15` and `G16` are refused under constant surface speed or nose-radius compensation, and `G17`, `G18` and `G119` under radius compensation; the LAP shape between `G81` and `G80` is not a cut. No cycle is shifted by address arithmetic |
-| **Sinumerik 840D** | `CYCLE81` to `CYCLE89` and `CYCLE840` carry `RTP`, `RFP`, `DP` (and `FDEP` of `CYCLE83`) for a Z shift, with the trailing mode arguments described; `CYCLE61`, `POCKET3`, `POCKET4` and `SLOT1` are described but refused by address arithmetic, because their points in the plane are positions of their own; `G290` and `G291` switch the control between its own language and ISO mode; `G75` is refused under radius compensation. A program that never writes `G90` is not known to be absolute (see [Machines](machines.md#the-power-on-distance-mode)) |
+| **Sinumerik 840D** | `CYCLE81` to `CYCLE89` and `CYCLE840` carry `RTP`, `RFP`, `DP` (and `FDEP` of `CYCLE83`) for a Z shift, with the trailing mode arguments described; `CYCLE61`, `POCKET3`, `POCKET4` and `SLOT1` are described but refused by address arithmetic, because their points in the plane are positions of their own; `G290` and `G291` switch the control between its own language and ISO mode; `G75` is refused under radius compensation. The profile assumes absolute positions (`G90`) at the start of a program until a machine says otherwise (see [Machines](machines.md#the-power-on-distance-mode)) |
 
 Where the data is missing the scripts say so, once, and do not flag every line: a code the
 database lacks under the move letter makes a block "not reviewed" for the arithmetic and

@@ -492,7 +492,7 @@ report a wait-code line.
 The map groups the program by channel. Each channel has its tools and its wait codes under
 it, all of its sections together in program order. Codes that do not wait (a Sinumerik
 `SETM` or `CLEARM`) are not listed there; `Alt+F7` reaches them. A channel with more than 250
-wait codes shows them as one entry with their number, on its first wait (*10000 wait codes*);
+wait codes shows them as one entry with their number, on its first wait (*10000 wait codes (Alt+F7 steps through them)*);
 `Alt+F7` and `Shift+Alt+F7` step through them one by one. Thousands of entries would make the
 map too slow to keep up with your typing. The lines that belong to no channel are
 under **Outside the channels**. Click an entry to jump to it. A program without channels
@@ -552,7 +552,7 @@ Say path 1 and path 2, with `M901 P3`-style waits.
 | **Different channels** — *M901 in Path 1 waits for Path 1, Path 2, Path 3, but the M901 in Path 2 it meets (line 12) waits for Path 1, Path 2; both must name the same channels.* | Fanuc presets: the two waits that meet name different paths, or one has a `P` word and the other has none. The control stops with an alarm | Write the same `P` word in every path of that wait |
 | **Other order** — *M902 (line 40) and M903 (line 52) are in the other order in Path 2 (lines 61 and 58). 2 more out of order.* | Both channels have the waits, but not in the same order. With the control, each would wait for the other | Swap them in one channel. The finding reports the first pair; the *more* (only there when there are more) says how many further pairs are the other way round |
 | **Order not checked** — *The order of M902 and M903 against Path 2 is not checked: a jump target or a backward jump lies between them.* | The order is not as written, but a jump target or a backward jump (`GOTO` back, `M99 P`, the end of a loop) lies between the two waits, so gEdit cannot say what runs first | **Nothing is wrong that gEdit can see.** Check the order by hand. With *Count not checked* these are the cases where the check refuses to judge |
-| **Not increasing** — *P20 comes after P30 in Turret A; the numbers must increase.* | For order numbers: a number below the one before it | Correct the number, or the order |
+| **Not increasing** — *P20 comes after P30 (line 12) in Turret A; the numbers must increase.* | For order numbers: a number below the one before it | Correct the number, or the order |
 | **Names no other channel** — *M905 in Path 1 names no other channel, so nothing can answer it.* | The wait's `P` word (or the line) names only its own channel, or none | Look at the `P` word. It should name the other channel. With a wait without `P`, see [which channels a wait names](#which-channels-a-wait-names) |
 | **Unknown channel** — *M906 in Path 1 names “4”, which is not a channel of this machine.* | The wait names a channel the machine does not have. If it names several, one finding lists them all | A typing mistake in the `P` word, or a channel missing in the setting |
 | **Outside every channel** — *M901 on line 3 is outside every channel section.* | A wait in lines that belong to no channel | A wait before the first section or after a section end. Is it in the right place? |

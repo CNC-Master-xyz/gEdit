@@ -53,8 +53,8 @@ On Windows and Linux, `Ctrl+Alt+A` is `AltGr+A` on some keyboard layouts (a Poli
 `ą` with it). If the key types a letter on your keyboard, use the **Code Inspector** button on the
 View tab (*Panels*) or the palette; they do the same.
 
-The side panel, the bottom panel, the Output panel, the display switches and the zoom are
-on the View tab, without shortcuts. So are **Motion Colors** (View tab, *Lines*) and
+The side panel, the bottom panel, the Script Output panel, the display switches and the zoom
+are on the View tab, without shortcuts. So are **Motion Colors** (View tab, *Lines*) and
 **Edit Value at Cursor…** (palette: *Inspector: Edit Value at Cursor…*), which changes the number
 under the cursor; see [Understanding a block](inspector.md).
 
@@ -110,10 +110,11 @@ too.
 
 ## NC
 
-Only one command on the NC tab has a key: **Select Tool Segment**, `Cmd/Ctrl+F7`, listed
-under [Moving around the program](#moving-around-the-program). Renumbering, the cleanups and
-Insert and Remove Block Skip are deliberate, one-at-a-time operations and are reached from
-the ribbon or from `F1`. See [transformations.md](transformations.md).
+Only two kinds of command on the NC tab have a key: **Select Tool Segment**, `Cmd/Ctrl+F7`,
+listed under [Moving around the program](#moving-around-the-program), and the sync-point
+commands of the *Channels* group, listed under [Channels](#channels). Renumbering, the
+cleanups and Insert and Remove Block Skip are deliberate, one-at-a-time operations and are
+reached from the ribbon or from `F1`. See [transformations.md](transformations.md).
 
 ## Channels
 
@@ -153,11 +154,11 @@ and in the palette. **Copy to My Scripts** is in the palette only;
 
 ## Templates
 
-None of these has a key, on purpose; each is on the Insert tab and in the palette (`F1`). See
+None of these has a key, on purpose; each is on the Insert tab and in the palette (`F1`), except Insert Template…, which is in the palette only. See
 [Writing with templates](templates.md).
 
-- **Insert Template…** lists the templates of the program, favourites first, and inserts the
-  one you pick. Each template also has a command of its own, *Insert: <template name>*.
+- **Insert Template…** (palette only, not on the ribbon) lists the templates of the program,
+  favourites first, and inserts the one you pick. Each template also has a command of its own, *Insert: <template name>*.
 - **Program start** (Insert tab) is the first of them.
 - **Edit Cycle…** (Insert tab, *Cycles*) changes the cycle at the cursor in a form, or inserts a
   new one.

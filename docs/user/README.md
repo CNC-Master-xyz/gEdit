@@ -43,7 +43,7 @@ Across the top is the **ribbon**, with seven tabs:
 | **NC** | Renumbering, removing block numbers, the cleanups, block skip and selecting a tool segment — see [Transformations](transformations.md) |
 | **Tools** | Compare ([Comparing two programs](#comparing-two-programs)) · the scripts that come with gEdit, in the **Built-in Scripts** group — **Program checks**, **Scale feed rates**, **Scale spindle speeds**, **Tool list**, **Extents**, **Address arithmetic** (see [Scripts](scripts.md)) · **Check Wait Codes** for [channels](channels.md#check-wait-codes) · **Test Profile on Document** for [profiles of your own](profiles.md#testing-a-profile-on-a-program) |
 | **Scripts** | Run a script, stop it, your own scripts (**My Scripts**), **New Script**, **Edit Script**, **Rescan**, **Add Folder** — see [Scripts](scripts.md) |
-| **View** | The command palette, the panels (Program Map, Code Inspector, Results, Script Output), the motion-colour switch, folding, display switches, zoom, theme, settings, the shortcut list and About |
+| **View** | The command palette, the panels (Side Panel, Code Inspector, Bottom Panel, Script Output), the motion-colour switch, folding, display switches, zoom, theme, settings, the shortcut list and About |
 
 The ribbon starts at the top of the window. The program's name is in the window's own title bar
 (with a dot in front of it while the program has unsaved changes); there is no second title row
@@ -75,8 +75,8 @@ There are four panels:
   run.
 
 If you cannot find a command, press **F1**. That opens the command palette, which lists
-every command by name. **View ▸ Keyboard Shortcuts** lists every command with the key gEdit
-gives it; the editing keys that come with the editor (undo, find, comment, …) are in
+every command by name. **View ▸ Keyboard Shortcuts** lists the commands that have a key (tick
+*Show commands without a key* to see the rest); the editing keys that come with the editor (undo, find, comment, …) are in
 [Shortcuts](shortcuts.md).
 
 In this guide `View ▸ Side Panel` means the **Side Panel** button on the ribbon's View tab,
@@ -939,7 +939,7 @@ in lower case, on every shipped dialect.
 
 | Page | What you can set |
 |---|---|
-| **Appearance** | Theme (System, Light or Dark), editor font and size |
+| **Appearance** | Color theme (System, Light or Dark), editor font and size |
 | **Editor** | Tab width, spaces or tabs, whitespace display, word wrap, minimap, line numbers, current-line highlight, sticky scroll, text drag and drop, copy without a selection |
 | **Assistance** | Hover help on or off; completion automatic, manual or off; [colouring the lines by how they move](inspector.md#motion-colours) on or off |
 | **Files** | Length of the recent list, what happens when a file changes outside gEdit, the dialect new files start in, and what [Never losing work](#never-losing-work) sets: where the backup copy goes, how many versions to keep, the most space they may take and when the earlier versions of deleted files go, and the switches for crash recovery, session restore and per-file memory |
@@ -984,7 +984,7 @@ Being clear about this saves disappointment on the shop floor.
   paths) gEdit can show the channels apart and check that the wait codes fit each other. It
   does not know what a wait does at the machine, it reorders and synchronizes nothing, and a
   clean check is no proof that the program runs. Showing two channels **side by side** is not
-  there; it is planned for a later version, and today you step between the channels. **Split into Channel
+  there, and today you step between the channels. **Split into Channel
   Documents** makes copies for reading: nothing you change in them comes back into the
   program. See [Channels](channels.md).
 - **A profile of your own describes; it does not compute.** It changes how a dialect's

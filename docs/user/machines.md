@@ -218,7 +218,7 @@ that machine.
 | **U, W, V and H move incrementally** | Fanuc lathe only: *U and W* (the default), *U, W, V and H*, or *none*. See [the Fanuc lathe](#the-fanuc-lathe) |
 | **Tool word: offset digits** | Fanuc lathe and Okuma: how a `T` word splits into station and offset. See [the Fanuc lathe](#the-fanuc-lathe) and [Okuma](#okuma-the-unit-system-scales-every-number) |
 | **Tool change** | Sinumerik milling only: whether `M6` changes the tool, or a `T` alone does. See [Sinumerik](#sinumerik-diameter-programming-and-the-rest) |
-| **Feed mode**, **Spindle-speed mode**, **Plane** and **Positioning at power-on** | What is in force before the program sets it, as far as the dialect offers them — Fanuc mill: feed mode, positioning, plane; Fanuc lathe: feed mode, spindle-speed mode, plane; Okuma: feed mode, positioning, spindle-speed mode; Sinumerik turning and milling: feed mode (the feed type), plane, positioning. "Dialect default" leaves it to the profile |
+| **Feed mode at power-on**, **Spindle-speed mode at power-on**, **Plane at power-on** and **Positioning at power-on** | What is in force before the program sets it, as far as the dialect offers them — Fanuc mill: feed mode, positioning, plane; Fanuc lathe: feed mode, spindle-speed mode, plane; Okuma: feed mode, positioning, spindle-speed mode; Sinumerik turning and milling: feed mode (the feed type), plane, positioning. "Dialect default" leaves it to the profile |
 | **Notes** | Your own note, up to 500 characters. gEdit only stores it |
 
 The feed modes a Fanuc lathe is offered follow its G-code system: `G98`/`G99` in A,
@@ -250,11 +250,11 @@ Whether a program is absolute or incremental before it says so (`G90` or `G91`) 
 positions. **Address arithmetic** moves a word only while it knows the program is absolute,
 because adding to an incremental word would add the offset twice; **Extents** cannot place
 an axis word at all while the mode is not known. A program whose post always writes `G90`
-is fine. A program that never does, such as the Siemens programs of some posts, is read as
-"not known" and every word is left as written and listed. The profiles of Fanuc and
-Sinumerik assume nothing here (Okuma starts absolute), because the state after a reset is a
-machine setting: if your control starts in `G90`, say so in the machine and the arithmetic
-and the extents work on those programs.
+is fine. A program that never does, such as the Fanuc programs of some posts, is read as
+"not known" and every word is left as written and listed. The profiles of Fanuc assume
+nothing here (Okuma and Sinumerik start absolute, `G90`), because the state after a reset is
+a machine setting: if your Fanuc control starts in `G90`, say so in the machine and the
+arithmetic and the extents work on those programs.
 
 ## Choosing the machine for a document
 
@@ -779,7 +779,7 @@ shows it as "dialect default, assumed" — or, for a G-code system read off the 
 | `U`, `W`, `V`, `H` incremental | not a parameter of this dialect | `U` and `W` (verify) | not a parameter of this dialect | not a parameter of this dialect | not a parameter of this dialect |
 | Tool word: offset digits | not a parameter of this dialect | by length: 1–2 digits station, 3–4 digits station + 2, 5 digits 2 + 3 (verify) | two-digit offsets (verify) | not a parameter of this dialect | not a parameter of this dialect |
 | Tool change | not a parameter of this dialect | not a parameter of this dialect | not a parameter of this dialect | not a parameter of this dialect | `M6` (verify) |
-| Power-on codes | feed per minute (`G94`) | feed per revolution (`G99`), direct rpm (`G97`), ZX plane (`G18`) | feed per revolution (`G95`), absolute (`G90`); no spindle-speed mode | feed per revolution (`G95`), ZX plane (`G18`) | feed per minute (`G94`), XY plane (`G17`) |
+| Power-on codes | feed per minute (`G94`) | feed per revolution (`G99`), direct rpm (`G97`), ZX plane (`G18`) | feed per revolution (`G95`), absolute (`G90`); no spindle-speed mode | feed per revolution (`G95`), ZX plane (`G18`), absolute (`G90`) | feed per minute (`G94`), XY plane (`G17`), absolute (`G90`) |
 
 Known soft spots in that table, said plainly:
 
@@ -815,7 +815,7 @@ Known soft spots in that table, said plainly:
   delivery state, which is radius programming. It holds for the usual turning setup; a
   control that starts with radius programming needs a machine that says so.
 - The Okuma **power-on state** — `G95` and `G90` — is the state after a reset that the
-  manual describes. The Sinumerik one — `G95` and `G18` — is what turning programs are
+  manual describes. The Sinumerik one — `G95`, `G18` and `G90` — is what turning programs are
   written in, and it is machine data on the control. Neither has been checked on a machine.
 - The **power-on modes** and the assumed **millimetres** of the other profiles are what the
   notes describe as usual, not what your machine does after a reset.

@@ -53,7 +53,7 @@ scripts included. On Windows that covers the case that looks least like it: a
 clean Windows 10 or 11 already has `python.exe` and `python3.exe` on `PATH` before Python
 is installed, as placeholders that open the Microsoft Store instead of running anything.
 gEdit never takes one of those for an interpreter, and the Tools and Scripts tabs say "Python 3.9 or
-newer was not found". A Python you really did install from the Store is used as usual.
+newer was not found, so the script commands are off". A Python you really did install from the Store is used as usual.
 
 ## Running a script
 
@@ -329,7 +329,7 @@ constant surface speed — `G50 S` on a Fanuc lathe in G-code system A and on an
 included (`G26 S3000 S2=2000`). Which code or word that is comes from the dialect's code
 database and profile, so the script is right on every dialect without knowing any of them.
 The Sinumerik `G25 S` is the **lowest** speed, not a clamp: it is never scaled, with "Also
-scale the limits" or without it, and it is still counted as a limit left as written. A word
+scale spindle speed limits" or without it, and it is still counted as a limit left as written. A word
 with an index — `S[2]=500`, `LIMS[2]=1800` — belongs to the spindle the index names: it is
 never the main spindle's speed in force and never the main clamp.
 
@@ -516,7 +516,7 @@ you run on a selection.
 **What it does not check, and why.**
 
 - Okuma `G136` alone in its block, and the first blocks after `G137`: the manual states
-  them for ending a conversion, and the owner's own post writes `G136 M109`; no rule says
+  them for ending a conversion, and a post may write `G136 M109`; no rule says
   that is wrong.
 - A code a Heidenhain TNC 640 refuses (`M104`, `FN 15`, cycles 1 to 6): which codes it
   refuses depends on a setting of the control generation, which the machine configuration
@@ -1270,7 +1270,7 @@ are short, and they are meant to be read.
 
 | | |
 |---|---|
-| The Tools and Scripts tabs say "Python 3.9 or newer was not found" | No Python, or one older than 3.9. Set `Settings ▸ Scripts ▸ Python interpreter` to the interpreter's path |
+| The Tools and Scripts tabs say "Python 3.9 or newer was not found, so the script commands are off" | No Python, or one older than 3.9. Set `Settings ▸ Scripts ▸ Python interpreter` to the interpreter's path |
 | A script is not on the Tools or Scripts tab | It may be for other dialects (`profiles` in its header), it may be hidden behind a file of the same name in a later folder, its name or its subfolder's name starts with `_` or `.`, it sits more than one folder deep, or the bundled scripts are hidden. Use **Rescan** after adding it |
 | It appears under its file name, and the tooltip says the header could not be read | gEdit refused the header (see [The header](#the-header)); it then runs in panel mode and shows raw output only. Fix it, then **Rescan** |
 | *The program changed while the script ran* | You typed in the document while it ran, so nothing was applied. Run it again, or take **Open in new tab** |

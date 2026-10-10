@@ -351,7 +351,7 @@ uses that program's dialect and numbering.
 The list shows the built-in templates **that code set offers a program**, the ones the Insert
 tab, the quick pick and completion would offer: the lathe's set lists the lathe templates,
 not the mill drilling and tapping templates it inherits, and the mill's set the mill ones.
-A set that programs of both kinds use (the Siemens one) lists both.
+A set that programs of both kinds use (the Sinumerik one) lists both.
 
 **The list.** Templates are listed by group, with a *Search* box (name, group or id). A row
 shows a badge:
