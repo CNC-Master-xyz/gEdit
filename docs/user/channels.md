@@ -49,7 +49,7 @@ gEdit does **not**:
 - **Synchronize anything.** gEdit never adds, removes or renumbers a wait. It tells you
   what does not fit and you decide.
 - **Show the channels side by side.** One channel is shown at a time. A side-by-side view
-  with the time axis is not planned for this version.
+  with the time axis is planned for a later version.
 - **Open files by itself.** For a program with one file per channel, gEdit looks whether the
   other files are there, and tells you. You open them yourself.
 

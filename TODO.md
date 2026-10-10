@@ -89,6 +89,8 @@ Later milestones add their own checks to [P2 §13](docs/planning/phase-2-impleme
 
 ### UI
 
+- [ ] **The hover's parameter table runs its columns together and is cut short** (seen while retaking the screenshots, 2026-10-10): on `G81` the long meaning of `R` ("R point: where the feed starts (G99 returns here)") runs into its value `2.` with no gap, and the table ends at the hover's height, so the `F` row needs a scroll ([hoverText.ts](src/lib/core/codes/hoverText.ts), the hover's styles)
+- [ ] **The Results panel's table aligns its values off the column heads** (same day): in the tool list the numbers sit right of their headings and one description is indented (`M10 TAP`) — readable, but untidy ([the Results panel](src/lib/components/panels))
 - [ ] **The ribbon tab is not remembered between starts** (it never was; the window opens on File). `resolveTab` in `ribbonModel.ts` is ready to take a stored id if it should be
 
 ## Tech debt and test gaps
@@ -117,7 +119,6 @@ Later milestones add their own checks to [P2 §13](docs/planning/phase-2-impleme
 - [ ] **Leaks and bloat**: the external-change service keeps closed documents; `licenses.json` is 1.58 MB and About renders 460 rows at once — slow growth in a long session, a bigger bundle ([external.ts](src/lib/app/external.ts), [AboutDialog.svelte](src/lib/components/dialogs/AboutDialog.svelte))
 - [ ] **Upgrade watch**: the hand-built macOS menu (tauri 2.11.5), the delegate patch in `quit.rs` (tao), rfd's dialog labels — re-check on any tauri, tao or muda bump ([quit.rs](src-tauri/src/quit.rs)). Also Monaco: the undo group of `applyLines.ts` imitates a class inside Monaco (`{ id, nextOrder() }`, ids from 1e9 up); `applyLinesUndo.test.ts` runs Monaco's real undo service and fails if an upgrade reads more of the group, and the tokenizer test `monarchSim.test.ts` imports Monaco internals ([applyLines.ts](src/lib/monaco/applyLines.ts))
 - [ ] **Design-note status lines not re-checked in code**: the housekeeping of bug-fix round 1 wrote some status lines from the roadmap and the guide only — Export Differences is a unified diff only, sticky scroll is among the Editor settings, the settings dialog has no per-field reset — and `references.ts` keeps a `mainJumpsOn` label branch that no built-in profile reaches ([file-compare.md](docs/planning/file-compare.md), [settings-ui.md](docs/planning/settings-ui.md))
-- [ ] **The screenshots show the Phase 1 build** — `docs/screenshots/main-window.png` still shows the old Home tab and a title row inside the window; retake them with the seven-tab ribbon ([docs/screenshots](docs/screenshots))
 
 ## Ahead
 

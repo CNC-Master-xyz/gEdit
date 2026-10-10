@@ -920,7 +920,7 @@ marks.
 
 This version fills in code help, labels and parameters from the manufacturers' manuals for
 the four control families. They are written in the project's own words, and every one is marked
-inside the project as **waiting for the owner's review**; gEdit does not show the mark in the
+inside the project as **not yet reviewed**; gEdit does not show the mark in the
 hover, so read them with your manual at hand and tell the project where one is wrong. What was
 added:
 

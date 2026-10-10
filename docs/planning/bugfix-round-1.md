@@ -138,7 +138,7 @@ For the owner:
 
 - **Review the code data.** Every new or changed code entry carries `review: "pending"` (not shown in the app): 10 Okuma entries, 24 Sinumerik, 24 Klartext, and the Fanuc entries and the six lathe cycles. Questions the manuals left open: Okuma `G21` at rapid or not (no motion is claimed), the format of `F` under `G93`, the wording of `G85`/`G86` (only `M85` allowed in the block), the arcs of `M15`/`M16`; Fanuc `G29` as a machine position, `G43.1` left off the lathe; Sinumerik `_ZFS` as a tool-axis position, `CYCLE93 SPD` not called a diameter; Klartext `Q338` against `Q386` in 256/257.
 - **Look at the ribbon scrollbar once on a Mac with overlay scrollbars** (narrow the window until the ribbon scrolls; the group names must stay fully visible). The harness Mac shows classic bars, so this could not be reproduced.
-- **Retake `docs/screenshots/main-window.png`**: it still shows the old Home tab and the title row.
+- **Screenshots retaken** (2026-10-10, on the CI build of `71f38d7`, dark theme, 1520×900 points on a 2× display): `main-window.png` (seven tabs, NC tab), `hover.png` (`G81` with its parameter table) and `script-run.png` (Tools tab, Built-in Scripts, the tool list in the Results panel).
 - **Windows checks** that CI cannot make: a mapped drive and UNC paths give one tab and one backup history, a stopped script's child program ends, the file-name rules in the real dialogs. The Linux package is called `g-edit` (the dry run printed it), so it does not clash with GNOME's `gedit`; the owner may still choose a nicer name.
 - Publish v1.0.0 as planned; this round does not change that.
 

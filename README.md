@@ -40,11 +40,14 @@ program you have open. See [docs/user/profiles.md](docs/user/profiles.md).
 
 ![The gEdit main window in the dark theme](docs/screenshots/main-window.png)
 
-*A Fanuc mill program and a Klartext program open in tabs. On the left the program map —
-the program name, the header comments, the three tool calls with the comment that describes
-each one, and the program end — with the entry the cursor is in marked. At the bottom the
-status bar: the file, the dialect, the encoding, the line ending and the cursor position.
-The programs are the project's own synthetic samples from `tests/fixtures/exit/`.*
+*The ribbon with its seven tabs, here the NC tab with its Numbering, Cleanup, Block Skip,
+Segments and Channels groups. A Fanuc mill program and a Klartext program are open in tabs.
+On the left the program map — the program name, the header comments, the three tool calls
+with the comment that describes each one, and the program end — with the tool the cursor is
+in marked. Beside the line numbers a coloured bar shows how each line moves (rapid, feed,
+cycle). At the bottom the status bar: the file, the dialect, the machine, the encoding, the
+line ending and the cursor position. The programs are the project's own synthetic samples
+from `tests/fixtures/exit/`.*
 
 ## Download
 
@@ -96,8 +99,9 @@ help and completion from a code database written for the subset of code CAM syst
 
 ![Hover help on a G code](docs/screenshots/hover.png)
 
-*The hover on `G81`: what the code does, that it is a modal cycle, and the words it needs.
-It comes from the code database, not from the program on screen, and a code the database
+*The hover on `G81`: what the code does, that it is a modal cycle, the words it needs, and
+a table of its parameters with the values this block writes. The description comes from the
+code database, not from the program on screen, and a code the database
 does not describe says so rather than guessing.*
 
 **Understanding a block.** Put the cursor in a block and the code inspector (`Cmd/Ctrl+Alt+A`) lists
@@ -143,7 +147,7 @@ address arithmetic — and they use the same contract as one you write yourself.
 
 ![A script run reported in the Results panel](docs/screenshots/script-run.png)
 
-*The Tools tab as it was in the first release, with the first three bundled scripts in the Python Scripts group, just after the
+*The Tools tab with the six bundled scripts in the Built-in Scripts group, just after the
 tool list ran over the program in the editor. Its table is in the Results panel — the
 tools in order of first use, with the comment that describes each one, the line it is first
 called on, the number of calls and the feed and speed range — and under it the one finding:

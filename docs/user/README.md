@@ -30,8 +30,10 @@ the machine, not for the person who builds the editor — the build and design n
 
 ![The gEdit window: ribbon, tabs, program map, editor and status bar](../screenshots/main-window.png)
 
-*The ribbon, two open programs in the tab bar, the Program Map on the left
-and the status bar along the bottom. The theme here is the dark one.*
+*The ribbon with its seven tabs (here the NC tab), two open programs in the tab bar, the
+Program Map on the left with the tool the cursor is in marked, the bar beside the line
+numbers that shows how each line moves, and the status bar along the bottom. The theme here
+is the dark one.*
 
 Across the top is the **ribbon**, with seven tabs:
 
@@ -658,7 +660,8 @@ front of the number, whatever the number looks like.
 
 ![The hover on a G code](../screenshots/hover.png)
 
-*`G81`: what it does, that it is a cycle and modal, and that it wants Z, R and F.*
+*`G81`: what it does, that it is a cycle and modal, that it wants Z, R and F, and a table of
+its parameters with the values this block writes.*
 
 Once gEdit has read the program up to the line, the hover also shows what the word means **in
 this block**: a table of a cycle's parameters with the values written, and one line for an
