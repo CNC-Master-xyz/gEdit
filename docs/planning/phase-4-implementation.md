@@ -1,0 +1,630 @@
+# gEdit: implementation plan for Phase 4
+
+Scope: the roadmap's Phase 4, **"Comfort and geometry"** (`docs/planning/roadmap.md`): translate, rotate and mirror a program's path, expand drilling cycles into plain moves, report path lengths and an estimated run time, and give the editor the comfort features long-time users of NC editors expect (split view, printing, finding files in folders, typing help, named bookmarks, block ranges, inserting files, file associations, renumbering options, the side-by-side channel view, word-level compare marks, shortcut and colour settings, script packages, a form editor for profiles). Phase 4 is finished when the exit criteria in §2.2 pass.
+
+Status: **draft of 2026-10-12, waiting for the owner's review**. Nothing in it is decided until the owner has read it; the questions only the owner (or a machine) can answer are in §9, each with a proposed default that is marked as a proposal. The plan splits the work into eight milestones, in order of value:
+
+| Milestone | What it delivers | Status |
+|---|---|---|
+| **P4a "Move the path"** | translate, rotate and mirror as bundled scripts on the Python modal interpreter, with a shared path tracker taken out of the extents script; what cannot be judged is refused and listed, and a refused block means nothing is written | planned |
+| **P4b "Drilling cycles and time"** | expand drilling cycles into rapid and feed moves; path lengths and an estimated time per tool; a machine's motion data (rapid rates, tool-change time, top feed) and limits (top spindle speed, travel) as a new, optional block of the machine configuration, also read by the program checks | planned |
+| **P4c "Editor comfort"** | auto-space and an automatic block number on Enter; bookmark names, the bookmark panel and "bookmark all matches"; select or delete a block range; insert file and append file; printing; next and previous NC event only if the owner asks for it | planned |
+| **P4d "Renumber, all of it"** | the advanced renumber options; `M99 P` and `M98 P… Q…` rewritten instead of reported; references from other open documents listed and, on request, updated | planned |
+| **P4e "Side by side"** | split view (two editor groups on one model); the side-by-side channel view and merging split channel documents back; word-level marks in the comparison; the aligned diff only if the owner says review mode is too limited | planned |
+| **P4f "Folders and channels"** | find files in folders; OS file associations with a single running instance; folder-to-machine rules; the folder-aware sibling lookup, writing split channels to disk, channel-aware compare and search, and a wait-code check that follows jumps | planned |
+| **P4g "Settings, keys and packages"** | user keyboard shortcuts with conflict warnings, a key per script, script packages that can be switched on and off, export and import of the whole configuration, a settings search box, and the switch for a second interface language | planned |
+| **P4h "Profiles and machines"** | the form-generated profile editor with a live preview, JSON Schemas for profiles and machines, per-profile colours and the role colour editor, the remaining machine parameters (block-aware units for the `G76` thread height, the per-class number input in the dialog), and the small per-profile options the owner keeps | planned |
+
+It **reuses the Phase 2 execution protocol** (`phase-2-implementation.md` §5, cited as **P2 §5**, which reuses P1 §4), as amended by the Phase 3 plan (`phase-3-implementation.md` §4, cited as **P3 §4**), and the contracts of P2 §7 and P3 §6. They stay binding unless §4 or §6 of this document changes them. Numbering continues Phase 3: verified facts **F110+**, architecture decisions **AD-41+**, exit criteria **X19+**, contract deviations **#292+** in §7 (continuing P3 §7), work packages **P4.1+**, owner questions **Q4-1+** (§9).
+
+Path shorthands as in P2 and P3: `SP` = a scratch directory outside the repo; `P2`, `P3` = the Phase 2 and Phase 3 plans. All other paths are relative to the repository root (branch `p4a/base` from `main` @ `f119784`, or the `main` of the day the owner releases the plan). The repository is public: this plan names no local machine paths, and no real program, file name of a real program or content derived from one appears in it.
+
+---
+
+## 0. Where this plan comes from
+
+- **The roadmap's Phase 4 table** (the old Phase 3 before the re-cut of 2026-09-30, D69) and its exit criteria: "geometry transforms and cycle expansion work reliably on the fixture set, and the editor has the comfort features long-time users expect". Every row is in §2.1 with a decision; the rows the roadmap marks "if asked for", "only if review mode proves too limited" or "or cut" are optional and say so.
+- **The deferrals of Phase 2** that the roadmap lists in Phase 4, with their reasons in [P2 §11](phase-2-implementation.md#11-deferred-or-cut-items-phase-2--phase-3-or-backlog): items 2, 4, 5, 6, 8, 14, 15, 16, 17, 21, 26, 27 and 28. Item 27 (the side-by-side channel view) is the reason split view comes first in P4e: its groundwork is a second editor and a model per pane, which split view builds.
+- **What bug-fix round 1 and the TODO left in Phase 4 areas:** the `G76` second-block `P` (thread height) shown as written because the unit readers are not block-aware (TODO, "Two-block lathe cycles, what is left"); the Fanuc lathe `G83`–`G89`, the Okuma `G181`–`G189` and the Klartext pattern cycles without position roles (TODO, "Code-database gaps"); two instances of the app overwriting each other's state (TODO, "Data safety"), which file associations would make common; the extents' unresolved cycle depths and Okuma `L` radii (TODO, "M10 data gaps").
+- **The owner's standing rules** (the memory notes, P2 §10, the handover): CAM output first and keep it simple; no backplot, no simulation, no DNC, no program management; machine-dependent readings are machine configurations with documented defaults; tapping speeds are left and reported, never scaled; the commercial reference editor is never named; manuals are sources of facts in our own words; an independent corpus of programs may be read for facts only, is never named or quoted, and evidence from it stays in `docs/planning/`; the owner's real programs stay local and are reported only as counts; a draft release follows each milestone that lands (D70); model and effort are chosen per task and shown per work package.
+- **What the code says** (§1): the Python layer has modes and frames but no geometry model; the only position tracker and arc geometry are inside `extents.py`; the database has no flag that says "a drilling cycle with an R plane, a depth and a peck", no arc direction and no compensation side; the machine configuration has no rates or limits; the app has one code editor, no directory listing, no file associations and no print path. P4a and P4b therefore begin with data and a shared module, not with scripts.
+
+## 1. Verified facts this plan relies on (at `f119784`)
+
+- **F110. The Python modal state has no geometry.** `ModalInterpreter` (`src-tauri/resources/scripts/_nc_modal.py:487`, state at 1308–1332) tracks the plane (`sets.plane`, Klartext through `planeFromAxisWord`), absolute or incremental, the motion group as the last modal code, units, the feed unit (per minute, per revolution, per tooth, inverse time, travel time), the speed unit and clamp, diameter or radius (`diameter_reading`, 1448), open frames as a list of `{code, line, group}` without their values (1004–1069), tool centre point control and the rotary axes' state. The active cycle is `{code, line, pitchFeed}` only (937): **no cycle parameter is kept**. Sinumerik `TRANS`/`ATRANS` are a shift, not a frame; Klartext cycle 7 is an offset; Fanuc `G15`/`G16` are a frame (`polarCommand`); Sinumerik `AP=`, `RP=` and `G110`–`G112` are not in the database.
+- **F111. The only position tracker and arc geometry live in `extents.py`.** `resolve_moves` (1043) resolves incremental moves from the last known position; `Extents.arc` (1110–1197), `centre_from_radius` (1522: a negative `R` is more than 180°, chord slack 0.002), `extremes` (1206) and `polar_move` (1230) do the geometry, from a vocabulary table at 93–121 (`G2`/`G3`, the profile's `arcCenter` and `arcCenterMode`, `R` and `CR`, Klartext `DR±`, `PR`/`PA`, `TURN=`, `AC()`/`IC()`). `CT`, `CTP` and `CIP` are always unresolved, and so are Okuma arcs with an `L` radius and `G102`/`G103`. The `R` plane of a drilling cycle is not computed and `G98`/`G99` are not read (they are a group without `sets`).
+- **F112. Address arithmetic is the precedent for refusals.** `address_arithmetic.py` refuses a block per reason (`BLOCK_REASONS`, 245; `block_refusal`, 1380): an unknown code, a machine position (`G53`, `G28`, `M91`, `SUPA`), any open frame, a turned rotary axis without TCP, a call or modal macro with a chosen address, a cycle not reviewed or with a variable position, a cycle outside the XY plane, a pole it cannot move. It skips incremental words on add and subtract, variables, expressions, data words (`G92`, `G52`, `G10`) and FK points; it moves a cycle and the blocks that run it "in one piece, or not at all"; it reads every number on the machine and writes it back in its own form, rounding half away from zero only where the word's form forces it and reporting it ([user guide](../user/scripts.md#address-arithmetic)). A refused block is left and **the other blocks are changed**.
+- **F113. The arc-centre convention is profile data.** `addresses.arcCenter` and `arcCenterMode: "incremental"` are in `fanuc-gcode.json`, `okuma-osp.json` and `sinumerik.json` (the lathe inherits); `AC()`/`IC()` override it per word; Klartext writes its centre as the pole `CC` (`pole: set`, used by `C`, `CR`, `CT`, `LP`, `CP`, `CTP`).
+- **F114. The database has no arc direction and no compensation side.** `CodeSets` (`src/lib/core/codes/types.ts`) has `motion`, `path: 'arc' | 'cycle'` (read by the motion colours only), `radiusComp: 'on' | 'off'`, but nothing that says `G2` is clockwise or `G41` is left. Mirroring needs both, as data.
+- **F115. There is no drilling-cycle flag.** Cycles are told by `group: 'cycle'`, `sets.cycle`, `modal`, `pitchFeed`/`tapping`, `blocks: 2`, `axisWords` and `CodeParam.position` (`'tool-axis' | 'none' | 'other' | 'mode'`, types.ts:77). Fanuc mill `G73`, `G74`, `G76`, `G81`–`G89`: `R` is tool-axis, `Q` a length, `P` a count, `K` a count. Fanuc lathe `G83`–`G89` and Okuma `G181`–`G189`: no position roles. Okuma `G80`–`G83` are contour (LAP) codes. Klartext `CYCL DEF 200`–`209`, `240`, `25x`, `262`: `Q203` tool-axis, the rest none; `CYCL CALL POS`/`PAT` positions `other`. Sinumerik `CYCLE81`–`89`, `CYCLE840`: `RTP`, `RFP`, `DP` (and `FDEP` of `CYCLE83`) tool-axis, `SDIS` and `DPR` none, `DTB` a dwell.
+- **F116. A machine has no rates and no limits.** `MachineParams` (`src/lib/core/machines/types.ts:108`) has `numberInput`, `units`, `diameter`, `variants`, `modalInitial`; `channels` is stored in `MachineConfig.params` only and kept out of the effective key (P2 §7.16 #149). No rapid rate, top feed, tool-change time, top spindle speed, travel or acceleration exists anywhere; nothing converts a feed per revolution into a feed per minute or a surface speed into revolutions. Scale Feed's limits are form values. `MACHINES_VERSION` is 1 (Rust and TypeScript).
+- **F117. The script contract.** Header fields `name`, `description`, `profiles`, `input`, `output`, `timeout`, `envelope`, `documents`, `params` (`src-tauri/src/scripts/meta.rs:57-67`); parameter types `number`, `integer`, `text`, `bool`, `choice`, `file`, `folder`, `address-list` (76–85); outputs `panel`, `replace`, `new-document` (one untitled document, `src/lib/app/scripts.ts:640-645`) and `report` (at most 5,000 rows and 1,000 findings). `documents` other than `active` is accepted with a warning and reset to `active` (`meta.rs:365-371`): **no script can read two documents today**. Every script is a command `script.run:<id>` without a key (`src/lib/contrib/scripts.ts:87`).
+- **F118. One code editor.** `editorService.ts` drives one `IStandaloneCodeEditor` with one model per document; the compare diff editor is the only other widget, and its header records the two traps of any further instance (every editor option lands in the shared configuration service; a `theme` option sets the global theme; `src/lib/monaco/diff.ts:18-29`). No editor groups exist. View zones and scroll sync are public API (P2 F55); `setHiddenAreas` is not and fails over 300,000 lines (P2 F54).
+- **F119. Keys.** `CommandDef.keys` is one key or `{mac, other}`; `findConflicts` (`src/lib/core/keys/keySpec.ts:340-357`) checks both platforms; `tests/unit/commandPins.test.ts` pins every shipped key against `tests/runtime/lib/shortcuts.js`. There is no user override file.
+- **F120. Settings and texts.** Settings are one flat schema with `SETTINGS_VERSION` 1 (`src/lib/core/settings/schema.ts:26`); the dialog has five schema pages plus Machines and Profiles and no search. `t()` (`src/lib/i18n/index.ts`) has plurals through `Intl.PluralRules` and only English message files. The config folder is fixed (`src-tauri/src/paths.rs:407-416`); there is no zip support and no JSON Schema file for profiles or machines. M13 imports and exports single profile, code and machine files.
+- **F121. Bookmarks** are line numbers without names, stored per file in `state.json` (at most 200 per file, 500 files; `src/lib/stores/fileMemory.ts`); there is no panel and no ribbon entry.
+- **F122. Typing** reads `editing.forceUppercase` and `editing.preventLineJoin` only (`src/lib/contrib/typing.ts`); nothing handles Enter.
+- **F123. Renumbering** implements `start`, `step`, `digits`, `max`, `onOverflow`, `spacesAfter`, `skipStartingWith`, `skipEmpty`, `restartAtProgramStart`, `onlyNumbered` and `altPrefixes`; `fitToMax`, `alignColumn`, `everyNth`, `skipContaining`, `skipFirst`/`skipLast`, `startTrigger` and `autoNumberOnEnter` are design-note names only. Reference rules (`src/lib/core/transforms/references.ts`): on Fanuc `M99 P` and `M98 P… Q…` are **reported**, `M98 Q` without `P` and `GOTO` are rewritten, `G70`–`G73 P/Q` are reported on the mill and rewritten on the lathe; Okuma `GOTO`, `IF` and `G85`–`G88 N…`; Sinumerik `GOTOF`/`GOTOB`/`GOTOC`. No rule for `G65`.
+- **F124. The shell.** Tauri plugins: dialog, fs, window-state (`src-tauri/Cargo.toml:31-33`). No single-instance plugin (`src-tauri/src/recovery.rs:27-31` explains the heartbeat that replaces it), no `fileAssociations` in `tauri.conf.json`, `on_run_event` handles only `Exit` (`src-tauri/src/lib.rs:87-91`), no print path, and no command that lists a directory for the webview (`channels.rs` reads the metadata of named siblings only).
+- **F125. Channels.** "Split into channel documents" makes untitled documents with a proposed name `<stem> <channel><ext>` (`src/lib/contrib/channels.ts:503-525`) and is a one-way copy; nothing shows two channels side by side.
+- **F126. Compare** has review mode with six ignore options (`src/lib/core/compare/types.ts:76-81`); inside a changed line only Monaco's own character marks show.
+- **F127. Tests.** A test that times work over 100,000 lines or more, or simulates typing, against a wall clock lives in `<name>.slow.test.ts` (`vitest.config.ts:8-36`, `CONTRIBUTING.md` "Tests"); the evidence gate exempts `docs/planning/` (`tests/unit/evidenceGate.test.ts`); no test checks the links of the Markdown documents.
+
+## 2. Scope and exit criteria
+
+### 2.1 Roadmap Phase 4 rows
+
+| Roadmap Phase 4 item | Decision | Milestone, WP |
+|---|---|---|
+| [Translate](nc-transformations.md#translate-coordinates), [rotate](nc-transformations.md#rotate-coordinates), [mirror](nc-transformations.md#mirror-coordinates) | **In**, as three bundled scripts on one shared module (AD-41–AD-44). First version: rotate and mirror in the XY plane of a milling program; translate on every built-in profile; lathe rotate and mirror refused (Q4-2) | P4a, P4.1–P4.4 |
+| [Expand drilling cycles](nc-transformations.md#expand-drilling-cycles) | **In** for the plain drilling, dwell, peck and boring cycles the database describes with an expansion schema (AD-45); tapping, oriented boring, back boring and lathe or contour cycles refused (Q4-8) | P4b, P4.6, P4.7 |
+| [Statistics and time estimate](nc-transformations.md#statistics-and-time-estimate) | **In**, as a report; times need the machine's motion data (AD-46, AD-47) | P4b, P4.8, P4.9 |
+| Machines (§11 item 26): machine limits (top spindle speed, travel) used by the program checks | **In**, with the motion data in one optional machine block (AD-46) | P4b, P4.9, P4.10 |
+| Editor: [auto-space while typing](editor-core.md#auto-space-while-typing), [automatic block number on Enter](editor-core.md#automatic-block-number-on-enter) | **In**, both off by default per profile (Q4-12) | P4c, P4.12 |
+| Editor: [bookmark names and panel](editor-core.md#bookmarks), [block range](editor-core.md#select-or-delete-a-block-range), [insert/append file](editor-core.md#insert-file-and-append-file) | **In** | P4c, P4.13, P4.14 |
+| Editor: [printing](editor-core.md#printing) | **In**, through the webview's print dialog; a platform without one gets "Export as HTML" (Q4-22) | P4c, P4.15 |
+| Editor: [next and previous NC event](editor-core.md#next-and-previous-nc-event) (if asked for) | **Optional**: not built unless the owner asks (Q4-13); Find All with a word condition covers it today (P2 §11 item 4) | P4c, P4.16 (optional) |
+| NC: [renumber advanced options](nc-transformations.md#renumber-blocks); `M99 P`, `M98 P… Q…` and cross-file references in [reference-aware renumbering](nc-transformations.md#reference-aware-renumbering) | **In** (AD-49); a reference from another document is listed, and updated only in open documents on request (Q4-17) | P4d, P4.18, P4.19 |
+| Editor: [split view](editor-core.md#split-view) | **In** (AD-50), first in P4e | P4e, P4.21 |
+| Editor: side-by-side channel view ([P2 §11 item 27](phase-2-implementation.md#11-deferred-or-cut-items-phase-2--phase-3-or-backlog)) | **In** on split view's groups: a model per pane with a two-way mapping (AD-51) | P4e, P4.22, P4.23 |
+| Multi-channel, the rest (§11 item 28): merging a split channel document back | **In**, on the same mapping (AD-51) | P4e, P4.23 |
+| Compare: [word-level marking](file-compare.md#word-level-marking) | **In**, in review mode and the raw view (AD-52) | P4e, P4.24 |
+| Compare: [aligned NC-aware diff with merge](file-compare.md#aligned-nc-aware-diff-with-merge) (only if review mode proves too limited) | **Optional**: not built unless the owner says review mode is too limited (Q4-14) | P4e, P4.25 (optional) |
+| Editor: [find files in folders](editor-core.md#find-files-in-folders) | **In**, one read-only folder walk in Rust (AD-53) | P4f, P4.27, P4.28 |
+| Editor: [OS file associations](editor-core.md#os-file-associations) | **In**, with one running instance (AD-54); the extensions are the owner's list (Q4-21) | P4f, P4.29 |
+| Machines (§11 item 26): folder-to-machine rules (D53) | **In** | P4f, P4.30 |
+| Multi-channel, the rest (§11 item 28): folder-aware sibling lookup, writing the split channels to disk, channel-aware compare and search scope, a check that follows jumps | **In** | P4f, P4.30–P4.32 |
+| Multi-channel, the rest: sync presets per control | **Waits on the owner's data** (D64): no work package until a machine's wait codes are known (Q4-16) | – |
+| Multi-channel, the rest: a sync timeline | **Optional, proposed cut** (Q4-15): it leans toward a schedule view of the machine, which the scope fence keeps out | – |
+| Settings: [keyboard shortcut customization](settings-ui.md#keyboard-shortcuts); Scripting: per-script shortcuts | **In** (AD-55) | P4g, P4.34 |
+| Scripting: [script packages](scripting.md#plugins) enable/disable | **In** (AD-56) | P4g, P4.35 |
+| Settings: [full config export/import and relocation](settings-ui.md#configuration-portability) | **In** for export and import; relocation proposed as a pointer file (Q4-23) | P4g, P4.36 |
+| Settings: a settings search box | **In** | P4g, P4.37 |
+| Settings: [UI translations](settings-ui.md#internationalization) | **In** as the language switch and the loading of a second message set; which translation ships is the owner's (Q4-18) | P4g, P4.37 |
+| Profiles: form-generated profile editor with a live preview (D40; moved from Phase 3) | **In** (AD-57), on the JSON Schemas | P4h, P4.40 |
+| Settings: JSON Schemas for profiles and machines | **In** (AD-57); P2 §2.1 had cut them, P2 §11 item 17 kept them for Phase 4 (§7 records the choice) | P4h, P4.39 |
+| Settings: per-profile colours and the [role colour editor](settings-ui.md#themes-and-colors) | **In** | P4h, P4.41 |
+| Profiles: per-profile `tabWidth`, `rulers`, completion mode; hover delay and modifier modes; a quick switcher in recently used order (§11 item 21; or cut) | **Optional**: proposed in for `tabWidth` and `rulers`, cut for the rest (Q4-19) | P4h, P4.42 (optional) |
+| Machines (§11 item 26): per-block parameter units (`G76` `P`), editing the per-class number input in the dialog | **In** | P4h, P4.43 |
+| Machines (§11 item 26): a `toolWord` variant for short lathe `T` words (D49) | **Proposed closed**: D49 decided "the station alone, as built", and the `offset1` choice exists since M12.5 (Q4-20) | – |
+
+Not in Phase 4, on purpose: scripts that read several documents (P1 D16; the combined tool list, split and join stay in the backlog, and no Phase 4 row needs them); live markers of the program checks (backlog, D65); anything of the scope fence (backplot, simulation, DNC, program management).
+
+### 2.2 Phase 4 exit criteria (testable)
+
+Each criterion is proven by its milestone's tests and runtime scenarios on committed fixtures (synthetic, or the owner-public programs under `tests/fixtures/nc/owner-public/`); the owner's local programs are checked by G11 on their machine only, as counts. "Refused" always means: nothing in the document changes, and every reason is a row in Results with its line.
+
+| # | Criterion | Proven by |
+|---|---|---|
+| X19 | **Translate.** On synthetic goldens for every built-in profile (`tests/fixtures/scripts/translate/<case>/`): a shift by dX, dY, dZ moves every absolute point, absolute arc centre (`AC()`, an absolute `arcCenterMode`), Klartext pole `CC`, cycle position and tool-axis cycle position (`R` under `G90`, `Q203`, `RTP`/`RFP`/`DP`), and leaves incremental words, incremental centres, radii and polar radii and angles as written; a lathe's dX is read as the machine reads `X` (diameter or radius, AD-43); each word is written back in its own form. A shift of 0, 0, 0 gives the program back **byte for byte** on every owner-public program it does not refuse; a shift by d and then by −d gives every word back its value. The extents of the result equal the extents of the original moved by the shift on every golden and every owner-public program it does not refuse (the differential oracle, §4 rule 7). | `test_translate.py`, `test_geometry_oracle.py`, `p4-geometry` |
+| X20 | **Rotate.** In the XY plane of a milling profile, about a point by an angle: every point, arc centre vector and incremental move is rotated; `G2`/`G3` stay; `X` and `Y` are both written on every moved block (a block that wrote only one gets the other); Klartext `PA` turns by the angle, `IPA` stays; a rotation by 90°, 180° or 270° is exact; any other angle rounds each word to its resolution (AD-44) and every arc keeps its start and end radius within the tolerance of Q4-4, or the run is refused. Rotating by 360° gives the program back byte for byte; four rotations by 90° give every value back. | `test_rotate.py`, the oracle |
+| X21 | **Mirror.** About the X or the Y axis through a point, or a line at an angle, in the XY plane of a milling profile: points and arc vectors mirror, `G2`↔`G3` and `G41`↔`G42` swap (Klartext `DR+`↔`DR-`, `RL`↔`RR`) **from data** (AD-42), and the result carries one warning that climb milling became conventional milling; mirroring twice gives every value back. | `test_mirror.py`, the oracle |
+| X22 | **Refused, not guessed.** Each of these refuses the whole run with its reason and its line, and writes nothing (AD-41, Q4-1): a frame or shift in force (`G68`, `G51.1`, `G16`, Sinumerik `ROT`/`MIRROR`/`SCALE`/`TRANS`, Klartext cycles 7, 8, 10, 26, `PLANE`, cycle 19); tool centre point control with a rotary word in scope (rotate, mirror); a variable or expression in a moved word; a subprogram or macro call (`M98`, `G65`, `G66`, `CALL LBL`, `CALL PGM`, `L…`, a Sinumerik name call); a coordinate setting (`G92` as a setting, `G52`, `G10`); a cycle with a parameter whose role is `other` or not reviewed (pockets, patterns, `PATTERN DEF`); an FK contour; `CT`, `CTP`, `CIP` under rotate and mirror; Okuma `L`-radius arcs and `G102`/`G103`; a plane other than XY (rotate, mirror); a point-less word whose reading depends on the machine with no machine chosen (AD-31, D57); a distance mode that is only assumed (Q4-5); an axis the shift must move that the program never writes before its first moved block; a selection that starts or ends inside a cycle or a Klartext multi-line block. `G53`, `M91`, `SUPA` and incremental `G28`/`G30` returns are left and listed as information; an absolute intermediate point that the transform would change refuses the run (Q4-6). | the goldens' `refused` cases, `p4-geometry` |
+| X23 | **Expand drilling cycles.** Each cycle of the expansion schema (Q4-8) at the positions of its modal block and of the blocks that repeat it becomes the rapid and feed moves the manual describes, with `G98`/`G99` (or the dialect's return), the `R` plane or set-up clearance, the depth, absolute or incremental, the peck, the dwell copied as the same word, the repeat count, and the motion mode after the cycle restored; a peck cycle whose clearance or retract is a machine parameter is expanded only when the machine sets it (Q4-9); a tapping cycle, an oriented or back boring cycle, a cycle under radius compensation, and a cycle the database gives no schema are refused with the reason. Every golden's expansion has the same extents as the cycle (the depth reached, the return level) as `extents.py` reads them. | `test_expand_cycles.py`, `p4-cycles` |
+| X24 | **Statistics and time.** Per tool and in total: feed length, rapid length, arc length included, the number of tool changes, and with the machine's motion data the feed time, rapid time, dwell time and tool-change time; feeds per revolution use the speed in force, constant surface speed uses the diameter along the move and the clamp in force (or the machine's top speed); expanded drilling cycles counted; inverse-time feeds counted; a multi-pass lathe cycle, a thread cycle, a contour cycle, a pocket or pattern cycle, a feed per tooth, a call and a rotary move without a rotary rate are counted as "not estimated" with their lines. Without motion data the lengths are given and the time columns say what to set. The goldens hold hand-computed values to 0.01 mm and 0.1 s. | `test_statistics.py`, `p4-cycles` |
+| X25 | **Machine motion and limits.** A machine stores an optional `motion` block (rapid rate per axis, rapid kind, top feed, tool-change time, rotary rapid, the peck values of Q4-9) and a `limits` block (top spindle speed, travel per axis), edited on a page of its own in the machine dialog, validated with JSON paths, exported and imported with the machine, outside the effective key (AD-46); the program checks report a speed above the top speed and a position outside the travel (in machine coordinates only where the program says so, otherwise information), and nothing when the block is absent. | `motion.test.ts`, `test_program_checks.py`, `p4-machines` |
+| X26 | **Typing help.** With the profile's `editing.autoSpace` on, typing `G1X` gives `G1 X`, and nothing changes inside a comment, a string, a variable expression, a multi-letter keyword or a Sinumerik `NAME=` word; with `editing.autoNumber` on, Enter after `N120 G1 X5.` starts `N130 ` (the profile's step), Enter between `N120` and `N125` gives a number between them, with no gap the line stays unnumbered and the status bar says so, and on Klartext the blocks below are renumbered in the same undo step. Each is one undo step with the typed text. | `typing.test.ts`, `autoNumber.test.ts`, `p4-comfort` |
+| X27 | **Bookmarks, ranges, files, print.** A bookmark can carry a name; the bookmark panel lists every bookmark of every open document with file, line, name and text, jumps, deletes one and clears all; "Bookmark All Matches" marks every line the current search finds; names persist per file. "Select Block Range" and "Delete Block Range" take line or block numbers and refuse a block number that does not exist or exists twice. "Insert File" and "Append File" read a file the way Open reads it (encoding, line endings normalized to the document's), as one undo step; appending after a program end warns; on Klartext the inserted blocks are renumbered and a second `BEGIN PGM` is refused. "Print" prints the document or the selection with colours or in black, line numbers optional, and a header with name, date and page. | unit tests, `p4-comfort` |
+| X28 | **Renumber, all of it.** The renumber form offers fit to maximum, align to a column, every Nth line, skip lines containing a text, skip the first and last lines, and a start trigger; each has goldens on Fanuc mill and lathe, Okuma and Sinumerik; `M99 P` inside the same file and `M98 P… Q…` that point into a program of the same file are rewritten; a reference from another **open** document to a renumbered number is listed and, when the user confirms, updated in that document as its own undo step; a reference whose target is not in the file stays reported. | `renumber.test.ts`, `references.test.ts`, `p4-renumber` |
+| X29 | **Split view and channels side by side.** "Split Editor" shows the document in two panes on one model (edits, undo, bookmarks, the inspector and the motion colours follow the focused pane); on a two-channel program (single file and one file per channel), "Channels Side by Side" opens one editable pane per channel, aligned at the wait codes with filler space, matched and unmatched marks marked differently, with optional locked scrolling; an edit in a pane is one undo step of the document; "Merge Channels Back" writes the edited channel documents of a split into their source as one undo step; a program over 300,000 lines works the same (no hidden areas are used). | `editorGroups.test.ts`, `channelPanes.test.ts`, `p4-split`, `p4-channels` |
+| X30 | **Word marks in compare.** In review mode and the raw view, a changed line marks the whole words that differ (`F1200` → `F1000` marks both words, not two digits), read with each side's tokenizer; a word that only moved is not marked. | `wordDiff.test.ts`, `p4-compare` |
+| X31 | **Folders and files.** "Find in Folder" searches a folder the user picked (name pattern, text or regular expression, modified dates), streams the results into the Results panel, can be stopped, never follows a link out of the folder, and skips binary and oversized files with a count; a double-click on a `.nc` (or another registered extension) opens it in the running gEdit, as a tab, on the three platforms; a folder rule assigns a machine to the files of a folder; the sibling lookup finds the other channel file in the document's folder; the split channels can be saved to disk with the names of the pattern (each save asks before it overwrites); compare and Find All can be limited to a channel; the wait-code check follows a `GOTO` inside a channel. | Rust tests, unit tests, `p4-folders` |
+| X32 | **Settings, keys and packages.** A user key for any command, stored in `keybindings.json`, wins over the default, warns on a conflict on either platform, and can be reset; a script can have a key; a package folder under `<config>/packages/` adds its scripts, profiles, code files and templates, and switching it off removes them without a restart; "Export Configuration" writes one zip with the settings, keys, profiles, code files, machines, scripts and packages, and "Import Configuration" shows what it will replace before it does; the settings search box finds a setting by its label or help; the interface language follows the setting and falls back to English for a missing text. | unit tests, Rust tests, `p4-settings` |
+| X33 | **Profiles and machines.** The profile form edits a user profile section by section, generated from the profile's JSON Schema, with help per field and a live preview on a sample program; every built-in profile and every user profile fixture validates the same under the schema and the hand-written validator; a profile's `colors` override role colours for that profile only; the role colour editor changes a role with a live preview and refuses a colour below the contrast limit; the `G76` thread height `P` is read as the machine reads a length in block 2; the per-class number input is editable in the machine dialog. | `schema.test.ts`, `profileForm.test.ts`, `p4-profiles` |
+| X34 | **No regression, within the budgets.** Every earlier scenario passes (the cumulative suite `m0`–`m13`, `rp`, `p3a`, `p3b`, `b1`), changed only for the listed intentional changes; CI green on the three platforms. The new budgets: a geometry script and the expansion on 300,000 lines within the 300 s the M10 scripts allow (the same `timeout`), measured in `p4-perf`; auto-space and auto-number add ≤ 2 ms per keystroke at 300,000 lines; a second editor pane keeps the typing budget of P1; "Find in Folder" yields its first result within 1 s on a folder of 10,000 files and can be stopped within 200 ms; the bookmark panel updates ≤ 16 ms with 1,000 bookmarks. | unit budgets, `*.slow.test.ts`, `p4-perf`, CI |
+
+**Phase 4 is done when** X19–X34 pass, except the parts of an optional row the owner chose not to build; the cumulative runtime suite passes on the GitHub macOS runner; G10 has signed off the new data (the drilling-cycle schemas, the arc-direction and compensation-side flags, the motion defaults) and the script texts; and the owner has done the manual checks of §10 that only a real window or a machine can do.
+
+## 3. Architecture decisions
+
+AD-19 (one modal interpreter, both languages), AD-31 (machine configurations, "no machine, no guess") and AD-32 (channels) of P2 §3, and AD-33–AD-40 of P3 §3 stay binding as written; the decisions below add to them.
+
+**AD-41: The geometry transforms are scripts on one shared module, and a refusal means nothing is written.**
+- Three bundled scripts, `translate.py`, `rotate.py`, `mirror.py` (the Tools tab's Built-in Scripts, each its own command), on a new helper module `_nc_geom.py`: the classification of every word of a block into a geometry role (absolute point, incremental point, arc centre absolute or incremental, radius, polar radius, polar angle absolute or incremental, pole, cycle position, tool-axis cycle position, data, untouched), the transform of a role, the write-back through `_nc_machine.py` in the word's own form, and the refusal reasons.
+- **Refusal is all-or-nothing** (proposed default, Q4-1): address arithmetic changes the blocks it can judge and lists the rest (F112), which is right for a value change; for a path it is not — a contour moved except for one block is a broken contour. A geometry run that meets one refused block writes nothing and lists every refused block, so the user sees all of them at once.
+- **Why scripts:** the roadmap's delivery column says Script; the work is a batch computation over the text on the Python interpreter, which is the oracle of the TypeScript one (AD-19), and users can read and adapt it (README principle 3). **Why not one script with an operation choice:** each transform has its own form (a shift, a centre and angle, an axis), and three commands are what a user looks for.
+- **Why not a frame in the program** (inserting `G68`, `ROT`, cycle 10 or a datum shift instead of rewriting coordinates): that changes what the control does, needs the control's option, and leaves the path unreadable for the inspector and the checks; rewriting is what the design note asks for.
+
+**AD-42: Mirroring swaps what the data says to swap.**
+- New database flags, set by the P4a prelude and checked by G10: `CodeSets.arcDirection: 'cw' | 'ccw'` on the arc codes (`G2`/`G3` and their dialect forms) and `CodeSets.compSide: 'left' | 'right'` on the radius-compensation codes (`G41`/`G42`, Klartext `RL`/`RR` where they are entries); Klartext `DR+`/`DR-` read through a profile member that names the direction words of an arc (`addresses.arcDirectionWords`, the prelude's contract). `mirror.py` swaps a code for the code of the same group with the other value, so no code list lives in the script ("no consumer names a profile", P2 §8.8).
+- A mirror also reverses the cutting direction: climb milling becomes conventional milling. The run says so in one warning; reversing the path to restore it is not offered (the design note keeps it for later, and it needs every block's order reversed).
+
+**AD-43: Every number is read on the machine, and a lathe's X is a diameter when the machine says so.**
+- The transforms read each word with `_nc_machine.py` (AD-31): a point-less word under "none" whose reading differs between the presets is refused, as in address arithmetic (D57).
+- On a lathe, translate's dX is asked as the machine reads `X` (the form says "diameter" or "radius" and follows the document's machine; Sinumerik `DIAMON`/`DIAMOF`/`DIAM90` switches are followed per word, as `diameter_reading` does); `U` and `W` are incremental and stay. Rotate and mirror are refused on a lathe profile in the first version (Q4-2).
+- The distance mode at the first moved block comes from the program, or from the machine's power-on mode (`modalInitial`); a mode only assumed from the profile's default refuses the run (Q4-5). The design note's per-run options "arc-centre convention" and "distance mode to assume" are dropped: both are facts of the control (F113, the machine's power-on mode), and a run option would let a guess in (§7 records this).
+
+**AD-44: Exact where it can be, rounded where it must be, and the arcs checked after rounding.**
+- Translate, a mirror about an axis-parallel line through a decimal point, and a rotation by a multiple of 90° are computed exactly on decimal text (the `Decimal` rules of `_nc_machine.py`): no word is rounded.
+- Any other rotation or mirror line computes in double precision and rounds each word half away from zero to its resolution: a point-less word to whole increments of the machine (IS-B 0.001 mm, an Okuma unit), a word with a point to the decimals the form asks (default: the word's own decimals, and at least three in mm, four in inch; Q4-4). Every rounded word is counted in the message.
+- After rounding, every arc is checked: the distance from the centre to the start and to the end may differ by at most the tolerance of Q4-4, otherwise the run is refused at that arc (a control rejects or misreads such an arc). A radius arc keeps its radius; its chord is checked against it.
+- Rotate writes `X` and `Y` on every moved block (a block that wrote only one now moves in both), from the position the path tracker knows; translate and the axis mirrors write only the words that were there. A block whose start position is unknown (no point written yet on an axis the transform needs) refuses the run.
+
+**AD-45: Drilling cycles expand from a schema in the database, never from a code list.**
+- A new member `CodeEntry.expand` (the P4b prelude's contract) says what a cycle does in steps the script knows: the approach (rapid to the position, rapid to the `R` plane or the set-up clearance above the surface), the feed in (in one, or in pecks with a retract to the `R` plane or by a distance), a dwell at the bottom, the way out (rapid, feed, feed with dwell, spindle stop and rapid), the return level (`G98`/`G99`, Klartext `Q204`, Sinumerik `RTP`), and which parameter is which (`CodeParam.expandRole`: position, r-plane, surface, depth, depth-relative, clearance, peck, dwell, return, feed, repeat). The expansion script reads only that.
+- Only a cycle with a schema is expanded; the NC architect writes each schema from the manual, with a golden per cycle. Tapping cycles have no schema (a tap needs the spindle and the feed synchronized; plain moves break it, and tapping speeds are left as written by the owner's rule); nor do oriented boring (`G76`, the shift direction is a machine parameter), back boring (`G87`), manual-return boring (`G88`), the lathe cycles and Okuma's contour codes.
+- **Machine-dependent steps are machine data** (AD-46): the retract of a high-speed peck (`G73`) and the clearance of a deep peck (`G83`) are parameters of the control; the expansion uses the machine's values and refuses the cycle while they are not set (proposed, Q4-9). The motion mode after the cycle is the one the manual gives for the dialect, written on the next motion block when that block has no motion code of its own.
+- The same expansion is used inside `statistics.py` (a module `_nc_cycles.py`), so the time estimate counts what the expansion would write.
+
+**AD-46: A machine's motion data and limits are an optional block of its configuration, outside the effective key.**
+- `MachineConfig.params.motion` (rapid rate per axis in mm/min or in/min and the rotary rapid in degrees per minute, the rapid kind: `straight` (all axes on one line at the rapid rate) or `per-axis` (each axis at its own rate), the top cutting feed, the tool-change time in seconds, and the peck values of AD-45) and `MachineConfig.params.limits` (top spindle speed per spindle, travel per axis in machine coordinates). Both optional, both additive: `MACHINES_VERSION` stays 1, as M12's `channels` did (D59).
+- **Not in `EffectiveMachine.params` and not in `effectiveKey`** (the M12 pattern, P2 §7.16 #149): they do not change how a program is read, so changing a rate rebuilds no modal index. The script context gains `machine.motion` and `machine.limits` (additive, `contract` stays 2), absent when the machine has none.
+- **Documented defaults:** none is a fact about any machine. The plan proposes that a missing value is "not set" and the feature that needs it says so (the time columns, the peck cycles, the limit checks), instead of a number that looks like a machine's (Q4-10, Q4-11).
+
+**AD-47: The time estimate is a lower bound and says so.**
+- Time = length ÷ feed for every move, at 100 % override, with no acceleration, no block processing time and no look-ahead, so the machine is always slower; the report says this in one plain line. A feed per revolution is multiplied by the speed in force; under constant surface speed the speed follows the diameter along the move, held by the clamp in force or, without one, the machine's top speed (AD-46), and a move is split where the clamp starts to hold. Rapid moves use the machine's rapid kind and rates; the top cutting feed clamps a programmed feed above it. A dwell counts as written (the dwell class of `_nc_machine.py`). An inverse-time block takes 1 ÷ F minutes.
+- What cannot be estimated is counted, never guessed: a multi-pass lathe cycle (`G71`–`G73`, `G76`), a thread or contour cycle, a pocket or pattern cycle, an Okuma LAP cycle, a feed per tooth (no tooth count is known), a subprogram call, a rotary move without a rotary rate.
+
+**AD-48: The path tracker is taken out of `extents.py` before anything else uses it.**
+- P4.1 moves the position tracker and the arc and polar geometry of `extents.py` (F111) into `_nc_path.py` without changing a result: every extents golden and every owner-public run stays byte for byte the same (the guard). The geometry scripts, the expansion and the statistics use the module; `extents.py` imports it.
+- Why not a second tracker in `_nc_geom.py`: two trackers drift, and the TODO already lists duplicated script code as debt. Why not a TypeScript tracker: these are scripts (AD-41); the modal parity of AD-19 covers the modal state only, and the path tracker has no TypeScript reader.
+
+**AD-49: Renumbering rewrites `M99 P` and `M98 P… Q…` inside the file, and lists what points in from outside.**
+- A reference into another program of the **same file** (`M98 P1000 Q30` where `O1000` is in the file; `M99 P40` in a subprogram whose caller is in the file) is rewritten with the map of the program it points into, which the renumber builds per program (`restartAtProgramStart`). A target that is not in the file stays reported, as today.
+- **Other documents:** after a renumber, references in the other **open** documents that point at a renumbered program of this file (`M98 P<this program>`, `CALL` and the like, from the profile's reference rules) are listed in Results; "Update the other documents" rewrites them, each document as its own undo step, after one confirmation; a file that is not open is never read or written (proposed, Q4-17).
+
+**AD-50: Editor groups: two panes, one model, the focused pane is the editor.**
+- `EditorService` gains groups: at most two in Phase 4, side by side or stacked; each group is one `IStandaloneCodeEditor`, created with the shared instance options (`instanceOptions.ts`) and never a `theme` option (F118). The same document can be in both, sharing its model; each group keeps its own view state. `editorInstance()` answers the focused group's editor, so every command, decoration and panel follows the focus; the decoration owners (bookmarks, motion colours, compare marks, the inspector's highlight) register per editor.
+- Why two and not N: the channel view and the header-while-editing case need two; a third pane multiplies the view-model cost of P2 F56 for no row of the roadmap.
+
+**AD-51: A channel pane is a model of its own with a two-way mapping into the document.**
+- **One file with channel sections:** each pane shows a model built from that channel's lines; an edit in a pane is applied to the document's model as the minimal edit of the mapped lines (one undo step of the document), and a change of the document (a transform, a reload, a machine switch) re-projects the panes. **One file per channel:** each pane is that channel's own document (its own dirty state and save).
+- Alignment at the wait codes with view zones and locked scrolling are public API (P2 F55); no hidden areas are used, so a program over 300,000 lines works the same (P2 F54).
+- Merging split channel documents back into their source uses the same mapping: the split records where each channel came from, and "Merge Channels Back" writes the channel documents' current text into those ranges as one undo step of the source, refused when the source changed in those ranges since the split.
+
+**AD-52: Word marks come from the tokenizer of each side.**
+- A changed line pair is tokenized with each side's profile; words are aligned by a small diff over the word sequence; a word that differs is marked whole, as a decoration on top of Monaco's own diff. In review mode the marks are computed on the normalized text and shown on it.
+
+**AD-53: One read-only folder walk in Rust serves every folder feature.**
+- A command `folder_search` (streaming, cancellable, a folder the user picked in the dialog, read only, no link followed out of it, a cap on files and on file size, binary files skipped and counted, the name pattern and dates checked before a file is read) serves Find in Folder; a narrower `folder_siblings` (one folder, names only) serves the channel sibling lookup. Both are reviewed under G8's security part (a new command that takes a path).
+- Why not the fs plugin's directory scope: it would grant the webview a directory, which P2 §4 kept closed; a command that only answers what the search asked keeps the grant narrow.
+
+**AD-54: File associations need one running instance.**
+- The installer registers the extensions the owner confirms (Q4-21); macOS sends `RunEvent::Opened` to the running app, Windows and Linux start a second process with the path. A second process must hand its paths to the first and end, or the two overwrite each other's state (TODO, "Data safety"). The single-instance plugin of Tauri does this. P2 D42 deferred file associations for three reasons: the plugin had to be fetched over the network, several extensions are shared with other programs, and the installers could not be tested here. P4f answers them in turn: the dependency is added in the P4f prelude with the owner's OK and its licence checked by `licenses:check`; the extensions are the owner's list (Q4-21); the installers are a manual check (§10).
+
+**AD-55: User keys are one file of overrides, checked like the defaults.**
+- `<config>/keybindings.json`: command id → key (or `null` to remove a key), per platform where needed; read and validated like the other user files (bounded, JSON paths in problems); applied over the defaults at start and on save; `findConflicts` runs on the merged set for both platforms, and a conflict is shown on the Keyboard page and never silently resolved. A script's key binds `script.run:<id>`. The Keyboard page edits the file; the shortcut reference (View ▸ Keyboard Shortcuts) shows the keys in force.
+
+**AD-56: A script package is a folder that adds user files, and switching it off removes them.**
+- `<config>/packages/<name>/` with `scripts/`, `profiles/`, `codes/` (templates included), and a small `package.json` (name, version, description). Its files are read with the user files' rules (limits, validation, the M13 merge), as a layer between the built-ins and the user's own files; a setting `packages.disabled` lists the switched-off ones; a reload follows a switch without a restart. A package is as trusted as a user script: it is the user's folder.
+
+**AD-57: The JSON Schemas drive the profile form and are held to the hand-written validators.**
+- `schemas/profile.schema.json` and `schemas/machines.schema.json` are written by hand from the types (draft 2020-12), shipped and referenced with `$schema` in exported files; the form editor generates its sections and help from them. The hand-written validators stay the gate (P2 F6): a test holds both to the same answer on every built-in profile, every fixture profile and a set of broken ones, so a schema that drifts fails CI.
+
+## 4. Execution protocol: deltas to P2 §5 and P3 §4
+
+Everything in [P2 §5](phase-2-implementation.md#5-execution-protocol-deltas-to-p1-4) and [P3 §4](phase-3-implementation.md#4-execution-protocol-deltas-to-p2-5) applies: a prelude with contracts and stubs, work packages in their own worktrees with disjoint `Owns` lines, Wave A from `p4x/base`, Wave B from the Wave A integration, integration, gates G0–G11, reviews, fixes, documentation, one squash commit on `main` per milestone. The changes:
+
+1. **Branches.** Milestone `x` (`a`…`h`): `p4x/base` (the prelude) from `main`, work-package branches `p4x/<wp>`, Wave A integration `p4x/intA` where a milestone has two waves, integration `p4x/int`. Before landing: fetch, merge `origin/main` (the second session on the owner's Windows machine may have pushed; its commits are reviewed like any other change), run the gates again, then one squash commit on `main`. No push, tag or publication without the owner's say.
+2. **A draft release after each milestone that lands** (D70, [P2 §5.3](phase-2-implementation.md#53-releases-after-each-milestone-accepted-2026-10-01-d70)): the version is bumped in the milestone's commit, the tag is pushed with the owner's OK, the workflow builds the draft, and only the owner publishes. Which versions, and whether v1.0.0 is published first, is Q4-24.
+3. **Model and effort per work package** (the owner's instruction; the agent types of the project): **Haiku, low** (`gedit-mech`) for exact mechanical recipes only, its result checked by the orchestrator; **Sonnet, medium** (`gedit-docs`) for narrow rules and documentation; **Sonnet, high** (`gedit-impl`) for well-scoped implementation, UI, integration, the harness and the code review; **Opus, high** (`gedit-nc-architect`) for NC-critical logic, NC data, the preludes of NC milestones and the NC review; **Opus, extra high** (`gedit-judge`) for the skeptic pass and exit-criteria verdicts. Every work package below names its model; the integrator of every milestone is Sonnet, high.
+4. **Reviews.** After integration, the NC review (Opus, high; ids `NC-…`) and the code review (Sonnet, high; ids `CODE-…`, with the security part of G8 where a milestone adds a Rust command or a capability) run **in parallel and read-only**. The skeptic (Opus, extra high) verifies every finding and confirms, partly confirms or rejects it with the reason. Fixers get **only verified findings**, and every fix comes with a regression test that fails without it. A milestone without NC content (P4e, P4g) has no NC review unless it touches `src/lib/data/**`.
+5. **Light test runs** (the owner, 2026-10-10; `CONTRIBUTING.md`, "Running the tests lightly"): `taskpolicy -b` for tests and builds; vitest on the related files with few workers; the full suite once at integration, at normal priority, on a quiet machine; Python locally on the newest interpreter only (CI runs 3.9 and 3.12); the runtime harness only on the GitHub runner, never locally (it drives the real mouse and keyboard). Long commands run in the background and are polled briefly; every wait loop is stopped before a package hands back.
+6. **Slow tests.** A wall-clock test over 100,000 lines or more, or a typing simulation, goes into `<name>.slow.test.ts` next to its `<name>.test.ts` (F127); a property is pinned by a count where a count can replace a clock; a heavy measurement yields to the event loop between rounds (the CI "Timeout calling onTaskUpdate" lesson).
+7. **The differential oracle for scripts** (P4a, P4b). A transform is checked against code that did not compute it: the extents of the transformed program against the transformed extents of the original (translate: the ranges shifted; axis mirror: the ranges reflected; rotation by 90°: the ranges turned), and the expansion's extents against the cycle's. After the reviews, an adversarial fuzz review (Opus, high, as the P3b fuzz review) runs the transforms on random programs from the six profiles and holds identity and round-trip properties (§2.2 X19–X21); its findings go through the skeptic like the others.
+8. **G10** covers the new data (the arc-direction and compensation-side flags, the expansion schemas, the motion and limits defaults and their texts) and every golden of an NC fixture; **G11** on the owner's machine runs the three transforms (identity and round trip), the expansion and the statistics over the local programs and reports counts only (transformed, refused per reason, identity kept).
+9. **The runtime harness.** Each milestone has its suite (`tests/runtime/suites/p4a.txt` …); scenarios that pin behaviour a milestone changes on purpose are found by grep and updated first; the cumulative suite runs on `spike/harness-ci` before landing only when the owner allows the force-push in that session, and on `main` after the landing in any case.
+10. **Evidence and names.** No evidence about real programs outside `docs/planning/` (the evidence gate); no name of the commercial reference editor anywhere; manuals in our own words. Each milestone runs `tests/unit/evidenceGate.test.ts`.
+11. **Contract deviations** are recorded in §7, numbered from #292.
+
+## 5. Milestones
+
+Each milestone below has a prelude, waves of work packages with disjoint `Owns`, an integration, the reviews of §4 rule 4, the gates and a commit. The status lines and "as built" notes are filled in as the milestones run.
+
+### P4a: Move the path
+
+**Goal:** a user moves a milling program by a shift, turns it about a point or mirrors it, on any built-in milling profile, and moves a lathe program along X and Z; what gEdit cannot judge is refused with every reason listed, and the document is not touched.
+
+**Status:** planned.
+
+**What the prelude decides:**
+
+1. The contracts of `_nc_path.py` (the tracker's API: the position before and after each block, the arc of a block with its centre, start and end, the polar move, the reasons a position is not known) and `_nc_geom.py` (the word roles of AD-41, `transform(role, value, op)`, the write-back, the refusal reasons with their plain texts), as stubs with docstrings and failing tests marked pending.
+2. The data flags of AD-42 (`CodeSets.arcDirection`, `CodeSets.compSide`, the profile's arc direction words): types, the loader, `flagsContract.test.ts`, the Python reader; the flags are written on the six databases by the prelude itself (a short, exact list, checked by G10).
+3. The golden format of `tests/fixtures/scripts/{translate,rotate,mirror}/<case>/` (`input`, `params.json`, `machine.json` optional, `expected` or `refused.json` with the reasons and lines), as the address arithmetic fixtures are.
+4. The settled defaults of §9 that the scripts need (Q4-1, Q4-2, Q4-4, Q4-5, Q4-6), each in the scripts' header comments.
+5. The list of cases the NC architect has to decide from the manuals, so the review decides and does not discover: Klartext `APPR`/`DEP` forms under rotate and mirror (proposed: points transformed, the angle words `CCA` and the arc direction follow the rules of `C`; any form not covered refused); Sinumerik `AR=` (an opening angle stays under rotation and changes sign under a mirror); Fanuc helical arcs (the third axis stays); `G2`/`G3` with `R` under a mirror (the radius stays, the direction swaps).
+
+**Prelude P4a:** this plan's P4a sections, the stubs and contracts above, the data flags with their tests, the roadmap's P4a rows (the scripts carry their own texts, so no i18n file changes). **Model:** Opus, high.
+
+**Intentional behaviour changes when P4a lands:** the Tools tab gains three built-in scripts (a scenario that counts the bundled scripts or lists the Built-in Scripts menu changes; H4a greps `tests/runtime/scenarios` for the menu's count first); `extents.py` imports `_nc_path.py` with no change of output.
+
+**Wave A**
+
+#### P4.1 The path tracker (`_nc_path.py`)
+
+- **Model:** Opus, high.
+- **Owns:** `src-tauri/resources/scripts/_nc_path.py` (new), `src-tauri/resources/scripts/extents.py` (only the code that moves out and its imports), `tests/python/test_nc_path.py` (new).
+- **Depends on:** the prelude.
+- **Deliver:** AD-48: the tracker and the arc and polar geometry moved out of `extents.py`, behind the prelude's API, with the block's start and end position, the arc's centre in absolute coordinates whatever the convention, and the reason when a position is not known; `extents.py` uses it.
+- **Tests:** every extents golden and the owner-public extents run byte for byte unchanged; the tracker on hand-written blocks for every arc form F111 lists (centre incremental and absolute, `R` above and below 180°, `CR=`, Klartext `CC` with `C`, `CR`, `LP`, `CP`, `AC()`/`IC()`), each unknown-position reason.
+- **Covers:** the groundwork of X19–X24.
+
+#### P4.2 The transform rules (`_nc_geom.py`)
+
+- **Model:** Opus, high.
+- **Owns:** `src-tauri/resources/scripts/_nc_geom.py` (new), `tests/python/test_nc_geom.py` (new).
+- **Depends on:** the prelude (the tracker's API as a stub; the tests build positions by hand).
+- **Deliver:** AD-41–AD-44: the role of every word of a block in every built-in dialect (from the profile, the database and the modal state, never from a code list), the three operations on each role (translate, rotate, mirror) with exact decimal arithmetic where AD-44 says so and rounding elsewhere, the arc check after rounding, the swaps of AD-42, the write-back in the word's own form through `_nc_machine.py` (a point stays a point, a point-less word stays whole increments, the sign and leading zeros kept, Klartext's `+`), the lathe's diameter reading, and every refusal reason of X22 as a stable id with a plain text.
+- **Tests:** each role in each dialect; each operation on each role; exactness (translate by `0.1` then `-0.1`; mirror about `X12.5`; rotate by 90°); rounding to IS-B increments and to decimals; the arc check refusing a rounded arc; every refusal reason.
+- **Covers:** X19–X22 (the rules).
+
+**Integration of Wave A (`p4a/intA`):** merge P4.1 and P4.2; `_nc_geom.py` runs on the real tracker; the extents goldens again.
+
+**Wave B**
+
+#### P4.3 Translate
+
+- **Model:** Opus, high.
+- **Owns:** `src-tauri/resources/scripts/translate.py` (new), `tests/python/test_translate.py` (new), `tests/fixtures/scripts/translate/**` (new).
+- **Depends on:** Wave A.
+- **Deliver:** the script with its header (the form: dX, dY, dZ; on a lathe dX "as the machine reads X" and dZ; decimals; `input = "selection-or-document"`, `output = "replace"`, `envelope = true`, `timeout = 300`), the selection primed with the lines above it (`preceding_lines`), the all-or-nothing rule, the message (what moved, how many words, what was left as information, what refused and why).
+- **Tests:** the goldens of X19 on every built-in profile (mill, lathe A and B, Klartext, Okuma lathe, Sinumerik turning and milling), including drilling cycles moved in one piece, a Klartext `CYCL CALL POS`, Sinumerik `MCALL` positions, `AC()` centres, a work-offset change inside the scope, a selection; every refused case of X22 that applies to translate.
+- **Covers:** X19, X22.
+
+#### P4.4 Rotate and mirror
+
+- **Model:** Opus, high.
+- **Owns:** `src-tauri/resources/scripts/rotate.py`, `src-tauri/resources/scripts/mirror.py` (new), `tests/python/test_rotate.py`, `tests/python/test_mirror.py`, `tests/fixtures/scripts/{rotate,mirror}/**` (new).
+- **Depends on:** Wave A.
+- **Deliver:** the two scripts (rotate: centre X, Y and angle in degrees, counter-clockwise positive, as the controls count it; mirror: the X axis, the Y axis, or a line through a point at an angle; decimals), refused on a lathe profile and outside the XY plane (Q4-2, Q4-3), with the climb-milling warning of AD-42.
+- **Tests:** X20 and X21 on Fanuc mill, Klartext, Sinumerik milling and Okuma (its milling programs read with the lathe profile are refused as a lathe, which the goldens pin); the exact cases; the rounded case with the arc check; every refused case of X22 that applies.
+- **Covers:** X20, X21, X22.
+
+#### P4.5 The differential oracle and the identity runs
+
+- **Model:** Sonnet, high.
+- **Owns:** `tests/python/test_geometry_oracle.py` (new), `tests/python/helpers.py` (additive helpers only).
+- **Depends on:** Wave A; the scripts through their command line (the stubs until the Wave B integration).
+- **Deliver:** §4 rule 7: the extents oracle on every golden and every owner-public program; identity (shift 0, rotate 0 and 360, mirror twice) byte for byte where nothing rounds; the round trip by values; a count of what each owner-public program refuses, printed (not asserted), for the review.
+- **Covers:** X19–X21 (the properties).
+
+#### P4.D Documentation
+
+- **Model:** Sonnet, medium.
+- **Owns:** `docs/user/scripts.md` (the three new sections), `docs/user/README.md` (the list of what gEdit does not do), `docs/planning/{README,roadmap}.md`, `CHANGELOG.md` ("Unreleased"), `TODO.md`, `docs/planning/nc-transformations.md` (the status lines of the three sections and the dropped run options, §7).
+- **Deliver:** what each transform moves and keeps, the lathe's X, what is refused and why, rounding and the arc check, the climb-milling warning, and how to undo.
+
+#### H4a Harness P4a
+
+- **Model:** Sonnet, high.
+- **Owns:** `tests/runtime/scenarios/p4-geometry*.js`, `tests/runtime/suites/p4a.txt`, and the scenarios that pin the Built-in Scripts menu (found by grep).
+- **Deliver:** `p4-geometry`: each transform from the Tools tab on a fixture, the result as one undo step, a refused run that leaves the document untouched with its rows in Results; `p4-perf` (first part): the three scripts on 300,000 lines within their timeout.
+
+**Integration I4a:** merge Wave B; the full unit suite, Python and the extents goldens; the runtime suite on the runner.
+
+**Reviews:** NC (the transform rules, the refusals, the data flags, every golden; `NC-…`) and code (the scripts' structure, the module boundaries, the selection priming, the performance; `CODE-…`) in parallel; the skeptic; the fix batches; then the fuzz review of §4 rule 7.
+
+**Gates:** G0–G11 (G6 on the runner); G7: `p4-perf`; G10: the flags and the goldens; G11: the transforms over the owner's local programs (counts).
+
+**Commit:** `P4a: Move the path — translate, rotate, mirror on a shared path tracker`
+
+### P4b: Drilling cycles and time
+
+**Goal:** a user replaces the drilling cycles of a program with the moves they make, reads how long each tool runs and how far it travels, and gives a machine its rapid rates, tool-change time and limits once, so the time estimate and the program checks can use them.
+
+**Status:** planned.
+
+**What the prelude decides:**
+
+1. `CodeEntry.expand` and `CodeParam.expandRole` (AD-45): types, the loader, the flags contract test, the Python reader; the step vocabulary and its rules (which word of a following block runs the cycle again, the motion mode after the cycle, `G91` forms, the repeat count) written as a contract the data and the script share.
+2. `MachineConfig.params.motion` and `.limits` (AD-46): types, validation with JSON paths and bounds, the Rust side's shape (additive, version 1), the context members, the defaults "not set".
+3. The golden formats `tests/fixtures/scripts/expand_cycles/<case>/` and `tests/fixtures/scripts/statistics/<case>/` (the expected table with values to 0.01 mm and 0.1 s).
+4. The answers of Q4-8 to Q4-11 the scripts need, as proposals until the owner answers.
+
+**Prelude P4b:** the above with stubs and pending tests, the roadmap's P4b rows. **Model:** Opus, high.
+
+**Intentional behaviour changes when P4b lands:** two new built-in scripts; the machine dialog gains a page; the program checks gain the limit checks (silent without a `limits` block, so every existing golden stays).
+
+**Wave A**
+
+#### P4.6 Expansion schemas (data)
+
+- **Model:** Opus, high.
+- **Owns:** the `expand` and `expandRole` members in `src/lib/data/codes/*.json` (only this WP edits those files in P4b), `src/lib/data/codes/expand.test.ts` (new).
+- **Depends on:** the prelude.
+- **Deliver:** the schemas of the cycles Q4-8 names, each from its manual section, in our own words: Fanuc mill `G73`, `G81`, `G82`, `G83`, `G85`, `G86`, `G89`; Klartext 200, 201, 203; Sinumerik `CYCLE81`, `CYCLE82`, `CYCLE83` (the parameters it understands; any other parameter set to a value other than its default refuses the cycle), `CYCLE85`, `CYCLE86`, `CYCLE89`; the sources (manual, section) in the hand-off for G10.
+- **Tests:** every schema loads; every `expandRole` names a parameter of its entry; no tapping entry (`tapping`, `pitchFeed`) carries a schema.
+- **Covers:** X23 (data).
+
+#### P4.7 The expansion (`_nc_cycles.py`, `expand_cycles.py`)
+
+- **Model:** Opus, high.
+- **Owns:** `src-tauri/resources/scripts/_nc_cycles.py`, `src-tauri/resources/scripts/expand_cycles.py` (new), `tests/python/test_expand_cycles.py`, `tests/fixtures/scripts/expand_cycles/**` (new).
+- **Depends on:** the prelude; P4a's `_nc_path.py` (the initial level and the positions).
+- **Deliver:** AD-45: the steps of a schema turned into blocks in the dialect's own forms (`G0`/`G1`, Klartext `L … FMAX`/`F`, Sinumerik `G0`/`G1`), the cycle's block number on the first block and none on the others except on Klartext, where the program is renumbered (Q4-12 for the numbering), the feed copied as written, the dwell copied as the same word, the repeat count, the motion mode after the cycle; the machine's peck values (Q4-9); refusals: no schema, tapping, radius compensation in force, a variable in a cycle word, an unknown initial level or distance mode, a cycle that starts above the selection.
+- **Tests:** a golden per schema per return mode and distance mode; repeated positions; the refusals; the extents equality of X23.
+- **Covers:** X23.
+
+#### P4.8 The motion and limits block in the app
+
+- **Model:** Sonnet, high.
+- **Owns:** `src/lib/core/machines/motion.ts` (new) and its test, the machine dialog's new page (`src/lib/components/dialogs/MachineMotionForm.svelte`, new, and its test), the additive members in `src/lib/core/scripting/context.ts` and its test, `src/lib/i18n/en/machines.ts` (the page's keys only), the Rust validation of the two blocks in `src-tauri/src/machines.rs` (additive).
+- **Depends on:** the prelude.
+- **Deliver:** AD-46: the page "Motion and limits" with plain labels and units, each field optional, a note that every value comes from the machine's documentation and that none is assumed; export and import with the machine; the context members.
+- **Tests:** validation (negative and absurd values refused with the path), round trip through the file, the context with and without the blocks, the effective key unchanged by a rate change.
+- **Covers:** X25 (the app half).
+
+**Integration of Wave A (`p4b/intA`):** merge P4.6–P4.8; the expansion runs on the real schemas.
+
+**Wave B**
+
+#### P4.9 Statistics and time estimate
+
+- **Model:** Opus, high.
+- **Owns:** `src-tauri/resources/scripts/statistics.py` (new), `tests/python/test_statistics.py`, `tests/fixtures/scripts/statistics/**` (new).
+- **Depends on:** Wave A.
+- **Deliver:** AD-47: the report per tool and in total (feed length, rapid length, tool changes, feed time, rapid time, dwell time, tool-change time, total; "not estimated" counts with their lines), the form's motion fields pre-filled from the machine and editable for the run (Q4-10), output as a table or CSV in a new document, the lower-bound line, per channel where the program has channels (as the tool list does).
+- **Tests:** hand-computed goldens: a straight and an arc move, a helix, per-revolution feed, constant surface speed with and without a clamp and with the split, both rapid kinds, the top feed clamp, inverse time, dwells in each dialect's form, an expanded cycle, every "not estimated" kind; no time without motion data.
+- **Covers:** X24.
+
+#### P4.10 Limits in the program checks
+
+- **Model:** Opus, high.
+- **Owns:** the limit checks in `src-tauri/resources/scripts/program_checks.py` (new check functions and their table rows only), `tests/python/test_program_checks.py` (new cases), `tests/fixtures/scripts/program_checks/limits-*` (new).
+- **Depends on:** Wave A.
+- **Deliver:** a speed above the machine's top speed (the main spindle and, where the database says, the others), a position outside the travel (an error only in machine coordinates, `G53`; in work coordinates information, since the offset is not known), silent without a `limits` block.
+- **Covers:** X25 (the check half).
+
+#### P4.D Documentation, H4b Harness
+
+- **P4.D** (Sonnet, medium; owns as in P4a plus `docs/user/machines.md`): the expansion, the statistics with what "a lower bound" means, the new machine page with a list of where each value is found on a control.
+- **H4b** (Sonnet, high; owns `tests/runtime/scenarios/p4-cycles*.js`, `p4-machines*.js`, `tests/runtime/suites/p4b.txt`): `p4-cycles` (expand on a fixture, the statistics table), `p4-machines` (the page, a value saved and read back), `p4-perf` (second part).
+
+**Integration I4b, reviews, gates:** as P4a; G10 the schemas and the check texts.
+
+**Commit:** `P4b: Drilling cycles and time — expansion, statistics, machine motion and limits`
+
+### P4c: Editor comfort
+
+**Goal:** typing a block needs fewer keystrokes, bookmarks have names and a list, a range of blocks is one command away, a file can be inserted or appended, and a program can be printed.
+
+**Status:** planned.
+
+**What the prelude decides:** the profile members `editing.autoSpace` and `editing.autoNumber` (both off in every built-in profile, Q4-12); the bookmark record with a name (`state.json`, per file: `{ line, name? }`, read as untrusted, the old `number[]` read as before); the command ids, keys (none by default except what Q4-12 settles) and test ids; the print view's contract (a print-only HTML built from the tokens and the theme's role colours). **Model:** Sonnet, high, with the typing rules read by the NC architect.
+
+**Wave A**
+
+- **P4.12 Auto-space and automatic block number** (Opus, high; owns `src/lib/core/nc/autoSpace.ts`, `src/lib/core/nc/autoNumber.ts` and their tests, `src/lib/contrib/typing.ts` (the two handlers), the `.slow.test.ts` of the keystroke budget). The rules of X26 from the tokenizer of the profile: no space inside a comment, string, variable expression, `NAME=` word or multi-letter keyword; the next number from the block above and the step, a number between two numbered lines, none when there is no gap, Klartext renumbering the blocks below in the same edit, a line that continues a block (`syntax.continuationStart`) never numbered.
+- **P4.13 Bookmarks** (Sonnet, high; owns `src/lib/core/nav/bookmarks.ts`, `src/lib/contrib/bookmarks.ts`, `src/lib/monaco/bookmarks.ts`, `src/lib/components/panels/BookmarksPanel.svelte` (new), `src/lib/stores/fileMemory.ts` (the record), their tests, `src/lib/i18n/en/bookmarks.ts`). Names, the panel (left region, beside the Program Map), "Bookmark All Matches" from the find widget's current search, persistence, a ribbon entry on the Edit tab.
+- **P4.14 Block range, insert and append file** (Sonnet, high; owns `src/lib/contrib/ranges.ts`, `src/lib/contrib/insertFile.ts` (new) and their tests, `src/lib/i18n/en/ranges.ts`). The block range dialog (line or block numbers, select or delete, refuse a missing or duplicate number); insert and append through the file-read path (encoding, line endings), one undo step, the warning after a program end from the profile's `programEnd`, Klartext renumbering and a refused second `BEGIN PGM`.
+
+**Wave B**
+
+- **P4.15 Printing** (Sonnet, high; owns `src/lib/app/print.ts` (new), `src/lib/components/print/**` (new), the Rust print call if the webview needs one, their tests). The print view (colours or black, line numbers, header with name, date and page), the document or the selection, the webview's print dialog; a spike in the prelude settles whether the macOS, Windows and Linux webviews print from Tauri; where one does not, "Export as HTML" (Q4-22).
+- **P4.16 Next and previous NC event** (optional, Q4-13; Sonnet, high): only if the owner asks.
+- **P4.D** (Sonnet, medium) and **H4c** (Sonnet, high; `p4-comfort`, `tests/runtime/suites/p4c.txt`).
+
+**Reviews:** NC (the typing rules, Klartext renumbering, the end-marker rule) and code in parallel; the skeptic; fixes.
+
+**Commit:** `P4c: Editor comfort — typing help, named bookmarks, block ranges, insert file, printing`
+
+### P4d: Renumber, all of it
+
+**Goal:** the renumber form has the options a shop needs for its posts and its machines, and a renumber no longer breaks a subprogram call or return that points into the same file.
+
+**Status:** planned.
+
+**Prelude** (Opus, high): the profile members of the advanced options (`fitToMax`, `alignColumn`, `everyNth`, `skipContaining`, `skipFirst`, `skipLast`, `startTrigger`, `startAfterTrigger`, as the design note names them, F123), the reference rules that change from "report" to "rewrite" (`M99 P`, `M98 P… Q…`) and the per-program map they need, the result rows of the other-document list.
+
+- **P4.18 Advanced options** (Opus, high; owns `src/lib/core/transforms/renumber.ts` and its tests, the renumber form in `src/lib/contrib/ncNumbering.ts`, `src/lib/i18n/en/numbering.ts`). Each option with goldens on Fanuc mill and lathe, Okuma and Sinumerik; Klartext keeps its no-option rule.
+- **P4.19 References across programs and documents** (Opus, high; owns `src/lib/core/transforms/references.ts` and its tests, the reference rules in `src/lib/data/profiles/*.json` (only this WP edits them in P4d), `src/lib/contrib/renumberOthers.ts` (new) and its test). AD-49.
+- **P4.D**, **H4d** (`p4-renumber`).
+
+**Reviews, gates:** NC review of every golden and rule; G10 the profile rules.
+
+**Commit:** `P4d: Renumber, all of it — advanced options, subprogram references`
+
+### P4e: Side by side
+
+**Goal:** a user sees two places of one program at once, edits the channels of a multi-channel program side by side lined up at their wait codes, and sees in a comparison which words changed.
+
+**Status:** planned.
+
+**Prelude** (Opus, high — an exception to the rule of §4 rule 3 that the owner can veto: the editor-group contract is the base every editor feature then depends on, and the traps of F118 are where a second instance has gone wrong before): AD-50's `EditorService` groups, the per-editor decoration registration, the commands (`view.splitEditor`, `view.closeSplit`, `channels.sideBySide`, `channels.mergeBack`), the test ids, the mapping contract of AD-51.
+
+**Wave A**
+
+- **P4.21 Editor groups and split view** (Sonnet, high; owns `src/lib/monaco/editorService.ts`, `src/lib/components/editor/EditorHost.svelte`, `src/lib/components/editor/EditorGroup.svelte` (new), the decoration owners' registration in `src/lib/monaco/{bookmarks,motionColors}.ts`, their tests, the `.slow.test.ts` of the typing budget with two panes).
+- **P4.24 Word marks in compare** (Sonnet, high, with the word alignment read by the NC architect; owns `src/lib/core/compare/wordDiff.ts` (new), `src/lib/monaco/diff.ts` (the decorations), their tests). AD-52.
+
+**Wave B**
+
+- **P4.22 Channel panes** (Sonnet, high; owns `src/lib/core/channels/panes.ts` (new; the mapping), `src/lib/contrib/channelPanes.ts` (new), their tests). AD-51: projection, edits mapped back as one undo step, re-projection, alignment with view zones, locked scrolling, matched and unmatched marks.
+- **P4.23 Merge channels back** (Sonnet, high; owns `src/lib/contrib/channels.ts` (the split's record and the merge), its test).
+- **P4.25 Aligned diff** (optional, Q4-14).
+- **P4.D**, **H4e** (`p4-split`, `p4-channels`, `p4-compare`).
+
+**Reviews:** code review (with the editor traps, the undo grouping and the 300,000-line case as named points); an NC review of the alignment rules and the word marks only.
+
+**Commit:** `P4e: Side by side — split view, channel panes, word marks in compare`
+
+### P4f: Folders and channels
+
+**Goal:** a user finds the program that uses T17 in a folder, opens files from the file browser into the running gEdit, has a machine chosen by the folder a file is in, and works with channel files the way they sit on disk.
+
+**Status:** planned.
+
+**Prelude** (Sonnet, high, with the security part of the plan read by the code reviewer before the waves start): the Rust commands of AD-53 with their limits, the single-instance plugin (the dependency added with the owner's OK, its licence checked), the bundle's `fileAssociations` from Q4-21, the folder rules' shape in `machines.json` (additive), the Results rows of Find in Folder.
+
+- **P4.27 The folder walk** (Sonnet, high; owns `src-tauri/src/folders.rs` (new) and its tests, the command registration, `src/lib/platform/commands.ts` (additive)).
+- **P4.28 Find in Folder** (Sonnet, high; owns `src/lib/contrib/findInFolder.ts`, its form and test, `src/lib/i18n/en/findInFolder.ts`).
+- **P4.29 File associations and one instance** (Sonnet, high; owns `src-tauri/tauri.conf.json` (the bundle), `src-tauri/src/lib.rs` (`RunEvent::Opened`, the second instance's paths), `src/lib/contrib/files.ts` (opening from the OS) and tests).
+- **P4.30 Folder rules and siblings** (Sonnet, high; owns `src/lib/core/machines/folderRules.ts` (new), the channel sibling lookup in `src/lib/core/channels/siblings.ts`, their tests).
+- **P4.31 Channels on disk, channel scope** (Sonnet, high; owns the split's save in `src/lib/contrib/channels.ts`, the channel scope of `src/lib/core/search/**` and `src/lib/app/compare.ts`, their tests).
+- **P4.32 The check follows jumps** (Opus, high; owns `src/lib/core/channels/check.ts` and its tests, `src-tauri/resources/scripts/_nc_channels.py` if the Python side reads the same rule). A `GOTO` inside a channel is followed when its target is in the same channel and the loop has no variable count; a pair spanned by anything else stays "not judged".
+- **P4.D**, **H4f** (`p4-folders`; the file-association open on macOS through the runner's `open` command; Windows and Linux are manual checks).
+
+**Reviews:** code review with G8's security part (the new commands that take a path, the plugin, the capability diff); NC review of P4.32.
+
+**Commit:** `P4f: Folders and channels — find in folder, file associations, folder rules, channel files`
+
+### P4g: Settings, keys and packages
+
+**Goal:** a user binds their own keys, gives a script a key, shares a shop's setup as a package or one zip, finds a setting by name, and can switch the interface language.
+
+**Status:** planned.
+
+**Prelude** (Sonnet, high): `keybindings.json` (AD-55), the package layout and its layer (AD-56), the configuration zip's layout and the preview of an import, the relocation pointer if Q4-23 keeps it, the `ui.language` setting and the message-set loading.
+
+- **P4.34 User keys and script keys** (Sonnet, high; owns `src/lib/app/keys/**`, `src/lib/core/keys/keySpec.ts` (the merge), the Keyboard settings page, `tests/unit/commandPins.test.ts` (the merged set), their tests).
+- **P4.35 Script packages** (Sonnet, high; owns `src-tauri/src/userfiles.rs` and `src-tauri/src/scripts/discovery.rs` (the packages root), the package layer in `src/lib/app/userConfig.ts`, their tests).
+- **P4.36 Configuration export and import** (Sonnet, high; owns `src-tauri/src/configzip.rs` (new; a zip crate added with the owner's OK and its licence checked), the commands and their tests, the import preview dialog).
+- **P4.37 Settings search and the language switch** (Sonnet, high; owns `src/lib/components/dialogs/SettingsDialog.svelte`, `src/lib/i18n/index.ts`, the schema's `ui.language`, their tests). A second message set is loaded only when one ships (Q4-18).
+- **P4.D**, **H4g** (`p4-settings`).
+
+**Reviews:** code review with the security part (zip paths that leave the config folder, oversized entries, a package's files read under the user-file limits); no NC review unless `src/lib/data/**` changes.
+
+**Commit:** `P4g: Settings, keys and packages`
+
+### P4h: Profiles and machines
+
+**Goal:** a user edits their own profile in a form instead of JSON, sees the effect at once, colours a profile's words their own way, and sets the last machine parameters in the dialog.
+
+**Status:** planned.
+
+**Prelude** (Opus, high, for the schema's NC content; the form's contract by Sonnet, high): the two schemas of AD-57 and the agreement test; the `colors` member of a profile and the theme generation per profile (`role.profileId` rules, dialect-profiles "Tokenizer and colors"); the block-aware unit reading of AD-31 for `CodeParam.block` (the `G76` second-block `P`).
+
+- **P4.39 JSON Schemas** (Opus, high; owns `schemas/**` (new), `src/lib/core/profiles/schema.test.ts`, `src/lib/core/machines/schema.test.ts`).
+- **P4.40 The profile form** (Sonnet, high; owns `src/lib/components/dialogs/ProfileForm*.svelte` (new), `src/lib/app/profileForm.ts` (new), their tests). Sections from the schema, help per field, a live preview with a sample program per dialect, save through the profile's document (the AD-40 pattern).
+- **P4.41 Profile colours and the role colour editor** (Sonnet, high; owns `src/lib/core/grammar/themes.ts`, `src/lib/monaco/theme.ts`, the Appearance page's editor, their tests, a contrast test of every default and every chosen colour).
+- **P4.42 Per-profile `tabWidth` and `rulers`** (optional, Q4-19; Sonnet, medium).
+- **P4.43 Machine parameters, the rest** (Opus, high; owns `src/lib/core/codes/wordValue.ts` and `src/lib/core/machines/numbers.ts` (the block-aware unit), `src-tauri/resources/scripts/_nc_machine.py` (the same rule), the number-input page of the machine dialog, their tests). The `G76` thread height read as the machine reads a length in block 2 in both languages, with modal goldens; the per-class number input edited in the dialog with the same validation as the file.
+- **P4.D**, **H4h** (`p4-profiles`).
+
+**Reviews:** NC (the schemas' NC content, the block-aware unit in both languages, the parity of the TypeScript and Python readings) and code in parallel; the skeptic; the parity judge (P3 §4 rule 5) for P4.43.
+
+**Commit:** `P4h: Profiles and machines — profile form, schemas, colours, machine parameters`
+
+## 6. Shared contracts (binding once the preludes write them)
+
+This section is written by each milestone's prelude; until then the architecture decisions of §3 are the contract. The headings are reserved so links stay stable:
+
+### 6.1 The path tracker and the transform rules (`_nc_path.py`, `_nc_geom.py`; P4a)
+
+### 6.2 Arc direction and compensation side (`CodeSets.arcDirection`, `CodeSets.compSide`; P4a)
+
+### 6.3 Expansion schemas (`CodeEntry.expand`, `CodeParam.expandRole`; P4b)
+
+### 6.4 Machine motion and limits (`MachineConfig.params.motion`, `.limits`; P4b)
+
+### 6.5 Typing help and bookmarks (P4c)
+
+### 6.6 Renumber options and references (P4d)
+
+### 6.7 Editor groups and channel panes (P4e)
+
+### 6.8 Folder commands and file associations (P4f)
+
+### 6.9 Keys, packages and the configuration zip (P4g)
+
+### 6.10 Schemas, profile colours and the block-aware unit (P4h)
+
+### 6.11 Commands, keys and test ids (all milestones; P2 §7.12, §7.13 extended)
+
+## 7. Where Phase 4 deviated from the contracts
+
+No deviation yet. Rows are numbered from #292 in the format of P3 §7. The plan itself departs from the design notes in four places, recorded here so the notes can be brought up to date when the work lands:
+
+| # | Source | What changes | Why |
+|---|---|---|---|
+| – | nc-transformations, "Geometry transforms" | The run options "arc-centre convention" and "distance mode to assume at the start" are dropped (AD-43) | Both are facts of the control: the profile's `arcCenterMode` with `AC()`/`IC()` per word, and the machine's power-on mode; a per-run choice lets a guess in |
+| – | nc-transformations, "Geometry transforms", common edge cases | "Incremental words are kept" holds for translate only; rotate and mirror turn or flip incremental moves, arc vectors and `IPA` | An incremental move is a vector; rotating the path rotates it |
+| – | nc-transformations, "Expand drilling cycles" | `G74`, `G76`, `G84`, `G87`, `G88` are not expanded (AD-45) | Tapping and oriented or manual boring cannot be written as plain moves without changing what the tool does |
+| – | P2 §2.1 (JSON Schema files cut, F6) and P2 §11 item 17 (Phase 4) | The schemas are built, and the hand-written validators stay the gate (AD-57) | The form editor needs a schema; the test that holds both to one answer keeps the old reason (one gate) intact |
+
+## 8. Risks and mitigations
+
+| Risk | Mitigation |
+|---|---|
+| A transformed program runs into the part or the fixture | All-or-nothing refusal (AD-41); every assumption is a refusal reason (X22); the differential oracle and the fuzz review (§4 rule 7); exactness where possible and the arc check where not (AD-44); the owner's check on the machine's own simulation or a dry run (§10) |
+| Rounding after a rotation makes an arc the control rejects | The arc check after rounding with the tolerance of Q4-4; the run is refused at that arc |
+| A mirror turns climb into conventional milling unnoticed | One warning in every mirror result (AD-42) |
+| An expanded cycle does something else than the cycle | Schemas only for the cycles the manuals describe step by step; extents equality per golden (X23); tapping and oriented boring never expanded; machine-dependent peck values required (AD-45) |
+| The time estimate is read as a promise | A lower bound by design, said in the report; "not estimated" counted with lines; no built-in rate (AD-46, AD-47) |
+| The extraction of the path tracker changes extents | Byte-for-byte extents goldens and the owner-public runs as the gate of P4.1 (AD-48) |
+| A second editor breaks the main one (shared options, global theme) | AD-50: one creation path with the shared instance options and no `theme`; the code review names it; `p4-split` runs both themes |
+| A channel pane's edit lands on the wrong lines of the document | A minimal mapped edit with tests on random edits against a full re-projection; a change of the source between split and merge refuses the merge (AD-51) |
+| The folder walk exposes more of the disk than asked | A command that answers only the search, no directory grant, no link followed out, caps; the security review of G8 (AD-53) |
+| Two instances overwrite each other's state once files open from the OS | The single-instance hand-over (AD-54) |
+| A user key file breaks a default that a scenario or the user relies on | `findConflicts` on the merged set, conflicts shown and never resolved silently, reset per key; `commandPins.test.ts` pins the defaults (AD-55) |
+| A configuration zip writes outside the config folder | Entry paths checked against the folder before anything is written; the preview shows every file; oversized entries refused |
+| The JSON Schema and the validator disagree | The agreement test of AD-57 on every built-in, fixture and broken profile |
+| Timing tests fail under load | Slow tests in their own group (§4 rule 6); counts where they can replace a clock |
+| Eight milestones stretch the phase | Each milestone stands alone and lands with its release; the optional rows are off unless the owner turns them on |
+
+## 9. Owner decisions and defaults
+
+Nothing below is decided. Each item is a question with the default this plan **proposes**; the plan runs with the proposal only after the owner has read it.
+
+**Geometry (P4a)**
+
+- **Q4-1. A refused block in a transform.** Proposed: nothing is written and every refused block is listed (AD-41). Alternative: change what can be judged and list the rest, as address arithmetic does.
+- **Q4-2. Rotate and mirror on a lathe.** Proposed: refused in Phase 4; translate only (X and Z, X as the machine reads it). Question: is a mirror in Z (a program for the counter spindle) something the owner would use, and on which machine?
+- **Q4-3. Planes.** Proposed: rotate and mirror in the XY plane only, as the design note says "at first".
+- **Q4-4. Rounding and the arc tolerance.** Proposed: a word with a point keeps its own decimals and gets at least three in mm and four in inch when a rotation or an angled mirror rounds; a point-less word stays whole increments of the machine; after rounding, start and end radius of an arc may differ by at most 0.002 mm (0.0001 in), the slack the extents already use, otherwise the run is refused. Question: does one of the owner's controls check arcs more tightly?
+- **Q4-5. A distance mode that is only assumed.** Proposed: refused, unless the program writes `G90`/`G91` (or the dialect's form) before the first moved block or the machine sets the power-on mode.
+- **Q4-6. `G28`/`G30` intermediate points.** Proposed: an incremental return of zero (`G91 G28 Z0`) is left and listed as information; an absolute intermediate point that the transform would change refuses the run; `G53`, `M91` and `SUPA` are left and listed.
+- **Q4-7. The mirror's cutting direction.** Proposed: a warning only; no reversal of the path.
+
+**Drilling cycles and time (P4b)**
+
+- **Q4-8. Which cycles expand.** Proposed: Fanuc mill `G73`, `G81`, `G82`, `G83`, `G85`, `G86`, `G89`; Klartext 200, 201, 203; Sinumerik `CYCLE81`, `CYCLE82`, `CYCLE83` (basic parameters), `CYCLE85`, `CYCLE86`, `CYCLE89`. Not: tapping (`G74`, `G84`, cycles 206, 207, 209, `CYCLE84`, `CYCLE840`), `G76`, `G87`, `G88`, the lathe and Okuma cycles. Question: which of the refused ones does the owner need, and for which control?
+- **Q4-9. Peck retract and clearance.** The high-speed peck (`G73`) retracts by a distance and the deep peck (`G83`) stops short of the last depth by a distance; both are parameters of the control. Proposed: they are machine values (AD-46); without them the two cycles are refused with "set the peck values of this machine". Question: can the owner read them off the machines?
+- **Q4-10. Rates when no machine is chosen.** Proposed: lengths are always reported; times need a rapid rate and a tool-change time, from the machine or typed into the form for the run; gEdit ships no rate of its own.
+- **Q4-11. The rapid kind.** Controls move rapids either on a straight line or each axis at its own rate (a parameter). Proposed: a machine value with "straight line" as the documented default, because it gives the longer (safer) estimate when the axes have equal rates. Question: which do the owner's machines use?
+- **Q4-12. Block numbers of new lines** (expanded cycles, auto-number). Proposed: an expanded cycle keeps its block number on the first block and the others get none (Klartext renumbers); auto-space and auto-number are off in every built-in profile and switched on per profile or per session. Question: on or off by default for the owner's controls?
+
+**Editor and comfort (P4c–P4h)**
+
+- **Q4-13. Next and previous NC event.** Proposed: not built (Find All with a word condition does it).
+- **Q4-14. The aligned diff with merge.** Proposed: not built unless the owner finds review mode too limited.
+- **Q4-15. A sync timeline of the channels.** Proposed: cut; it leans toward a schedule of the machine, which the scope keeps out.
+- **Q4-16. Sync presets per control.** Proposed: no work until a machine's wait codes are known (D64); the presets stay generic and marked "verify".
+- **Q4-17. References from other documents after a renumber.** Proposed: listed; updated only in open documents, each as its own undo step, after one confirmation; files that are not open are never read or written.
+- **Q4-18. Interface languages.** Proposed: the switch and the loading of a second message set are built; no translation ships until someone offers one. Question: does the owner want a German interface, and would they review it?
+- **Q4-19. The small per-profile options.** Proposed: per-profile `tabWidth` and `rulers` (a ruler at the control's longest block); cut the per-profile completion mode, the hover delay and modifier, and the recently used tab switcher (Switch Tab exists).
+- **Q4-20. A tool-word variant for short lathe `T` words.** Proposed: closed, since the owner decided a short word is the station alone (D49) and the "last digit" choice exists.
+- **Q4-21. File associations.** The built-in profiles also claim extensions that other programs use (`txt`, `h`, `iso`, `sub`). Proposed: register `nc`, `tap`, `cnc`, `eia`, `ncc`, `ptp`, `min`, `ssb`, `mpf`, `spf` and not `txt`, `h`, `iso`, `sub`. Question: which should gEdit open on a double-click?
+- **Q4-22. Printing where a webview cannot print.** Proposed: "Export as HTML" there, saved with the save dialog.
+- **Q4-23. Moving the configuration folder.** Proposed: export and import of the whole configuration are built; moving the folder works through a pointer file in the default folder. Question: does the owner need it (a shared network folder, a portable install), or is export and import enough?
+
+**Releases**
+
+- **Q4-24. Versions.** Proposed: v1.0.0 is published first; P4a's release is v1.1.0 and carries the "Unreleased" changes of bug-fix round 1; each later milestone that lands is the next minor version, each a draft the owner checks and publishes.
+
+**Model choice**
+
+- **Q4-25. The P4e prelude on Opus.** Proposed: the editor-group contract by Opus, high, as an exception to the rule that non-NC work goes to Sonnet (P4e prelude).
+
+## 10. Manual checks for the owner
+
+- P4a: translate, rotate and mirror a copy of a real milling program and run it in the machine's own simulation or as a dry run above the part; translate a lathe program in X and Z with the machine chosen and check the diameter; read the refusal rows of a program that has a frame or a subprogram call.
+- P4b: expand a drilling cycle of a real program and compare the moves with the control's own cycle on the machine's simulation; set the machine's rapid rates and tool-change time and compare the estimated time with a real run (the estimate should be lower); a program with a spindle speed above the machine's top speed.
+- P4c: type a few blocks with auto-space and auto-number on; print a program on paper and to PDF on each platform.
+- P4d: renumber a program with `M98 P… Q…` and `M99 P` and run it in the simulation.
+- P4e: edit the two channels of a real two-turret program side by side and check that the wait codes stay lined up; merge a split back.
+- P4f: double-click an NC file on Windows, macOS and Linux with gEdit open and closed; search a folder of programs for a tool.
+- P4g: bind a key of the owner's own on a Windows keyboard with AltGr (Swiss German) and check that it does not take an AltGr character.
+- P4h: make a user profile with the form and test it on a program.
+- After each release: the checklist of [P2 §13](phase-2-implementation.md#13-manual-checks-for-the-owner-cannot-be-automated-here) on the three platforms, then publish the draft when satisfied.
+
+## 11. Coverage: roadmap row → work package
+
+| Roadmap Phase 4 row | WP | Exit criterion |
+|---|---|---|
+| Translate, rotate, mirror | P4.1–P4.5 | X19–X22 |
+| Expand drilling cycles, statistics and time estimate | P4.6, P4.7, P4.9 | X23, X24 |
+| Machines (§11 item 26): limits, motion data | P4.8, P4.10 | X25 |
+| Auto-space, automatic block number on Enter | P4.12 | X26 |
+| Bookmark names and panel, block range, insert/append file, next/previous NC event (if asked for) | P4.13, P4.14, P4.16 (optional) | X27 |
+| Printing | P4.15 | X27 |
+| Renumber advanced options, `M99 P`, `M98 P… Q…`, cross-file references | P4.18, P4.19 | X28 |
+| Split view, side-by-side channel view, merging split channels back | P4.21–P4.23 | X29 |
+| Word-level marking; aligned diff (only if review mode is too limited) | P4.24, P4.25 (optional) | X30 |
+| Find files in folders, OS file associations, folder rules, the rest of multi-channel | P4.27–P4.32 | X31 |
+| Keyboard shortcuts, per-script shortcuts, script packages, config export/import, settings search, UI translations | P4.34–P4.37 | X32 |
+| Form-generated profile editor, JSON Schemas, per-profile colours and the role colour editor, per-profile options (or cut), machine parameters | P4.39–P4.43 | X33 |
+| Sync presets per control; sync timeline | – (Q4-16, Q4-15) | – |
+| `toolWord` variant for short lathe `T` words | – (Q4-20) | – |
+| (no regression, budgets) | every WP, H4a–H4h | X34 |

@@ -10,6 +10,7 @@ Phases 1 to 3 are on `main` and the [roadmap](docs/planning/roadmap.md) holds th
 
 1. [ ] **Publish v1.0.0, the one release.** The tag `v1.0.0` is on `65d801a` and the release workflow has built the draft with all seven files (it is still a draft); check the installers on macOS, Windows and Linux with [the release checklist](docs/releases/checklist.md), then publish the draft. The draft's notes are the `v1.0.0` entry of the [changelog](CHANGELOG.md) as tagged; bug-fix round 1 stays under `## Unreleased` for a later release. **Owner**
 2. [x] **Land bug-fix round 1 on `main`** — done: `71f38d7`, CI and the harness green on `main`, the release dry run built `gedit-nc` ([the record](docs/planning/bugfix-round-1.md#6-verification)). It stays under `## Unreleased` in the [CHANGELOG](CHANGELOG.md); there is no version for it yet, and cutting one (v1.0.1 or v1.1.0) is **Owner**'s call after v1.0.0 is out.
+3. [ ] **Review the Phase 4 plan.** The draft is [phase-4-implementation.md](docs/planning/phase-4-implementation.md) (2026-10-12): eight milestones P4a–P4h, geometry transforms and drilling cycles first. Nothing in it is decided until the owner has read it; the 25 questions in [§9](docs/planning/phase-4-implementation.md#9-owner-decisions-and-defaults) each carry a proposed default, and P4a can start once Q4-1 to Q4-7 and Q4-24 are answered. **Owner**
 
 ## Waiting on the owner
 

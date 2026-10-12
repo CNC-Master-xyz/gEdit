@@ -165,6 +165,8 @@ Status: **done and on `main` (2026-10-10, `71f38d7`; CI and the runtime suite, 1
 
 Exit criteria: geometry transforms and cycle expansion work reliably on the fixture set, and the editor has the comfort features long-time users expect. This was Phase 3 before the re-cut of 2026-09-30.
 
+Status: **planned; a plan is drafted ([phase-4-implementation.md](phase-4-implementation.md), 2026-10-12) and waits for the owner's review.** Nothing in it is decided until then.
+
 | Area | Item | Size | Delivery |
 |---|---|---|---|
 | NC | [Translate](nc-transformations.md#translate-coordinates), [rotate](nc-transformations.md#rotate-coordinates), [mirror](nc-transformations.md#mirror-coordinates) | L | Script |
