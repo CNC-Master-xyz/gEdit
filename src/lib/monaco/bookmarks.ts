@@ -1,8 +1,9 @@
 // Bookmarks in the editor (plan §7.3, §5 WP4.4). Owner: WP4.4.
 //
 // Per-model whole-line decorations with a codicon in the glyph margin and a mark in the
-// overview ruler. Session only: nothing is written to `state.json`, because a bookmark on
-// line 240 means nothing once the file has changed under it.
+// overview ruler. The decorations are the live copy; the session service keeps them per
+// file in `state.json` (`files.rememberPerFile`, `stores/fileMemory.ts`) and hands them back
+// when the file is opened again, clamped to its line count.
 //
 // The decoration options that matter:
 //

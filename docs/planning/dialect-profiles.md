@@ -216,7 +216,7 @@ Replaced the branches of the old `gcodeParser.ts` with a generic runner. Tool en
 
 **Status:** shipped in Phase 1, with reference-aware renumbering added in M6 (`references[]`).
 
-`mode`: `free` (default: any start and step) or `consecutive` (Klartext: every logical block, from `start` in steps of 1, no gaps allowed). How a block number is recognized (`N` prefix or leading integer) comes from `syntax.blockNumber`. Other fields: `start`, `step`, `fitToMax`, `digits`, `max`, `onOverflow` (`wrap` \| `stop`), `spacesAfter` or `alignColumn`, `everyNth`, `skipStartingWith[]`, `skipContaining[]`, `skipEmpty`, `skipFirst`, `skipLast`, `onlyNumbered`, `restartAtProgramStart`, `startTrigger` + `startAfterTrigger`, `references[]`, `autoNumberOnEnter`, `promptBeforeRenumber`.
+`mode`: `free` (default: any start and step) or `consecutive` (Klartext: every logical block, from `start` in steps of 1, no gaps allowed). How a block number is recognized (`N` prefix or leading integer, and the `altPrefixes` a renumber rewrites to the prefix) comes from `syntax.blockNumber`. Built: `start`, `step`, `digits`, `max`, `onOverflow` (`wrap` \| `stop`), `spacesAfter`, `skipStartingWith[]`, `skipEmpty`, `onlyNumbered`, `restartAtProgramStart`, `references[]`. Not built (the advanced options of the roadmap's Phase 4, [plan P4d](phase-4-implementation.md#p4d-renumber-all-of-it), and the automatic number on Enter of P4c): `fitToMax`, `alignColumn`, `everyNth`, `skipContaining[]`, `skipFirst`, `skipLast`, `startTrigger` + `startAfterTrigger`, `autoNumberOnEnter`, `promptBeforeRenumber`.
 
 ### Editing
 `P2 · S · Profile`

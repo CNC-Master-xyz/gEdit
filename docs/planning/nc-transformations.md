@@ -309,7 +309,7 @@ The same for several open documents: one list of all tools, with the programs th
 
 **Status:** shipped in M10 (WP10.2).
 
-Minimum and maximum X, Y, Z (and rotary axes if present), per tool and overall. Arc extremes are included, not only end points. Incremental moves and canned cycle depths are resolved. Work-offset changes start a new group, and G53 moves are listed separately. This is a quick check for wrong Z depths or stray coordinates without a backplot.
+Minimum and maximum X, Y, Z (and rotary axes if present), per tool and overall. Arc extremes are included, not only end points. Incremental moves are resolved from a known start. Of a canned cycle, the axis words of its block count (the depth of a Fanuc `G81 Z-10.`); the `R` plane and the return level (`G98`/`G99`) are not computed, and a depth that is a parameter of the cycle (Klartext, Sinumerik) is reported as not resolved ([the user guide](../user/scripts.md#extents)). Work-offset changes start a new group, and G53 moves are listed separately. This is a quick check for wrong Z depths or stray coordinates without a backplot.
 
 ### Statistics and time estimate
 `P3 · M · Script`
