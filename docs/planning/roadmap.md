@@ -95,7 +95,7 @@ Releases (accepted 2026-10-01; [D70](phase-2-implementation.md#101-decided-by-th
 | v0.5 | M11 | published |
 | v0.6 | M12, the owner answers of 2026-10-07 and 2026-10-08 | not cut on its own: folded into 1.0 (owner decision of 2026-10-09, one release at the end) |
 | 1.0 | M12, M12.5, M13, the Phase 2 exit, and Phase 3 (P3a, P3b); everything since v0.5.0 | tagged 2026-10-10 as v1.0.0 on `65d801a`; the release workflow has built the draft with all its files; the owner checks the installers on the three platforms and publishes it (not published yet) |
-| next | Bug-fix round 1 (`71f38d7`, on `main`) | no version cut yet; its changes are under `## Unreleased` in the CHANGELOG |
+| next | Bug-fix round 1 (`71f38d7`, on `main`), then the docs check (`bc33039`) and the Sinumerik `SLOT2`/`CYCLE72`/`ADIS=` data (`9319959`) | no version cut yet; its changes are under `## Unreleased` in the CHANGELOG |
 
 Row by row:
 
