@@ -52,7 +52,7 @@ from `tests/fixtures/exit/`.*
 ## Download
 
 Installers for macOS, Windows and Linux are on the
-[GitHub Releases page](https://github.com/NC-PB/gEdit/releases): a `.dmg` for macOS (Apple
+[GitHub Releases page](https://github.com/CNC-Master-xyz/gEdit/releases): a `.dmg` for macOS (Apple
 Silicon and Intel), an `.msi` and a setup `.exe` for Windows, and a `.deb`, an `.rpm` and an
 `.AppImage` for Linux, with a `SHA256SUMS` file to check them against. On Linux the installed
 program is called `gedit-nc`, so it does not clash with the GNOME text editor `gedit`. What each

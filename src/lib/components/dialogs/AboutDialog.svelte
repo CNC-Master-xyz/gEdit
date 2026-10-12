@@ -14,7 +14,7 @@
 -->
 <script module lang="ts">
   /** The repository the releases and the issue tracker live in. */
-  export const REPOSITORY_URL = 'https://github.com/NC-PB/gEdit';
+  export const REPOSITORY_URL = 'https://github.com/CNC-Master-xyz/gEdit';
   /** Where to report a problem. */
   export const ISSUES_URL = `${REPOSITORY_URL}/issues`;
 

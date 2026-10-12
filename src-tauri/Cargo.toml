@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "A desktop G-code editor for CNC programming (Fanuc, Heidenhain, Okuma, Sinumerik)."
 authors = ["Peter <83696476+NC-PB@users.noreply.github.com>"]
 license = "MIT"
-repository = "https://github.com/NC-PB/gEdit"
+repository = "https://github.com/CNC-Master-xyz/gEdit"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

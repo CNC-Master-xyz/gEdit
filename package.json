@@ -21,7 +21,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NC-PB/gEdit.git"
+    "url": "git+https://github.com/CNC-Master-xyz/gEdit.git"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

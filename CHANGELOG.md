@@ -213,7 +213,7 @@ Writing with templates (Phase 3, second half): the Insert tab offers parameteriz
 - On Windows and Linux, logging out or shutting down skips the unsaved-changes prompt; the half-minute snapshot is what catches that work.
 - Every text in the program is English.
 
-The [user guide](https://github.com/NC-PB/gEdit/blob/v1.0.0/docs/user/README.md#what-gedit-does-not-do) lists the limits in full.
+The [user guide](https://github.com/CNC-Master-xyz/gEdit/blob/v1.0.0/docs/user/README.md#what-gedit-does-not-do) lists the limits in full.
 
 ## v0.5.0 (2026-10-05)
 
@@ -362,7 +362,7 @@ The first release with installers for macOS, Windows and Linux, and the first wi
 - On Windows and Linux, logging out or shutting down skips the unsaved-changes prompt; the half-minute snapshot is what catches that work.
 - Every text in the program is English.
 
-The [user guide](https://github.com/NC-PB/gEdit/blob/v0.2.0/docs/user/README.md#what-gedit-does-not-do) lists the limits in full.
+The [user guide](https://github.com/CNC-Master-xyz/gEdit/blob/v0.2.0/docs/user/README.md#what-gedit-does-not-do) lists the limits in full.
 
 ### Installing an unsigned build
 
