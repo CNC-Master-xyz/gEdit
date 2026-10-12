@@ -603,7 +603,7 @@ A case folder holds
 `case.json` defaults to the `fanuc-gcode` profile with its code database, and the whole
 document as the input. Two of its keys are not context members: `machine` (the machine's
 parameters) runs the case against the effective profile generated for it — run
-`UPDATE_RESOLVED=1 npm test -- resolved` after adding one — and `machineName` is the name it
+`UPDATE_RESOLVED=1 npx vitest run resolved` after adding one — and `machineName` is the name it
 carries in the messages. A case with a `preceding.nc` is worth checking **twice** — once as
 it stands and once with `precedingLines` taken back out — because a golden on its own only
 proves the script is self-consistent, not that the priming does anything. The

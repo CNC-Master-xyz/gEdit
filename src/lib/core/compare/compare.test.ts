@@ -14,10 +14,9 @@ import { describe, expect, it } from 'vitest';
 import { applyMachine, effectiveMachine, noMachine } from '$lib/core/machines/effective';
 import type { EffectiveMachine, NumberInput } from '$lib/core/machines/types';
 import { compileProfile } from '$lib/core/profiles/compile';
-import { validateProfile } from '$lib/core/profiles/validate';
-import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
+import type { CompiledProfile } from '$lib/core/profiles/types';
 import { diffLines } from '$lib/core/transforms/lineDiff';
-import { BUILTIN_PROFILE_JSON } from '$lib/data/profiles';
+import { PROFILES, cpOf, type ProfileKey } from '../../../../tests/unit/helpers/compareProfiles';
 import { expectWithin } from '../../../../tests/unit/helpers/budget';
 import {
   COMPARE_NOTE_KEYS,
@@ -32,32 +31,6 @@ import {
   type CompareOptions,
   type SideMachine,
 } from './index';
-
-function profile(id: string): Profile {
-  const result = validateProfile(BUILTIN_PROFILE_JSON.find((p) => (p as { id?: string }).id === id));
-  if (!result.ok) throw new Error(`${id}: ${result.errors.join('; ')}`);
-  return result.profile;
-}
-
-const PROFILES = {
-  fanuc: profile('fanuc-gcode'),
-  lathe: profile('fanuc-lathe'),
-  klartext: profile('heidenhain-klartext'),
-  okuma: profile('okuma-osp'),
-  sinumerik: profile('sinumerik'),
-  sinumerikMill: profile('sinumerik-mill'),
-};
-type ProfileKey = keyof typeof PROFILES;
-
-const COMPILED = new Map<string, CompiledProfile>();
-function cpOf(key: ProfileKey): CompiledProfile {
-  let cp = COMPILED.get(key);
-  if (!cp) {
-    cp = compileProfile(PROFILES[key]);
-    COMPILED.set(key, cp);
-  }
-  return cp;
-}
 
 const NONE: CompareOptions = {
   ignoreBlockNumbers: false,
@@ -555,52 +528,6 @@ describe('X5: a re-posted program yields exactly its real changes', () => {
 });
 
 describe('budget', () => {
-  it('normalizes two 100k-line sides in a second', () => {
-    const source = readFileSync(
-      fileURLToPath(new URL('../../../../tests/fixtures/compare/x5-repost/original.nc', import.meta.url)),
-      'utf8',
-    )
-      .split('\n')
-      .filter((line) => line !== '');
-    const a = Array.from({ length: 100_000 }, (_, i) => source[i % source.length]);
-    // A jump in the middle makes the block-number walk read the whole file.
-    a[50_000] = 'N99990 IF[#1LT5]GOTO100';
-    const b = a.map((line) => line.replace(/\.(?=\s|$)/g, '.000'));
-    const cp = cpOf('fanuc');
-    const o = compareDefaults(PROFILES.fanuc);
-    normalizeLines(a.slice(0, 1000), cp, o);
-    const started = performance.now();
-    const left = normalizeLines(a, cp, o);
-    const right = normalizeLines(b, cp, o);
-    const ms = performance.now() - started;
-    expect(left.text).toBe(right.text);
-    expectWithin(ms, 1000, `two 100k-line sides: ${ms.toFixed(0)} ms`);
-  });
-
-  it('normalizes two 100k-line Klartext sides with the cycle names ignored in a second (#148)', () => {
-    const block = [
-      'CYCL DEF 200 BOHREN ~',
-      '    Q200=2 ;SICHERHEITS-ABST. ~',
-      '    Q201=-20 ;TIEFE',
-      'CYCL DEF 9.1 V.ZEIT 1.5',
-      'CYCL DEF 7.1 X+10',
-      'L X+10 Y-5,5 R0 FMAX M99',
-      'TOOL CALL 3 Z S3000',
-      '* - ROUGH',
-    ];
-    const a = Array.from({ length: 100_000 }, (_, i) => `${i} ${block[i % block.length].trimStart()}`.replace(/^\d+ (Q)/, '    $1'));
-    const b = a.map((line) => line.replace('BOHREN', 'DRILLING').replace('V.ZEIT', 'DWELL'));
-    const cp = cpOf('klartext');
-    const o = { ...compareDefaults(PROFILES.klartext), ignoreCycleNames: true };
-    normalizeLines(a.slice(0, 1000), cp, o);
-    const started = performance.now();
-    const left = normalizeLines(a, cp, o);
-    const right = normalizeLines(b, cp, o);
-    const ms = performance.now() - started;
-    expect(left.text).toBe(right.text);
-    expectWithin(ms, 1000, `two 100k-line Klartext sides, cycle names ignored: ${ms.toFixed(0)} ms`);
-  });
-
   it('matches a cycle-name pattern in linear time on lines built to make it backtrack (#148)', () => {
     // Long runs of name-like words that end in something no name may hold (`=`, a digit
     // word, a sign), with runs of blanks between them: the shapes that would make a

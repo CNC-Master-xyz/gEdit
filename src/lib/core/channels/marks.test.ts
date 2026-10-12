@@ -3,8 +3,8 @@
 // resolution.
 
 import { describe, expect, it } from 'vitest';
+import { fanucWait, singleFile as single } from '../../../../tests/unit/helpers/channelRules';
 import { cpOf, profileOf } from '../../../../tests/unit/helpers/profiles';
-import { expectWithin, fastest } from '../../../../tests/unit/helpers/budget';
 import { decodePartnerText, findMarks, resolveDocument } from './marks';
 import { STOPS_AND_ENDS_RULE, type ChannelParams, type SyncRule } from './types';
 
@@ -20,13 +20,6 @@ const three = (rules: SyncRule[], over: Partial<ChannelParams> = {}): ChannelPar
   ],
   syncMarks: rules,
   ...over,
-});
-
-const fanucWait = (decode: 'digits' | 'bitmask', whenAbsent?: { kind: 'fixed'; channels: string[] } | { kind: 'none' }): SyncRule => ({
-  id: 'wait',
-  label: 'wait',
-  match: { kind: 'codes', codes: 'M900-M999' },
-  partners: { kind: 'word', address: 'P', decode, whenAbsent },
 });
 
 const run = (lines: string[], p: ChannelParams, cp = lathe) => findMarks(lines, cp, p, { channelOf: () => '1' }).marks;
@@ -225,17 +218,6 @@ describe('findMarks, WP12.1: a wait is read as the control reads it, or not at a
 });
 
 describe('resolveDocument', () => {
-  const single: ChannelParams = {
-    layout: 'single-file',
-    list: [
-      { id: '1', name: 'Channel 1' },
-      { id: '2', name: 'Channel 2' },
-    ],
-    sectionStart: '^O(?<channel>[12])\\d{3}(?![\\d.])',
-    sectionEnd: '(?<![A-Z])M(?:99|30)(?![\\d.])',
-    syncMarks: [fanucWait('digits')],
-  };
-
   it('answers none, with no marks, for a program with no section', () => {
     const r = resolveDocument('a.nc', ['O5555', 'M901 P12', 'M30'], lathe, single);
     expect([r.layout, r.marks, r.problems]).toEqual(['none', [], []]);
@@ -264,24 +246,5 @@ describe('resolveDocument', () => {
     expect(resolveDocument('a_CH1.nc', ['M901 P12'], lathe, multi, { assigned: '2' })).toMatchObject({ layout: 'multi-file', self: { id: '2' }, by: 'assigned' });
     expect(resolveDocument('a_CH1.nc', ['M901 P12'], lathe, multi, { assigned: '7' })).toMatchObject({ self: { id: '1' }, by: 'fileName' });
     expect(resolveDocument('loose.nc', ['M901 P12'], lathe, multi).layout).toBe('none');
-  });
-
-  it('resolves 300,000 lines with two rules within the budget (G7: 150 ms; asserted below 500 ms)', () => {
-    const p: ChannelParams = {
-      ...single,
-      syncMarks: [fanucWait('digits'), { id: 'm1', label: 'm', semantics: 'count', match: { kind: 'codes', codes: 'M100' }, partners: { kind: 'all' } }],
-    };
-    const body = ['G01 X52.4 Z-30.2 F0.25', 'G00 X56. Z2. (RETRACT)', 'M901 P12', 'G01 Z-12.5 F0.1', 'M100', 'T0303 (OD FINISH)'];
-    const lines: string[] = [];
-    for (let i = 0; lines.length < 300_000; i++) {
-      if (i % 5000 === 0) lines.push(i % 10000 === 0 ? 'O1001' : 'O2001');
-      lines.push(body[i % body.length]);
-    }
-    let marks = 0;
-    const ms = fastest(2, () => {
-      marks = resolveDocument('big.nc', lines, lathe, p).marks.length;
-    });
-    expect(marks).toBe(20_000);
-    expectWithin(ms, 500, '300k-line resolution, two rules');
   });
 });

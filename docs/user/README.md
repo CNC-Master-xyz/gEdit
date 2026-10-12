@@ -871,7 +871,7 @@ out) gets a message instead.
 gEdit is tested against programs written for it and against a few the owner published. If you
 build it yourself you can also check it against your own, which never leave your disk: put
 them in `tests/real/` (or the folder `GEDIT_REAL_FIXTURES` names) with a `manifest.json`, and
-run `npm test -- realFixtures`. For each program it checks that the dialect is detected as
+run `npx vitest run realFixtures`. For each program it checks that the dialect is detected as
 you said, that no unknown mark is left outside comments (except the ones you list with a
 reason), that the program map and the tool list name the tools you expect, that the file
 survives a byte-exact round trip, that Scale Feed and Scale Speed at 100 % give back every

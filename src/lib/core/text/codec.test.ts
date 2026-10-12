@@ -6,7 +6,6 @@ import type { DecodeResult, Eol, FileEncoding } from '$lib/app/types';
 import { listFixtures, readFixture } from '../../../../tests/unit/helpers/fixtures';
 import { generateLarge } from '../../../../tests/gen/gen-large.mjs';
 import { decodeFile, encodeFile, encodingLabel } from './codec';
-import { expectWithin } from '../../../../tests/unit/helpers/budget';
 
 const UTF8: FileEncoding = { encoding: 'utf-8', hasBom: false };
 const UTF8_BOM: FileEncoding = { encoding: 'utf-8', hasBom: true };
@@ -332,18 +331,6 @@ describe('a big file', () => {
   it('is about 5 MB of CRLF UTF-8', () => {
     expect(bytes.length).toBeGreaterThanOrEqual(5 * 1024 * 1024);
     expect(bytes.length).toBeLessThan(7 * 1024 * 1024);
-  });
-
-  it('decodes in 200 ms or less', () => {
-    let best = Infinity;
-    for (let run = 0; run < 3; run++) {
-      const started = performance.now();
-      const decoded = decodeFile(bytes);
-      const took = performance.now() - started;
-      expect(decoded.ok && decoded.eol).toBe('crlf');
-      best = Math.min(best, took);
-    }
-    expectWithin(best, 200, 'decode of 5 MB');
   });
 
   it('round trips byte for byte', () => {

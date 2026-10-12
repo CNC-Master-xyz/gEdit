@@ -8,7 +8,7 @@
 // the main spindle by number), driven by the **effective** compiled profile and code
 // database it is given and by no dialect name. The oracle is `tests/fixtures/modal/**`, every
 // golden unchanged (`modal.golden.test.ts`), and the per-line parity check
-// `tests/unit/modalParity.test.ts`, which runs both interpreters over every golden's program
+// `tests/unit/modalParity.slow.test.ts`, which runs both interpreters over every golden's program
 // and every owner-public program and compares the state after every line.
 //
 // Where this file departs from a literal transcription of the Python, it does so for speed

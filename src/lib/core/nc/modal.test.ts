@@ -1,62 +1,21 @@
 // The TypeScript modal interpreter and its index (Phase 3 plan P3.1, §6.1; AD-19, AD-33).
 //
 // The goldens (`modal.golden.test.ts`) and the per-line parity with Python
-// (`tests/unit/modalParity.test.ts`) are the oracle; this file names the rules one by one on
+// (`tests/unit/modalParity.slow.test.ts`) are the oracle; this file names the rules one by one on
 // small synthetic programs of the built-in profiles, pins what the interpreter costs (regex
 // calls per line, the G7 budgets of X17), and holds the index to its contract: snapshots,
 // `null` before the build reaches a line, `applyChange` dropping only later snapshots,
 // `buildSome` within its budget, `statesAfter` equal to `stateAfter` line by line.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadCodeDb } from '$lib/core/codes/load';
-import { resolveCodeDbFiles } from '$lib/core/codes/resolve';
-import { applyMachine, effectiveMachine, noMachine } from '$lib/core/machines/effective';
 import { compileProfile } from '$lib/core/profiles/compile';
-import { resolveProfiles } from '$lib/core/profiles/resolve';
 import { validateProfile } from '$lib/core/profiles/validate';
-import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
-import { BUILTIN_PROFILE_SOURCES } from '$lib/data/profiles';
-import { expectWithin, fastest } from '../../../../tests/unit/helpers/budget';
+import { PROFILES, ctx, indexOver, program, type Ctx } from '../../../../tests/unit/helpers/modalIndex';
 import { maskComments } from './mask';
 import { ModalIndex, ModalInterpreter, SNAPSHOT_EVERY, STATES_MAX } from './modal';
 import { tokenizeLine } from './tokenizer';
-import type { CodeDb } from '$lib/core/codes/types';
 import type { MachineConfig } from '$lib/core/machines/types';
-import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
 import type { LineState, ModalState, NcToken } from './types';
-
-const PROFILES = new Map<string, Profile>(
-  resolveProfiles(BUILTIN_PROFILE_SOURCES).resolved.map((entry) => {
-    const checked = validateProfile(entry.profile);
-    if (!checked.ok) throw new Error(checked.errors.join('; '));
-    return [checked.profile.id, checked.profile];
-  }),
-);
-const CODE_DBS = resolveCodeDbFiles(BUILTIN_CODE_DB_JSON, (dialect, problem) => {
-  throw new Error(`${dialect}: ${problem.path}: ${problem.message}`);
-});
-
-interface Ctx {
-  cp: CompiledProfile;
-  db: CodeDb;
-}
-
-const contexts = new Map<string, Ctx>();
-
-/** A built-in profile's effective view: no machine, or the partial machine given. */
-function ctx(profileId: string, params?: MachineConfig['params']): Ctx {
-  const key = `${profileId}|${JSON.stringify(params ?? null)}`;
-  const found = contexts.get(key);
-  if (found) return found;
-  const profile = PROFILES.get(profileId);
-  if (!profile) throw new Error(`no profile ${profileId}`);
-  const machine =
-    params === undefined ? noMachine(profile) : effectiveMachine(profile, { id: 't', name: 't', profile: profileId, params }, 'document', {});
-  const applied = applyMachine(profile, machine);
-  const made = { cp: compileProfile(applied.profile), db: loadCodeDb(CODE_DBS[applied.codes]) };
-  contexts.set(key, made);
-  return made;
-}
 
 /** The state after every line of `lines`, walked by one interpreter. */
 function walk(c: Ctx, lines: readonly string[]): ModalState[] {
@@ -440,48 +399,9 @@ describe('what a line costs', () => {
 // The index
 // ---------------------------------------------------------------------------
 
-const MILL = [
-  'N%N% G0 G90 G54 X0. Y0.',
-  'N%N% T%T% M6',
-  'N%N% G43 Z25. H%T% M8 (TOOL)',
-  'N%N% S%S% M3',
-  'N%N% G1 Z-1. F200.',
-  'N%N% X50.123 Y-40.5 F1200.',
-  'N%N% G98 G81 X10. Y10. Z-5. R2. F200.',
-  'N%N% X20.',
-  'N%N% G80',
-  'N%N% G2 X30. Y0. R15.',
-  'N%N% G91 G1 X1.',
-  'N%N% G90 G68 X0 Y0 R%S%',
-  'N%N% G69',
-  '',
-];
-
-/** A synthetic program: `MILL` repeated, with block numbers, tools and speeds that change. */
-function program(count: number): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const block = Math.floor(i / MILL.length);
-    out.push(
-      MILL[i % MILL.length]
-        .replace('%N%', String((i % 9999) * 10))
-        .replace(/%T%/g, String((block % 12) + 1))
-        .replace(/%S%/g, String(1000 + (block % 7) * 100)),
-    );
-  }
-  return out;
-}
-
 /** A fresh sequential walk of the whole document: the oracle for the index. */
 function sequential(c: Ctx, lines: readonly string[]): ModalState[] {
   return [new ModalInterpreter(c.cp, c.db).state(), ...walk(c, lines)];
-}
-
-function indexOver(lines: string[], every: number): ModalIndex {
-  const c = ctx('fanuc-gcode');
-  const index = new ModalIndex(c.cp, c.db, { every });
-  index.reset(lines.length, (n) => lines[n - 1]);
-  return index;
 }
 
 function buildAll(index: ModalIndex): void {
@@ -612,34 +532,7 @@ describe('ModalIndex', () => {
     for (let n = 0; n <= lines.length; n++) expect(index.stateAfter(n), `line ${n}`).toEqual(oracle[n]);
   });
 
-  it('builds a 300k-line program in well under the G7 budget (X17: < 1.5 s in node, asserted < 4 s)', () => {
-    const lines = program(300_000);
-    const index = indexOver(lines, SNAPSHOT_EVERY);
-    const started = performance.now();
-    while (!index.buildSome(1_000_000));
-    const ms = performance.now() - started;
-    expect(index.ready()).toBe(true);
-    expect(ms, `${Math.round(ms)} ms for 300k lines`).toBeLessThan(4000);
-  });
 
-  it('answers within 1,000 lines of a snapshot in ≤ 15 ms, and applies a change in ≤ 1 ms (X17)', () => {
-    const lines = program(300_000);
-    const index = indexOver(lines, SNAPSHOT_EVERY);
-    while (!index.buildSome(1_000_000));
-    let n = 0;
-    // The worst case: 999 lines past a snapshot, and a reader that cannot continue its walk.
-    const ms = fastest(5, () => {
-      n = (n + 7) % 290;
-      expect(index.stateAfter(1000 * (n + 1) + 999)).not.toBeNull();
-    });
-    expectWithin(ms, 15, 'stateAfter 999 lines past a snapshot at 300k lines');
-    const range = fastest(5, () => {
-      expect(index.statesAfter(150_000, 150_999)).toHaveLength(1000);
-    });
-    expectWithin(range, 30, 'statesAfter of 1,000 lines at 300k lines');
-    const change = fastest(5, () => index.applyChange(150_500, lines.length, (k) => lines[k - 1]));
-    expectWithin(change, 1, 'applyChange at 300k lines');
-  });
 
   it('reads the clock after every line and stops at its budget (a fake clock: 1 ms per line)', () => {
     const lines = program(5000);
@@ -660,18 +553,4 @@ describe('ModalIndex', () => {
     expect(index.stateAfter(8)).not.toBeNull();
   });
 
-  it('returns from buildSome(8) within its budget plus one line (wall clock, median of seven)', () => {
-    const lines = program(300_000);
-    const index = indexOver(lines, SNAPSHOT_EVERY);
-    index.buildSome(1); // warm up (regexes compile on first use)
-    const runs: number[] = [];
-    for (let i = 0; i < 7; i++) {
-      const started = performance.now();
-      index.buildSome(8);
-      runs.push(performance.now() - started);
-    }
-    expect(index.ready()).toBe(false);
-    runs.sort((a, b) => a - b);
-    expectWithin(runs[3], 8 + 4, 'buildSome(8), median of seven');
-  });
 });

@@ -3,7 +3,7 @@
 Not a test module (``unittest discover`` only collects ``test*.py``): a small command that
 walks the Python modal interpreter over the program of every modal golden and prints the
 state after **every** line, in the goldens' notation (``render`` of ``test_modal.py``), as
-one JSON document on stdout. ``tests/unit/modalParity.test.ts`` runs it and holds the
+one JSON document on stdout. ``tests/unit/modalParity.slow.test.ts`` runs it and holds the
 TypeScript interpreter (``core/nc/modal.ts``) to the same states, line by line.
 
 Run from the repository root (``-S``: the standard library is all it needs, and a stray

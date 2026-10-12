@@ -1,6 +1,6 @@
 // Applying a transform's lines (plan §5 WP4.1, §7.3, AD-12).
 //
-// Monaco is not here: `FakeModel` is a text buffer with the five methods `applyLinesTo`
+// Monaco is not here: `FakeModel` (tests/unit/helpers/fakeEditableModel.ts) is a text buffer with the five methods `applyLinesTo`
 // uses, and it applies the operations the way Monaco does — by offset, from the last to
 // the first — so the assertions are about the resulting program text and not about the
 // shape of a range. It also refuses overlapping operations, which is the one thing that
@@ -17,6 +17,7 @@
 // service, which must keep Monaco behind a dynamic import.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { FakeModel, linesOf } from '../../../tests/unit/helpers/fakeEditableModel';
 import { editor } from './editorService';
 import { docs } from '$lib/stores/documents';
 import {
@@ -27,108 +28,8 @@ import {
   MAX_OPERATIONS_PER_CALL,
   MONACO_REDUCES_AT,
   batchOperations,
-  type EditableModel,
-  type UndoGroup,
   type LineOperation,
 } from './applyLines';
-
-class FakeModel implements EditableModel {
-  lines: string[];
-  /** How often `pushStackElement` was called; one undo step means exactly two. */
-  stackElements = 0;
-  /** Every `pushEditOperations` batch, so "one call" can be asserted. */
-  batches: LineOperation[][] = [];
-  /** The undo group each batch was pushed with (`undefined` for none). */
-  groups: (UndoGroup | undefined)[] = [];
-  /** Where in the sequence of calls each `pushStackElement` happened (index into `batches`). */
-  stackAt: number[] = [];
-
-  constructor(text: string) {
-    this.lines = text.split('\n');
-  }
-
-  get text(): string {
-    return this.lines.join('\n');
-  }
-
-  getLineCount(): number {
-    return this.lines.length;
-  }
-
-  getLineContent(line: number): string {
-    return this.lines[line - 1];
-  }
-
-  getLineMaxColumn(line: number): number {
-    return this.lines[line - 1].length + 1;
-  }
-
-  pushStackElement(): void {
-    this.stackElements++;
-    this.stackAt.push(this.batches.length);
-  }
-
-  pushEditOperations(_before: null, operations: LineOperation[], _cursor?: () => null, group?: UndoGroup): unknown {
-    this.batches.push(operations);
-    this.groups.push(group);
-    const spans = operations
-      .map((op) => {
-        const range = this.validateRange(op.range);
-        return {
-          start: this.offsetOf(range.startLineNumber, range.startColumn),
-          end: this.offsetOf(range.endLineNumber, range.endColumn),
-          text: op.text,
-        };
-      })
-      .sort((a, b) => a.start - b.start);
-
-    for (let i = 0; i < spans.length; i++) {
-      expect(spans[i].end).toBeGreaterThanOrEqual(spans[i].start);
-      if (i > 0) expect(spans[i].start).toBeGreaterThanOrEqual(spans[i - 1].end);
-    }
-
-    let text = this.text;
-    for (const span of [...spans].reverse()) {
-      text = text.slice(0, span.start) + span.text + text.slice(span.end);
-    }
-    this.lines = text.split('\n');
-    return null;
-  }
-
-  private offsetOf(line: number, column: number): number {
-    let offset = 0;
-    for (let i = 1; i < line; i++) offset += this.lines[i - 1].length + 1;
-    return offset + column - 1;
-  }
-
-  /**
-   * Monaco's `TextModel.validateRange`, the surrogate half of it.
-   *
-   * A boundary counts as *inside a surrogate pair* when the character in front of it is
-   * a high surrogate, and the range is then pushed outwards at that end — the start to
-   * the left, the end to the right. The end is only examined while it is not past the
-   * last character of the line, which is Monaco's `endColumn <= lineLength` condition.
-   */
-  private validateRange(range: LineOperation['range']): LineOperation['range'] {
-    const isHigh = (code: number): boolean => code >= 0xd800 && code <= 0xdbff;
-    const startLine = this.lines[range.startLineNumber - 1] ?? '';
-    const endLine = this.lines[range.endLineNumber - 1] ?? '';
-    const startInsidePair = range.startColumn > 1 && isHigh(startLine.charCodeAt(range.startColumn - 2));
-    const endInsidePair =
-      range.endColumn > 1 && range.endColumn <= endLine.length && isHigh(endLine.charCodeAt(range.endColumn - 2));
-    if (!startInsidePair && !endInsidePair) return range;
-    return {
-      ...range,
-      startColumn: startInsidePair ? range.startColumn - 1 : range.startColumn,
-      endColumn: endInsidePair ? range.endColumn + 1 : range.endColumn,
-    };
-  }
-}
-
-/** The whole document as lines, which is what a transform hands back. */
-function linesOf(text: string): string[] {
-  return text.split('\n');
-}
 
 describe('applyLinesTo: what lands in the model', () => {
   it('rewrites the changed lines and leaves the rest byte for byte', () => {
@@ -339,21 +240,6 @@ describe('planLineEdits: chunking', () => {
     const model = new FakeModel(oldLines.join('\n'));
     applyLinesTo(model, 1, size, newLines, undefined);
     expect(model.lines).toEqual(newLines);
-  });
-
-  it('chunks a real 100k-line rewrite into a bounded number of operations', () => {
-    const size = 100_000;
-    const oldLines = Array.from({ length: size }, (_, i) => `N${i * 10} G1 X${i}`);
-    const newLines = oldLines.map((line) => line.replace('G1', 'G01'));
-    const model = new FakeModel(oldLines.join('\n'));
-    const started = performance.now();
-    const result = applyLinesTo(model, 1, size, newLines);
-    const elapsed = performance.now() - started;
-    expect(result.changedLines).toBe(size);
-    expect(model.batches[0].length).toBeLessThanOrEqual(Math.ceil(size / CHUNK_LINES));
-    expect(linesOf(model.text)).toEqual(newLines);
-    // G7 budget for the apply step is 2 s; the plan itself has to be far cheaper.
-    expect(elapsed).toBeLessThan(2000);
   });
 
   it('switches at the documented threshold', () => {

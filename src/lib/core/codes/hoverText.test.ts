@@ -18,20 +18,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileProfile } from '$lib/core/profiles/compile';
-import { validateProfile } from '$lib/core/profiles/validate';
-import { applyMachine, effectiveMachine } from '$lib/core/machines/effective';
-import { ModalIndex } from '$lib/core/nc/modal';
-import { tokenizeLine } from '$lib/core/nc/tokenizer';
-import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
 import { t } from '$lib/i18n';
-import { expectWithin, fastest } from '../../../../tests/unit/helpers/budget';
-import { profileOf } from '../../../../tests/unit/helpers/profiles';
+import { CALCULATOR, IS_B, hoverIn, openDoc, preset, read, writtenOf } from '../../../../tests/unit/helpers/hoverDoc';
 import { loadCodeDb } from './load';
 import { lookupCode } from './lookup';
-import { resolveCodeDbFiles } from './resolve';
-import { blockRange } from './inspect';
-import { codeAddressesOf, escapeMarkdown, hoverAt, hoverTarget, hoverText, type HoverContext, type WaitCodeLookup } from './hoverText';
-import type { EffectiveMachine, MachineConfig, MachineParams, NumberInput } from '$lib/core/machines/types';
+import { codeAddressesOf, escapeMarkdown, hoverAt, hoverTarget, hoverText, type WaitCodeLookup } from './hoverText';
 import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
 import type { NcToken } from '$lib/core/nc/types';
 import type { CodeDb, CodeLookup } from './types';
@@ -486,111 +477,6 @@ describe('hoverText: text the control does not execute (M12.5, §7.16 #179)', ()
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const fixture = (path: string): string => readFileSync(join(ROOT, 'tests/fixtures/nc', path), 'utf8').replace(/\r\n?/g, '\n');
 
-const DBS = resolveCodeDbFiles(BUILTIN_CODE_DB_JSON, (dialect, problem) => {
-  throw new Error(`${dialect}: ${problem.path}: ${problem.message}`);
-});
-
-interface Doc {
-  profile: Profile;
-  cp: CompiledProfile;
-  db: CodeDb;
-  machine: EffectiveMachine;
-  lines: string[];
-  index: ModalIndex;
-}
-
-interface MachineSpec {
-  name?: string;
-  params?: Partial<MachineParams>;
-  /** Detected variants, as variant detection answers them, for a document with no machine. */
-  detected?: Record<string, { value: string; margin: number }>;
-  /** A code database to read instead of the built-in one (a user's file merged over it). */
-  db?: CodeDb;
-}
-
-/** A preset's number input, as a machine stores it. */
-function preset(profileId: string, id: string): NumberInput {
-  const found = profileOf(profileId).machineParams?.numberInput?.presets.find((p) => p.id === id);
-  if (!found) throw new Error(`${profileId}: no preset ${id}`);
-  return found.value;
-}
-
-/** `text` on profile `profileId`, read with `machine` (`null` or no `params`: none chosen), the index built. */
-function openDoc(profileId: string, text: string, machine: MachineSpec | null = null): Doc {
-  const base = profileOf(profileId);
-  const config: MachineConfig | null =
-    machine?.params !== undefined ? { id: 'm', name: machine.name ?? 'Machine', profile: profileId, params: machine.params } : null;
-  const eff = effectiveMachine(base, config, config ? 'document' : 'none', machine?.detected ?? {});
-  const applied = applyMachine(base, eff);
-  const checked = validateProfile(applied.profile, { applied: true });
-  if (!checked.ok) throw new Error(checked.errors.join('; '));
-  const cp = compileProfile(checked.profile);
-  const db = machine?.db ?? loadCodeDb(DBS[applied.codes]);
-  const lines = text.split('\n');
-  const index = new ModalIndex(cp, db);
-  index.reset(lines.length, (n) => lines[n - 1] ?? '');
-  while (!index.buildSome(1_000)) {
-    // until the whole document is read
-  }
-  return { profile: checked.profile, cp, db, machine: eff, lines, index };
-}
-
-/** The context of line `n`, as the provider builds it; `ready: false`: the index has not reached it. */
-function contextAt(doc: Doc, n: number, ready = true): HoverContext {
-  const lineCount = doc.lines.length;
-  const getLine = (k: number): string => doc.lines[k - 1] ?? '';
-  const { first, last } = blockRange({ line: n, lineCount, getLine }, doc.cp);
-  const before = ready ? doc.index.stateAfter(first - 1) : null;
-  return {
-    before,
-    after: before === null ? null : doc.index.stateAfter(last),
-    profile: doc.profile,
-    machine: doc.machine,
-    blockLines: { first, last, line: n, lineCount, getLine },
-  };
-}
-
-interface HoverIn {
-  /** false: no context at all (a diff side, a scratch model). */
-  context?: boolean;
-  ready?: boolean;
-  /** Which occurrence of `at` on the line (0 = the first). */
-  nth?: number;
-  waitCode?: WaitCodeLookup;
-}
-
-/** The hover markdown on line `n` at `at`. Every message the context asks for must exist. */
-function hoverIn(doc: Doc, n: number, at: string, o: HoverIn = {}): string {
-  const line = doc.lines[n - 1];
-  let offset = -1;
-  for (let i = 0; i <= (o.nth ?? 0); i++) offset = line.indexOf(at, offset + 1);
-  if (offset < 0) throw new Error(`"${at}" is not on line ${n}: ${line}`);
-  const prev = n > 1 ? tokenizeLine(doc.lines[n - 2], doc.cp).state : undefined;
-  const context = o.context === false ? undefined : contextAt(doc, n, o.ready !== false);
-  const markdown = hoverAt(line, offset, doc.cp, doc.db, t, prev, { context, waitCode: o.waitCode })?.markdown ?? '';
-  expect(markdown, 'a message key without a text').not.toContain('assistant.');
-  return markdown;
-}
-
-/** The markdown with its escapes removed: what the user reads. */
-const plain = (markdown: string): string => markdown.replace(/\\(.)/g, '$1');
-/** The readable hover. */
-const read = (doc: Doc, n: number, at: string, o: HoverIn = {}): string => plain(hoverIn(doc, n, at, o));
-/** The table rows of a hover: `[word, meaning, written]`, `null` for "not written". */
-function tableOf(text: string): [string, string, string | null][] {
-  return text
-    .split('\n')
-    .filter((row) => row.startsWith('| ') && !row.startsWith('| Word') && !row.startsWith('| ---'))
-    .map((row) => {
-      const [word, meaning, written] = row.slice(2, -2).split(' | ');
-      return [word, meaning, written === '_not written_' ? null : written];
-    });
-}
-const writtenOf = (text: string): Record<string, string | null> => Object.fromEntries(tableOf(text).map(([w, , v]) => [w, v]));
-
-const IS_B = { name: 'Lathe IS-B', params: { numberInput: preset('fanuc-lathe', 'is-b') } };
-const CALCULATOR = { name: 'Lathe calc', params: { numberInput: preset('fanuc-lathe', 'calculator') } };
-
 describe('hoverText in context: absent or not ready, the Phase 2 hover unchanged', () => {
   const doc = openDoc('fanuc-lathe', fixture('fanuc-lathe/l01-turning-a.nc'));
 
@@ -912,28 +798,6 @@ describe('hoverText in context: escaping', () => {
     expect(table).not.toContain('<b>');
     const line = hoverIn(doc, 3, 'R3.');
     expect(line).toContain('R — \\*\\*R\\*\\* \\| \\[plane\\]\\(https://example\\.com\\) \\<b\\>x\\</b\\> \\(G83\\)');
-  });
-});
-
-describe('hoverText in context: the budget', () => {
-  it('answers a hover at line 300,000 within 50 ms, the two states included', () => {
-    const block = ['G00 X40. Z2.', 'G01 Z-20. F0.2', 'X42.', 'G00 Z2.'];
-    const lines: string[] = ['G21 G99', 'G50 S2500', 'G96 S200 M03'];
-    while (lines.length < 299_998) lines.push(block[lines.length % block.length]);
-    lines.push('G76 P020060 Q80 R0.03', 'G76 X18.16 Z-18. P920 Q250 F1.5');
-    const doc = openDoc('fanuc-lathe', lines.join('\n'), IS_B);
-    expect(doc.lines.length).toBe(300_000);
-    let text = '';
-    const ms = fastest(5, () => {
-      text = hoverIn(doc, 300_000, 'F1.5');
-    });
-    expect(plain(text)).toContain('F — thread lead (G76)');
-    expectWithin(ms, 50, 'hover with its modal context at line 300,000');
-    const table = fastest(5, () => {
-      text = hoverIn(doc, 300_000, 'G76');
-    });
-    expect(plain(text)).toContain('block 2 of 2');
-    expectWithin(table, 50, 'hover with the cycle table at line 300,000');
   });
 });
 

@@ -27,7 +27,6 @@ import {
 } from './detect';
 import { validateProfile } from './validate';
 import type { CompiledProfile, Profile } from './types';
-import { expectWithin, fastest } from '../../../../tests/unit/helpers/budget';
 
 const FANUC = 'fanuc-gcode';
 const KLARTEXT = 'heidenhain-klartext';
@@ -156,19 +155,6 @@ describe('the content score', () => {
     const marker = '0 BEGIN PGM A MM';
     expect(detectBoth('/work/a.txt', [...neutral, marker].join('\n\n'))).toEqual([FANUC, KLARTEXT]);
     expect(detectBoth('/work/a.txt', [...neutral.slice(1), marker].join('\n\n'))).toEqual([KLARTEXT, KLARTEXT]);
-  });
-
-  it('does not read the rest of a large file', () => {
-    // Detection is on the open path: it has to look at 400 lines, not at 200 000.
-    const big = `%\nO1234\n${Array.from({ length: 200_000 }, (_, i) => `N${i} G1 X${i}.`).join('\n')}\n`;
-    expect(detectProfile(BUILTINS, '/work/big.nc', big, KLARTEXT)).toBe(FANUC);
-    // A few milliseconds in practice; the limit only catches a full split. One pause of
-    // a loaded machine is 100 ms, so the fastest of three runs is what is held to it.
-    expectWithin(
-      fastest(3, () => detectProfile(BUILTINS, '/work/big.nc', big, KLARTEXT)),
-      100,
-      '400 lines of a 200 000-line file',
-    );
   });
 
   it('scores a document without a path on its content alone', () => {

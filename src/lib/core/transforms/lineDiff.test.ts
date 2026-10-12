@@ -7,7 +7,6 @@
 
 import { describe, expect, it } from 'vitest';
 import { charSpan, computeLineEdits, DEFAULT_MAX_D, diffLines, type LineEdit } from './lineDiff';
-import { expectWithin } from '../../../../tests/unit/helpers/budget';
 
 /** Applies the edits from the last to the first, exactly as Monaco applies a batch. */
 function applyEdits(oldLines: string[], edits: LineEdit[]): string[] {
@@ -239,37 +238,6 @@ describe('diffLines: the Myers diff on its own (M11, WP11.2)', () => {
     const newLines = Array.from({ length: 50 }, (_, i) => `N${i}`);
     const edits = diffLines(oldLines, newLines, { maxD: 10 });
     expect(edits).toEqual([{ oldStart: 0, oldEnd: 50, newLines }]);
-  });
-});
-
-describe('computeLineEdits: performance', () => {
-  it('walks 100k same-length lines in well under 200 ms', () => {
-    const oldLines = Array.from({ length: 100_000 }, (_, i) => `N${i * 10} G1 X${i}.5`);
-    const newLines = oldLines.map((line, i) => (i % 3 === 0 ? line.replace('G1', 'G01') : line));
-    const started = performance.now();
-    const edits = computeLineEdits(oldLines, newLines);
-    const elapsed = performance.now() - started;
-    expect(edits.length).toBe(33_334);
-    expectWithin(elapsed, 200, '100k same-length lines');
-  });
-
-  it('answers a 100k-line deletion from a lineMap in well under 200 ms', () => {
-    const oldLines = Array.from({ length: 100_000 }, (_, i) => (i % 5 === 0 ? '' : `N${i} G1`));
-    const newLines: string[] = [];
-    const map = new Int32Array(oldLines.length);
-    oldLines.forEach((line, i) => {
-      if (line === '') {
-        map[i] = -1;
-        return;
-      }
-      map[i] = newLines.length;
-      newLines.push(line);
-    });
-    const started = performance.now();
-    const edits = computeLineEdits(oldLines, newLines, map);
-    const elapsed = performance.now() - started;
-    expect(edits.length).toBe(20_000);
-    expectWithin(elapsed, 200, '100k-line deletion from a lineMap');
   });
 });
 

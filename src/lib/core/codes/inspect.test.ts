@@ -7,17 +7,9 @@ import { describe, expect, it } from 'vitest';
 import type { Msg } from '$lib/app/types';
 import { hasKey } from '$lib/i18n';
 import { loadCodeDb } from '$lib/core/codes/load';
-import { resolveCodeDbFiles } from '$lib/core/codes/resolve';
-import { applyMachine, effectiveMachine } from '$lib/core/machines/effective';
-import type { MachineConfig, MachineParams, NumberInput } from '$lib/core/machines/types';
 import { rewriteWord } from '$lib/core/nc/rewriteWord';
 import { ModalIndex } from '$lib/core/nc/modal';
-import type { ModalState, ModalValue } from '$lib/core/nc/types';
-import { compileProfile } from '$lib/core/profiles/compile';
-import { validateProfile } from '$lib/core/profiles/validate';
-import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
-import { expectWithin, fastest } from '../../../../tests/unit/helpers/budget';
-import { profileOf } from '../../../../tests/unit/helpers/profiles';
+import { mv, preset, state, viewOf } from '../../../../tests/unit/helpers/inspectView';
 import {
   blockRange,
   callArguments,
@@ -30,26 +22,6 @@ import {
   type InspectView,
   type InspectedWord,
 } from './inspect';
-
-const DBS = resolveCodeDbFiles(BUILTIN_CODE_DB_JSON, (dialect, problem) => {
-  throw new Error(`${dialect}: ${problem.path}: ${problem.message}`);
-});
-
-function preset(profileId: string, id: string): NumberInput {
-  const found = profileOf(profileId).machineParams?.numberInput?.presets.find((p) => p.id === id);
-  if (!found) throw new Error(`${profileId}: no preset ${id}`);
-  return found.value;
-}
-
-function viewOf(profileId: string, o: { name?: string; params?: Partial<MachineParams> } | null = null): InspectView {
-  const base = profileOf(profileId);
-  const machine: MachineConfig | null = o ? { id: 'm', name: o.name ?? 'Machine', profile: profileId, params: o.params ?? {} } : null;
-  const eff = effectiveMachine(base, machine, machine ? 'document' : 'none', {});
-  const applied = applyMachine(base, eff);
-  const checked = validateProfile(applied.profile, { applied: true });
-  if (!checked.ok) throw new Error(checked.errors.join('; '));
-  return { profile: checked.profile, cp: compileProfile(checked.profile), db: loadCodeDb(DBS[applied.codes]), machine: eff };
-}
 
 /**
  * B1: the view with every `CodeParam.block` taken out, as a user database written before it would
@@ -66,35 +38,6 @@ function withoutBlocks(view: InspectView): InspectView {
     return { ...entry, params };
   });
   return { ...view, db: { ...view.db, codes } };
-}
-
-function mv(code: string, line = 0, from: ModalValue['from'] = 'profile'): ModalValue {
-  return line === 0 ? { code, line, assumed: true, from } : { code, line, assumed: false };
-}
-
-function state(o: Partial<Omit<ModalState, 'block'>> & { block?: Partial<ModalState['block']> } = {}): ModalState {
-  const { block, ...rest } = o;
-  return {
-    groups: {},
-    feedUnit: 'unknown',
-    speedUnit: 'unknown',
-    distance: 'unknown',
-    units: { value: 'mm', line: 0, assumed: true, from: 'profile' },
-    plane: 'unknown',
-    diameter: null,
-    tool: null,
-    feed: null,
-    speed: null,
-    speedLimit: null,
-    activeCycle: null,
-    definedCycle: null,
-    modalCall: null,
-    frame: null,
-    tcp: null,
-    pitchFeedAmbiguous: null,
-    ...rest,
-    block: { cycle: null, pitchFeed: false, speedLimit: false, fNotFeed: false, toolChange: false, ...block },
-  };
 }
 
 function doc(text: string, line: number): InspectInput {
@@ -579,26 +522,6 @@ describe('callArguments', () => {
     expect(callArguments('50,0,1,-20,,5')).toEqual(['50', '0', '1', '-20', '', '5']);
     expect(callArguments('R1*(2,3), "A,B" ,7')).toEqual(['R1*(2,3)', '"A,B"', '7']);
     expect(callArguments('')).toEqual([]);
-  });
-});
-
-describe('the budget (X17: the inspector updates within 30 ms per cursor move)', () => {
-  it('inspects a block deep in a 300k-line program in a few milliseconds', () => {
-    const view = viewOf('fanuc-lathe');
-    const lines = Array.from({ length: 300_000 }, (_, i) => `N${i + 1} G1 X${(i % 90) + 10}.5 Z-${i % 50}. F0.2`);
-    const input: InspectInput = { line: 150_000, lineCount: lines.length, getLine: (n) => lines[n - 1] };
-    const after = state({ feedUnit: 'per-rev', distance: 'absolute', groups: { motion: mv('G1', 150_000), feedmode: mv('G99') } });
-    const ms = fastest(5, () => inspectBlock(input, view, after, after));
-    expectWithin(ms, 10, 'inspectBlock at line 150,000 of 300,000');
-  });
-
-  it('stops a block that never ends after MAX_BLOCK_LINES each way', () => {
-    const view = viewOf('heidenhain-klartext');
-    const lines = Array.from({ length: 5_000 }, (_, i) => `  Q${200 + (i % 100)}=${i} ~`);
-    const input: InspectInput = { line: 2_500, lineCount: lines.length, getLine: (n) => lines[n - 1] };
-    expect(blockRange(input, view.cp)).toEqual({ first: 2_000, last: 3_000 });
-    const ms = fastest(3, () => inspectBlock(input, view, null, state()));
-    expectWithin(ms, 30, 'inspectBlock over 1,001 continued lines');
   });
 });
 

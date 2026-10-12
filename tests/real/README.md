@@ -22,7 +22,7 @@ tests/real/heidenhain/
 or anywhere else on your disk, and point `GEDIT_REAL_FIXTURES` at it:
 
 ```sh
-GEDIT_REAL_FIXTURES=/Volumes/work/nc npm test -- realFixtures
+GEDIT_REAL_FIXTURES=/Volumes/work/nc npx vitest run realFixtures
 ```
 
 Without either, the tests **skip**. They say "no local folder found" when there is no
@@ -32,9 +32,9 @@ skip never looks like a pass.
 Two test files run the checks, one per language:
 
 ```sh
-npm test -- realFixtures                                  # every check below
+npx vitest run realFixtures                                  # every check below
 python3 -m unittest tests.python.test_real_fixtures       # the Python tokenizer's unknownTokens
-GEDIT_G11=strict npm test -- realFixtures                 # and fail on every failure
+GEDIT_G11=strict npx vitest run realFixtures                 # and fail on every failure
 ```
 
 By default a run prints its report and fails only when a check crashed: the report is the

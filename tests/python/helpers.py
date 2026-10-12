@@ -61,7 +61,7 @@ CODES_DIR = REPO_ROOT / "src" / "lib" / "data" / "codes"
 RESOLVED_DIR = FIXTURES_DIR / "resolved"
 
 #: What to run when a resolved fixture is missing or out of date.
-UPDATE_RESOLVED = "run `UPDATE_RESOLVED=1 npm test -- resolved`"
+UPDATE_RESOLVED = "run `UPDATE_RESOLVED=1 npx vitest run resolved`"
 
 #: The dialect a fixture case is written in unless its ``case.json`` says otherwise.
 DEFAULT_PROFILE_ID = "fanuc-gcode"

@@ -9,7 +9,7 @@
 // golden and the Python one can never differ by their input.
 //
 // Only the claims a golden lists are compared (`claimDiffers`, the TypeScript twin of
-// `test_modal.check`); the per-line comparison with Python is `tests/unit/modalParity.test.ts`.
+// `test_modal.check`); the per-line comparison with Python is `tests/unit/modalParity.slow.test.ts`.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

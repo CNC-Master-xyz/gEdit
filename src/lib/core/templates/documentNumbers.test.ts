@@ -1,31 +1,15 @@
 // The fast reading of a program's block numbers (`documentNumbers`, P3b fix H, plan §7 #287,
 // known gap 23) gives what the tokenizer gives: `documentNumbersByTokens` is the definition.
 // Random lines hard on the head of a block, every built-in profile and variants of them, and the
-// committed fixture programs; then the cost, in time and in tokenizer calls (`documentNumbers.calls.test.ts`).
+// committed fixture programs; then the cost in tokenizer calls (`documentNumbers.calls.test.ts`) and in
+// time at 300,000 lines (`documentNumbers.slow.test.ts`).
 
 import { describe, expect, it } from 'vitest';
-import { expectWithin, fastest } from '../../../../tests/unit/helpers/budget';
 import { listFixtures, openFixture } from '../../../../tests/unit/helpers/fixtures';
 import { cpOf } from '../../../../tests/unit/helpers/profiles';
+import { sameAsTokens as same } from '../../../../tests/unit/helpers/documentNumbers';
 import { profilesToRead, random, randomLine, randomLines } from '../../../../tests/unit/helpers/randomNc';
 import { documentNumbers, documentNumbersByTokens } from './blockNumbers';
-
-function same(lines: string[], cp: Parameters<typeof documentNumbers>[1], what: string): void {
-  const fast = documentNumbers(lines, cp);
-  const slow = documentNumbersByTokens(lines, cp);
-  // Maps in insertion order: the first line of each number and the word a reference was written as.
-  expect([...fast.blocks], what).toEqual([...slow.blocks]);
-  expect([...fast.referenced], what).toEqual([...slow.referenced]);
-  expect(fast.max, what).toBe(slow.max);
-  // Without the block numbers: the referenced numbers are the same, and the block numbers are not read.
-  const refs = documentNumbers(lines, cp, false);
-  expect([...refs.referenced], what).toEqual([...slow.referenced]);
-  if (refs.withBlocks) expect([...refs.blocks], what).toEqual([...slow.blocks]);
-  else {
-    expect(refs.blocks.size, what).toBe(0);
-    expect(refs.max, what).toBeNull();
-  }
-}
 
 describe('documentNumbers equals the tokenizer reading', () => {
   for (const [name, cp] of profilesToRead()) {
@@ -99,71 +83,4 @@ describe('what it answers (hand-written program)', () => {
     expect(doc.blocks.size).toBe(0);
     expect(doc.max).toBeNull();
   });
-});
-
-describe('the cost at 300,000 lines', () => {
-  const sizes = 300_000;
-  // Each measurement holds the worker for seconds on a slow runner; a macrotask between them lets
-  // the worker answer the runner's messages (a worker that never yields fails the whole run with
-  // "Timeout calling onTaskUpdate", every test passed).
-  const breathe = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-  const program = (cp: string): string[] => {
-    const lines: string[] = ['%', 'O1000 (SHOP)'];
-    for (let i = 0; lines.length < sizes; i++) {
-      lines.push(`N${(i + 1) * 10} G1 X${(i % 100) + 0.123} Y${i % 50}.5 F1200.`);
-      // Some of the lines a real program has that the fast reading hands to the tokenizer.
-      if (i % 40 === 0) lines.push(cp === 'okuma-osp' ? 'G85 NLAP1 D3 F0.3' : 'M98 P1000 (SUB)');
-      if (i % 25 === 0) lines.push('(OPERATION 2: FINISH)');
-    }
-    return lines;
-  };
-
-  for (const id of ['fanuc-gcode', 'okuma-osp', 'sinumerik']) {
-    // That the fast reading leaves most lines out of the tokenizer is pinned by count in
-    // documentNumbers.calls.test.ts; here only the time, against the frame budget. A ratio to the
-    // tokenizer (3x) is noise on a shared runner: 2.98x failed a CI run while the count held.
-    it(`${id}: well inside a frame budget`, async () => {
-      const cp = cpOf(id);
-      const lines = program(id);
-      documentNumbers(lines, cp);
-      let fast = Infinity;
-      for (let round = 0; round < 3; round++) {
-        await breathe();
-        const started = performance.now();
-        documentNumbers(lines, cp);
-        fast = Math.min(fast, performance.now() - started);
-      }
-      expectWithin(fast, 300, `documentNumbers on ${lines.length} ${id} lines`);
-      await breathe();
-      same(lines, cp, `${id} 300k`);
-    });
-  }
-
-  // FZ-02: a letter the gate looks for (a P, a GOTO, an N) in a comment on every line must not send every line to the tokenizer.
-  const commented: Record<string, string> = {
-    'fanuc-gcode': 'N10 G1 X1.5 Z-2. F0.2 (SPINDLE STOP)',
-    'okuma-osp': 'N10 G1 X1.5 Z-2. (CONTOUR)',
-    sinumerik: 'N10 G1 X1.5 Z-2. ; contour',
-  };
-  for (const [id, line] of Object.entries(commented)) {
-    it(`${id}: a gate letter in a comment on every line costs no tokenizer pass`, async () => {
-      const cp = cpOf(id);
-      const lines = Array.from({ length: sizes }, (_, i) => `${line.replace('N10', `N${(i + 1) * 10}`)}`);
-      // Alternating runs, the best of each: a load that comes and goes (a full test run) hits both sides.
-      documentNumbers(lines.slice(0, 2000), cp);
-      let fast = Infinity;
-      let slow = Infinity;
-      for (let round = 0; round < 3; round++) {
-        await breathe();
-        fast = Math.min(fast, fastest(1, () => void documentNumbers(lines, cp)));
-        await breathe();
-        slow = Math.min(slow, fastest(1, () => void documentNumbersByTokens(lines, cp)));
-      }
-      // That no line goes to the tokenizer is pinned by count in documentNumbers.calls.test.ts; here the
-      // time, against the frame budget. A ratio to the tokenizer (2x) is noise on a shared runner: 1.9x
-      // there failed the release run of v1.0.0 while the call count stayed 0.
-      expectWithin(fast, 300, `documentNumbers on ${lines.length} commented ${id} lines (tokenizer ${slow.toFixed(0)} ms)`);
-      same(lines.slice(0, 5000), cp, `${id} commented`);
-    });
-  }
 });

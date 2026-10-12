@@ -63,7 +63,9 @@ jobs:
       - name: Type check (svelte-check)
         run: npm run check
       - name: Unit tests (vitest)
-        run: npm test
+        run: npm run test:unit
+      - name: Slow tests (wall-clock budgets)
+        run: npm run test:slow
       - name: Build frontend
         run: npm run build
       - name: Third-party notices are current

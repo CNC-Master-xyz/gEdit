@@ -29,106 +29,17 @@
 // only on a crash — the report is the gate's result, and it goes into the commit body.
 // With `GEDIT_G11=strict` every failure and every "no longer a gap" fails it too, which is
 // how the owner checks a manifest they have finished. The logic itself is tested below on
-// a synthetic manifest in a temporary folder, so it runs in CI without a real program.
+// a synthetic manifest in a temporary folder, so it runs in CI without a real program. The run over
+// the local programs itself is in `realFixtures.slow.test.ts` (it can take minutes).
 
-import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FIXTURES_DIR } from './helpers/fixtures';
-import { CHECKS, type G11Report, type RealProgram, type Source, allowed, formatReport, programsOf, runG11 } from './helpers/g11';
+import { CHECKS, type G11Report, type RealProgram, allowed, formatReport, programsOf, runG11 } from './helpers/g11';
+import { REPO, readManifest, realFolder, reportPathAllowed, summary } from './helpers/realFolder';
 import { findPython } from './helpers/realPrograms';
-
-export type { RealProgram } from './helpers/g11';
-
-/** Where the manifest and the programs are, or why there is none. */
-export type RealFolder =
-  | { kind: 'folder'; path: string; source: 'env' | 'worktree' }
-  | { kind: 'not-found' };
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-
-/** The repository this test file is in: a worktree, or the main checkout. */
-const REPO = resolve(HERE, '..', '..');
-
-/**
- * The main working tree, even from inside a linked worktree.
- *
- * `git rev-parse --git-common-dir` answers the **shared** `.git` directory, which is the
- * main checkout's; its parent is the main working tree.
- */
-function mainWorkingTree(): string | null {
-  try {
-    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], {
-      cwd: HERE,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    if (common === '') return null;
-    const root = isAbsolute(common) ? common : resolve(HERE, common);
-    return dirname(root);
-  } catch {
-    return null;
-  }
-}
-
-/** The folder to read, without ever revealing it in a message. */
-export function realFolder(env: NodeJS.ProcessEnv = process.env): RealFolder {
-  const named = env.GEDIT_REAL_FIXTURES;
-  if (typeof named === 'string' && named.trim() !== '') {
-    const path = resolve(named.trim());
-    if (existsSync(path) && statSync(path).isDirectory()) return { kind: 'folder', path, source: 'env' };
-    return { kind: 'not-found' };
-  }
-  const tree = mainWorkingTree();
-  const fallback = tree === null ? null : join(tree, 'tests', 'real');
-  if (fallback !== null && existsSync(fallback) && statSync(fallback).isDirectory()) {
-    return { kind: 'folder', path: fallback, source: 'worktree' };
-  }
-  return { kind: 'not-found' };
-}
-
-/** The manifest of a folder, or null when there is none (which is "no programs"). */
-export function readManifest(folder: string): RealProgram[] | null {
-  const path = join(folder, 'manifest.json');
-  if (!existsSync(path)) return null;
-  return programsOf(JSON.parse(readFileSync(path, 'utf8')));
-}
-
-/** The source as the report names it: which of the two folders, never its path. */
-function sourceOf(folder: Extract<RealFolder, { kind: 'folder' }>): Source {
-  return folder.source === 'env' ? 'GEDIT_REAL_FIXTURES' : 'main working tree';
-}
-
-/** What a run found, for the line the commit body records (counts only, never a path). */
-export function summary(folder: RealFolder, programs: RealProgram[] | null): string {
-  if (folder.kind === 'not-found') return 'G11 skipped: no local folder found';
-  if (programs === null || programs.length === 0) {
-    return `G11 skipped: no programs in the local folder (${sourceOf(folder)})`;
-  }
-  return `G11: ${programs.length} local programs (${sourceOf(folder)})`;
-}
-
-/**
- * Whether `GEDIT_G11_REPORT` may be written to `path`: inside the local folder or outside
- * the repository, never under its `tests/` (a report there could end up committed, and
- * its counts are the owner's). The main working tree's `tests/real/` is the local folder
- * and gitignored, so it is allowed.
- */
-export function reportPathAllowed(path: string, roots: readonly string[]): boolean {
-  const target = resolve(path);
-  for (const root of roots) {
-    const tests = join(root, 'tests');
-    const inside = (dir: string): boolean => {
-      const rel = relative(dir, target);
-      return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
-    };
-    if (inside(tests) && !inside(join(tests, 'real'))) return false;
-  }
-  return true;
-}
 
 describe('the local programs', () => {
   const folder = realFolder();
@@ -141,33 +52,6 @@ describe('the local programs', () => {
     if (folder.kind === 'folder') expect(line).not.toContain(folder.path);
     console.log(line);
   });
-
-  it.skipIf(folder.kind !== 'folder' || programs === null || programs.length === 0)(
-    'runs every check over every program the manifest names (G11)',
-    () => {
-      const local = folder as Extract<RealFolder, { kind: 'folder' }>;
-      const python = findPython();
-      const report = runG11(local.path, programs ?? [], sourceOf(local), python);
-      const lines = formatReport(report);
-      if (!python.ok) lines.push(`G11 the script checks skipped: ${python.reason}`);
-      for (const line of lines) expect(line).not.toContain(local.path);
-      console.log(lines.join('\n'));
-
-      const target = process.env.GEDIT_G11_REPORT?.trim();
-      if (target) {
-        const roots = [REPO, mainWorkingTree()].filter((root): root is string => root !== null);
-        if (reportPathAllowed(target, roots)) writeFileSync(target, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-        else console.log('G11 report not written: GEDIT_G11_REPORT points under tests/ of the repository');
-      }
-
-      expect(report.checks.noCrash.fail, 'a check crashed on a local program').toBe(0);
-      if (process.env.GEDIT_G11 === 'strict') {
-        expect(report.failures, 'G11 failures (strict)').toEqual([]);
-        expect(report.noLongerGaps, 'known gaps that pass now (strict)').toEqual([]);
-      }
-    },
-    600_000,
-  );
 });
 
 // ---------------------------------------------------------------------------

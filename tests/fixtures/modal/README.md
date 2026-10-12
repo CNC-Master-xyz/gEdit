@@ -83,7 +83,7 @@ implementations of one merge is how the two sides start disagreeing quietly.
 A golden whose effective profile has not been generated yet is a *spec golden* (plan §5.2
 rule 3): it fails with
 
-> run `UPDATE_RESOLVED=1 npm test -- resolved`
+> run `UPDATE_RESOLVED=1 npx vitest run resolved`
 
 and integration regenerates the resolved fixtures after Wave A.
 

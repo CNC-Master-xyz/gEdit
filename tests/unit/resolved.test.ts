@@ -15,7 +15,7 @@
 //     here, so "this program reads like this on that machine" is pinned to a file a
 //     reviewer can read.
 //
-// `UPDATE_RESOLVED=1 npm test -- resolved` rewrites everything; a plain run compares, and
+// `UPDATE_RESOLVED=1 npx vitest run resolved` rewrites everything; a plain run compares, and
 // a missing entry says which command to run. Integration regenerates after Wave A (I6),
 // because a content WP may write a golden whose effective profile does not exist yet.
 
@@ -50,7 +50,7 @@ const { createChannelService } = await import('$lib/stores/channels');
 
 const ROOT = join(FIXTURES_DIR, 'resolved');
 const UPDATE = process.env.UPDATE_RESOLVED === '1';
-const HOW = 'run `UPDATE_RESOLVED=1 npm test -- resolved`';
+const HOW = 'run `UPDATE_RESOLVED=1 npx vitest run resolved`';
 
 /** The folders that may hold a golden with a `machine` member (§7.4). */
 const GOLDEN_ROOTS = ['modal', 'scripts', 'machines'];

@@ -29,7 +29,7 @@ npm run tauri dev      # start the app with hot reload
 |---|---|
 | `npm run tauri dev` | Runs the app in development mode. |
 | `npm run check` | Type check (svelte-check). Must report 0 errors and 0 warnings. |
-| `npm test` | Unit tests (vitest, node environment). `npm run test:watch` reruns on change. |
+| `npm test` | Unit tests (vitest, node environment), then the slow tests alone with two workers. `npm run test:unit` and `npm run test:slow` run one group; `npm run test:watch` reruns on change. |
 | `npm run build` | Builds the frontend into `build/`. |
 | `npm run tauri build` | Builds the installers. `npx tauri build --debug` gives a faster, unoptimized bundle. |
 | `npm run licenses` | Regenerates `src/lib/data/licenses.json` (see [Third-party notices](#third-party-notices)). |
@@ -48,15 +48,15 @@ cargo test --locked
 
 Python tests (the bundled scripts and their shared library): `python3 -m unittest discover -s tests/python -t .`
 
-A unit test that asserts a wall-clock budget goes through `tests/unit/helpers/budget.ts`: the budget is measured on the development machine, and CI multiplies it by a fixed factor (see [phase-2-implementation.md](docs/planning/phase-2-implementation.md) §5.2, rule 13).
+A unit test that asserts a wall-clock budget goes through `tests/unit/helpers/budget.ts`: the budget is measured on the development machine, and CI multiplies it by a fixed factor (see [phase-2-implementation.md](docs/planning/phase-2-implementation.md) §5.2, rule 13). One that times 100,000 lines or more, or simulates typing, lives in a `.slow.test.ts` file (see [Tests](#tests)).
 
 ### Running the tests lightly
 
 The full test suite and the Rust and Python suites load every core for minutes, and the runtime harness drives the real mouse and keyboard, so run only as much as the change needs while you work, and the whole set once at the end:
 
 - Put `taskpolicy -b` in front of every test or build command on macOS (`taskpolicy -b npx vitest run …`), so a long run does not make the machine unusable. On Linux `nice -n 19` does the same.
-- Run the test files that belong to your change: `taskpolicy -b npx vitest run src/lib/core/transforms/renumber.test.ts --maxWorkers=2`, `cargo test files::` for one Rust module, `python3 -S -m unittest tests.python.test_modal` for one Python file. Python needs only the newest interpreter locally; CI runs 3.9 and 3.12.
-- Run `npm test` in full once, when the work is finished. Tests that assert a wall-clock budget can fail on a machine that is busy with something else and pass alone; run the file alone before you suspect your change, and never loosen a budget to make a busy machine pass.
+- Run the test files that belong to your change: `taskpolicy -b npx vitest run src/lib/core/transforms/renumber.test.ts --maxWorkers=2` (a path filter finds the `.slow.test.ts` file of a module as well), `cargo test files::` for one Rust module, `python3 -S -m unittest tests.python.test_modal` for one Python file. Python needs only the newest interpreter locally; CI runs 3.9 and 3.12.
+- Run `npm test` in full once, when the work is finished (the slow group runs last, alone, so a busy machine rarely fails its budgets). `npm test -- <filter>` does not work, because the filter reaches only the second command: use `npx vitest run <filter>`. Tests that assert a wall-clock budget can still fail on a machine that is busy with something else and pass alone; run the file alone before you suspect your change, and never loosen a budget to make a busy machine pass.
 - Leave the runtime harness to CI (the Harness workflow) unless a maintainer asks for a local run.
 - A change to the release or harness workflows is tried on a branch, not on `main` (see [Trying a workflow on a branch](#trying-a-workflow-on-a-branch)).
 
@@ -68,7 +68,7 @@ Run what CI runs: `npm run check`, `npm test`, `npm run build`, `npm run license
 
 `.github/workflows/ci.yml` runs on pushes to `main` and on every pull request:
 
-- **checks** (Linux): type check, unit tests, frontend build, license notices, versions, a scan of the built bundle for `eval`, `Function(…)` and the test hook, and `rustfmt --check` on the harness source.
+- **checks** (Linux): type check, unit tests, slow tests, frontend build, license notices, versions, a scan of the built bundle for `eval`, `Function(…)` and the test hook, and `rustfmt --check` on the harness source.
 - **python** (Linux, on 3.9 and 3.12): the bundled scripts' tests. The 3.9 leg is what keeps the oldest supported interpreter honest.
 - **rust** (macOS, Windows, Linux): `cargo fmt`, `clippy` with warnings as errors, `cargo test`.
 - **bundle** (macOS, Windows, Linux): an unsigned debug build of the installers, uploaded as workflow artifacts for manual smoke tests.
@@ -183,7 +183,7 @@ The generated surfaces are not documentation to maintain by hand: the shortcut d
 ### Test fixtures are synthetic
 
 - Every NC program under `tests/fixtures/` is written for gEdit and says so in a comment at the top. Never commit real customer or shop programs, not even anonymized ones. The rules and a description of every file are in [tests/fixtures/README.md](tests/fixtures/README.md). The one exception is reserved: `tests/fixtures/nc/owner-public/`, for the few programs the owner hands over as safe to publish. Each one needs a permission line in that README and goes in only after the owner has gone through what `node tests/gen/check-anonymized.mjs` flags in it (a reading aid, not a filter; Phase 2 plan §9.2).
-- Your own programs belong in `tests/real/` (gitignored except its README) or in a folder named by `GEDIT_REAL_FIXTURES`. `npm test -- realFixtures` and `tests/python/test_real_fixtures.py` check them on your machine and print counts only, never a file name or program text; without such a folder they skip. By default they fail only on a crash; `GEDIT_G11=strict` fails on every failure, `GEDIT_G11_REPORT=<file>` writes the report as JSON, and `GEDIT_PYTHON` names the Python 3.9+ the script checks use. See [tests/real/README.md](tests/real/README.md).
+- Your own programs belong in `tests/real/` (gitignored except its README) or in a folder named by `GEDIT_REAL_FIXTURES`. `npx vitest run realFixtures` and `tests/python/test_real_fixtures.py` check them on your machine and print counts only, never a file name or program text; without such a folder they skip. By default they fail only on a crash; `GEDIT_G11=strict` fails on every failure, `GEDIT_G11_REPORT=<file>` writes the report as JSON, and `GEDIT_PYTHON` names the Python 3.9+ the script checks use. See [tests/real/README.md](tests/real/README.md).
 - Fixtures are byte-exact: `.gitattributes` marks them `-text`, so git never rewrites their line endings. Encoding fixtures are produced by `tests/gen/gen-encoding.mjs`; change the generator, not the files, and run `node tests/gen/gen-encoding.mjs` to rewrite them.
 - Large test programs come from `tests/gen/gen-large.mjs` and go into `.perf/`, which is not committed.
 
@@ -208,6 +208,7 @@ Scripts go through `src-tauri/src/scripts/`, whose module documentation states b
 ## Tests
 
 - **Unit tests (vitest):** `*.test.ts` next to the module under `src/`, or under `tests/unit/`. They run in node; never import Monaco or the Tauri API in a unit test. Test services through their `createX(deps)` factory with fakes.
+- **Slow tests (vitest):** a test that times work over 100,000 lines or more, or simulates typing, against a wall clock goes into `<name>.slow.test.ts`, next to its `<name>.test.ts`. `npm test` runs these after the unit tests, alone and with two workers, so a busy run neither fails their budgets nor waits for them. CI runs them as a step of their own. Tests of correctness stay in the unit file, however long they take.
 - **Rust:** `cargo test` in `src-tauri/`.
 - **Python:** standard-library `unittest` under `tests/python/`, with the same golden files as the TypeScript side where both implement the same logic.
 - **Runtime harness (macOS):** see the next section.
