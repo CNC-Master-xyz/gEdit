@@ -193,8 +193,8 @@ each of them uncertain (no certain marker, a family margin below
 ## `nc/owner-public/`: the owner's own programs
 
 Programs not written for gEdit: the owner published these programs at
-github.com/NC-PB/NC-Code and handed them over for this folder on 2026-09-25. Every file
-below is **published by the owner at github.com/NC-PB/NC-Code, cleared for public use on
+github.com/CNC-Master-xyz/NC-Code and handed them over for this folder on 2026-09-25. Every file
+below is **published by the owner at github.com/CNC-Master-xyz/NC-Code, cleared for public use on
 2026-09-25**, and is committed byte for byte as it is published there (LF endings, ASCII).
 The folder names the profile each program has to open with. Most of them come in the
 same few parts posted for several controls, which is what makes them useful: the same
