@@ -122,6 +122,8 @@ And the M8 NC review (G10), each with the program the review ran:
   finding names the code in force
 * `sinumerik-cycle-feeds` / `-only` — the feeds of `CYCLE95` and `CYCLE952` are listed, and
   the chamfer feeds `FRC=` and `FRCM=` are reported
+* `sinumerik-milling-cycle-feeds` — the feeds of `SLOT2` and `CYCLE72` are listed (the
+  reserved `_FFCP`, a feed of older `SLOT2` versions, too); `ADIS=` and `ADISPOS=` are left
 * `okuma-thread-after-g32` — the finding names `G71`, the block's own thread cycle, and not
   the `G32` still in force
 * `okuma-feeds-of-their-own` — `FA=` and `FB=` are feeds under addresses of their own
@@ -224,6 +226,9 @@ REQUIRED_CASES = [
     "lathe-filter-no-value",
     # B1 (owner decision): the F of a Klartext function is no path feed.
     "klartext-function-feeds",
+    # 2026-10-12: the feeds of SLOT2 and CYCLE72 are listed (none without their entries), and
+    # the rounding distances ADIS= and ADISPOS= are not feeds.
+    "sinumerik-milling-cycle-feeds",
 ]
 
 #: The addresses this script is allowed to rewrite. Everything else has to come back

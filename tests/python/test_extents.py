@@ -59,6 +59,9 @@ REQUIRED_CASES = [
     "fanuc-local-shift",
     "fanuc-rotary-no-tcp",
     "sinumerik-trans",
+    # SLOT2 and CYCLE72 (2026-10-12): calls the database describes leave their depth
+    # unresolved and say so; without an entry they were silent and the Z range looked complete.
+    "sinumerik-milling-cycles",
 ]
 
 gedit_nc = helpers.import_gedit_nc()

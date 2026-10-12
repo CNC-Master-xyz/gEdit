@@ -768,10 +768,10 @@ and keeps it. `GOTOF:20` and `GOTOB:20`, written without a blank, are followed l
 help either leaves them out or marks them as not verified:
 
 - cycles: `CYCLE940`, `CYCLE98` and `CYCLE62` are explained, their parameters not yet; the
-  other milling cycles (`CYCLE64`, `CYCLE70`, `CYCLE72`, `CYCLE76`–`CYCLE79`, `CYCLE899`,
-  `SLOT2`, `LONGHOLE` …) are coloured and listed in the program map as calls, with no code
-  help at all (`CYCLE93`, `CYCLE97`, `CYCLE800`, `CYCLE832`, `CYCLE61`, `POCKET3`, `POCKET4`
-  and `SLOT1` are explained, with their arguments);
+  other milling cycles (`CYCLE64`, `CYCLE70`, `CYCLE76`–`CYCLE79`, `CYCLE899`, `LONGHOLE` …)
+  are coloured and listed in the program map as calls, with no code help at all (`CYCLE93`,
+  `CYCLE97`, `CYCLE800`, `CYCLE832`, `CYCLE61`, `CYCLE72`, `POCKET3`, `POCKET4`, `SLOT1` and
+  `SLOT2` are explained, with their arguments);
 - `G942` and `G952`, which the manual only lists;
 - `M19`: where an orientation stops is set up on the machine;
 - synchronized actions (`WHEN … DO`). The channel commands (`WAITM`, `WAITMC`, `WAITE`,
@@ -818,8 +818,9 @@ the tool list moved every tool's feed and speed one row down.
 high-speed milling: `CYCLE800` (swivel), `CYCLE832` (high-speed settings), `TRAORI` and
 `TRAFOOF`, `TRANSMIT`, `TRACYL`, `G75` (a fixed-point approach), the `ORI…` orientation words
 and the `DYN…` dynamic words, `TRANS`, `ROT`, `SCALE` and `MIRROR` and their additive forms.
-The milling cycles `CYCLE61`, `POCKET3`, `POCKET4` and `SLOT1`, `CUT3DCC`, `COMPSURF`,
-`G601`–`G603`, `G643`–`G645` and the tolerance words `CTOL=` and `OTOL=` are described too
+The milling cycles `CYCLE61`, `CYCLE72`, `POCKET3`, `POCKET4`, `SLOT1` and `SLOT2`, `CUT3DCC`,
+`COMPSURF`, `G601`–`G603`, `G643`–`G645`, the tolerance words `CTOL=` and `OTOL=` and the
+rounding distances `ADIS=` and `ADISPOS=` are described too
 ([below](#codes-added-from-the-control-manuals)); the feed word `FP=` is not, and is coloured
 and listed as a call without code help. The profile lists `A`, `B` and
 `C` as axes and as angles, so the scripts read the rotary axes of a five-axis machine in
@@ -936,7 +937,13 @@ added:
   `CYCLE97`; `G601`–`G603` as their own group (exact-stop criterion), `G643`–`G645`; `CUT3DCC`,
   `CUT3DCCD`, `COMPSURF`; the tolerances `CTOL=` and `OTOL=`; and the channel commands `WAITM`,
   `WAITMC`, `WAITE`, `SETM`, `CLEARM`, `INIT`, `START`. `SLOT1` changed meaning between versions
-  of the cycle; the labels say both.
+  of the cycle; the labels say both. Added later: `SLOT2` (circular slots) and `CYCLE72` (path
+  milling along a contour) with their arguments in call order and their feeds labelled, and the
+  rounding distances `ADIS=` (for `G641` on path moves) and `ADISPOS=` (the same for `G0`),
+  which are lengths, not feeds: Scale Feed leaves them alone. Older versions of `SLOT2` read
+  the milling direction and four finishing arguments differently, and older versions of
+  `CYCLE72` retract to a different height; the labels say both. `CYCLE62` now also names
+  `CYCLE72` as a cycle it can give a contour to.
 - **Heidenhain Klartext.** Cycles 251, 252, 253, 254, 256 and 257 (milling), the contour cycles
   14 and 21 to 25, the cutting speed `VC`, the points `P1X` to `P3Z`, and labels for the feed of
   the `PLANE` functions and of cycle 19 (*Feed for the tilting move*). Cycle 20 and the pattern

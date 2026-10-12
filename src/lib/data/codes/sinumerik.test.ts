@@ -263,9 +263,9 @@ describe('what a code does to the modal state', () => {
   it('starts a cycle on every CYCLE entry and on G63, for its own block', () => {
     const starts = codesWith((e) => e.sets?.cycle === 'start');
     expect(starts).toEqual([
-      'CYCLE61', 'CYCLE62', 'CYCLE81', 'CYCLE82', 'CYCLE83', 'CYCLE84', 'CYCLE840', 'CYCLE85', 'CYCLE86',
+      'CYCLE61', 'CYCLE62', 'CYCLE72', 'CYCLE81', 'CYCLE82', 'CYCLE83', 'CYCLE84', 'CYCLE840', 'CYCLE85', 'CYCLE86',
       'CYCLE87', 'CYCLE88', 'CYCLE89', 'CYCLE92', 'CYCLE93', 'CYCLE930', 'CYCLE940', 'CYCLE95',
-      'CYCLE951', 'CYCLE952', 'CYCLE97', 'CYCLE98', 'CYCLE99', 'G63', 'POCKET3', 'POCKET4', 'SLOT1',
+      'CYCLE951', 'CYCLE952', 'CYCLE97', 'CYCLE98', 'CYCLE99', 'G63', 'POCKET3', 'POCKET4', 'SLOT1', 'SLOT2',
     ]);
     // G63 taps once: the move type in force before it applies again after its block.
     expect(entry('G63')?.group).toBe('nonmodal');
@@ -548,6 +548,78 @@ describe('B1 (a7s): the codes taken from the 840D sl manuals', () => {
     }
     for (const code of ['WAITM', 'WAITMC', 'WAITE', 'SETM', 'CLEARM', 'INIT', 'START']) expect(entry(code)?.group, code).toBe('program');
     expect(entry('CLEARM')?.description).toMatch(/CLEARM\(\) clears all/);
+  });
+});
+
+describe('SLOT2, CYCLE72, ADIS= and ADISPOS= from the manuals (owner decision 2026-10-12)', () => {
+  // Facts from the 840D sl NC programming manual 06/2019 (§2.11.2 pp. 298–307, §3.25.1.8
+  // pp. 1055–1057, §3.25.1.16 pp. 1070–1073, §4.1 p. 1176, §4.2 p. 1222), the external-cycles
+  // manual 03/2009 (§1.21, §1.27) and the cycles manual 01/2008 (§3.6, §3.12). Each entry carries
+  // the owner's review mark until the owner has read it.
+  const feeds = (code: string) => (entry(code)?.params ?? []).filter((p) => /\bfeed\b(?!\s+factor)/i.test(p.label)).map((p) => p.address);
+  const order = (code: string) => entry(code)?.params?.map((p) => p.address);
+  const label = (code: string, address: string) => entry(code)?.params?.find((p) => p.address === address)?.label;
+
+  it('ships every new entry with a label and a description, marked for the owner\'s review', () => {
+    for (const code of ['SLOT2', 'CYCLE72', 'ADIS', 'ADISPOS']) {
+      const e = entry(code) as (CodeEntry & { review?: string }) | undefined;
+      expect(e, code).toBeDefined();
+      expect(e?.description?.length ?? 0, code).toBeGreaterThan(0);
+      expect(e?.review, code).toBe('pending');
+      expect(e?.verify, code).toBeUndefined();
+    }
+  });
+
+  it('lists the arguments of SLOT2 and CYCLE72 in the order the control reads them', () => {
+    expect(order('SLOT2')).toEqual([
+      'RTP', 'RFP', 'SDIS', '_DP', '_DPR', 'NUM', 'AFSL', 'WID', '_CPA', '_CPO', 'RAD', 'STA1', 'INDA', 'FFD', 'FFP1', '_MID',
+      'CDIR', '_FAL', 'VARI', '_MIDF', 'FFP2', 'SSF', '_FFCP', '_UMODE', '_FS', '_ZFS', '_GMODE', '_DMODE', '_AMODE',
+    ]);
+    expect(order('CYCLE72')).toEqual([
+      '_KNAME', '_RTP', '_RFP', '_SDIS', '_DP', '_MID', '_FAL', '_FALD', '_FFP1', '_FFD', '_VARI', '_RL', '_AS1', '_LP1', '_FF3',
+      '_AS2', '_LP2', '_UMODE', '_FS', '_ZFS', '_GMODE', '_DMODE', '_AMODE',
+    ]);
+    for (const code of ['SLOT2', 'CYCLE72']) {
+      expect([entry(code)?.group, entry(code)?.sets?.cycle, entry(code)?.modal], code).toEqual(['cycle', 'start', undefined]);
+    }
+    // The older versions stop after argument 23 (SLOT2, _FFCP) and 17 (CYCLE72, _LP2).
+    expect(entry('SLOT2')?.description).toMatch(/first 23 arguments/);
+    expect(entry('CYCLE72')?.description).toMatch(/first 17 arguments/);
+  });
+
+  it('says both readings where a version changed the meaning of an argument', () => {
+    // SLOT2: the milling direction was G2/G3 and the four finishing arguments were active.
+    expect(label('SLOT2', 'CDIR')).toMatch(/0 climb, 1 conventional \(older versions 2 with G2, 3 with G3\)/);
+    for (const address of ['_MIDF', 'FFP2', 'SSF', '_FFCP']) expect(label('SLOT2', address), address).toMatch(/^Reserved in the current version; .* older ones/);
+    // CYCLE72: the retraction digit 0 went to _RTP in the 2008 manual, to the reference point since.
+    expect(label('CYCLE72', '_VARI')).toMatch(/0 to the reference point \(older versions: to _RTP\)/);
+    expect(label('CYCLE72', '_KNAME')).toMatch(/START:END/);
+    expect(entry('CYCLE72')?.description).toMatch(/CYCLE62/);
+    // CYCLE62 names the contour for CYCLE72 too, not for a turning cycle only.
+    expect(entry('CYCLE62')?.description).toMatch(/CYCLE72/);
+    expect((entry('CYCLE62') as (CodeEntry & { review?: string }) | undefined)?.review).toBe('pending');
+  });
+
+  it('names the feeds so Scale Feed lists them, and nothing else as one', () => {
+    // FFP2 and _FFCP are feeds of older SLOT2 versions and reserved in the current one.
+    expect(feeds('SLOT2')).toEqual(['FFD', 'FFP1', 'FFP2', '_FFCP']);
+    expect(feeds('CYCLE72')).toEqual(['_FFP1', '_FFD', '_FF3']);
+    for (const code of ['SLOT2', 'CYCLE72']) {
+      expect(entry(code)?.pitchFeed, code).toBeUndefined();
+      expect(entry(code)?.tapping, code).toBeUndefined();
+    }
+  });
+
+  it('describes ADIS= and ADISPOS= as rounding lengths that switch nothing', () => {
+    // Values written with `=`, as CTOL= is: no group, no modal flag, nothing they set.
+    for (const code of ['ADIS', 'ADISPOS']) {
+      expect([entry(code)?.group, entry(code)?.modal, entry(code)?.sets], code).toEqual([undefined, undefined, undefined]);
+      expect(entry(code)?.params, code).toBeUndefined();
+      expect(entry(code)?.description, code).toMatch(/G641/);
+      expect(entry(code)?.description, code).toMatch(/a length written without a sign, not a feed/);
+    }
+    expect(entry('ADISPOS')?.description).toMatch(/G0/);
+    expect(entry('ADISPOS')?.description).toMatch(/smaller of ADIS and ADISPOS/);
   });
 });
 

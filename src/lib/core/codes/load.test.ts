@@ -713,10 +713,12 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
     expect(marked('fanuc-lathe-b')).toEqual(['G92.1']);
     // The Okuma lathe codes (package A7-O).
     expect(marked('okuma')).toEqual(['G20', 'G21', 'G85', 'G86', 'G93', 'G119', 'G132', 'G133', 'G313', 'M85']);
-    // The Sinumerik and Klartext codes (package A7-S).
+    // The Sinumerik and Klartext codes (package A7-S); SLOT2, CYCLE72, ADIS and ADISPOS were
+    // added from the manuals afterwards (owner decision 2026-10-12) and carry the same mark,
+    // as does CYCLE62, whose description now names CYCLE72 next to the turning cycles.
     expect(marked('sinumerik')).toEqual([
-      'G601', 'G602', 'G603', 'G643', 'G644', 'G645', 'CYCLE61', 'POCKET3', 'POCKET4', 'SLOT1', 'CYCLE93', 'CYCLE97',
-      'CTOL', 'OTOL', 'WAITM', 'WAITMC', 'WAITE', 'SETM', 'CLEARM', 'INIT', 'START', 'COMPSURF', 'CUT3DCC', 'CUT3DCCD',
+      'G601', 'G602', 'G603', 'G643', 'G644', 'G645', 'CYCLE61', 'POCKET3', 'POCKET4', 'SLOT1', 'SLOT2', 'CYCLE72', 'CYCLE93', 'CYCLE97',
+      'CYCLE62', 'CTOL', 'OTOL', 'ADIS', 'ADISPOS', 'WAITM', 'WAITMC', 'WAITE', 'SETM', 'CLEARM', 'INIT', 'START', 'COMPSURF', 'CUT3DCC', 'CUT3DCCD',
     ]);
     expect(marked('heidenhain')).toEqual([
       'VC', 'CYCL DEF 19', 'CYCL DEF 251', 'CYCL DEF 252', 'CYCL DEF 253', 'CYCL DEF 254', 'CYCL DEF 256',

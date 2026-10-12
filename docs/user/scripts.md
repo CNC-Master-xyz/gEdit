@@ -773,9 +773,11 @@ That is the editor's number format for the dialect, not something this script ch
 
 #### Not covered yet
 
-The Sinumerik milling cycles `CYCLE61`, `POCKET3`, `POCKET4` and `SLOT1` and the Klartext
-cycle 254 are refused as a whole because their positions in the plane have no role in the
-database (a Z shift would otherwise move the depth and leave the positions). Klartext cycles
+The Sinumerik milling cycles `CYCLE61`, `POCKET3`, `POCKET4`, `SLOT1` and `SLOT2` and the
+Klartext cycle 254 are refused as a whole because their positions in the plane have no role in
+the database (a Z shift would otherwise move the depth and leave the positions). `CYCLE72` is
+refused for the same reason: the contour it mills is named by its first argument and lies in a
+subprogram or another part of the program, where the call cannot judge it. Klartext cycles
 251 to 253, 256 and 257 move together with their call like cycles 200 to 209. A Klartext cycle the
 database still lacks does not replace the earlier definition in the modal state, so address
 arithmetic refuses it with its calls; the same goes for cycle 20 and the pattern cycles 220 and

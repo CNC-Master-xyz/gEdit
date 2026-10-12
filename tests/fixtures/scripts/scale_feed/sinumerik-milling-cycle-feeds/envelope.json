@@ -1,0 +1,35 @@
+{
+  "message": "Scaled 1 feed rate to 80 %; 6 cycle feeds left unchanged. No machine: profile defaults assumed.",
+  "findings": [
+    {
+      "line": 8,
+      "severity": "info",
+      "message": "Argument 14 of SLOT2 (FFD, feed for the infeed in depth) is 100 and is left unchanged: this run does not scale the arguments of a cycle."
+    },
+    {
+      "line": 8,
+      "severity": "info",
+      "message": "Argument 15 of SLOT2 (FFP1, feed in the plane) is 400 and is left unchanged: this run does not scale the arguments of a cycle."
+    },
+    {
+      "line": 8,
+      "severity": "info",
+      "message": "Argument 23 of SLOT2 (_FFCP, reserved in the current version; in older ones the feed for moving on the circle from slot to slot, in mm/min) is 300 and is left unchanged: this run does not scale the arguments of a cycle."
+    },
+    {
+      "line": 9,
+      "severity": "info",
+      "message": "Argument 9 of CYCLE72 (_FFP1, feed along the contour) is 800 and is left unchanged: this run does not scale the arguments of a cycle."
+    },
+    {
+      "line": 9,
+      "severity": "info",
+      "message": "Argument 10 of CYCLE72 (_FFD, feed for the infeed in depth, or for an approach in space) is 200 and is left unchanged: this run does not scale the arguments of a cycle."
+    },
+    {
+      "line": 9,
+      "severity": "info",
+      "message": "Argument 15 of CYCLE72 (_FF3, feed for the moves between, in the G94 or G95 of the contour; in older versions the retraction feed too) is 1000 and is left unchanged: this run does not scale the arguments of a cycle."
+    }
+  ]
+}

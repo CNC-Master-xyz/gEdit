@@ -1973,6 +1973,301 @@
       ]
     },
     {
+      "code": "SLOT2",
+      "group": "cycle",
+      "sets": { "cycle": "start" },
+      "review": "pending",
+      "label": "Circular slot milling cycle",
+      "description": "Mills NUM circular slots on a circle around _CPA, _CPO with radius RAD: the first at the start angle STA1, the next ones INDA further on, each AFSL degrees long and WID wide. It roughs, finishes, finishes the edge only, chamfers or machines completely, as VARI says. Its feeds are its own arguments (FFD in depth, FFP1 in the plane). Older cycle versions take the first 23 arguments only and give some of them another meaning; the labels say both.",
+      "params": [
+        {
+          "address": "RTP",
+          "label": "Retraction plane, as an absolute position",
+          "position": "tool-axis"
+        },
+        {
+          "address": "RFP",
+          "label": "Reference point on the tool axis, as an absolute position",
+          "position": "tool-axis"
+        },
+        {
+          "address": "SDIS",
+          "label": "Safety distance above the reference point, written without a sign",
+          "position": "none"
+        },
+        {
+          "address": "_DP",
+          "label": "Slot depth: an absolute position, or a depth from the reference point when the ones digit of _AMODE is 1",
+          "position": "tool-axis"
+        },
+        {
+          "address": "_DPR",
+          "label": "Slot depth measured from the reference point, written without a sign",
+          "position": "none"
+        },
+        {
+          "address": "NUM",
+          "label": "Number of slots on the circle",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "AFSL",
+          "label": "Length of each slot, as the angle it spans on the circle, written without a sign",
+          "position": "none"
+        },
+        {
+          "address": "WID",
+          "label": "Slot width",
+          "position": "none"
+        },
+        {
+          "address": "_CPA",
+          "label": "Centre of the circle on the first axis of the plane, as an absolute position",
+          "position": "other"
+        },
+        {
+          "address": "_CPO",
+          "label": "Centre of the circle on the second axis of the plane, as an absolute position",
+          "position": "other"
+        },
+        {
+          "address": "RAD",
+          "label": "Radius of the circle, written without a sign",
+          "position": "none"
+        },
+        {
+          "address": "STA1",
+          "label": "Start angle: from the first axis of the plane to the first slot",
+          "position": "none"
+        },
+        {
+          "address": "INDA",
+          "label": "Angle from one slot to the next; 0 spreads the slots evenly over the whole circle",
+          "position": "none"
+        },
+        {
+          "address": "FFD",
+          "label": "Feed for the infeed in depth",
+          "position": "none"
+        },
+        {
+          "address": "FFP1",
+          "label": "Feed in the plane",
+          "position": "none"
+        },
+        {
+          "address": "_MID",
+          "label": "Largest infeed in depth",
+          "position": "none"
+        },
+        {
+          "address": "CDIR",
+          "label": "Milling direction: 0 climb, 1 conventional (older versions 2 with G2, 3 with G3)",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "_FAL",
+          "label": "Finishing allowance on the slot wall",
+          "position": "none"
+        },
+        {
+          "address": "VARI",
+          "label": "Kind of machining: ones 0 complete machining, 1 roughing, 2 finishing, 3 finishing the edge, 5 chamfering (older versions 0, 1 and 2 only); tens how it moves from slot to slot, 0 on a straight line with G0, 1 on the circle; thousands 1 the slots spread over the whole circle, 2 INDA apart on part of it, 0 the whole circle when INDA is 0",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "_MIDF",
+          "label": "Reserved in the current version; the largest infeed for finishing in older ones",
+          "position": "none"
+        },
+        {
+          "address": "FFP2",
+          "label": "Reserved in the current version; the feed for finishing in older ones",
+          "position": "none"
+        },
+        {
+          "address": "SSF",
+          "label": "Reserved in the current version; the spindle speed for finishing in older ones",
+          "position": "none"
+        },
+        {
+          "address": "_FFCP",
+          "label": "Reserved in the current version; in older ones the feed for moving on the circle from slot to slot, in mm/min",
+          "position": "none"
+        },
+        {
+          "address": "_UMODE",
+          "label": "Reserved, written as 0 or left empty",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "_FS",
+          "label": "Chamfer width",
+          "position": "none"
+        },
+        {
+          "address": "_ZFS",
+          "label": "Depth of the tool tip when chamfering: an absolute position, or measured when the hundreds digit of _AMODE is 1",
+          "position": "tool-axis"
+        },
+        {
+          "address": "_GMODE",
+          "label": "Geometry mode, digit by digit: hundreds machining or only the start point",
+          "unit": "count",
+          "position": "mode"
+        },
+        {
+          "address": "_DMODE",
+          "label": "Display mode, digit by digit: ones the plane while the cycle runs (0 the plane in force, 1 G17, 2 G18, 3 G19), thousands 1 for the current cycle version",
+          "unit": "count",
+          "position": "mode"
+        },
+        {
+          "address": "_AMODE",
+          "label": "Alternative mode, digit by digit: ones whether the depth is measured (1) or absolute (2), hundreds whether the chamfering depth is measured; 0 the reading of the parameters above",
+          "unit": "count",
+          "position": "mode"
+        }
+      ]
+    },
+    {
+      "code": "CYCLE72",
+      "group": "cycle",
+      "sets": { "cycle": "start" },
+      "review": "pending",
+      "label": "Path milling cycle",
+      "description": "Mills along a contour of its own, open or closed, on its centre or to the left or right of it (_RL), with a soft approach and departure: roughing, finishing or chamfering, as _VARI says, on as many depths as _MID needs. The contour is named by _KNAME: a subprogram, or a part of a program from one label or block number to another (\"START:END\"); when the thousands digit of _DMODE is 1, a CYCLE62 call names it instead. Its feeds are its own arguments (_FFP1 along the contour, _FFD in depth, _FF3 between). Older cycle versions take the first 17 arguments only.",
+      "params": [
+        {
+          "address": "_KNAME",
+          "label": "Name of the contour: a subprogram, or the first and last block of a part of a program (\"START:END\"); the contour's points are positions of their own",
+          "position": "other"
+        },
+        {
+          "address": "_RTP",
+          "label": "Retraction plane, as an absolute position",
+          "position": "tool-axis"
+        },
+        {
+          "address": "_RFP",
+          "label": "Reference point on the tool axis, as an absolute position",
+          "position": "tool-axis"
+        },
+        {
+          "address": "_SDIS",
+          "label": "Safety distance above the reference point, written without a sign",
+          "position": "none"
+        },
+        {
+          "address": "_DP",
+          "label": "Final depth: an absolute position, or a depth from the reference point when the ones digit of _AMODE is 1",
+          "position": "tool-axis"
+        },
+        {
+          "address": "_MID",
+          "label": "Largest infeed in depth, written without a sign",
+          "position": "none"
+        },
+        {
+          "address": "_FAL",
+          "label": "Finishing allowance on the contour, in the plane",
+          "position": "none"
+        },
+        {
+          "address": "_FALD",
+          "label": "Finishing allowance on the floor, written without a sign",
+          "position": "none"
+        },
+        {
+          "address": "_FFP1",
+          "label": "Feed along the contour",
+          "position": "none"
+        },
+        {
+          "address": "_FFD",
+          "label": "Feed for the infeed in depth, or for an approach in space",
+          "position": "none"
+        },
+        {
+          "address": "_VARI",
+          "label": "Kind of machining: ones 1 roughing, 2 finishing, 5 chamfering; tens the moves between, 0 with G0, 1 with G1; hundreds the retraction at the end of the contour, 0 to the reference point (older versions: to _RTP), 1 to the reference point plus _SDIS, 2 by _SDIS, 3 none; ten-thousands 1 machines the contour backwards",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "_RL",
+          "label": "Side of the contour: 40 on its centre (G40), 41 left of it (G41), 42 right of it (G42)",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "_AS1",
+          "label": "Approach: ones 1 a straight line, 2 a quarter circle, 3 a half circle, 4 straight in at a right angle; tens 0 in the plane, 1 in space",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "_LP1",
+          "label": "Length of the approach, or the radius of the approach arc, written without a sign",
+          "position": "none"
+        },
+        {
+          "address": "_FF3",
+          "label": "Feed for the moves between, in the G94 or G95 of the contour; in older versions the retraction feed too",
+          "position": "none"
+        },
+        {
+          "address": "_AS2",
+          "label": "Departure: ones 1 a straight line, 2 a quarter circle, 3 a half circle; tens 0 in the plane, 1 in space; empty: like the approach",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "_LP2",
+          "label": "Length of the departure, or the radius of the departure arc, written without a sign",
+          "position": "none"
+        },
+        {
+          "address": "_UMODE",
+          "label": "Reserved, written as 0 or left empty",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "_FS",
+          "label": "Chamfer width",
+          "position": "none"
+        },
+        {
+          "address": "_ZFS",
+          "label": "Depth of the tool tip when chamfering: an absolute position, or measured when the hundreds digit of _AMODE is 1",
+          "position": "tool-axis"
+        },
+        {
+          "address": "_GMODE",
+          "label": "Geometry mode, digit by digit: hundreds machining or only the start point",
+          "unit": "count",
+          "position": "mode"
+        },
+        {
+          "address": "_DMODE",
+          "label": "Display mode, digit by digit: ones the plane while the cycle runs (0 the plane in force, 1 G17, 2 G18, 3 G19), tens whether the two feeds take the G94 or G95 in force, thousands 1 when a CYCLE62 call names the contour instead of _KNAME",
+          "unit": "count",
+          "position": "mode"
+        },
+        {
+          "address": "_AMODE",
+          "label": "Alternative mode, digit by digit: ones whether the final depth is measured (1) or absolute (0), hundreds whether the chamfering depth is measured; 0 the reading of the parameters above",
+          "unit": "count",
+          "position": "mode"
+        }
+      ]
+    },
+    {
       "code": "CYCLE93",
       "group": "cycle",
       "sets": { "cycle": "start" },
@@ -2730,8 +3025,9 @@
       "code": "CYCLE62",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Contour call",
-      "description": "Names the contour the turning cycle after it works on. It cuts nothing itself."
+      "description": "Names the contour the cycle after it works on, a contour turning cycle or the path milling cycle CYCLE72: a subprogram, a contour name, or the labels of its first and last block in this program or in a subprogram. It cuts nothing itself."
     },
     {
       "code": "CYCLE800",
@@ -2901,6 +3197,18 @@
       "review": "pending",
       "label": "Orientation tolerance",
       "description": "OTOL=0.5 sets the tolerance of the tool orientation in degrees for the compressor functions, orientation smoothing and rounding (all kinds except G641, G644 and OSD), until the next OTOL=, the end of the program or a reset. A negative value goes back to the tolerance the machine is set up with."
+    },
+    {
+      "code": "ADIS",
+      "review": "pending",
+      "label": "Rounding distance",
+      "description": "ADIS=0.5 sets how far before and after the end of a block G641 may round the corner between G1, G2, G3 and the other path moves, until the next ADIS=. Without it the distance is 0 and G641 rounds nothing, like G64; on short moves the control shortens it. It is a length written without a sign, not a feed or a tolerance. A machine can be set up so that G644 keeps to it as well."
+    },
+    {
+      "code": "ADISPOS",
+      "review": "pending",
+      "label": "Rounding distance for rapid moves",
+      "description": "ADISPOS=1 is the ADIS= of G0 moves: how far before and after the end of a block G641 may round the corner between rapid moves, until the next ADISPOS=. Without it the distance is 0, so G641 does not round G0 corners. Between a G0 and a path move the smaller of ADIS and ADISPOS counts. It is a length written without a sign, not a feed."
     },
     {
       "code": "SETMS",

@@ -77,6 +77,8 @@ REQUIRED_CASES = [
     # B1 fix NC: the lathe turret mirror apart from the rotation (NC-02), FK points (NC-03).
     "lathe-frames",
     "klartext-fk",
+    # The Sinumerik milling cycles, SLOT2 and CYCLE72 among them (2026-10-12).
+    "sinumerik-milling-cycles",
 ]
 
 #: The vocabulary of the README: block reasons, word reasons, notes and run notes.

@@ -1,5 +1,5 @@
 {
-  "message": "Added 0.5 to Z in 2 words on 2 blocks. Left 3 blocks as written: 3 cycle calls with positions of their own. No machine chosen: words whose reading depends on the machine are left alone.",
+  "message": "Added 0.5 to Z in 2 words on 2 blocks. Left 5 blocks as written: 5 cycle calls with positions of their own. No machine chosen: words whose reading depends on the machine are left alone.",
   "findings": [
     {
       "line": 10,
@@ -17,6 +17,18 @@
       "line": 12,
       "severity": "warning",
       "message": "N110 SLOT1(10,0,2,-5,,1,30,10,20,20,,0,,100,400,2,0,0.1,1): SLOT1 has positions of its own (_CPA and _CPO) that a shift cannot judge.",
+      "reason": "cycle-position"
+    },
+    {
+      "line": 13,
+      "severity": "warning",
+      "message": "N112 SLOT2(10,0,2,-5,,3,40,10,50,50,30,0,120,100,400,2,0,0.…: SLOT2 has positions of its own (_CPA and _CPO) that a shift cannot judge.",
+      "reason": "cycle-position"
+    },
+    {
+      "line": 14,
+      "severity": "warning",
+      "message": "N114 CYCLE72(\"CONT1\",10,0,2,-5,2,0.1,0.1,800,200,111,41,2,5…: CYCLE72 has positions of its own (_KNAME) that a shift cannot judge.",
       "reason": "cycle-position"
     }
   ]

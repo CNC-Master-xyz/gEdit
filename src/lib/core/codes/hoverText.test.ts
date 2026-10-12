@@ -293,6 +293,29 @@ describe('hoverText: the turning dialects', () => {
     expect(hoverAt('N80 CYCLE83(5,0,2,-30)', 10, sinumerikProfile, sinumerik, t)).toMatchObject({ start: 4, end: 22 });
   });
 
+  it('explains SLOT2, CYCLE72 and the rounding distances ADIS= and ADISPOS= (2026-10-12)', () => {
+    const slot = siemensHover('N110 SLOT2(10,0,2,-5,,3,40,10,50,50,30,0,120,100,400,2,0,0.1,1)', 'SLOT2') as string;
+    expect(slot).toContain('**SLOT2** — Circular slot milling cycle');
+    expect(slot).not.toContain('does not describe this word yet');
+    const path = siemensHover('N120 CYCLE72("CONT1",10,0,2,-5,2,0.1,0.1,800,200,111,41,2,5,1000,2,5)', 'CYCLE72') as string;
+    expect(path).toContain('**CYCLE72** — Path milling cycle');
+    // A word written with `=` that switches nothing, as CTOL= is: a length, never a feed.
+    const line = 'N30 G641 ADIS=0.5 ADISPOS=1';
+    const adis = siemensHover(line, 'ADIS=') as string;
+    expect(adis).toContain('**ADIS** — Rounding distance');
+    expect(adis).toContain('not a feed');
+    expect(adis).not.toContain('rapid moves');
+    expect(siemensHover(line, 'ADISPOS')).toContain('**ADISPOS** — Rounding distance for rapid moves');
+    // The database describes these names as entries of their own, not as addresses; the hover
+    // finds the entry by the name in front of the `=` (it said nothing before, CTOL= and SVC= too).
+    expect(siemensHover('N40 CTOL=0.02 OTOL=0.5', 'CTOL')).toContain('**CTOL** — Contour tolerance');
+    expect(siemensHover('N40 CTOL=0.02 OTOL=0.5', 'OTOL')).toContain('**OTOL** — Orientation tolerance');
+    expect(siemensHover('N50 SVC=120', 'SVC')).toContain('**SVC** — Cutting speed of the tool');
+    // A name the database does not know stays what it was, and an address stays an address.
+    expect(siemensHover('N60 LIMS=3000', 'LIMS')).toContain('**LIMS** — Spindle speed limit');
+    expect(siemensHover('N70 CR=15', 'CR')).toContain('**CR** — Arc radius');
+  });
+
   it('stays silent on a subprogram, a name and a label the program gives itself', () => {
     expect(siemensHover('N200 PROBE_DIA(1,,3)', 'PROBE_DIA')).toBeNull();
     const line = 'N70 IF XNOW<=XBOT GOTOF LAST_CUT';

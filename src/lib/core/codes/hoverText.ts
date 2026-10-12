@@ -313,6 +313,20 @@ function lookupFor(db: CodeDb, token: NcToken): CodeLookup | null {
   return lookupWord(db, { ...token, kind: 'word', address: token.address ?? token.text.toUpperCase() });
 }
 
+/**
+ * The entry of a word written with `=` under a name the database describes as an entry of
+ * its own, not as an address (`CTOL=0.02`, `ADIS=0.5`, `SVC=100`): the value behind the `=`
+ * is data, so the entry is the name's whatever value follows, and the hover is headed by the
+ * name. Null for every other token, for an indexed word (`S[2]=500`, read by its address) and
+ * for an entry marked for verification.
+ */
+function valueWordEntry(db: CodeDb, token: NcToken, lookup: CodeLookup | null): CodeEntry | null {
+  if (token.kind !== 'word' || token.address === undefined || token.index !== undefined) return null;
+  if (!isAssignmentWord(token) || lookup?.entry || lookup?.address) return null;
+  const entry = lookupCode(db, token.address);
+  return entry && entry.verify !== true ? entry : null;
+}
+
 /** The whole hover for a position in a line, or null when there is nothing to say. */
 export function hoverAt(
   line: string,
@@ -331,7 +345,8 @@ export function hoverAt(
     extendedAddresses: extendedAddressesOf(cp),
     waitCode: o.waitCode,
   };
-  const markdown = hoverText(token, lookup, t, o2);
+  const named = valueWordEntry(db, token, lookup);
+  const markdown = named ? codeHover(token.address as string, named, t) : hoverText(token, lookup, t, o2);
   if (markdown === null) return null;
   // M12.5: a wait code of the machine says what the machine says, and nothing more.
   const context = o.context && !answersAsWaitCode(token, o2) ? contextParagraphs(token, line, cp, db, t, o.context) : [];

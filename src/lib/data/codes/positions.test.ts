@@ -153,7 +153,7 @@ describe('what the roles decide (the reasons are in the G10 table, plan §8.7)',
     // B1 (a7s): the milling cycles write their names with an underscore, and their chamfering
     // depth _ZFS is a tool-axis position too while _AMODE reads it as absolute.
     expect(withRole('sinumerik', 'tool-axis').filter((p) => !/ _?(RTP|RFP|DP)$/.test(p))).toEqual([
-      'CYCLE83 FDEP', 'POCKET3 _ZFS', 'POCKET4 _ZFS', 'SLOT1 _ZFS',
+      'CYCLE83 FDEP', 'POCKET3 _ZFS', 'POCKET4 _ZFS', 'SLOT1 _ZFS', 'SLOT2 _ZFS', 'CYCLE72 _ZFS',
     ]);
     // The drilling axis, the plane and whether the depth is absolute can each be chosen by a
     // mode argument; anything but 0 there is a reading the role does not describe.
@@ -175,6 +175,11 @@ describe('what the roles decide (the reasons are in the G10 table, plan §8.7)',
       POCKET3: ['_PA', '_PO'],
       POCKET4: ['_PA', '_PO'],
       SLOT1: ['_CPA', '_CPO'],
+      // SLOT2 (2026-10-12) mills its slots on a circle around a centre of its own; CYCLE72 mills a
+      // contour named by _KNAME, whose points are in a subprogram or a part of a program the call
+      // cannot see, so the name counts as positions of its own and the call is refused and listed.
+      SLOT2: ['_CPA', '_CPO'],
+      CYCLE72: ['_KNAME'],
       CYCLE93: ['SPD', 'SPL'],
       CYCLE97: ['SPL', 'FPL', 'DM1', 'DM2'],
     };
@@ -184,7 +189,7 @@ describe('what the roles decide (the reasons are in the G10 table, plan §8.7)',
       expect(Object.values(roles), `${code}: every parameter reviewed`).not.toContain(null);
     }
     // The plane, the depth reading and the dimensioning are mode arguments, as on the drilling cycles.
-    for (const code of ['POCKET3', 'POCKET4', 'SLOT1']) {
+    for (const code of ['POCKET3', 'POCKET4', 'SLOT1', 'SLOT2', 'CYCLE72']) {
       const roles = rolesOf('sinumerik', code);
       expect([roles._GMODE, roles._DMODE, roles._AMODE], code).toEqual(['mode', 'mode', 'mode']);
     }

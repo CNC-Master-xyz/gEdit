@@ -244,7 +244,7 @@ and the blocks under it refused (`frame`), a `TRAORI` section judged and a simul
 | `klartext-modal-call` | Klartext | an `M89` modal call moved with its positions; `Q203=+0,5` keeps its comma; a `PLANE SPATIAL` frame until `PLANE RESET` |
 | `sinumerik-cycle83` | Sinumerik milling | `CYCLE81`, `MCALL CYCLE83` with the trailing arguments at 0 moved; `_AMODE=1`, `_GMODE=1` (`cycle-mode`, with the `MCALL` positions); `RFP=R1` (`cycle-expression`); a call under `G91` moved |
 | `sinumerik-cycle800` | Sinumerik milling | `CYCLE800()` closes; `CYCLE800(…)` and the blocks under it (`frame`) |
-| `sinumerik-milling-cycles` | Sinumerik milling | (B1) `CYCLE61`, `POCKET3`, `SLOT1` refused for their points in the plane (`cycle-position`); `G601`, `G643` are known codes, so no `unknown-code-note` |
+| `sinumerik-milling-cycles` | Sinumerik milling | (B1) `CYCLE61`, `POCKET3`, `SLOT1` refused for their points in the plane (`cycle-position`); `G601`, `G643` are known codes, so no `unknown-code-note`. (2026-10-12) `SLOT2` refused for its circle centre `_CPA`, `_CPO`, `CYCLE72` for its contour `_KNAME` (positions elsewhere); with no entry both were `cycle-not-reviewed` |
 | `sinumerik-traori` | Sinumerik milling | an `A`/`C` move under `TRAORI` moved, the same move after `TRAFOOF` refused (`rotary-without-tcp`; "moves A", since C turns no Z); the first block, which ends at `A0 C0`, moved; `SUPA`; `Z=IC(10)` (`incremental`); `TRANS Z5` (`data`) |
 | `sinumerik-diamof` | Sinumerik turning | +0.5 to `X` as a diameter: `DIAMON` words +0.5, `DIAMOF` words +0.25; `X=IC(2)` (`incremental`) |
 | `sinumerik-mill-x-shift` | Sinumerik milling | (M10 review, NC-1) +1 to `X`: every `X` +1 (not 0.5), a `DIAMON` word +2, no "as a diameter" |
