@@ -32,6 +32,8 @@ person on a real machine can see.
 
 ## On each platform
 
+The first release that gets this check on all three platforms is v1.1.0 (v1.0.0 was never published, the owner, 2026-10-12). Its run also settles the open Phase 1 exit check: the bundles on Windows and Linux.
+
 Use the sample programs in `tests/fixtures/exit/` (open them by the application, not in
 another editor first: they contain a BOM, CRLF, NUL bytes and Windows-1252 bytes on
 purpose).

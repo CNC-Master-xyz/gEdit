@@ -1,8 +1,10 @@
 # Changelog
 
-What changed in each release of gEdit, written for the person who edits NC programs. The release workflow publishes the entry of a version as the notes of its draft release, so the top of each entry has to make sense on its own. The entry called `Unreleased` is what has been fixed or added on `main` since v1.0.0 was prepared; it has no date and no release of its own yet.
+What changed in each release of gEdit, written for the person who edits NC programs. The release workflow publishes the entry of a version as the notes of its draft release, so the top of each entry has to make sense on its own. The entry called `Unreleased` is what has been fixed or added on `main` since v1.0.0 was prepared; it has no date yet and will be the entry of v1.1.0.
 
 ## Unreleased
+
+This release will be v1.1.0. It includes [v1.0.0](#v100-2026-10-10), which was built but not published as a release.
 
 A round of fixes after the v1.0.0 preparation: files, recovery and backups report and bound themselves honestly, scripts behave on Windows and when started from the Dock, the ribbon has seven tabs, the code help is filled in from the control manuals for all four control families, and a number of small readings of Klartext, Sinumerik, Okuma and Fanuc programs are corrected. The plan of record is [bugfix-round-1.md](docs/planning/bugfix-round-1.md); the guide pages are linked below.
 
