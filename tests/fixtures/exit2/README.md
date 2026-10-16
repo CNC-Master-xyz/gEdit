@@ -226,7 +226,7 @@ and `unclosedComments` run where the dialect has the marker and the comment end.
 |---|---|
 | `checks-<x>.findings.<machine>.json` | `program_checks.py`. `<machine>` is `none`, `x8-lathe-is-b` or `x8-okuma-1um`; `machine` defines the machine. Every row with a line jumps to it. |
 | `checks-<x>.extents.<machine>.json` | `extents.py`. With none, the point-less words are "not resolved", with the finding and the header saying so. A tool scope is named as the tool list names the tool, with the word as written (`T1 (T010101, line 9)`; M13 review, NC-9). |
-| `checks-lathe.arith-z-0.5.none.nc` + report | Address arithmetic `subtract 0.5` on `Z`, no machine. It changes only absolute `Z` words with a point. It lists both `W` words and the point-less `Z2000`. The cycles it has not reviewed (`G71`, `G70`, `G84`) and the `G68.2` frame are left and listed. The `Z–5.` with an en dash (line 76) is left and listed as a word that cannot be read (M13 review, NC-5). |
+| `checks-lathe.arith-z-0.5.none.nc` + report | Address arithmetic `subtract 0.5` on `Z`, no machine. It changes only absolute `Z` words with a point. It lists both `W` words and the point-less `Z2000`. The cycle it has not reviewed (`G84`) and the `G68.2` frame are left and listed; the finishing allowance `W0.1` of the second `G71` block is listed as a value of the cycle (P4a, plan §7 #305, #345: the `G70`–`G76` values are cycle data). The `Z–5.` with an en dash (line 76) is left and listed as a word that cannot be read (M13 review, NC-5). |
 | `checks-mill.blockskip.nc` | Block skip insert on the selection lines 18–23 (the `T2` operation), form defaults. |
 | `checks-mill.blockskip.json` | The selection, both status texts, and that remove on the same selection gives the input back. |
 
