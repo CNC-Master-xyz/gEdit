@@ -161,10 +161,12 @@
 </div>
 
 <style>
+  /* A flex item of the host's panel (a column): it shrinks to the panel, so the body
+     scrolls and the footer is never cut off. */
   .modal {
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
-    max-height: inherit;
     min-height: 0;
     outline: none;
   }

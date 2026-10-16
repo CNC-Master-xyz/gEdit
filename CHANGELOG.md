@@ -55,6 +55,7 @@ Two parts. New: the three scripts that move the path, Translate, Rotate and Mirr
 
 ### Fixed
 
+- **Dialogs on a short window:** the Insert and Cancel buttons of a long form (a cycle, a template) could be cut off at the bottom; the form now scrolls and the buttons stay in view.
 - **Two tabs could own one file** (a link, a `..`, a mapped drive) and the later save overwrote the earlier.
 - **A same-size rewrite on FAT32 or exFAT** was not noticed before a save.
 - **A transform of 1,000 or more separate edits moved bookmarks and folds,** on the run and on Undo; they now stay where they are, and one Undo still takes the whole run back.

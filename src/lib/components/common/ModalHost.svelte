@@ -131,7 +131,12 @@
     max-height: 86vh;
   }
 
+  /* A column, so the dialog inside shrinks to the panel's height: its body scrolls and its
+     buttons stay in view on a short window. (The dialog used to inherit the panel's
+     max-height, which the macOS web view did not hold to: the buttons were cut off.) */
   .modal-panel {
+    display: flex;
+    flex-direction: column;
     width: min(620px, 90vw);
     max-height: 70vh;
     padding: 10px;
