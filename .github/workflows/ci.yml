@@ -97,7 +97,9 @@ jobs:
   python:
     name: Python ${{ matrix.python }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    # The P4a tests (the geometry oracle, the owner-public runs) made the suite ~9.5 min on
+    # 3.12 and longer on 3.9 (cancelled at 10 min on 2026-10-16); 30 leaves room on both.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
