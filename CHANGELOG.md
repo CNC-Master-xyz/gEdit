@@ -1,12 +1,12 @@
 # Changelog
 
-What changed in each release of gEdit, written for the person who edits NC programs. The release workflow publishes the entry of a version as the notes of its draft release, so the top of each entry has to make sense on its own. The entry called `Unreleased` is what has been fixed or added on `main` since v1.0.0 was prepared; it has no date yet and will be the entry of v1.1.0.
+What changed in each release of gEdit, written for the person who edits NC programs. The release workflow publishes the entry of a version as the notes of its draft release, so the top of each entry has to make sense on its own. An entry called `Unreleased`, when there is one, is what has been fixed or added on `main` since the last release; it gets its version and date when that version is tagged.
 
-## Unreleased
+## v1.1.0 (2026-10-17)
 
-This release will be v1.1.0. It includes [v1.0.0](#v100-2026-10-10), which was built but not published as a release.
+The first 1.x release. It includes everything of [v1.0.0](https://github.com/CNC-Master-xyz/gEdit/blob/v1.1.0/CHANGELOG.md#v100-2026-10-10), which was built but never published as a release: if you come from v0.5.0, read that entry too.
 
-A round of fixes after the v1.0.0 preparation: files, recovery and backups report and bound themselves honestly, scripts behave on Windows and when started from the Dock, the ribbon has seven tabs, the code help is filled in from the control manuals for all four control families, and a number of small readings of Klartext, Sinumerik, Okuma and Fanuc programs are corrected. The plan of record is [bugfix-round-1.md](docs/planning/bugfix-round-1.md); the guide pages are linked below. It also adds the three scripts that move the path: Translate, Rotate and Mirror ([phase-4-implementation.md](docs/planning/phase-4-implementation.md#p4a-move-the-path)).
+Two parts. New: the three scripts that move the path, Translate, Rotate and Mirror, on the Tools tab ([phase-4-implementation.md](docs/planning/phase-4-implementation.md#p4a-move-the-path), the guide page [Scripts](docs/user/scripts.md)); a block they cannot judge refuses the whole run, so nothing is written that gEdit had to guess. And a round of fixes after 1.0: files, recovery and backups report and bound themselves honestly, scripts behave on Windows and when started from the Dock, the ribbon has seven tabs, the code help is filled in from the control manuals for all four control families, and a number of small readings of Klartext, Sinumerik, Okuma and Fanuc programs are corrected. The plan of record is [bugfix-round-1.md](docs/planning/bugfix-round-1.md); the guide pages are linked below.
 
 ### New
 
