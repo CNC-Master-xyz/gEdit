@@ -8,7 +8,7 @@
     ]
   },
   "machine": null,
-  "message": "Subtracted 0.5 from Z in 15 words on 15 blocks. Left 5 blocks and 4 words as written: 1 inside a frame, 4 cycles not reviewed, 1 word that cannot be read, 2 incremental words, 1 word whose reading depends on the machine. No machine chosen: words whose reading depends on the machine are left alone.",
+  "message": "Subtracted 0.5 from Z in 15 words on 15 blocks. Left 2 blocks and 5 words as written: 1 inside a frame, 1 cycle not reviewed, 1 word that cannot be read, 1 data word, 2 incremental words, 1 word whose reading depends on the machine. No machine chosen: words whose reading depends on the machine are left alone.",
   "findings": [
     {
       "line": 4,
@@ -17,22 +17,10 @@
       "reason": "incremental"
     },
     {
-      "line": 12,
-      "severity": "warning",
-      "message": "G71 U1.5 R0.5: nobody reviewed the positions of G71 (roadmap R8).",
-      "reason": "cycle-not-reviewed"
-    },
-    {
       "line": 13,
-      "severity": "warning",
-      "message": "G71 P100 Q200 U0.4 W0.1 F0.25: nobody reviewed the positions of G71 (roadmap R8).",
-      "reason": "cycle-not-reviewed"
-    },
-    {
-      "line": 20,
-      "severity": "warning",
-      "message": "G70 P100 Q300: nobody reviewed the positions of G70 (roadmap R8).",
-      "reason": "cycle-not-reviewed"
+      "severity": "info",
+      "message": "W0.1: a value of G71, not a position of this program.",
+      "reason": "data"
     },
     {
       "line": 27,

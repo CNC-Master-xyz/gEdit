@@ -1000,6 +1000,33 @@ class TestP4aReviewLatheCycleValues(unittest.TestCase):
         self.assertEqual(lines_of(payload)[2:4], ["G76 P020060 Q100 R0.05", "G76 X40. Z-20. R-2. P1000 Q300 F1.5"])
         self.assertEqual(reasons(payload), ["data", "data"])
 
+    def test_a_shift_of_z_still_lists_the_w_of_plain_moves_beside_the_g71_allowance(self):
+        # exit2-x8 after P4a: W stays the incremental twin of Z in a plain move (`G01 W-1.`,
+        # a bare `W-2.` under G01) and is listed as such; only the W of a G71 block became a
+        # value of the cycle. No machine: the profile's default G-code system names the twins.
+        payload = self.lathe(
+            "G01 W-1. F0.1\nW-2.\nG71 U1.5 R0.5\nG71 P10 Q20 U0.4 W0.1 F0.25\nN10 G0 X20.\nN20 G1 Z-10.\nG70 P10 Q20",
+            operation="subtract",
+            operand=0.5,
+            addresses=["Z"],
+        )
+        self.assertEqual(lines_of(payload)[1:9], ["G0 X50. Z4.5", "G01 W-1. F0.1", "W-2.", "G71 U1.5 R0.5", "G71 P10 Q20 U0.4 W0.1 F0.25", "N10 G0 X20.", "N20 G1 Z-10.5", "G70 P10 Q20"])
+        self.assertEqual(
+            [(f["line"], f["reason"], f["message"]) for f in payload["findings"]],
+            [
+                (3, "incremental", "W-1.: W moves Z by a distance, so a shift does not apply to it."),
+                (4, "incremental", "W-2.: W moves Z by a distance, so a shift does not apply to it."),
+                (6, "data", "W0.1: a value of G71, not a position of this program."),
+            ],
+        )
+        self.assertIn("1 data word, 2 incremental words", payload["message"])
+
+    def test_the_no_machine_lathe_context_names_the_incremental_twins(self):
+        # The bare resolved profile has no `addresses.incremental`: the twins come from the
+        # default G-code system's overlay. A check built on the bare profile loses every W row.
+        twins = helpers.import_gedit_nc().incremental_axes(helpers.effective_context("fanuc-lathe")["profile"])
+        self.assertEqual(twins, {"U": "X", "W": "Z"})
+
     def test_a_mill_drilling_cycle_keeps_its_rules(self):
         # Its lengths lie on the tool axis: a multiply of X scales the hole positions.
         payload = run("G90 G17\nG83 X10. Y10. Z-5. R2. Q1. F100.\nG80\n", operation="multiply", operand=2, addresses=["X"])
