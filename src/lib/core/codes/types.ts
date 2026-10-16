@@ -111,6 +111,31 @@ export interface CodeParam {
    * unknown, and the inspector falls back to its pairing of neighbouring blocks.
    */
   block?: 1 | 2;
+  /**
+   * P4a fix B1 (NC-2; plan §7 #311). The parameter is an **angle** (`'angle'`) or a **side or
+   * corner** (`'side'`) in the working plane that places or turns what the cycle cuts: the angle
+   * the whole pocket, slot or stud is turned by (Klartext `Q224`, `Q374`), the corner the tool
+   * stands at when it is called (`Q367`), the side it approaches from (`Q437`, `Q376`). A
+   * rotation or a mirror of the path would have to change it, which gEdit does not do yet, so
+   * rotate and mirror refuse the cycle and its calls (`cycle-angle`); translate and address
+   * arithmetic read the parameter by its `position` as before (`'none'`). Absent: the parameter
+   * is no angle or side of the plane.
+   */
+  inPlane?: 'angle' | 'side';
+  /**
+   * P4a fix B1 (NC-11; plan §7 #315). On a code with `positionsRotary`: written as `0`, this
+   * parameter keeps the rotary axes where they stand (Sinumerik `CYCLE800` `_DIR` 0: compute the
+   * frame without moving). Any other value, or the parameter left out, turns them.
+   */
+  keepsRotary?: boolean;
+  /**
+   * P4a fix B1 (NC-8; plan §7 #316). The sign of this value is a **direction**: the direction of
+   * the move that follows along the other axis of the plane (Okuma `G75`/`G76` `L`, the chamfer
+   * and the corner round at the end of a `G01` move). A mirror would have to change it in some
+   * blocks and not in others, which gEdit does not do yet, so the lathe Z mirror refuses a block
+   * that writes it (`chamfer-sign`). Only `'next-move'`.
+   */
+  signOf?: 'next-move';
 }
 
 /**
@@ -217,8 +242,28 @@ export interface CodeSets {
    * judges a program reads it.
    */
   path?: 'arc' | 'cycle';
+  /**
+   * Phase 4 (P4a prelude; Phase 4 plan §6.2, AD-42). The direction of the arc this code
+   * cuts, **as the control defines it**: `'cw'` clockwise (`G2`), `'ccw'` counter-clockwise
+   * (`G3`), seen from the positive end of the axis normal to the plane toward its negative
+   * end (G17: from +Z, G18: from +Y, G19: from +X) in the right-handed system. On a lathe the
+   * arc looks the other way round when the turret is behind the centre line, but the code
+   * means the same, and that is what is recorded. Only on an entry with `path: 'arc'`
+   * (`core/codes/load.ts` drops it otherwise). A mirror swaps the code for the one of the same
+   * group with the other value, so an arc code without it (`CIP`, `CT`, Okuma `G102`) cannot be
+   * mirrored. Read by `_nc_path`/`_nc_geom` (`gedit_nc.arc_direction_of`) and `arcDirectionOf`.
+   */
+  arcDirection?: 'cw' | 'ccw';
   /** M10 (WP10.2). Cutter or nose radius compensation on (`G41`, `G42`, `RL`, `RR`) or off (`G40`, `R0`). */
   radiusComp?: 'on' | 'off';
+  /**
+   * Phase 4 (P4a prelude; plan §6.2, AD-42). The side of the path the tool keeps to under
+   * this compensation code, seen along the direction of travel: `'left'` (`G41`, `RL`) or
+   * `'right'` (`G42`, `RR`). Only on an entry with `radiusComp: 'on'` (dropped otherwise). A
+   * mirror swaps the code for the one of the same group with the other value; a compensation
+   * code without it (five-axis `G41.2`–`G42.6`, the leading-edge `G41.3`) cannot be mirrored.
+   */
+  compSide?: 'left' | 'right';
   /** M10 (WP10.2). A tool length offset on (`G43`, `G44`, `G43.4`, `G43.5`) or off (`G49`). */
   lengthComp?: 'on' | 'off';
   /** M10 (WP10.2). Leaving this modal code sets the spindle speed to zero (Sinumerik `G331`, `G332`). */
@@ -454,6 +499,56 @@ export interface CodeEntry {
    * writes no value at all (`TRANS` alone, a reset). Only `true`.
    */
   shift?: boolean;
+  /**
+   * P4a integration (plan §7 #299). A block of this shift code whose every axis value is a
+   * written zero sets **no** shift: the manual's reset (Klartext cycle 7 with `X+0`, Fanuc
+   * `G52` with every axis at zero, Sinumerik `TRANS X0`) or an addition of nothing
+   * (`ATRANS X0`). The geometry transforms (`_nc_geom.py`) then do not refuse the block as a
+   * coordinate shift; any other value, a variable, or a code without the flag (`G92 X0` sets
+   * the position, which is no reset) still refuses. Only `true`, only with `shift` or a
+   * data code of the offset group. Nothing in the app reads it.
+   */
+  shiftZeroIsNone?: boolean;
+  /**
+   * P4a fix B1 (NC-15; plan §7 #317). On a code with `frameZeroWords`: the value at which those
+   * words read as **no frame** (`"1"`: a scaling factor of 1, Klartext cycle 11 `SCL1` and cycle
+   * 26 `X1 Y1`; the TNC 640 cycle manual resets both by the factor 1). Absent: `0`, the reading
+   * of the tilts and rotations. Read by the modal interpreter's rule 13 in both languages.
+   */
+  frameIdentity?: string;
+  /**
+   * P4a fix B1 (NC-5; plan §7 #312). What the code does to the order the blocks run in, so the
+   * geometry transforms know where a straight walk through the program is not what the control
+   * does:
+   *   - `'jump'`: the block may continue at the label it names (Fanuc and Okuma `GOTO`, Okuma
+   *     `IF`, Sinumerik `GOTOF`, `GOTOB`, `GOTO`, `GOTOC`, Klartext `FN 9`–`FN 12`);
+   *   - `'label'`: a label of its own, a jump target (Klartext `LBL`), or, in a jump block, the
+   *     label it names;
+   *   - `'branch'`, `'else'`, `'branch-end'`: a structured condition (Sinumerik `IF`, `ELSE`,
+   *     `ENDIF`); an `IF` whose block jumps is a jump;
+   *   - `'loop'`, `'loop-end'`: a loop's start and end (Sinumerik `WHILE`/`ENDWHILE`, `FOR`/
+   *     `ENDFOR`, `LOOP`/`ENDLOOP`, `REPEAT`/`UNTIL`; Fanuc `DO`/`END`);
+   *   - `'repeat'`: with a label behind it, runs the section from that label again (Sinumerik
+   *     `REPEAT MARK1 P=2`, `REPEATB`); without one, a loop start (`REPEAT` … `UNTIL`).
+   * Block numbers and the dialects' label tokens are labels as written. Read by `_nc_path`
+   * (the tracker's flow reading) and `_nc_geom`; nothing in the app reads it.
+   */
+  flow?: 'jump' | 'label' | 'branch' | 'else' | 'branch-end' | 'loop' | 'loop-end' | 'repeat';
+  /**
+   * P4a fix B1 (NC-12, owner decision Q-D of 2026-10-16; plan §7 #318). The block describes the
+   * workpiece blank for the control's graphics (Klartext `BLK FORM 0.1 Z X… Y… Z…`): its bare
+   * axis letter names the tool axis, not a position, and its corners are data. Rotate and mirror
+   * leave it as written and say so in one information row (`blank`). Only `true`.
+   */
+  blank?: boolean;
+  /**
+   * P4a fix B1 (NC-11; plan §7 #315). A block of this code turns the machine's rotary axes to
+   * angles the program does not write (Klartext `PLANE … TURN`/`MOVE`, Fanuc `G53.1`, Sinumerik
+   * `CYCLE800` unless its `keepsRotary` parameter is 0; an empty call `CYCLE800()` turns
+   * nothing). The rotary axes are then not known until the program writes them absolutely.
+   * Only `true`.
+   */
+  positionsRotary?: boolean;
 }
 
 /** One dialect's database, as stored in JSON. */

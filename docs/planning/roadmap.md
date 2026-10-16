@@ -167,11 +167,11 @@ Status: **done and on `main` (2026-10-10, `71f38d7`; CI and the runtime suite, 1
 
 Exit criteria: geometry transforms and cycle expansion work reliably on the fixture set, and the editor has the comfort features long-time users expect. This was Phase 3 before the re-cut of 2026-09-30.
 
-Status: **plan of record since 2026-10-12 ([phase-4-implementation.md](phase-4-implementation.md)); the owner's answers to its 25 questions are in, and P4a starts with its prelude.** Cut by the owner on 2026-10-12: next and previous NC event, the channel sync timeline, moving the configuration folder (see [Not planned](#not-planned)). Closed: the `toolWord` variant.
+Status: **plan of record since 2026-10-12 ([phase-4-implementation.md](phase-4-implementation.md)); the owner's answers to its 25 questions are in. P4a (translate, rotate, mirror on a shared path tracker) is built, reviewed and fixed on `p4a/intC` (2026-10-16): the prelude (the contracts and the arc direction and compensation side flags, [§6.1 and §6.2](phase-4-implementation.md#61-the-path-tracker-and-the-transform-rules-_nc_pathpy-_nc_geompy-p4a)), Wave A and Wave B with their integrations, and the user guide ([Scripts](../user/scripts.md#translate)). The NC and code reviews and their fix batches are done ([§7 #311–#360](phase-4-implementation.md#7-where-phase-4-deviated-from-the-contracts)); the optimisation of the scripts, the fuzz review, the runtime suite, the gates and the owner's manual checks (§10) are next, then v1.1.0.** Cut by the owner on 2026-10-12: next and previous NC event, the channel sync timeline, moving the configuration folder (see [Not planned](#not-planned)). Closed: the `toolWord` variant.
 
 | Area | Item | Size | Delivery |
 |---|---|---|---|
-| NC | [Translate](nc-transformations.md#translate-coordinates), [rotate](nc-transformations.md#rotate-coordinates), [mirror](nc-transformations.md#mirror-coordinates) | L | Script |
+| NC | [Translate](nc-transformations.md#translate-coordinates), [rotate](nc-transformations.md#rotate-coordinates), [mirror](nc-transformations.md#mirror-coordinates) (with a Z mirror for the counter spindle on a lathe) | L | Script |
 | NC | [Expand drilling cycles](nc-transformations.md#expand-drilling-cycles), [statistics and time estimate](nc-transformations.md#statistics-and-time-estimate) | M | Script |
 | Compare | [Aligned NC-aware diff with merge](file-compare.md#aligned-nc-aware-diff-with-merge) (decided in, owner 2026-10-12), [word-level marking](file-compare.md#word-level-marking) | L | Core |
 | Editor | [Split view](editor-core.md#split-view), [printing](editor-core.md#printing), [find files in folders](editor-core.md#find-files-in-folders) | M | Core |

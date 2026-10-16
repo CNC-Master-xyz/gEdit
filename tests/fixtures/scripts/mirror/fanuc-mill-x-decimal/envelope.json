@@ -1,0 +1,29 @@
+{
+  "message": "Mirrored in X about X12.5: 11 words and 4 codes on 9 blocks (G2 and G3, G41 and G42 swapped). Left 2 blocks as written: 1 return to the reference point, 1 position in machine coordinates. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "warning",
+      "message": "Mirroring reverses the cutting direction: climb milling is now conventional milling, and the other way round. Check the cutting data.",
+      "reason": "climb-milling"
+    },
+    {
+      "line": 14,
+      "severity": "warning",
+      "message": "A helical move (an arc with a move along the third axis) now turns the other way: a thread milled with it is now the other hand.",
+      "reason": "helix-hand"
+    },
+    {
+      "line": 19,
+      "severity": "info",
+      "message": "G91 G28 Z0.: a position in machine coordinates or an incremental return to the reference point; left as written.",
+      "reason": "machine-position"
+    },
+    {
+      "line": 20,
+      "severity": "info",
+      "message": "G90 G53 X0. Y0.: a position in machine coordinates or an incremental return to the reference point; left as written.",
+      "reason": "machine-position"
+    }
+  ]
+}

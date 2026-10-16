@@ -1,0 +1,11 @@
+{
+  "message": "Rotated by 30° about X0 Y0: 8 words on 4 blocks, 1 of them added, 6 rounded. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "info",
+      "message": "4 L IX-10 IY-10 R0 F100: rounded to the word's decimals or to whole increments (the first of 4 rounded blocks).",
+      "reason": "rounded"
+    }
+  ]
+}

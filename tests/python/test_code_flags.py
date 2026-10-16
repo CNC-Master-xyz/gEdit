@@ -20,6 +20,7 @@ M10 (P10) adds two, with their TypeScript twins ``positionOf`` and ``tcpOf``:
 
 from __future__ import annotations
 
+import json
 import unittest
 
 from tests.python import helpers
@@ -176,9 +177,92 @@ class TcpTest(unittest.TestCase):
         self.assertEqual((gedit_nc.frame_of(entry), gedit_nc.tcp_of(entry)), ("close", "off"))
 
 
+class GeometryFlagsTest(unittest.TestCase):
+    """Phase 4 (P4a prelude, plan section 6.2): the twin of ``what a mirror swaps`` in
+    ``flagsContract.test.ts``, and the Python half of ``geometryFlags.test.ts``."""
+
+    golden = helpers.load_json(helpers.FIXTURES_DIR / "codes" / "geometry-flags.json")
+
+    def test_the_arc_direction_reads_only_on_an_arc(self) -> None:
+        cases = [
+            ({"code": "G2", "sets": {"motion": "feed", "path": "arc", "arcDirection": "cw"}}, "cw"),
+            ({"code": "G3", "sets": {"motion": "feed", "path": "arc", "arcDirection": "ccw"}}, "ccw"),
+            ({"code": "G1", "sets": {"motion": "feed", "arcDirection": "cw"}}, None),
+            ({"code": "G90", "sets": {"path": "cycle", "arcDirection": "ccw"}}, None),
+            ({"code": "G2", "sets": {"path": "arc", "arcDirection": "CW"}}, None),
+            ({"code": "CIP", "sets": {"motion": "feed", "path": "arc"}}, None),
+            (None, None),
+        ]
+        for entry, want in cases:
+            with self.subTest(entry=entry):
+                self.assertEqual(gedit_nc.arc_direction_of(entry), want)
+
+    def test_the_side_reads_only_on_a_compensation_that_is_on(self) -> None:
+        cases = [
+            ({"code": "G41", "sets": {"radiusComp": "on", "compSide": "left"}}, "left"),
+            ({"code": "RR", "sets": {"radiusComp": "on", "compSide": "right"}}, "right"),
+            ({"code": "G40", "sets": {"radiusComp": "off", "compSide": "left"}}, None),
+            ({"code": "G41.2", "sets": {"radiusComp": "on"}}, None),
+            ({"code": "G41", "sets": {"radiusComp": "on", "compSide": "LEFT"}}, None),
+            (None, None),
+        ]
+        for entry, want in cases:
+            with self.subTest(entry=entry):
+                self.assertEqual(gedit_nc.comp_side_of(entry), want)
+
+    def test_the_direction_words_of_a_profile(self) -> None:
+        cases = [
+            ({"addresses": {"arcDirectionWords": {"DR+": "ccw", "DR-": "cw"}}}, {"DR+": "ccw", "DR-": "cw"}),
+            ({"addresses": {"arcDirectionWords": {"dr+": "ccw"}}}, {"DR+": "ccw"}),
+            ({"addresses": {"arcDirectionWords": {"DR": "cw", "DR-1": "cw", "DR+": "left"}}}, {}),
+            ({"addresses": {"arcDirectionWords": {"DR+": "cw", "DR-": "cw"}}}, {"DR+": "cw"}),
+            ({"addresses": {}}, {}),
+            ({}, {}),
+            (None, {}),
+        ]
+        for profile, want in cases:
+            with self.subTest(profile=profile):
+                self.assertEqual(gedit_nc.arc_direction_words_of(profile), want)
+
+    def test_the_direction_words_agree_with_the_validators_cases(self) -> None:
+        # tests/fixtures/codes/arc-direction-words.json is also run through the TypeScript
+        # validator (validate.test.ts): a word the validator refuses must not be read.
+        path = helpers.FIXTURES_DIR / "codes" / "arc-direction-words.json"
+        cases = json.loads(path.read_text(encoding="utf-8"))["cases"]
+        self.assertGreater(len(cases), 10)
+        for case in cases:
+            with self.subTest(case=case["name"]):
+                profile = {"addresses": {"arcDirectionWords": case["words"]}}
+                read = gedit_nc.arc_direction_words_of(profile)
+                self.assertEqual(read, case["read"])
+                if case["valid"]:
+                    self.assertEqual(len(read), len(case["words"]))
+
+    def test_every_golden_row_reads_the_same_in_python(self) -> None:
+        rows = 0
+        for dialect, entries in self.golden["databases"].items():
+            codes = {e.get("code"): e for e in helpers.resolved_codes(dialect)}
+            for row in entries:
+                with self.subTest(dialect=dialect, code=row["code"]):
+                    entry = codes.get(row["code"])
+                    self.assertIsNotNone(entry)
+                    self.assertEqual(
+                        (gedit_nc.arc_direction_of(entry), gedit_nc.comp_side_of(entry)),
+                        (row.get("arcDirection"), row.get("compSide")),
+                    )
+                rows += 1
+        self.assertEqual(rows, 16)
+
+    def test_the_profiles_read_the_golden_words(self) -> None:
+        for profile_id, words in self.golden["profiles"].items():
+            with self.subTest(profile=profile_id):
+                self.assertEqual(gedit_nc.arc_direction_words_of(helpers.resolved_profile(profile_id)), words)
+
+
 class ExportTest(unittest.TestCase):
     def test_the_readers_are_part_of_the_module(self) -> None:
-        for name in ("axis_words_of", "frame_of", "speed_limit_bound_of", "position_of", "tcp_of", "names_main_spindle"):
+        for name in ("axis_words_of", "frame_of", "speed_limit_bound_of", "position_of", "tcp_of", "names_main_spindle",
+                     "arc_direction_of", "comp_side_of", "arc_direction_words_of"):
             with self.subTest(name=name):
                 self.assertIn(name, gedit_nc.__all__)
 

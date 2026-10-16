@@ -123,7 +123,16 @@ A multiply or divide scales a distance like a position: incremental words, twins
 What it would leave unscaled while the rest moves is refused instead (`not-scaled`): a
 coordinate shift or set (`CodeEntry.shift`: `G52`, `G92`, `TRANS`) written with a chosen
 axis, and, with the tool axis chosen, a cycle that writes another length parameter (a peck
-depth `Q`, Klartext `Q201`, Sinumerik `SDIS`).
+depth `Q`, Klartext `Q201`, Sinumerik `SDIS`). A cycle with axis values of its own and no
+position on the tool axis (the Fanuc lathe's `G71`-`G76`) is judged so for every linear
+axis the run scales, and a block of it that scales an end point is refused whenever the
+cycle has such a length at all, written there or not (P4a review, NC-16).
+
+**The values of a cycle** (P4a review, NC-16). A word of a chosen address that is a reviewed
+parameter of the cycle in its block with no position (`position: 'none'`) and that may be a
+length (no `unit` of `dwell`, `count` or `angle`) is a value of the cycle and is left and
+listed (`data`): the relief `R` of `G74` and `G75`, the allowance and the taper `R` of `G76`.
+A count stays the user's choice (`K` of `G83`).
 
 **Arc geometry** (NC-3). An absolute arc centre (`I=AC(50)`) and the intermediate point of
 `CIP` (`CodeParam.axis`, absolute under `G90`) are positions of their axis and move with
@@ -180,8 +189,8 @@ Single words (`severity: "info"`, the rest of the block is changed): the words o
 whose words are data (`G92`, `G52`, `G10`, a datum shift), incremental words (`G91`, an
 incremental twin such as `W`, the Klartext `I` prefix — and every word while the distance
 mode is not known), variables and expressions, words with no resolved value (every
-machine-dependent word while no machine is chosen), and count parameters reached only
-through the arc-centre option (`G83 … K3`). An absolute point of a Klartext FK contour
+machine-dependent word while no machine is chosen), the values of a cycle (NC-16), and
+count parameters reached only through the arc-centre option (`G83 … K3`). An absolute point of a Klartext FK contour
 (`P1X` … `P3Y`, the centre `CCX`/`CCY`) on a chosen axis is left and listed as a warning
 (B1 fix NC, NC-03): gEdit does not move it, so the FK contour has to be checked.
 
@@ -663,6 +672,12 @@ def param_axis(codes: Sequence[Dict[str, Any]], address: str) -> Optional[str]:
 def reviewed(entry: Optional[Dict[str, Any]]) -> bool:
     """Whether anybody reviewed the entry's parameters for R8: at least one carries a role."""
     return any(gedit_nc.position_of(param) is not None for param in params_of(entry))
+
+
+def is_cycle_value(param: Optional[Dict[str, Any]]) -> bool:
+    """A reviewed cycle parameter that is no position and may be a length (NC-16): role
+    `'none'` and no `unit` of `dwell`, `count` or `angle`."""
+    return gedit_nc.position_of(param) == "none" and isinstance(param, dict) and param.get("unit") not in NOT_A_LENGTH
 
 
 def code_of(entry: Optional[Dict[str, Any]], fallback: str = "the cycle") -> str:
@@ -1245,12 +1260,15 @@ class Run:
         # cycle positions on the tool axis.
         cycle_words: Dict[int, bool] = {}
         cycle_args: List[Tuple[Arg, Optional[str]]] = []
+        # NC-16: the words of a cycle block that are values of the cycle (a depth, an
+        # allowance, a relief: `R` of the Fanuc lathe's `G74`-`G76`), left and listed.
+        cycle_data: Dict[int, str] = {}
         pole_words: set = set()
         if group is not None:
             if group.kind == "pole":
                 refusal = self.judge_pole(block, state, pole_words)
             else:
-                refusal = self.judge_cycle(block, group, state, cycle_words, cycle_args)
+                refusal = self.judge_cycle(block, group, state, cycle_words, cycle_args, cycle_data)
             if refusal is not None:
                 block.refusal = refusal
                 return
@@ -1318,7 +1336,7 @@ class Run:
                 continue
             if address not in setup.words and not is_cycle:
                 continue
-            word_data = None if id(token) in pole_words else data
+            word_data = None if id(token) in pole_words else cycle_data.get(id(token), data)
             outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, word_data, is_cycle))
         for arg, cls in cycle_args:
             outcomes.append(self.arg_outcome(arg, cls, state))
@@ -1512,8 +1530,12 @@ class Run:
         state: Dict[str, Any],
         cycle_words: Dict[int, bool],
         cycle_args: List[Tuple[Arg, Optional[str]]],
+        cycle_data: Dict[int, str],
     ) -> Optional[Tuple[str, str]]:
-        """R8: whether this block's cycle can be judged, and which of its values move with it."""
+        """R8: whether this block's cycle can be judged, and which of its values move with it.
+
+        Fills ``cycle_data`` with the words that are values of the cycle (NC-16).
+        """
         setup = self.setup
         entry = group.entry
         name = code_of(entry)
@@ -1551,6 +1573,13 @@ class Run:
                 return ("cycle-not-reviewed", "%s writes %s, which the code database does not describe" % (name, quote(arg.text)))
             if gedit_nc.position_of(param) is None:
                 return ("cycle-not-reviewed", "nobody reviewed %s of %s (roadmap R8)" % (self.shown(entry, arg), name))
+            if arg.kind == "word" and is_cycle_value(param):
+                # NC-16: a reviewed parameter that is no position (`position: 'none'`) and
+                # may be a length is a value of the cycle, not a coordinate of the program:
+                # the relief `R` of `G74`, the allowance and the taper `R` of `G76`. It is
+                # left and listed like the words of `G71`. A count stays the user's choice
+                # (`K` of `G83`, README "The form").
+                cycle_data[id(arg.token)] = name
         for own in [entry] + list(block.call_entries):
             others = [str(p.get("address")) for p in params_of(own) if gedit_nc.position_of(p) == "other"]
             if others:
@@ -1597,21 +1626,33 @@ class Run:
             if arg.kind == "call":
                 arg.name = self.shown(entry, arg)
             cycle_args.append((arg, cls))
-        if not self.params.additive and setup.moves_tool_axis:
+        # NC-16: a cycle with axis values of its own and no position on the tool axis (the
+        # Fanuc lathe's `G71`-`G76`): its other lengths may lie along any axis (the step `P`
+        # of `G74` along X, its peck `Q` along Z, the taper `R` of `G76`), so a multiply or
+        # divide of any linear axis judges it, not only one of the tool axis.
+        own_axes = not tool_axis and self.has_axis_values(entry)
+        scales = bool(setup.chosen & (setup.linear | frozenset(setup.twins)))
+        if not self.params.additive and (setup.moves_tool_axis or (own_axes and scales)):
             # CODE-8: a multiply or divide of the tool axis scales the cycle's positions, but
             # not a depth or a distance written as one of its other parameters (`Q1.` of
             # `G83`, Klartext `Q201`, Sinumerik `SDIS`): the cycle is scaled in one piece or
             # not at all.
             codes = block.codes()
+            data_axes = own_axes and gedit_nc.axis_words_of(entry) == "data"
             for arg in args:
                 param = self.param_of(entry, arg)
-                if gedit_nc.position_of(param) != "none" or arg.text.strip() == "":
+                if arg.text.strip() == "":
                     continue
-                if isinstance(param, dict) and param.get("unit") in NOT_A_LENGTH:
+                if gedit_nc.position_of(param) != "none":
+                    # NC-16: the axis words of a cycle whose axis words are data (`U2.` and
+                    # `W0.1` of `G71`: a depth of cut, an allowance) are lengths too.
+                    if not (data_axes and arg.kind == "word" and arg.name in setup.axes and gedit_nc.position_of(param) is None):
+                        continue
+                elif isinstance(param, dict) and param.get("unit") in NOT_A_LENGTH:
                     continue
                 if arg.literal is not None and gedit_nc.decimal_of(arg.literal) == 0:
                     continue
-                if arg.kind == "word":
+                if arg.kind == "word" and gedit_nc.position_of(param) == "none":
                     cls = self.number_class(arg.name, codes, [entry])
                     if cls is not None and cls not in ("length", "increment"):
                         continue
@@ -1620,7 +1661,47 @@ class Run:
                     "%s writes %s, which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece"
                     % (name, quote("%s=%s" % (self.shown(entry, arg), arg.text) if arg.kind != "word" else arg.text)),
                 )
+            if own_axes and not data_axes:
+                # NC-16: a block that scales an end point of such a cycle and leaves out its
+                # lengths (`G76 X40. Z-20. F1.5`): the control takes them from the cycle's
+                # first block or its own settings, unscaled.
+                scaled = [
+                    arg.text
+                    for arg in args
+                    if arg.kind == "word"
+                    and arg.name in setup.words
+                    and arg.name in setup.axes
+                    and gedit_nc.position_of(self.param_of(entry, arg)) is None
+                ]
+                lengths = self.length_params(entry, codes)
+                if scaled and lengths:
+                    return (
+                        "not-scaled",
+                        "%s has depths or distances of its own (%s) that a multiply or divide does not scale, so the cycle cannot be scaled in one piece"
+                        % (name, and_list(lengths)),
+                    )
         return None
+
+    def has_axis_values(self, entry: Optional[Dict[str, Any]]) -> bool:
+        """Whether the cycle declares an axis word of its own (an end point, an allowance)
+        without a role: the Fanuc lathe's `G71`-`G76` (NC-16)."""
+        axes = self.setup.axes
+        return any(
+            str(p.get("address") or "").upper() in axes and gedit_nc.position_of(p) is None for p in params_of(entry)
+        )
+
+    def length_params(self, entry: Optional[Dict[str, Any]], codes: List[Dict[str, Any]]) -> List[str]:
+        """The addresses of the cycle's reviewed parameters that may be lengths (NC-16)."""
+        found: List[str] = []
+        for param in params_of(entry):
+            address = str(param.get("address") or "")
+            if address == "" or address in found or not is_cycle_value(param):
+                continue
+            cls = self.number_class(address.upper(), codes, [entry] if isinstance(entry, dict) else [])
+            if cls is not None and cls not in ("length", "increment"):
+                continue
+            found.append(address)
+        return found
 
     def param_of(self, entry: Optional[Dict[str, Any]], arg: Arg) -> Optional[Dict[str, Any]]:
         if arg.kind == "call":

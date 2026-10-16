@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be mirrored for the counter spindle: 2 blocks of a milling program. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "G0 X10. Z5.: the Z mirror for the counter spindle is for turning programs; a milling program is mirrored about a line in the XY plane.",
+      "reason": "mill-z-mirror"
+    },
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "G1 Z-10. F100.: the Z mirror for the counter spindle is for turning programs; a milling program is mirrored about a line in the XY plane.",
+      "reason": "mill-z-mirror"
+    }
+  ]
+}

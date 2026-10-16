@@ -1,0 +1,53 @@
+{
+  "message": "Nothing was changed: 8 blocks cannot be mirrored for the counter spindle: 1 block with a rotary axis away from 0, 1 block outside the working plane, 2 thread blocks, 2 turning cycle blocks, 2 taper passes. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "G90 X40. Z-20. R-2. F0.2: a turning or facing pass with a taper (R): whether the taper changes sign depends on the cycle; write the taper for the counter spindle by hand.",
+      "reason": "single-pass-taper"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "G94 X20. Z-2. R-3. F0.2: a turning or facing pass with a taper (R): whether the taper changes sign depends on the cycle; write the taper for the counter spindle by hand.",
+      "reason": "single-pass-taper"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "G75 R1.: a turning, grooving or drilling cycle; its parameters are not mirrored, so the cycle would work on the wrong side.",
+      "reason": "lathe-cycle"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "G75 X30. Z-20. P2000 Q3000 F0.1: a turning, grooving or drilling cycle; its parameters are not mirrored, so the cycle would work on the wrong side.",
+      "reason": "lathe-cycle"
+    },
+    {
+      "line": 13,
+      "severity": "error",
+      "message": "G32 Z-20. F1.5: a thread or tapping move or cycle: mirrored in Z it would cut the other hand of thread unless the counter spindle turns the other way, which the program does not say. Write the threads for the counter spindle by hand.",
+      "reason": "thread"
+    },
+    {
+      "line": 14,
+      "severity": "error",
+      "message": "G92 X29. Z-20. F1.5: a thread or tapping move or cycle: mirrored in Z it would cut the other hand of thread unless the counter spindle turns the other way, which the program does not say. Write the threads for the counter spindle by hand.",
+      "reason": "thread"
+    },
+    {
+      "line": 15,
+      "severity": "error",
+      "message": "G0 X60. Z5. C90.: a rotary axis moves to an angle other than 0 here, or stands at one; turning or mirroring the path would need its angle changed too, which gEdit does not do.",
+      "reason": "rotary-word"
+    },
+    {
+      "line": 17,
+      "severity": "error",
+      "message": "G1 X40. Z0. F0.2: the working plane is not the one this transform works in (XY on a milling program, ZX with G18 for the lathe Z mirror).",
+      "reason": "plane"
+    }
+  ]
+}

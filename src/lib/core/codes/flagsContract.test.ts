@@ -8,10 +8,14 @@
 // flagged entry so that none can be dropped silently. The Python twins
 // (`gedit_nc.axis_words_of`, `frame_of`, `speed_limit_bound_of`) are held to the same
 // cases in `tests/python/test_code_flags.py`.
+//
+// The Phase 4 prelude (P4a, plan §6.2) adds the two flags a mirror swaps:
+// `CodeSets.arcDirection` and `CodeSets.compSide`, read by `arcDirectionOf` and `compSideOf`
+// (Python `arc_direction_of`, `comp_side_of`).
 
 import { describe, expect, it } from 'vitest';
 import { loadCodeDb, type CodeDbProblem } from './load';
-import { axisWordsOf, frameOf, lookupCode, positionOf, speedLimitBoundOf, tcpOf } from './lookup';
+import { arcDirectionOf, axisWordsOf, compSideOf, frameOf, lookupCode, positionOf, speedLimitBoundOf, tcpOf } from './lookup';
 import type { CodeDb } from './types';
 
 function load(codes: unknown[]): { db: CodeDb; problems: CodeDbProblem[] } {
@@ -343,5 +347,59 @@ describe('the path of a feed move (Phase 3 prelude P3a, plan §6.6; the motion c
       ['G90', 'cycle', 'feed'],
     ]);
     expect(problems.map((p) => p.path)).toEqual(['codes[2].sets.path']);
+  });
+});
+
+describe('what a mirror swaps (Phase 4 prelude P4a, plan §6.2, AD-42)', () => {
+  it('carries the arc direction and the compensation side and drops any other value', () => {
+    const { db, problems } = load([
+      { code: 'G2', label: 'Arc', group: 'motion', modal: true, sets: { motion: 'feed', path: 'arc', arcDirection: 'cw' } },
+      { code: 'G3', label: 'Arc', group: 'motion', modal: true, sets: { motion: 'feed', path: 'arc', arcDirection: 'ccw' } },
+      { code: 'G41', label: 'Left', group: 'compensation', modal: true, sets: { radiusComp: 'on', compSide: 'left' } },
+      { code: 'G42', label: 'Right', group: 'compensation', modal: true, sets: { radiusComp: 'on', compSide: 'right' } },
+      { code: 'G12', label: 'Arc', group: 'motion', sets: { motion: 'feed', path: 'arc', arcDirection: 'clockwise' } },
+      { code: 'G43', label: 'Side', group: 'compensation', sets: { radiusComp: 'on', compSide: 'LEFT' } },
+    ]);
+    expect(db.codes.map((e) => [e.code, arcDirectionOf(e), compSideOf(e)])).toEqual([
+      ['G2', 'cw', null],
+      ['G3', 'ccw', null],
+      ['G41', null, 'left'],
+      ['G42', null, 'right'],
+      ['G12', null, null],
+      ['G43', null, null],
+    ]);
+    expect(problems.map((p) => p.path)).toEqual(['codes[4].sets.arcDirection', 'codes[5].sets.compSide']);
+  });
+
+  it('drops a direction on a code that cuts no arc and a side on a compensation that is off', () => {
+    const { db, problems } = load([
+      { code: 'G1', label: 'Line', group: 'motion', modal: true, sets: { motion: 'feed', arcDirection: 'cw' } },
+      { code: 'G40', label: 'Off', group: 'compensation', modal: true, sets: { radiusComp: 'off', compSide: 'left' } },
+      { code: 'G90', label: 'Pass', group: 'motion', modal: true, sets: { motion: 'feed', path: 'cycle', arcDirection: 'ccw' } },
+      { code: 'RL', label: 'Left', group: 'compensation', sets: { compSide: 'left' } },
+    ]);
+    expect(db.codes.map((e) => e.sets ?? null)).toEqual([
+      { motion: 'feed' },
+      { radiusComp: 'off' },
+      { motion: 'feed', path: 'cycle' },
+      null,
+    ]);
+    expect(problems.map((p) => p.path)).toEqual([
+      'codes[0].sets.arcDirection',
+      'codes[1].sets.compSide',
+      'codes[2].sets.arcDirection',
+      'codes[3].sets.compSide',
+    ]);
+  });
+
+  it('reads nothing into a raw entry whose flag has no partner member or the wrong spelling', () => {
+    // The loader would have dropped these; the readers must not guess when handed a raw
+    // entry (a user database loaded elsewhere, a test double).
+    expect(arcDirectionOf({ code: 'G1', label: 'x', sets: { arcDirection: 'cw' } })).toBeNull();
+    expect(arcDirectionOf({ code: 'G2', label: 'x', sets: { path: 'arc', arcDirection: 'CW' as 'cw' } })).toBeNull();
+    expect(compSideOf({ code: 'G40', label: 'x', sets: { radiusComp: 'off', compSide: 'left' } })).toBeNull();
+    expect(compSideOf({ code: 'G41', label: 'x', sets: { radiusComp: 'on' } })).toBeNull();
+    expect(arcDirectionOf(null)).toBeNull();
+    expect(compSideOf(undefined)).toBeNull();
   });
 });

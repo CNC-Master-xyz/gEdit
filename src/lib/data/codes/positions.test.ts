@@ -81,7 +81,9 @@ describe('the R8 roles of the shipped databases', () => {
 
   it.each(DIALECTS)('%s: the reader gives the roles the golden lists, through the loader', (dialect) => {
     for (const row of GOLDEN.databases[dialect]) {
-      expect(Object.entries(rolesOf(dialect, row.code)), `${dialect} ${row.code}`).toEqual(row.params);
+      // A two-block cycle may declare an address once per block (`U` of G71); the roles agree
+      // between the two (the loader holds them to it), so the reader answers once per address.
+      expect(Object.entries(rolesOf(dialect, row.code)), `${dialect} ${row.code}`).toEqual(Object.entries(Object.fromEntries(row.params)));
     }
   });
 });
@@ -100,14 +102,24 @@ describe('what the roles decide (the reasons are in the G10 table, plan §8.7)',
     }
   });
 
-  it('Fanuc lathe: no role at all, its own or inherited — R of a lathe drilling cycle is a machine parameter', () => {
-    // On a lathe in G-code system A, whether R is a distance from the initial level or a
-    // position is a parameter of the control; nothing here is certain, so every lathe
-    // cycle is refused and listed. The lathe replaces or removes every mill drilling cycle.
+  it('Fanuc lathe: roles on G70 to G76 only — R of a lathe drilling cycle is a machine parameter', () => {
+    // On a lathe in G-code system A, whether R of a drilling cycle (G83 to G89) is a distance
+    // from the initial level or a position is a parameter of the control; nothing there is
+    // certain, so those cycles are refused and listed. The lathe replaces or removes every
+    // mill drilling cycle. P4a integration (§7 #305): the multiple repetitive cycles G70 to
+    // G76 are reviewed from the lathe manual — depths, retracts, allowances, block numbers,
+    // counts and feeds, no positions; their X and Z are axis words. Okuma has no role.
+    const repetitive = ['G70', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76'];
+    expect(GOLDEN.databases['fanuc-lathe'].map((row) => row.code)).toEqual(repetitive);
+    for (const row of GOLDEN.databases['fanuc-lathe']) {
+      for (const [address, role] of row.params) {
+        expect(role, `${row.code} ${address}`).toBe(['X', 'Z', 'U', 'W'].includes(address) ? null : 'none');
+      }
+    }
     for (const dialect of ['fanuc-lathe', 'fanuc-lathe-b', 'okuma']) {
-      expect(GOLDEN.databases[dialect], dialect).toEqual([]);
+      if (dialect !== 'fanuc-lathe') expect(GOLDEN.databases[dialect], dialect).toEqual([]);
       const inherited = LOADED[dialect].codes.filter((e) => (e.params ?? []).some((p) => positionOf(p) !== null));
-      expect(inherited.map((e) => e.code), dialect).toEqual([]);
+      expect(inherited.map((e) => e.code).sort(), dialect).toEqual(dialect === 'okuma' ? [] : repetitive);
     }
   });
 

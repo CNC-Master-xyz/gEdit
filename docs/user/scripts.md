@@ -2,8 +2,8 @@
 
 A script is a small Python program that reads your NC code and gives something back: new
 code, or a table. Scripts are how gEdit is extended. Scaling feeds, scaling spindle speeds,
-listing tools, checking a program, finding its extents and doing arithmetic on address
-values are done by scripts that ship with the app, and they use exactly the same contract
+listing tools, checking a program, finding its extents, doing arithmetic on address
+values and moving, turning or mirroring the path are done by scripts that ship with the app, and they use exactly the same contract
 as one you write yourself — so if a bundled script is nearly what you need, copy it and
 change the part that is not.
 
@@ -639,7 +639,10 @@ too, whatever the distance mode, and so are the cycle positions on a scaled tool
 would be left unscaled while the positions around it are scaled is refused: a coordinate
 shift or set written with a chosen axis, and, when the tool axis is chosen, a cycle that
 writes a length parameter of its own (a peck depth `Q`, Klartext `Q201`, Sinumerik `SDIS`).
-The radius `R` of an arc is scaled only when you choose `R`.
+A Fanuc lathe cycle `G71` to `G76` is never scaled in part, on any axis: a multiply or
+divide of a linear axis refuses (*not scaled*) a block of it that writes a length of the
+cycle other than zero, and a block that scales its end point. Its blocks are left as written
+and listed. The radius `R` of an arc is scaled only when you choose `R`.
 
 #### What a Z shift moves in a cycle
 
@@ -680,12 +683,16 @@ per refused block, with the block as written and the reason in plain words.
   that is closed again (`G69`, `G15`, `PLANE RESET`, `CYCLE800()`) ends it, and so does a
   Klartext cycle 19 or `PLANE SPATIAL`, `PROJECTED` or `EULER` with every angle at zero, and a `CYCL DEF 19.1` that names no angle.
 - **A rotary axis without tool centre point control**, see the next section.
-- **A cycle it has no role for**: every lathe and Okuma cycle, a Fanuc `G65` that hands a
+- **A cycle it has no role for**: every Okuma cycle and every lathe cycle but the Fanuc
+  multiple repetitive cycles `G70` to `G76` (their contour blocks and end points are moved,
+  and their depths, allowances, the relief `R` of `G74` and `G75`, the taper `R` of `G76`, and
+  counts are left as written **and listed** as values of the cycle), a Fanuc `G65` that hands a
   chosen address a number, a Sinumerik or Klartext cycle the database has not reviewed, and
   **a call it does not know that has a number among its arguments** (`CYCLE76(…)`, a
   subprogram `MYSUB(10)`), since its depth could be an absolute position nobody described.
   A call with no number (`MYSUB`, `CYCLE832()`) is not a cycle with positions and is not
-  touched. The Sinumerik milling cycles `CYCLE61`, `POCKET3`, `POCKET4` and `SLOT1` and the
+  touched. The Sinumerik milling cycles `CYCLE61`, `POCKET3`, `POCKET4` and `SLOT1`, the turning cycle `CYCLE95` (its contour is
+  elsewhere) and the
   Klartext cycle 254 are known, but their points in the plane are positions of their own that a
   shift cannot judge, so such a call is refused with *has positions of its own*.
 - **An FK contour point**: the absolute points of a Klartext FK contour (`P1X`, `P1Y`, `P1Z`,
@@ -718,7 +725,9 @@ Words it leaves inside a block it does change are listed too, at information lev
 **incremental** word (`G91`, a lathe `U`/`W`, a Klartext `IZ`); a **variable** or an
 expression (Okuma `X=V1+2`, Sinumerik `X=R1`); a **code whose words are values** (`G92`,
 `G52`, `G10`, `CYCL DEF 7`, `TRANS`); a **count** reached through the arc centres; and a
-word whose reading **depends on the machine**. A Sinumerik `Z=AC(3.25)` is an absolute
+word whose reading **depends on the machine**; and a **value of a cycle** of a chosen address
+(the depths, allowances and taper of a Fanuc lathe cycle, which are not positions). A count you
+choose on purpose still changes (`K` of `G83`). A Sinumerik `Z=AC(3.25)` is an absolute
 position and is moved; `Z=IC(2)` is an incremental distance and is left.
 
 At most 500 rows are listed, and the message says how many more there were. Its last
@@ -782,6 +791,405 @@ subprogram or another part of the program, where the call cannot judge it. Klart
 database still lacks does not replace the earlier definition in the modal state, so address
 arithmetic refuses it with its calls; the same goes for cycle 20 and the pattern cycles 220 and
 221. The fix for these is database content, not the script.
+
+### Translate
+
+Moves the path by a shift in X, Y and Z: the part sits 12 mm further along the table, or
+a second vice takes the same program. It replaces the text as one undo step and ends with a
+message that says what it moved and what it left, so read the message. It works on every
+built-in dialect, milling and turning.
+
+| Field | |
+|---|---|
+| **X shift**, **Y shift**, **Z shift** | The shift per axis, in the program's units (millimetres or inches). A shift of 0 leaves the axis alone. On a turning dialect the **X shift** is read the way your machine reads `X`, see below |
+| **Decimal places** | *As written*, the only choice: each word keeps its own form and gets the decimals the shift needs. A shift is never rounded |
+
+**What moves.** Every absolute position: the end point of a move, an absolute arc centre
+(Sinumerik `I=AC(…)`, or `I`/`J` on a control whose centres are absolute), the Klartext pole
+`CC`, and the position of a drilling cycle (the `X`/`Y` of a block under `G81`, a Klartext
+`CYCL CALL POS`, the positions behind a Sinumerik `MCALL`). A shift of `Z` also moves the
+cycle positions on the tool axis: the `R` plane of a Fanuc cycle under `G90`, Klartext's
+`Q203`, Sinumerik's `RTP`, `RFP` and `DP`. It is the same rule as in
+[What a Z shift moves in a cycle](#what-a-z-shift-moves-in-a-cycle).
+
+A Klartext **`CYCL CALL POS`** writes a position of its own, and its Z adds to the surface
+coordinate of the cycle (`Q203`). A shift in **X and Y** moves the call's X and Y. A shift in
+**Z** is refused: moving both the call and the definition would move the cycle twice, and
+moving only one would leave the other behind. The call and the definition it runs are listed
+together. Shift Z in another way, or use [Address arithmetic](#address-arithmetic) on the
+cycle's own parameters.
+
+**What stays.** Incremental words (`G91`, a lathe `U` and `W`, a Klartext `IX`), incremental
+arc centres (`I`, `J`, `K` on most controls), radii, and Klartext polar radii and angles. A
+shift does not change a distance, an angle or a length, so none of them is touched. A
+cycle moves **in one piece** with the blocks that run it. A tool offset number (Sinumerik
+`D`) is never changed by any of the three.
+
+A program in inches, or a block that switches units, gets the shift converted
+(25.4 mm to the inch) in the units the block states.
+
+**Exact.** No word is rounded. A word keeps its form: a point stays a point, a word with no
+point stays a whole number of increments of your machine, a leading zero or its absence
+(`Z-.5`) is kept, and Klartext keeps its plus signs. A shift that a word cannot hold, such
+as 0.0005 on a machine that counts in whole thousandths, refuses the run. A shift of
+0, 0, 0 gives the program back unchanged, byte for byte, and a shift by *d* followed by a
+shift by *−d* gives every value back.
+
+Examples, on a Fanuc mill with no machine chosen (X 1.25, Y −2, Z 0.5):
+`G0 X0. Y0. Z5.` becomes `G0 X1.25 Y-2. Z5.5`, `G1 Z-1.` becomes `G1 Z-0.5`, and
+`G90 G81 X20. Y20. Z-5. R2.` becomes `G90 G81 X21.25 Y18. Z-4.5 R2.5`. A `G91 G1 X-10.`
+stays as it is.
+
+**On a lathe the X shift is read as the machine reads `X`.** On a machine that programs `X`
+as a diameter (the usual case, and what gEdit assumes when no machine is chosen) an X shift
+of 1 moves a diameter word by 1. On a machine that programs `X` as a radius it moves it by 1
+as a radius, which is 2 on the diameter. A Sinumerik program that switches between `DIAMON`
+and `DIAMOF` is moved by the reading in force at each word: a diameter shift of 1 moves a
+`DIAMON` word by 1 and a `DIAMOF` word by 0.5. `U` and `W` are incremental and stay. The
+message names the reading ("Moved by X1 (diameter) Z-0.5") and its last sentence says
+whether the machine reads `X` as a diameter or a radius.
+
+**A rotary axis.** A rotary move by a value other than 0 from a position gEdit does not know
+counts as turned, like an absolute one, and with tool centre point control off a shift is
+refused while the axis stands turned. A block that tilts the plane (`PLANE … TURN`, `MOVE`,
+`G53.1`, `CYCLE800`) leaves the rotary axes not known until the program writes them. On a
+5-axis machine with tool centre point control, where the program coordinates turn with the
+table, a shift stays allowed with the table turned.
+
+**Jumps** (all three). A jump, a loop or a block marked with `/` can reach a block with another distance
+mode, plane, unit, frame or cycle than the lines above it have. Where it does, the block is
+refused (`jump`). Where the state is the same, the program is moved as written.
+
+**Returns and machine positions.** `G53`, `M91`, `SUPA` and an incremental return
+(`G91 G28 Z0.`) are left as written and listed as information. A return through an
+**absolute** intermediate point (`G90 G28 Z50.`) would be moved, so it refuses the run.
+
+### Rotate
+
+Turns the path of a **milling** program in the XY plane about a point, by an angle: a
+fixture standing at 90 degrees, or a part machined on the other face. It replaces the text
+as one undo step and ends with a message, like Translate.
+
+| Field | |
+|---|---|
+| **Centre X**, **Centre Y** | The point the path turns about, in the program's units. Default 0 and 0 |
+| **Angle (degrees)** | Counter-clockwise is positive, as the controls count it, seen from the positive end of Z. Required |
+| **Decimal places** | Only for an angle that is not a multiple of 90. *As written* keeps each word's own decimals, with at least 3 in millimetres and 4 in inches; 3 or 4 writes every rounded word with a point with that many. A word without a point stays whole increments only on a machine that reads it in increments; on a machine that reads numbers as written it gets a point and 3 decimals (inches: 4) when it must be rounded |
+
+**What turns.** Absolute positions about the centre. Incremental moves and arc centre
+vectors (`I`, `J`) **turn too**: they are directions, and turning the path turns them.
+Absolute arc centres turn like points, and so do the Klartext pole `CC` and the positions
+of a cycle in the plane. The polar angle `PA` turns by the angle; `IPA` is a step and stays.
+
+**What stays.** `G2` and `G3` (a rotation does not change the way round), radii with their
+sign, the Sinumerik opening angle `AR=` and `TURN=`, the axes outside the plane (the `Z` of
+a helix), and every cycle parameter on the tool axis.
+
+**`X` and `Y` are both written on every block that now moves in both.** A block that wrote
+only `X` has to write a `Y` afterwards. gEdit takes it from where the tool is, in the
+form of the `X` beside it. A block whose start gEdit does not know (the first move of the
+program with no position before it, one after a machine position, one reached by a jump
+with another position than the straight run has, or a cut from an axis the program has not
+written yet) refuses the run.
+
+**A rotary axis.** A rotary word that leaves its axis at 0 is accepted. A rotary axis that
+moves to another angle, or stands at one, refuses the move. After a block that tilts the
+plane (`PLANE … TURN`, `MOVE`, `G53.1`, `CYCLE800`) the rotary axes count as not known until
+the program writes them. This is cautious: a `PLANE SPATIAL … TURN` with every angle at 0
+that no rotary move follows is refused as well.
+
+**The workpiece blank.** A Klartext `BLK FORM` is left as written, with one information row
+per run. Check the blank in the control's graphics.
+
+**Pocket cycles with an angle** (Klartext 251, 253, 254, 256, 257) are refused with their
+calls, see the table below.
+
+A rotation by **360** degrees gives the program back byte for byte. A turning program
+is refused: you can translate it, or mirror it in Z, but not rotate it. This includes an
+Okuma milling program, which opens with the turning profile ([Dialects](dialects.md#milling-on-okuma-and-sinumerik)).
+
+### Mirror
+
+Mirrors the path of a program, for the other hand: in X, in Y, about a line at an angle,
+and on a lathe in Z for the counter spindle. It replaces the text as one undo step and
+ends with a message, like Translate.
+
+| Field | |
+|---|---|
+| **Mirror** | *In X (about a line parallel to Y)*, *In Y (about a line parallel to X)*, *About a line at an angle*, or *In Z for the counter spindle (turning)*. The form starts on **Automatic**: Z on a turning program, X on a milling program. A turning program can only be mirrored in Z |
+| **Point X**, **Point Y** | The point the mirror line goes through. *In X* flips the X values about the line through **Point X** (`X' = 2 × Point X − X`); *In Y* flips the Y values about the line through **Point Y**. Default 0 |
+| **Line angle (degrees)** | Only for a line at an angle: its angle from the X axis, counter-clockwise positive. Every multiple of 45 degrees is exact (0, 45, 90 and so on) |
+| **Mirror Z (turning)** | Only for the Z mirror: the Z the program is mirrored about (`Z' = 2 × Mirror Z − Z`). Default 0 |
+| **Decimal places** | As for Rotate, only for a line at an angle that is not a multiple of 90 |
+
+**What mirrors.** Absolute positions in the line, incremental moves and arc centre vectors
+as directions, absolute centres, the Klartext pole and the positions of a cycle in the
+plane. The polar angle `PA` becomes `2 × angle − PA`, and `IPA` changes sign. Radii keep
+their value and sign (the arc spans the same angle), and so do `AR=`, `TURN=`, the
+Klartext `CCA` and `LEN`, and the axes outside the plane.
+
+**What swaps.** The arc direction and the compensation side swap, because a mirror turns
+a path the other way round: `G2` and `G3`, `G41` and `G42`, in Klartext `RL` and `RR` and
+`DR+` and `DR-`. gEdit reads which codes belong together from the code database of the
+dialect, never from a list in the script, and writes the new code in the style of the one it
+replaces (`G02` becomes `G03`). A block with a code that has no single opposite in the database (Fanuc `G41.2` to `G42.6`,
+Okuma `G102` and `G103`) or an arc gEdit cannot check afterwards (`CT`, `CTP`, `CIP`)
+refuses the run.
+
+**What the result tells you.** One warning, at the first block it changed: *Mirroring
+reverses the cutting direction: climb milling is now conventional milling, and the other way
+round. Check the cutting data.* gEdit does **not** reverse the path to bring the cutting
+direction back. A second warning appears when a helical move (an arc with a move along the
+third axis) is mirrored: *a thread milled with it is now the other hand.* Mirroring twice
+gives every value back.
+
+An axis mirror writes only the words that were there. The first block of a selection is the one exception, see [Selections](#selections).
+
+A Klartext **`BLK FORM`** is left as written, with one information row per run.
+
+#### The Z mirror for the counter spindle
+
+A lathe program written for the main spindle, turned into one for the counter spindle.
+It works in the ZX plane (`G18`), which a turning dialect starts in. A program that
+selects another plane is refused.
+
+| | |
+|---|---|
+| **Flips** | Every absolute `Z` about **Mirror Z**; an incremental `Z` and `W` change sign; the arc centre word along Z (`K`) changes sign |
+| **Changes sign** | `Y`, about the turning axis (`Y' = −Y`, whatever **Mirror Z** is), and so do an incremental `Y` and the arc centre word `J` |
+| **Stays** | `X`, `U` and `I`, and the radii |
+| **Swaps** | `G2` and `G3`, `G41` and `G42`, from the code database as above |
+
+The Z mirror never reads `X`, so a diameter or a radius makes no difference to it, and
+Sinumerik `DIAMON`, `DIAMOF` and `DIAM90` refuse nothing. A C axis word that leaves its axis
+at 0 is accepted. A C word that moves the axis to another angle is refused: seen from the
+counter spindle it turns the other way. In a selection, a first move that writes no Z, or
+no Y while the tool stands away from Y0, is refused (`selection-start`).
+
+Example, Z0: `G1 Z-10.` becomes `G1 Z10.`, `G2 X30. Z-15. R5.` becomes `G3 X30. Z15. R5.`,
+`G3 X40. W-5. K-5. I0.` becomes `G2 X40. W5. K5. I0.`, and `G41` becomes `G42`.
+
+**Always one warning:** *Mirrored for the counter spindle: the tool nose direction (the
+cutting edge position in each tool's offset) is not in the program. Set it for the counter
+spindle before this program runs.* The tool nose direction is a number in the tool's
+offset on the control, not in the program, so gEdit cannot change it. Set it by hand.
+
+**What it refuses, and why.** The result of these cycles is not just points, so mirroring
+the numbers would make the cycle cut the wrong way:
+
+- **Threads** — thread cutting moves and cycles (`G32`, `G33`, `G76` and their
+  relatives in each dialect). The hand of a thread follows from the travel along Z
+  together with the direction the spindle turns. The mirror reverses the travel, and
+  whether the counter spindle turns the same way seen from the part is a fact of the
+  machine that the program does not state. Write the threads for the counter spindle by hand.
+- **Roughing cycles** (`G71` to `G73`, the Okuma contour cycles). Their finishing allowance
+  along Z has a direction, which depends on the contour. gEdit does not mirror them yet.
+- **Other turning, grooving and drilling cycles** (Fanuc `G70`, `G74`, `G75`, `G83`
+  to `G89`; Sinumerik `CYCLE92` to `CYCLE99`, `CYCLE930` and `CYCLE940` to `CYCLE952`;
+  the Okuma cycles). Their parameters hold the side and the direction of the machining.
+- **A chamfer or a corner round whose sign is a direction** (Okuma `G75`, `G76` with `L`):
+  the sign of `L` gives the direction of the next move along the other axis, which a Z
+  mirror reverses. Write it for the counter spindle by hand.
+- **A single turning or facing pass with a taper** (`G90`, `G94`, `G77`, `G79` with `R`):
+  the taper of one changes sign and the taper of another does not, and the database does not
+  say which is which. The same pass without a taper is points and is mirrored.
+
+The Z mirror is for turning programs only. A milling program is mirrored about a line in the
+XY plane, and a turning program is not mirrored in X: both are refused with a row that says so.
+
+### Rounding, exact and not
+
+A result is **exact** when it comes out of decimal arithmetic on the written text:
+translate; rotate by a multiple of 90 degrees; mirror in X or in Y, or about a line at any
+multiple of 45 degrees (0, 45, 90, 135 and so on); and the Z mirror. No word is rounded. If the result does not fit the
+form of a word (a point-less word that would need a fraction of an increment), the run is
+refused instead of rounded.
+
+Any other angle is **rounded**. Each word is computed and rounded half away from zero to its
+own number of decimals, with at least 3 in millimetres and 4 in inches. A word with no
+point stays a whole number of the machine's increments on a machine that reads it in
+increments; on a machine that reads numbers as written it gets a point and 3 decimals (4 in
+inches), like the absolute words around it. An incremental move is written as the difference
+of the two rounded points it joins, so rounding does not add up along a path. The run lists
+**one** information row, "rounded", at the first block with a rounded word, with the number of
+rounded blocks.
+
+Rounding can break an arc: a start and an end that were the same distance from the centre
+may no longer be. So gEdit **reads the written program again** and checks every arc. The
+start and the end must be the same distance from the centre within **0.002 mm (0.0001 inch)**,
+and the chord of an arc written with a radius may exceed its diameter by no more. An arc
+that fails refuses the run, at that arc: *after rounding, this arc's start and end are not
+the same distance from its centre … Use more decimals or an angle of 90, 180 or 270.*
+Choose **Decimal places** *4* and try again, or turn by a multiple of 90 (or mirror about a line at a multiple of 45).
+
+Example, rotate by 30 degrees about X0 Y0: `G3 X0. Y10. I-10. J0.` becomes
+`G3 X-5.000 Y8.660 I-8.660 J-5.000`, and a word that already had five decimals keeps them.
+
+### What translate, rotate and mirror refuse, and list
+
+They refuse **as a whole**. If one block cannot be moved, gEdit writes **nothing**,
+hands the text back unchanged (so there is no undo step) and lists **every** block it
+refused, so you see them all at once and not one after the other. A path moved except for
+one block is a broken path. The message begins *Nothing was changed: N blocks cannot be
+moved by …* and counts the reasons. In the **Results** panel there is one row per refused
+block, with the block as written and the reason, and a click on a row jumps to the line.
+
+This differs from [Address arithmetic](#address-arithmetic), which changes what it can judge
+and lists the rest.
+
+A row reads `<the block as written>: <reason>`. These are the reasons, in the words of the
+rows. The second column is the id the Results panel and the scripts' test files use. Translate
+words some of them in its own terms, for example for a cycle call with a position of its own
+(see "What moves" under [Translate](#translate)).
+
+**Frames, shifts and settings**
+
+| Applies to | Id | A row says |
+|---|---|---|
+| All three | `frame` | A coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first. |
+| All three | `coordinate-shift` | This block sets or shifts the coordinate system: a local shift, a coordinate set, a data setting, or a write into a system variable. The positions after it are in another system, and gEdit cannot tell which. |
+| All three | `intermediate-point` | The return to the reference point goes through this absolute intermediate point, which the transform would move; write it as an incremental zero return or check it by hand. |
+| Rotate and mirror | `rotary-word` | A rotary axis moves to an angle other than 0 here, or stands at one; turning or mirroring the path would need its angle changed too, which gEdit does not do. |
+| Translate | `rotary-turned` | A rotary axis stands turned here and tool centre point control is off, so a shift of the program is not a shift of these machine axes. |
+
+**The program around the block**
+
+| Applies to | Id | A row says |
+|---|---|---|
+| All three | `call` | A subprogram or macro call: the called program's positions are not in this document, so it cannot be moved with the rest. |
+| All three | `jump` | A jump, a loop or a block that may be skipped reaches this block with another distance mode, plane, unit, frame or cycle than the program written above it has, or jumps to a block gEdit cannot find; gEdit cannot tell which one is in force. |
+| All three | `expression` | A variable or a calculation in a word the transform has to change; gEdit only changes written numbers. |
+| All three | `machine-dependent` | This number is read differently on the machines of this control; choose the machine of this document. |
+| All three | `distance-assumed` | The program does not say whether its positions are absolute or incremental before this block, and the machine sets no power-on mode; add G90 or G91 (or the control's form) at the top. |
+| Translate | `axis-unwritten` | The shift moves an axis the program has not written before this block, so where a cut starts is not known. |
+| Rotate and mirror | `position-unknown` | gEdit does not know where the tool stands at the start of this block (an axis not written yet, a machine position, a calculation, a jump, a tilted plane) and the transform needs that point. A cut that starts from an axis the program has not written yet is the same case. |
+| All three | `unknown-code` | A code the database for this control does not know; it may change how the positions after it are read. |
+| All three | `word-unknown` | A word gEdit cannot place: it may be a position, an angle or a direction, and it would be left as written. |
+
+**Selections**
+
+| Applies to | Id | A row says |
+|---|---|---|
+| All three | `selection-inside` | The selection starts or ends inside a cycle or a block that runs over several lines; select the whole of it. |
+| Mirror (in X, Y, a line and Z) | `selection-mode` | This block runs under an arc direction or a compensation side (G2/G3, G41/G42) set above the selection; the mirror would have to swap that code outside the selection. Start the selection at the block that sets it. |
+
+**Cycles**
+
+| Applies to | Id | A row says |
+|---|---|---|
+| All three | `cycle-not-reviewed` | A cycle whose parameters gEdit has not been told about (or one the database does not know); its positions could not be moved with the path. |
+| All three | `cycle-position` | A cycle with positions of its own (a pattern, a pocket, a contour elsewhere) that gEdit does not move. |
+| Rotate and mirror | `cycle-angle` | A cycle that turns or places what it cuts by an angle or a corner of its own (a pocket's angle, the corner the tool stands at); gEdit does not turn or mirror those values, so the cycle would cut in the old direction. |
+| All three | `cycle-plane` | A cycle with a position on the tool axis while the working plane is not XY; the tool axis is not certain. |
+| All three | `fk-contour` | A free contour (FK): its points depend on each other and on the elements around them; gEdit does not move them. |
+
+**Arcs and numbers**
+
+| Applies to | Id | A row says |
+|---|---|---|
+| Rotate and mirror | `arc-tangential` | A tangential arc or an arc through a point; gEdit cannot check it after the transform. |
+| All three | `arc-unsupported` | An arc gEdit cannot compute (an arc by an L radius, a contour arc with the C axis). |
+| Rotate and mirror | `swap-unknown` | This arc direction or compensation side has no single opposite code in the database, so the mirror cannot write it. |
+| Rotate and mirror (not the Z mirror) | `arc-check` | After rounding, this arc's start and end are not the same distance from its centre (within 0.002 mm or 0.0001 in); a control rejects or misreads such an arc. Use more decimals or an angle of 90, 180 or 270. |
+| All three | `resolution` | The result does not fit this word's form (its decimals, or whole increments of the machine) without rounding; give a shift the machine can write. |
+| All three | `pole-unknown` | A move around the pole while the pole is not known or not moved with the path. |
+
+**Planes and kinds of machine**
+
+| Applies to | Id | A row says |
+|---|---|---|
+| Rotate and mirror | `plane` | The working plane is not the one this transform works in (XY on a milling program, ZX with G18 for the lathe Z mirror). |
+| Rotate | `lathe-rotate` | A turning program cannot be rotated; translate it, or mirror it in Z for the counter spindle. |
+| Mirror | `lathe-x-mirror` | A turning program can be mirrored in Z for the counter spindle, not in X. |
+| Mirror, Z for the counter spindle | `mill-z-mirror` | The Z mirror for the counter spindle is for turning programs; a milling program is mirrored about a line in the XY plane. |
+
+**The Z mirror for the counter spindle**
+
+| Applies to | Id | A row says |
+|---|---|---|
+| Mirror, Z for the counter spindle | `thread` | A thread or tapping move or cycle: mirrored in Z it would cut the other hand of thread unless the counter spindle turns the other way, which the program does not say. Write the threads for the counter spindle by hand. |
+| Mirror, Z for the counter spindle | `roughing-cycle` | A roughing cycle that works from a contour (its finishing allowance along Z has a direction); gEdit does not mirror it yet. |
+| Mirror, Z for the counter spindle | `lathe-cycle` | A turning, grooving or drilling cycle; its parameters are not mirrored, so the cycle would work on the wrong side. |
+| Mirror, Z for the counter spindle | `single-pass-taper` | A turning or facing pass with a taper (R): whether the taper changes sign depends on the cycle; write the taper for the counter spindle by hand. |
+| Mirror, Z for the counter spindle | `chamfer-sign` | A chamfer or a corner round whose sign gives the direction of the next move along the other axis; gEdit does not mirror it yet. Write it for the counter spindle by hand. |
+
+**A run can also be refused as a whole.** These reasons belong to the run, not to a block:
+
+| Applies to | Id | A row says |
+|---|---|---|
+| All three | `no-database` | This run had no code database for this control, so gEdit cannot tell a machine position, a frame or a cycle from a move. Nothing is moved. |
+| All three | `selection-unprimed` | The lines above the selection were not sent, so the distance mode, the units, a frame and a cycle in force there are not known. Run it on the whole program. Rotate and mirror add the arc direction and the compensation side to that list. |
+| Rotate and mirror | `selection-start` | The first move of the selection starts where the lines above leave the tool, and that point is not moved with the selection. An arc, an incremental move or (on a lathe) a move without Z, or without Y away from the turning axis, from there would miss the moved path. Start the selection at a block that moves to an absolute position, with Z on a lathe (and Y where Y is not 0). |
+
+**Information rows** do not stop a run. They list what is left as written:
+
+| Row | |
+|---|---|
+| Machine position | A position in machine coordinates or an incremental return to the reference point; left as written |
+| Word left | Translate only: a word gEdit cannot place; left as written (a shift does not change angles or lengths) |
+| Rounded | Rotate and mirror: **one row per run**, at the first block with a rounded word, with the count of rounded blocks |
+| Blank | Rotate and mirror, Klartext: the workpiece blank (`BLK FORM`) is left as written. It only sets the blank that the control's graphics show. Check it there. One row per run |
+
+**Warnings** are the climb-milling warning, the helix warning and the tool nose warning
+above. They appear **only in a run that writes**. A refused run lists no warning.
+
+**Pocket cycles with an angle.** A Klartext pocket cycle that turns what it
+cuts by an angle of its own, or places it by a corner (cycles 251, 253, 254, 256 and 257:
+the pocket angle and the corner the tool stands at) is refused by rotate and mirror
+(`cycle-angle`), with its definition and every call, because the angle would stay as it was. A shift does not change an angle, so translate does not refuse them for it.
+
+#### Selections
+
+All three work on a selection or on the whole program. A selection is read **with the lines
+above it**, so the distance mode, the plane, the units, a frame and a cycle in force are
+known, and only the selected lines change. A selection is refused when:
+
+- it starts or ends **inside a cycle** (a block of a cycle started or defined above it, a
+  modal cycle still in force at its end, a definition in it that is called below it) or
+  **inside a block written over several lines** (Klartext `~`, Okuma `$`). Select the whole
+  of it;
+- for a mirror, a block of the selection **runs under an arc direction or a compensation
+  side set above it**, which would have to be swapped outside the selection. Start the
+  selection at the block that sets it.
+
+A selection from **line 1** is a selection too: its end is judged like any other. One that
+starts lower needs the lines above it, and all three scripts refuse a run whose lines above
+were not sent (`selection-unprimed`): run it on the whole program.
+
+**The first move of a selection** starts where the lines above leave the tool, and that
+point is not moved with the selection. Rotate and mirror therefore refuse a first move that
+would miss the moved path (`selection-start`): an arc, an incremental move or an incremental
+polar move, and on a lathe a move that does not write Z (and Y, where the tool stands away
+from Y0). A move to an absolute position is allowed. It writes both plane axes, also for an
+axis mirror, where the first block of the selection would otherwise write only the axis it
+had. If you rotate the middle of a program, start the selection at such a block. The lines
+before and after stay where they were.
+
+#### Undo
+
+A run that writes is **one undo step**: a single Undo gives back the whole program. A refused
+run changes nothing and has no undo step.
+
+#### How long it may run
+
+The three scripts are allowed 15 minutes (900 seconds), more than the other scripts, because
+a rotation or an angled mirror of a program with several hundred thousand lines of arcs takes
+minutes. A script that runs past the limit is stopped and the document is not touched.
+
+#### What translate, rotate and mirror do not cover
+
+Rotate and mirror work in the XY plane of a milling program, and the Z mirror in the ZX
+plane of a lathe. Not covered: the other planes, rotating a lathe program, mirroring one in
+X, five-axis programs, a program in a coordinate rotation, mirror, scaling or tilted plane,
+subprogram and macro calls, positions that come from variables, Klartext free contours (FK) and
+the arcs `CT`, `CTP` and `CIP` under rotate and mirror, Okuma arcs by an `L` radius, and the
+cycles with positions of their own (pockets, patterns, `PATTERN DEF`), and the Klartext
+pocket cycles with an angle under rotate and mirror. A block that starts with a keyword
+gEdit does not know and that has no value (Klartext `TCH PROBE`, `FUNCTION …`, `DECLARE`,
+`SEL`) is refused as a code the database does not know, and an assignment to a system
+variable, or Klartext `FN 17`, as a coordinate shift. A scaling factor of 1 (Klartext cycles 11
+and 26) ends the scaling, so it is no frame. A later version may allow some of them.
+Under the Z mirror, also not covered: a roughing cycle with its contour in the selection.
 
 ## Where scripts live
 

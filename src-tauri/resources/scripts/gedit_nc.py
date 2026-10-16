@@ -171,7 +171,10 @@ from _nc_modal import (
     FeedModeTracker,
     ModalInterpreter,
     RotaryState,
+    arc_direction_of,
+    arc_direction_words_of,
     axis_words_of,
+    comp_side_of,
     cycle_block_of,
     declares_blocks,
     diameter_axes,
@@ -245,6 +248,11 @@ __all__ = [
     # tool centre point control, and the speed words that name the main spindle.
     "position_of",
     "tcp_of",
+    # Phase 4 (P4a prelude, plan section 6.2): what a mirror swaps — the direction of an arc
+    # code, the side of a compensation code, and the profile's arc direction words.
+    "arc_direction_of",
+    "comp_side_of",
+    "arc_direction_words_of",
     # B1: the two blocks of a lathe roughing or threading cycle (`CodeParam.block`).
     "cycle_block_of",
     "declares_blocks",

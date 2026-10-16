@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be moved by Z1: 1 block at a selection edge inside a cycle or a block. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 4,
+      "severity": "error",
+      "message": "G81 X10. Y10. Z-5. R2. F100.: the selection starts or ends inside a cycle or a block that runs over several lines; select the whole of it.",
+      "reason": "selection-inside"
+    }
+  ]
+}

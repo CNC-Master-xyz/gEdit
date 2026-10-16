@@ -267,6 +267,9 @@ describe('built-in code databases', () => {
       'CYCL DEF 254': ['Q439'],
       'CYCL DEF 256': ['Q215', 'Q369', 'Q338', 'Q385'],
       'CYCL DEF 257': ['Q215', 'Q369', 'Q338', 'Q385'],
+      // P4a fix B1 (NC-15): cycle 26's factors and centre are words of its 26.1 sub-block, each
+      // written only for the axes it scales.
+      'CYCL DEF 26': ['X', 'Y', 'Z', 'CCX', 'CCY', 'CCZ'],
     };
     const optional = (code: string, address: string) =>
       address === 'Q395' || (code === 'CYCL DEF 205' && address === 'Q208') || (LATER[code] ?? []).includes(address);
@@ -299,7 +302,8 @@ describe('loadCodeDb', () => {
   it('ships the empty CYCL DEF 19.1 as the end of cycle 19 (TNC 640 cycle manual, cycle 19 reset)', () => {
     const entry = heidenhain.db.codes.find((e) => e.code === 'CYCL DEF 19');
     expect(entry?.frameEmptyCloses).toBe('1');
-    expect(heidenhain.db.codes.filter((e) => e.frameEmptyCloses !== undefined).map((e) => e.code)).toEqual(['CYCL DEF 19']);
+    // P4a integration (§7 #299): cycle 8 ends the same way, an empty 8.1 (its axes carry no value).
+    expect(heidenhain.db.codes.filter((e) => e.frameEmptyCloses !== undefined).map((e) => e.code)).toEqual(['CYCL DEF 8', 'CYCL DEF 19']);
     for (const other of [fanuc, okuma, sinumerik]) {
       expect(other.db.codes.filter((e) => e.frameEmptyCloses !== undefined)).toEqual([]);
     }
@@ -702,29 +706,42 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
   });
 
   it('marks every entry the B1 manual pass wrote or changed for the owner\'s review', () => {
+    // The P4a prelude (Phase 4 plan §6.2) adds the arc direction to G2/G3 and the compensation
+    // side to G41/G42 (RL/RR on Klartext) and marks those entries the same way; the P4a Wave B
+    // integration (§7 #299 to #307) the resets (G52, TRANS, ATRANS, Klartext cycles 7, 8, 10),
+    // PATTERN DEF, CIP, CYCLE95 and the Fanuc lathe's G70.
     const marked = (dialect: string): string[] =>
       (BUILTIN_CODE_DB_JSON[dialect] as { codes: { code: string; review?: string }[] }).codes
         .filter((e) => e.review === 'pending')
         .map((e) => e.code);
     expect(marked('fanuc')).toEqual([
-      'G5.4', 'G6.2', 'G29', 'G30.1', 'G41.2', 'G41.3', 'G41.4', 'G41.5', 'G41.6', 'G42.2', 'G42.4', 'G42.5', 'G42.6', 'G43.1', 'G92.1',
+      'G2', 'G3', 'G5.4', 'G6.2', 'G29', 'G30.1', 'G41', 'G42', 'G41.2', 'G41.3', 'G41.4', 'G41.5', 'G41.6', 'G42.2', 'G42.4', 'G42.5', 'G42.6', 'G43.1', 'G52', 'G53.1', 'G92.1',
+      // P4a fix B1 (§7 #312): the flow codes.
+      'GOTO', 'DO', 'END',
     ]);
-    expect(marked('fanuc-lathe')).toEqual(['G50.3', 'G68.1', 'G69.1', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76']);
+    expect(marked('fanuc-lathe')).toEqual(['G41', 'G42', 'G50.3', 'G68.1', 'G69.1', 'G70', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76']);
     expect(marked('fanuc-lathe-b')).toEqual(['G92.1']);
     // The Okuma lathe codes (package A7-O).
-    expect(marked('okuma')).toEqual(['G20', 'G21', 'G85', 'G86', 'G93', 'G119', 'G132', 'G133', 'G313', 'M85']);
+    // P4a fix B1 (§7 #312, #316): the chamfer and corner round, and the jumps.
+    expect(marked('okuma')).toEqual(['G2', 'G3', 'G20', 'G21', 'G41', 'G42', 'G75', 'G76', 'G85', 'G86', 'G93', 'G119', 'G132', 'G133', 'G313', 'M85', 'GOTO', 'IF']);
     // The Sinumerik and Klartext codes (package A7-S); SLOT2, CYCLE72, ADIS and ADISPOS were
     // added from the manuals afterwards (owner decision 2026-10-12) and carry the same mark,
     // as does CYCLE62, whose description now names CYCLE72 next to the turning cycles.
     expect(marked('sinumerik')).toEqual([
-      'G601', 'G602', 'G603', 'G643', 'G644', 'G645', 'CYCLE61', 'POCKET3', 'POCKET4', 'SLOT1', 'SLOT2', 'CYCLE72', 'CYCLE93', 'CYCLE97',
-      'CYCLE62', 'CTOL', 'OTOL', 'ADIS', 'ADISPOS', 'WAITM', 'WAITMC', 'WAITE', 'SETM', 'CLEARM', 'INIT', 'START', 'COMPSURF', 'CUT3DCC', 'CUT3DCCD',
+      'G2', 'G3', 'CIP', 'G601', 'G602', 'G603', 'G643', 'G644', 'G645', 'G41', 'G42', 'CYCLE61', 'POCKET3', 'POCKET4', 'SLOT1', 'SLOT2', 'CYCLE72', 'CYCLE93',
+      'CYCLE95', 'CYCLE97', 'CYCLE62', 'CYCLE800', 'CTOL', 'OTOL', 'ADIS', 'ADISPOS', 'WAITM', 'WAITMC', 'WAITE', 'SETM', 'CLEARM', 'INIT', 'START', 'TRANS', 'ATRANS',
+      'COMPSURF', 'CUT3DCC', 'CUT3DCCD',
+      // P4a fix B1 (§7 #312): the flow codes.
+      'GOTOF', 'GOTOB', 'GOTO', 'GOTOC', 'IF', 'ELSE', 'ENDIF', 'WHILE', 'ENDWHILE', 'FOR', 'ENDFOR', 'REPEAT', 'REPEATB', 'UNTIL', 'LOOP', 'ENDLOOP',
     ]);
+    // P4a fix B1 (§7 #311-#318): the blank, the labels and jumps, the system write, the scalings,
+    // the datum shift's reset and the keywords that turn the rotary axes.
     expect(marked('heidenhain')).toEqual([
-      'VC', 'CYCL DEF 19', 'CYCL DEF 251', 'CYCL DEF 252', 'CYCL DEF 253', 'CYCL DEF 254', 'CYCL DEF 256',
+      'BLK FORM', 'RL', 'RR', 'VC', 'LBL', 'FN 9', 'FN 10', 'FN 11', 'FN 12', 'FN 17', 'CYCL DEF 7', 'CYCL DEF 8', 'CYCL DEF 10', 'CYCL DEF 11', 'CYCL DEF 19',
+      'CYCL DEF 26', 'PATTERN DEF', 'CYCL DEF 251', 'CYCL DEF 252', 'CYCL DEF 253', 'CYCL DEF 254', 'CYCL DEF 256',
       'CYCL DEF 257', 'CYCL DEF 14', 'CYCL DEF 21', 'CYCL DEF 22', 'CYCL DEF 23', 'CYCL DEF 24', 'CYCL DEF 25',
       'PLANE SPATIAL', 'PLANE PROJECTED', 'PLANE EULER', 'PLANE VECTOR', 'PLANE POINTS', 'PLANE RELATIV',
-      'PLANE AXIAL', 'PLANE RESET', 'M128', 'M140',
+      'PLANE AXIAL', 'PLANE RESET', 'TRANS DATUM', 'M128', 'M140', 'MOVE', 'TURN',
     ]);
   });
 });
@@ -782,5 +799,91 @@ describe('B1 NC-06: a count that is a real number (`decimals`)', () => {
       ['codes[0].params[1].decimals', 'decimals needs "unit": "count"'],
       ['codes[0].params[2].decimals', 'decimals has to be true or false'],
     ]);
+  });
+});
+
+describe('P4a fix B1: the members the geometry fixes read (plan §7 #311-#318)', () => {
+  it('carries the flow codes, the blank, the rotary turn and the scaling identity', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        { code: 'GOTO', label: 'Jump', flow: 'jump' },
+        { code: 'LBL', label: 'Label', flow: 'label' },
+        { code: 'BLK FORM', label: 'Blank', axisWords: 'data', blank: true },
+        { code: 'TURN', label: 'Turn', positionsRotary: true },
+        { code: 'CYCL DEF 11', label: 'Scaling', frame: 'open', frameZeroWords: ['SCL'], frameIdentity: '1' },
+        {
+          code: 'CYCLE800',
+          label: 'Swivel',
+          positionsRotary: true,
+          params: [{ address: '_DIR', label: 'Direction', keepsRotary: true }],
+        },
+        {
+          code: 'CYCL DEF 251',
+          label: 'Pocket',
+          params: [
+            { address: 'Q224', label: 'Angle', position: 'none', inPlane: 'angle' },
+            { address: 'Q367', label: 'Corner', position: 'none', inPlane: 'side' },
+          ],
+        },
+        { code: 'G75', label: 'Chamfer', params: [{ address: 'L', label: 'Size', unit: 'length', signOf: 'next-move' }] },
+      ],
+    });
+    expect(problems).toEqual([]);
+    const at = (code: string) => db.codes.find((e) => e.code === code);
+    expect(at('GOTO')?.flow).toBe('jump');
+    expect(at('LBL')?.flow).toBe('label');
+    expect(at('BLK FORM')?.blank).toBe(true);
+    expect(at('TURN')?.positionsRotary).toBe(true);
+    expect(at('CYCL DEF 11')?.frameIdentity).toBe('1');
+    expect(at('CYCLE800')?.params?.[0].keepsRotary).toBe(true);
+    expect(at('CYCL DEF 251')?.params?.map((p) => p.inPlane)).toEqual(['angle', 'side']);
+    expect(at('G75')?.params?.[0].signOf).toBe('next-move');
+  });
+
+  it('drops and reports a value it does not know, and a member without its partner', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        { code: 'GOTO', label: 'Jump', flow: 'goto' },
+        { code: 'CYCL DEF 11', label: 'Scaling', frame: 'open', frameIdentity: '1' },
+        { code: 'CYCL DEF 26', label: 'Scaling', frame: 'open', frameZeroWords: ['X'], frameIdentity: 'one' },
+        { code: 'CYCLE832', label: 'Tolerance', params: [{ address: '_TOL', label: 'Tolerance', keepsRotary: true }] },
+        { code: 'G1', label: 'Line', params: [{ address: 'Q1', label: 'Angle', inPlane: 'corner', signOf: 'previous-move' }] },
+      ],
+    });
+    expect(db.codes.map((e) => e.code)).toEqual(['GOTO', 'CYCL DEF 11', 'CYCL DEF 26', 'CYCLE832', 'G1']);
+    expect(db.codes.some((e) => e.flow !== undefined || e.frameIdentity !== undefined)).toBe(false);
+    expect(db.codes.find((e) => e.code === 'CYCLE832')?.params?.[0].keepsRotary).toBeUndefined();
+    expect(problems.map((p) => p.path)).toEqual([
+      'codes[0].flow',
+      'codes[1].frameIdentity',
+      'codes[2].frameIdentity',
+      'codes[3].params[0].keepsRotary',
+      'codes[4].params[0].inPlane',
+      'codes[4].params[0].signOf',
+    ]);
+  });
+
+  it('CODE-13: keeps shiftZeroIsNone only on a shift or a data code of the offset group', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        { code: 'G52', label: 'Local shift', axisWords: 'data', shift: true, shiftZeroIsNone: true },
+        { code: 'TRANS DATUM', label: 'Datum shift', group: 'offset', axisWords: 'data', shiftZeroIsNone: true },
+        { code: 'G92', label: 'Set', group: 'offset', shiftZeroIsNone: true },
+        { code: 'G1', label: 'Line', group: 'motion', shiftZeroIsNone: true },
+      ],
+    });
+    expect(db.codes.map((e) => [e.code, e.shiftZeroIsNone ?? null])).toEqual([
+      ['G52', true],
+      ['TRANS DATUM', true],
+      ['G92', null],
+      ['G1', null],
+    ]);
+    expect(problems.map((p) => p.path)).toEqual(['codes[2].shiftZeroIsNone', 'codes[3].shiftZeroIsNone']);
   });
 });

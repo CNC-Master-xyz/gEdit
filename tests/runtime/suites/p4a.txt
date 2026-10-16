@@ -1,0 +1,31 @@
+# P4a: "Move the path" - the three built-in geometry scripts of Phase 4, Translate, Rotate and Mirror (plan
+# docs/planning/phase-4-implementation.md, H4a), and the Phase 4 exit criteria that the running app proves for them:
+# X19 to X22 (the scripts from the Tools tab, the result as one undo step, a refused run that changes nothing) and the
+# geometry half of X34 (the budget at 300,000 lines).
+# Run with: tests/runtime/suites/m0.txt tests/runtime/suites/m1.txt tests/runtime/suites/m2.txt tests/runtime/suites/m3.txt tests/runtime/suites/m4.txt tests/runtime/suites/m5.txt tests/runtime/suites/m6.txt tests/runtime/suites/m7.txt tests/runtime/suites/m8.txt tests/runtime/suites/m9.txt tests/runtime/suites/m10.txt tests/runtime/suites/m11.txt tests/runtime/suites/m12.txt tests/runtime/suites/rp.txt tests/runtime/suites/m13.txt tests/runtime/suites/p3a.txt tests/runtime/suites/p3b.txt tests/runtime/suites/b1.txt tests/runtime/suites/p4a.txt
+#
+# Every expected text comes from a golden (tests/fixtures/scripts/{translate,rotate,mirror}/**), from the synthetic
+# programs themselves or from ctx.t(...), never from what the app shows. The wall-clock budget of p4-perf goes through
+# h.checkTime (10 x on a hosted runner, where the budget handed to it is the app's own 900 s limit divided by 10).
+#
+# Intentional changes to earlier scenarios, made with this suite (plan "Intentional behaviour changes when P4a lands"):
+# the Tools tab gains three built-in scripts, so the lists of the bundled scripts in m4-scripts, m5-common (read by
+# m5-scripts, which also counts the F9 picker and the Tools group by it) and the record in m10-common are nine long
+# (bundled:address_arithmetic.py, extents.py, mirror.py, program_checks.py, rotate.py, scale_feed.py, scale_speed.py,
+# tool_list.py, translate.py). The grep of tests/runtime for bundled:, BUNDLED, script-item, menuScriptIds,
+# quick-pick-item, scripts_list and the Built-in Scripts group found no other scenario that pins the list or its
+# count (m10-scripts picks its three by id, b1-ribbon asks for "at least one", m5-perf for "more than none").
+
+# X19 to X22: Translate by X1.25 Y-2 Z0.5, Rotate by 90 degrees and Mirror in X (a mill) and in Z (a lathe, for the
+# counter spindle) started from the Tools tab's Built-in Scripts on the goldens of tests/fixtures/scripts: the form's
+# field ids and first values, the text equal to the golden byte for byte, the golden's message and findings in the status
+# line and the Results panel, one undo back to the input byte for byte (and one redo forward); then one refused run
+# per script (frames and coordinate settings; thirteen kinds of block) that leaves the document the same bytes, never
+# marked as changed, with one row per refused block in Results (the count, the first block, every row in line order).
+p4-geometry
+
+# X34 (geometry): Translate, Rotate and Mirror each on a 300,000-line synthetic program, and Rotate and Mirror at 30
+# degrees on an arc-heavy one, within the 900 s of their timeout (h.checkTime: 450 s on the development Mac, and on the
+# runner the app's limit divided by 10), every line of the result compared with the answer worked out from the
+# program's text, and one undo that brings the whole program back. Never retried (retry: false in the scenario).
+p4-perf

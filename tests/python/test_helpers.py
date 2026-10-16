@@ -182,3 +182,68 @@ class TestPrecedingFixtureFile(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class TestGeometryCases(unittest.TestCase):
+    """Phase 4 (P4a prelude): the geometry golden format, read by ``geometry_cases``."""
+
+    def test_the_example_cases_of_the_prelude_read(self) -> None:
+        found = {script: {case.name: case for case in helpers.geometry_cases(script)} for script in ("translate", "rotate", "mirror")}
+        self.assertIn("fanuc-mill-shift", found["translate"])
+        self.assertIn("fanuc-mill-90", found["rotate"])
+        self.assertIn("lathe-z-counter-spindle", found["mirror"])
+        self.assertIn("lathe-thread-refused", found["mirror"])
+        for script, cases in found.items():
+            for case in cases.values():
+                with self.subTest(script=script, case=case.name):
+                    envelope = case.envelope()
+                    self.assertEqual(sorted(envelope), ["findings", "message"])
+                    for finding in envelope["findings"]:
+                        self.assertEqual(sorted(finding), ["line", "message", "reason", "severity"])
+                    if case.refused:
+                        # Nothing is written: the text handed back is the input.
+                        self.assertEqual(case.expected_text(), case.input_text())
+                        self.assertTrue(all(f["severity"] == "error" for f in envelope["findings"] if f["reason"] not in ("machine-position", "word-left", "climb-milling", "helix-hand", "tool-nose")))
+                    else:
+                        self.assertNotEqual(case.expected_text(), case.input_text())
+                    # A selection case may carry the mark in the lines above it (`preceding.nc`):
+                    # they are the same synthetic program.
+                    above = "\n".join(case.preceding_lines())
+                    self.assertIn("WRITTEN FOR GEDIT", case.input_text() + above)
+
+    def test_the_reasons_are_the_vocabulary_of_the_module(self) -> None:
+        helpers.import_gedit_nc()
+        import _nc_geom
+
+        import importlib
+
+        known = set(_nc_geom.REASONS) | set(_nc_geom.INFO) | set(_nc_geom.WARNINGS)
+        for script in ("translate", "rotate", "mirror"):
+            # The run-level refusals a script writes itself, outside the module's table: its own
+            # `RUN_REASONS` (rotate and mirror: `selection-start`), and the two every geometry
+            # script writes before it walks (no code database; a selection whose lines above
+            # were not sent).
+            own = set(getattr(importlib.import_module(script), "RUN_REASONS", {}))
+            vocabulary = known | own | {"no-database", "selection-unprimed"}
+            for case in helpers.geometry_cases(script):
+                for finding in case.envelope()["findings"]:
+                    with self.subTest(script=script, case=case.name, line=finding["line"]):
+                        self.assertIn(finding["reason"], vocabulary)
+
+    def test_a_case_with_both_or_neither_fails_loudly(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            case = root / "translate" / "both"
+            case.mkdir(parents=True)
+            for name in ("input.nc", "expected.nc", "envelope.json", "refused.json"):
+                (case / name).write_text("{}" if name.endswith(".json") else "G0 X0.\n", encoding="utf-8")
+            saved = helpers.SCRIPT_FIXTURES_DIR
+            helpers.SCRIPT_FIXTURES_DIR = root
+            try:
+                with self.assertRaises(AssertionError):
+                    helpers.geometry_cases("translate")
+            finally:
+                helpers.SCRIPT_FIXTURES_DIR = saved

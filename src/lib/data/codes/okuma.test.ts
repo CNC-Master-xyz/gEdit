@@ -622,8 +622,10 @@ describe('B1: the lathe codes added from the manuals', () => {
   });
 
   it('marks every entry B1 added or changed for the owner\'s review, and no other', () => {
+    // And the four the P4a prelude flagged for the mirror (plan §6.2): G2, G3, G41, G42.
     expect(codesWith((e) => reviewOf(e) !== undefined)).toEqual([
-      'G20', 'G21', 'G85', 'G86', 'G93', 'G119', 'G132', 'G133', 'G313', 'M85',
+      // P4a fix B1 (§7 #312, #316): the chamfer and corner round (G75, G76) and the jumps.
+      'G2', 'G3', 'G20', 'G21', 'G41', 'G42', 'G75', 'G76', 'G85', 'G86', 'G93', 'G119', 'G132', 'G133', 'G313', 'GOTO', 'IF', 'M85',
     ]);
     for (const e of ENTRIES.filter((row) => reviewOf(row) !== undefined)) expect(reviewOf(e), e.code).toBe('pending');
   });

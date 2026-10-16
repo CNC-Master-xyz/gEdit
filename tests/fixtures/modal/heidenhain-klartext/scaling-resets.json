@@ -1,0 +1,15 @@
+{
+  "about": "P4a fix B1 (NC-15, plan 7 #317): the TNC 640 cycle manual resets the scaling of cycle 11 by the factor 1 (SCL1) and the axis-specific scaling of cycle 26 by the factor 1 per axis. The identity value comes from the database (frameIdentity), not from a list of codes. A factor that is not a plain number (SCLQ5) keeps the frame open.",
+  "input": "scaling-resets.h",
+  "states": [
+    { "line": 5, "about": "11.0 only names the cycle.", "after": { "frame": null } },
+    { "line": 6, "about": "SCL0.5 scales the coordinate system.", "after": { "frame": "CYCL DEF 11" } },
+    { "line": 7, "after": { "frame": "CYCL DEF 11" } },
+    { "line": 9, "about": "SCL1 is the manual's reset.", "after": { "frame": null } },
+    { "line": 10, "after": { "frame": null } },
+    { "line": 12, "about": "X1.5 scales X.", "after": { "frame": "CYCL DEF 26" } },
+    { "line": 14, "about": "The factor 1 on both axes ends it; the centre words are no factors.", "after": { "frame": null } },
+    { "line": 16, "about": "SCL+1.000 is a factor of 1 as well.", "after": { "frame": null } },
+    { "line": 17, "about": "A factor from a variable is not known to be 1.", "after": { "frame": "CYCL DEF 11" } }
+  ]
+}

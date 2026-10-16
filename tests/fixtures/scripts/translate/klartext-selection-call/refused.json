@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be moved by X5: 2 blocks at a selection edge inside a cycle or a block. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "6 L X+20 Y+20 R0 FMAX M99: the selection starts or ends inside a cycle or a block that runs over several lines; select the whole of it.",
+      "reason": "selection-inside"
+    },
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "7 L X+30 Y+20 R0 FMAX M99: the selection starts or ends inside a cycle or a block that runs over several lines; select the whole of it.",
+      "reason": "selection-inside"
+    }
+  ]
+}

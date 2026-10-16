@@ -22,6 +22,9 @@
     ],
     "feed": "F",
     "mainSpindle": "1",
+    "offsetWords": [
+      "D"
+    ],
     "speedLimitWords": [
       "LIMS"
     ],

@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be moved by X1: 1 block whose distance mode is not stated. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "G0 X0. Y0. Z50.: the program does not say whether its positions are absolute or incremental before this block, and the machine sets no power-on mode; add G90 or G91 (or the control's form) at the top.",
+      "reason": "distance-assumed"
+    }
+  ]
+}

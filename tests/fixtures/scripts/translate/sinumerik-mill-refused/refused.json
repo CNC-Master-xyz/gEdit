@@ -1,0 +1,41 @@
+{
+  "message": "Nothing was changed: 6 blocks cannot be moved by X1.5 Y-2 Z0.25: 2 blocks in or opening a frame, 1 coordinate shift or setting, 1 subprogram or macro call, 1 block with a variable or calculation in a moved word, 1 cycle not reviewed. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 4,
+      "severity": "error",
+      "message": "N30 TRANS X10: this sets or shifts the coordinate system or writes offsets (a local shift, a coordinate set, a data setting that changes offsets); gEdit does not move the values it sets, so the positions after it would no longer match the moved path.",
+      "reason": "coordinate-shift"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N60 G1 X=R1 Y=R2+5: a variable or a calculation in a word the transform has to change; gEdit only changes written numbers.",
+      "reason": "expression"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "N70 L100: a subprogram or macro call: the called program's positions are not in this document, so it cannot be moved with the rest.",
+      "reason": "call"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "N80 POCKET3(10,0,2,-5,80,60,5,40,30,0,3,0.2,0.1,1000,800,0,…: a cycle whose parameters gEdit has not been told about (or one the database does not know); its positions could not be moved with the path.",
+      "reason": "cycle-not-reviewed"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "N90 ROT RPL=30: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "N100 G1 X10 Y10: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    }
+  ]
+}

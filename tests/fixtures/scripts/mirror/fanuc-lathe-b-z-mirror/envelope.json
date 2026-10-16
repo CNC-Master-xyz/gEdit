@@ -1,0 +1,11 @@
+{
+  "message": "Mirrored in Z about Z-2.5 for the counter spindle: 10 words and 3 codes on 9 blocks (G2 and G3, G41 and G42 swapped). Machine 'Lathe B': it does not say how it reads numbers, so a word whose reading depends on that would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "warning",
+      "message": "Mirrored for the counter spindle: the tool nose direction (the cutting edge position in each tool's offset) is not in the program. Set it for the counter spindle before this program runs.",
+      "reason": "tool-nose"
+    }
+  ]
+}

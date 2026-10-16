@@ -1,0 +1,41 @@
+{
+  "message": "Nothing was changed: 6 blocks cannot be moved by X1.5 Y-2 Z0.25: 6 blocks in or opening a frame. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 4,
+      "severity": "error",
+      "message": "N30 MIRROR X0: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "N40 G1 X5 F200: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "N50 SCALE X2 Y2: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N60 G1 X10: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "N70 CYCLE800(1,\"TC1\",200000,57,0,0,0,0,30,0,0,0,0,1,100,1): a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "N80 G1 X20 Y20: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    }
+  ]
+}

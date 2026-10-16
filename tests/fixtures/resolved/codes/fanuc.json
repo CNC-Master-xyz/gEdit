@@ -128,7 +128,9 @@
       "group": "motion",
       "label": "Circular move, clockwise",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "arcDirection": "cw",
         "motion": "feed",
         "path": "arc"
       }
@@ -139,7 +141,9 @@
       "group": "motion",
       "label": "Circular move, counter-clockwise",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "arcDirection": "ccw",
         "motion": "feed",
         "path": "arc"
       }
@@ -649,7 +653,9 @@
           "label": "Radius offset register"
         }
       ],
+      "review": "pending",
       "sets": {
+        "compSide": "left",
         "radiusComp": "on"
       }
     },
@@ -665,7 +671,9 @@
           "label": "Radius offset register"
         }
       ],
+      "review": "pending",
       "sets": {
+        "compSide": "right",
         "radiusComp": "on"
       }
     },
@@ -1084,7 +1092,9 @@
       "description": "Sets a local coordinate system inside the active work offset. The axis words give where its zero lies, so they are a shift and not a move; G52 with every axis at zero ends it.",
       "group": "nonmodal",
       "label": "Local coordinate system",
-      "shift": true
+      "review": "pending",
+      "shift": true,
+      "shiftZeroIsNone": true
     },
     {
       "axisWords": "machine",
@@ -1107,7 +1117,9 @@
       ],
       "description": "Write it alone in the block after G68.2 or G68.4: the rotary axes move so that the tool stands at right angles to the tilted plane.",
       "group": "nonmodal",
-      "label": "Turn the tool axis to the tilted plane"
+      "label": "Turn the tool axis to the tilted plane",
+      "positionsRotary": true,
+      "review": "pending"
     },
     {
       "code": "G54",
@@ -2525,8 +2537,10 @@
     {
       "code": "GOTO",
       "description": "Continues at the block with this N number. The target has to exist in the same program.",
+      "flow": "jump",
       "group": "macro",
-      "label": "Jump to a block"
+      "label": "Jump to a block",
+      "review": "pending"
     },
     {
       "code": "THEN",
@@ -2544,15 +2558,19 @@
     {
       "code": "DO",
       "description": "Opens the body of a WHILE loop. Its number has to match the END that closes the body.",
+      "flow": "loop",
       "group": "macro",
       "label": "Loop body start",
+      "review": "pending",
       "verify": true
     },
     {
       "code": "END",
       "description": "Closes the body of the WHILE loop with the same number.",
+      "flow": "loop-end",
       "group": "macro",
       "label": "Loop body end",
+      "review": "pending",
       "verify": true
     },
     {

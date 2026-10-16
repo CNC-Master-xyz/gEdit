@@ -81,8 +81,8 @@ tests/runtime/suite.sh tests/runtime/suites/m0.txt   # run a suite and print the
 
 ## On a hosted runner
 
-`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1}.txt` on `macos-14`
-(45 minute limit), always uploads `$GEDIT_RH_DIR/out`, the app logs and the sync logs, and
+`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a}.txt` on `macos-14`
+(150 minute limit since P4a; it was 45: `p4-perf` runs five scripts on 300,000 lines, about 100 minutes for the job, see the comment in `harness.yml`), always uploads `$GEDIT_RH_DIR/out`, the app logs and the sync logs, and
 caches the build directory. What differs from the owner's Mac, and how the scenarios deal with it:
 
 - The runner has a live, unlocked session with Accessibility already granted, so no setup
@@ -107,11 +107,11 @@ caches the build directory. What differs from the owner's Mac, and how the scena
 
 ## Suites
 
-One file per milestone, `suites/m0.txt` … `suites/m12.txt`, then `suites/rp.txt` (M12.5, "Real programs, second pass"), `suites/m13.txt` (M13 and the Phase 2 exit criteria), `suites/p3a.txt` (Phase 3, P3a "Understand a block"), `suites/p3b.txt` (Phase 3, P3b "Write with templates") and `suites/b1.txt` (the bug-fix round B1): one scenario name per line, `#`
+One file per milestone, `suites/m0.txt` … `suites/m12.txt`, then `suites/rp.txt` (M12.5, "Real programs, second pass"), `suites/m13.txt` (M13 and the Phase 2 exit criteria), `suites/p3a.txt` (Phase 3, P3a "Understand a block"), `suites/p3b.txt` (Phase 3, P3b "Write with templates"), `suites/b1.txt` (the bug-fix round B1) and `suites/p4a.txt` (Phase 4, P4a "Move the path"): one scenario name per line, `#`
 starts a comment. A cumulative run is all of them in order:
 
 ```sh
-tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1}.txt
+tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a}.txt
 ```
 
 The Phase 2 exit criteria (plan §2.2) and where each is proven; `suites/m13.txt` has the same table in its comments:
@@ -145,6 +145,13 @@ The Phase 3 criteria that the running app proves (`suites/p3a.txt` and `suites/p
 | X18 a, b Edit Cycle: read back, changed, nothing else touched, one Undo; insert mode with the renumber | `p3-cycleforms` |
 | X18 c the template manager and New Template from Selection, unsaved edits asked about | `p3-template-manager` |
 
+The Phase 4 criteria that the running app proves (`suites/p4a.txt`, plan `docs/planning/phase-4-implementation.md` §2.2):
+
+| Criterion | Scenario |
+|---|---|
+| X19 to X22 Translate, Rotate and Mirror from the Tools tab's Built-in Scripts on the goldens of `tests/fixtures/scripts/{translate,rotate,mirror}`: the form, the golden's text, message and findings, one undo; a refused run that changes nothing and lists every refused block in Results | `p4-geometry` |
+| X34 (geometry) the three scripts on a 300,000-line program, and rotate and mirror at 30 degrees on an arc-heavy one, within the 900 s of their timeout (a target of 450 s on the development Mac), the result compared line by line, one undo; never retried | `p4-perf` |
+
 The bug-fix round B1 (`suites/b1.txt`) adds one scenario or pair for each behaviour only the running app can prove:
 
 | Package | Scenario |
@@ -172,7 +179,9 @@ again when it failed and reports:
 | `BLOCKED` | could not be carried out: an input the scenario needed could not be delivered, because another app held the keyboard (a locked screen is one of those). Not retried — a second run would say the same — and never silently green | 1 |
 
 `--no-retry` runs each scenario once, and `--retry` turns the retry back on where
-`GEDIT_RH_ROBUST=0` switched it off. `--repeat N` runs the whole list N times and prints how
+`GEDIT_RH_ROBUST=0` switched it off. A scenario that declares `retry: false` (`p4-perf`: five
+runs of up to 900 s each) is never run twice, whichever flag is given: a second run would double
+the time of a real regression, and a timing failure is not the harness's flake. `--repeat N` runs the whole list N times and prints how
 many runs were flaky, which is how a flake rate is measured. The table's `Focus` column
 counts how often the app had to take the keyboard back during a run; `out/suite.json`
 holds the same numbers per scenario, with `firstAttempt` for the flakes.
@@ -271,6 +280,11 @@ scenario('m1-example', { timeout: 90 }, async (h) => {
   `clicks`; a scenario fails if one fell back to a DOM click), the quick pick and the suggest widget (`pickRows`, `pickByLabel`,
   `suggestItems`), and the goldens and code databases read back (`golden`, `codeFile`, with `files: REPO_FILE` for `{repo}`). Expected
   text comes from `tests/fixtures/templates/**` and `tests/fixtures/cycleforms/**`, never from what the app shows.
+  The P4a scenarios (`p4-geometry`, `p4-perf`) share `p4-geometry-common.js`: a golden of the geometry scripts read and its program opened
+  byte for byte under the profile the case names (`geometryGolden`, `openGolden`), a script started from the Tools tab with the
+  form filled by the field ids of `tests/fixtures/scripts/README.md` (`runGeometry`, which tells the end of the run by a subscription
+  to `scripts.running`, and fills every field so no remembered value leaks in) and the answer for the 300,000-line program worked out
+  from its own text (`wantedLine`; for the arc-heavy program of the angled runs `arcProgram` and `wantedArcLine`, compared by `nearDifferences` to one last place). Expected text comes from `tests/fixtures/scripts/**`, never from what the app shows.
   The B1 scenarios (`b1-*`) share `b1-common.js`: the seven ribbon tabs (`TABS`), a symbolic link made outside the app (`symlink`), the
   visible hover as a rectangle (`hoverBox`) and whether a row is inside its scrolling panel (`rowVisible`); a folder made read-only
   with `osOp(h, 'chmod', …)` is made writable again in a `finally`.
@@ -312,6 +326,7 @@ defaults:
 | `python` | `GEDIT_PYTHON` for the app (default `'{python}'`); `null` leaves it unset so the backend resolves it |
 | `vars` | extra environment variables |
 | `files` | files written into the run folder before the app starts: a path and its text, or `{ text, mode }` to set the file mode as well |
+| `retry` | `false`: `suite.sh` does not run the scenario a second time after a failure (only `p4-perf`, whose runs are minutes long; default `true`) |
 
 `vars`, `python` and `files` may use `{run}`, `{home}`, `{python}` and `{repo}`.
 

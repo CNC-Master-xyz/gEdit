@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be rotated: 1 arc off its radius after rounding. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "G3 X0. Y10.0015 I-10. J0.: after rounding, this arc's start and end are not the same distance from its centre (within 0.002 mm or 0.0001 in); a control rejects or misreads such an arc. Use more decimals or an angle of 90, 180 or 270.",
+      "reason": "arc-check"
+    }
+  ]
+}

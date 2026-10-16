@@ -1,0 +1,28 @@
+{
+  "$format": 1,
+  "note": [
+    "Cases for the arc direction words of a profile (addresses.arcDirectionWords, Phase 4 plan section 6.2): the TypeScript validator (src/lib/core/profiles/validate.ts) and the Python reader gedit_nc.arc_direction_words_of (_nc_modal.py) have to agree on which words are words.",
+    "src/lib/core/profiles/validate.test.ts runs every case through the validator: a case with valid true gives no problem, one with valid false gives one at least. tests/python/test_code_flags.py runs every case through the reader and holds it to 'read': a valid case reads as written but with the keys in upper case; an invalid one reads as what is left once the words the validator would refuse are dropped (the reader does not guess; the first of two words for a direction, and the first of two spellings of a word, stays).",
+    "Keys of 'words' are in file order."
+  ],
+  "cases": [
+    { "name": "klartext", "words": { "DR+": "ccw", "DR-": "cw" }, "valid": true, "read": { "DR+": "ccw", "DR-": "cw" } },
+    { "name": "one word only", "words": { "DR+": "ccw" }, "valid": true, "read": { "DR+": "ccw" } },
+    { "name": "lower case word", "words": { "dr+": "ccw" }, "valid": true, "read": { "DR+": "ccw" } },
+    { "name": "letters and digits after the first letter", "words": { "A1+": "cw", "A1-": "ccw" }, "valid": true, "read": { "A1+": "cw", "A1-": "ccw" } },
+    { "name": "no sign", "words": { "DR": "cw" }, "valid": false, "read": {} },
+    { "name": "sign not last", "words": { "DR-1": "cw" }, "valid": false, "read": {} },
+    { "name": "digit first", "words": { "1R+": "cw" }, "valid": false, "read": {} },
+    { "name": "sign only", "words": { "+": "cw" }, "valid": false, "read": {} },
+    { "name": "non-ASCII letter", "words": { "ÄR+": "cw" }, "valid": false, "read": {} },
+    { "name": "non-ASCII digit", "words": { "D٣+": "cw" }, "valid": false, "read": {} },
+    { "name": "line break after the sign", "words": { "DR+\n": "cw" }, "valid": false, "read": {} },
+    { "name": "space inside", "words": { "D R+": "cw" }, "valid": false, "read": {} },
+    { "name": "direction not cw or ccw", "words": { "DR+": "left" }, "valid": false, "read": {} },
+    { "name": "direction in upper case", "words": { "DR+": "CW" }, "valid": false, "read": {} },
+    { "name": "two words for one direction", "words": { "DR+": "cw", "DR-": "cw" }, "valid": false, "read": { "DR+": "cw" } },
+    { "name": "two spellings of one word", "words": { "DR+": "ccw", "dr+": "cw" }, "valid": false, "read": { "DR+": "ccw" } },
+    { "name": "two spellings, one direction", "words": { "DR+": "ccw", "dr+": "ccw" }, "valid": false, "read": { "DR+": "ccw" } },
+    { "name": "one bad word among good ones", "words": { "DR+": "ccw", "1R-": "cw" }, "valid": false, "read": { "DR+": "ccw" } }
+  ]
+}

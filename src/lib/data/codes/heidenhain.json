@@ -210,6 +210,8 @@
       "code": "BLK FORM",
       "group": "program",
       "axisWords": "data",
+      "blank": true,
+      "review": "pending",
       "label": "Stock definition",
       "description": "Describes the raw part for the graphics. Sub-block 0.1 carries the tool axis and one corner, sub-block 0.2 the opposite corner."
     },
@@ -427,14 +429,16 @@
     {
       "code": "RL",
       "group": "compensation",
-      "sets": { "radiusComp": "on" },
+      "sets": { "radiusComp": "on", "compSide": "left" },
+      "review": "pending",
       "label": "Radius compensation, left",
       "description": "Puts the tool to the left of the contour seen in the direction of travel. Go through an R0 block before switching to the other side, and do not switch it on in an arc."
     },
     {
       "code": "RR",
       "group": "compensation",
-      "sets": { "radiusComp": "on" },
+      "sets": { "radiusComp": "on", "compSide": "right" },
+      "review": "pending",
       "label": "Radius compensation, right",
       "description": "Puts the tool to the right of the contour seen in the direction of travel. Go through an R0 block before switching to the other side, and do not switch it on in an arc."
     },
@@ -466,6 +470,8 @@
     {
       "code": "LBL",
       "group": "subprogram",
+      "flow": "label",
+      "review": "pending",
       "label": "Label",
       "description": "Marks a jump target, given as a number or a name in quotes. LBL 0 marks the end of a subprogram and may appear many times; every other label may be set once."
     },
@@ -507,6 +513,46 @@
       "description": "Calculates with Q parameters. FN 0 assigns, FN 1 to FN 4 add, subtract, multiply and divide, FN 5 to FN 8 are square root, sine, cosine and the root of a sum of squares, and FN 9 upwards jump to a label when a comparison holds."
     },
     {
+      "code": "FN 9",
+      "group": "parameter",
+      "flow": "jump",
+      "review": "pending",
+      "label": "Jump if equal to",
+      "description": "Continues at the label named behind GOTO LBL when the first value is equal to the second; otherwise with the next block."
+    },
+    {
+      "code": "FN 10",
+      "group": "parameter",
+      "flow": "jump",
+      "review": "pending",
+      "label": "Jump if not equal to",
+      "description": "Continues at the label named behind GOTO LBL when the first value is not equal to the second; otherwise with the next block."
+    },
+    {
+      "code": "FN 11",
+      "group": "parameter",
+      "flow": "jump",
+      "review": "pending",
+      "label": "Jump if greater than",
+      "description": "Continues at the label named behind GOTO LBL when the first value is greater than the second; otherwise with the next block."
+    },
+    {
+      "code": "FN 12",
+      "group": "parameter",
+      "flow": "jump",
+      "review": "pending",
+      "label": "Jump if less than",
+      "description": "Continues at the label named behind GOTO LBL when the first value is less than the second; otherwise with the next block."
+    },
+    {
+      "code": "FN 17",
+      "group": "parameter",
+      "shift": true,
+      "review": "pending",
+      "label": "Write system data",
+      "description": "Writes a value into the control's own data (SYSWRITE): a datum, a preset or another setting. What it writes can move the coordinate system of the blocks after it."
+    },
+    {
       "code": "CYCL DEF",
       "group": "cycle",
       "sets": {},
@@ -517,14 +563,19 @@
       "code": "CYCL DEF 7",
       "group": "offset",
       "axisWords": "data",
+      "shiftZeroIsNone": true,
+      "review": "pending",
       "label": "Datum shift",
       "description": "Shifts the zero point. The sub-blocks 7.1, 7.2 and 7.3 give the shift in X, Y and Z, or #n takes line n of the datum table. Absolute values refer to the workpiece datum, incremental ones to the last shift. It acts from its definition on and is never called; defining it again with zeros shifts back."
     },
     {
       "code": "CYCL DEF 8",
-      "group": "frame",
+      "group": "mirror",
       "axisWords": "data",
       "frame": "open",
+      "frameZeroWords": ["X", "Y", "Z", "U", "V", "W", "A", "B", "C"],
+      "frameEmptyCloses": "1",
+      "review": "pending",
       "label": "Mirror image",
       "description": "Mirrors the following work in the working plane about the axes named in sub-block 8.1, which carry no values. Defining it again with no axis ends it. It acts from its definition on and is never called."
     },
@@ -536,15 +587,20 @@
     },
     {
       "code": "CYCL DEF 10",
-      "group": "frame",
+      "group": "rotation",
       "frame": "open",
+      "frameZeroWords": ["ROT"],
+      "review": "pending",
       "label": "Rotation",
       "description": "Turns the coordinate system in the working plane about the active zero point by the angle in sub-block 10.1. A zero angle ends it. It acts from its definition on and is never called; both axes of the plane have to be moved afterwards for it to show."
     },
     {
       "code": "CYCL DEF 11",
-      "group": "frame",
+      "group": "scaling",
       "frame": "open",
+      "frameZeroWords": ["SCL"],
+      "frameIdentity": "1",
+      "review": "pending",
       "label": "Scaling factor",
       "description": "Enlarges or reduces the contour and the dimensions in the cycles by the factor SCL in sub-block 11.1; a factor of 1 ends it. Shift the datum to a corner of the contour first. It acts from its definition on and is never called."
     },
@@ -578,8 +634,19 @@
       "group": "frame",
       "axisWords": "data",
       "frame": "open",
+      "frameZeroWords": ["X", "Y", "Z", "U", "V", "W"],
+      "frameIdentity": "1",
+      "review": "pending",
       "label": "Scaling factor per axis",
-      "description": "Enlarges or reduces the contour by a factor for each axis named in sub-block 26.1, about the centre CCX, CCY. A factor of 1 for an axis takes it back. It acts from its definition on and is never called; circles must not be stretched unevenly."
+      "description": "Enlarges or reduces the contour by a factor for each axis named in sub-block 26.1, about the centre CCX, CCY. A factor of 1 for an axis takes it back. It acts from its definition on and is never called; circles must not be stretched unevenly.",
+      "params": [
+        { "address": "X", "label": "Factor along X", "unit": "count", "decimals": true, "position": "none" },
+        { "address": "Y", "label": "Factor along Y", "unit": "count", "decimals": true, "position": "none" },
+        { "address": "Z", "label": "Factor along Z", "unit": "count", "decimals": true, "position": "none" },
+        { "address": "CCX", "label": "Centre of the scaling on X, as an absolute position", "position": "other" },
+        { "address": "CCY", "label": "Centre of the scaling on Y, as an absolute position", "position": "other" },
+        { "address": "CCZ", "label": "Centre of the scaling on Z, as an absolute position", "position": "other" }
+      ]
     },
     {
       "code": "CYCL DEF 32",
@@ -594,6 +661,20 @@
       "sets": { "cycle": "call" },
       "label": "Cycle call",
       "description": "Runs the cycle that was defined last at the current position. CYCL CALL PAT runs it at every point of a preceding pattern definition."
+    },
+    {
+      "code": "PATTERN DEF",
+      "label": "Pattern definition",
+      "description": "Defines the points that a following CYCL CALL PAT runs the last defined cycle at: up to nine single points (POS1 to POS9), a row (ROW1), a pattern (PAT1), a frame (FRAME1), a full circle (CIRC1) or a pitch circle (PITCHCIRC1), each with its coordinates in brackets. A surface Z other than 0 adds to the surface the cycle defines. The pattern stays in force until another one is defined or a point table is selected.",
+      "review": "pending",
+      "params": [
+        { "address": "POS", "label": "A single machining position: X, Y and the surface Z (the first one absolute)", "position": "other" },
+        { "address": "ROW", "label": "A row: start point X and Y, the spacing, the number of positions, the turn of the row and the surface Z", "position": "other" },
+        { "address": "PAT", "label": "A pattern: start point X and Y, the spacings, the columns and rows, its turns and the surface Z", "position": "other" },
+        { "address": "FRAME", "label": "A frame: start point X and Y, the spacings, the columns and rows, its turns and the surface Z", "position": "other" },
+        { "address": "CIRC", "label": "A full circle: centre X and Y, the diameter, the start angle, the number of positions and the surface Z", "position": "other" },
+        { "address": "PITCHCIRC", "label": "A pitch circle: centre X and Y, the diameter, the start angle, the angle step, the number of positions and the surface Z", "position": "other" }
+      ]
     },
     {
       "code": "CYCL CALL PAT",
@@ -1438,13 +1519,15 @@
           "address": "Q224",
           "label": "Angle the whole pocket is turned by, about the position the tool stands at when the cycle is called",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "inPlane": "angle"
         },
         {
           "address": "Q367",
           "label": "Where the tool stands when the cycle is called: 0 the pocket centre, 1 the lower left corner, 2 the lower right, 3 the upper right, 4 the upper left",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "inPlane": "side"
         },
         {
           "address": "Q207",
@@ -1686,13 +1769,15 @@
           "address": "Q374",
           "label": "Angle the whole slot is turned by, about the position the tool stands at when the cycle is called",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "inPlane": "angle"
         },
         {
           "address": "Q367",
           "label": "Where the tool stands when the cycle is called: 0 the slot centre, 1 the left end, 2 the centre of the left end circle, 3 the centre of the right end circle, 4 the right end",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "inPlane": "side"
         },
         {
           "address": "Q207",
@@ -1831,7 +1916,8 @@
           "address": "Q376",
           "label": "Polar angle of the start point",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "inPlane": "angle"
         },
         {
           "address": "Q248",
@@ -1982,13 +2068,15 @@
           "address": "Q224",
           "label": "Angle the whole stud is turned by, about the position the tool stands at when the cycle is called",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "inPlane": "angle"
         },
         {
           "address": "Q367",
           "label": "Where the tool stands when the cycle is called: 0 the stud centre, 1 the lower left corner, 2 the lower right, 3 the upper right, 4 the upper left",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "inPlane": "side"
         },
         {
           "address": "Q207",
@@ -2051,7 +2139,8 @@
           "address": "Q437",
           "label": "Where the tool approaches: 0 right of the stud, 1 the lower left corner, 2 the lower right, 3 the upper right, 4 the upper left",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "inPlane": "side"
         },
         {
           "address": "Q215",
@@ -2163,7 +2252,8 @@
           "address": "Q376",
           "label": "Polar angle about the stud centre the tool approaches from; -1 the control works it out",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "inPlane": "angle"
         },
         {
           "address": "Q215",
@@ -2732,6 +2822,8 @@
       "code": "TRANS DATUM",
       "group": "offset",
       "axisWords": "data",
+      "shiftZeroIsNone": true,
+      "review": "pending",
       "label": "Datum shift",
       "description": "Shifts the datum without a cycle: TRANS DATUM AXIS takes the shift from the axis values in the block, TRANS DATUM TABLE takes a line of the datum table, and TRANS DATUM RESET cancels the shift."
     },
@@ -2834,12 +2926,16 @@
     {
       "code": "MOVE",
       "group": "tilt",
+      "positionsRotary": true,
+      "review": "pending",
       "label": "Tilt with a compensating move",
       "description": "Ends a PLANE function that swivels automatically: the rotary axes turn and the linear axes make the compensating move, so the tool tip stays in place. The distance of the turning point from the tool tip (DIST), the feed and, if wanted, the retraction length (MB) follow."
     },
     {
       "code": "TURN",
       "group": "tilt",
+      "positionsRotary": true,
+      "review": "pending",
       "label": "Tilt the rotary axes only",
       "description": "Ends a PLANE function that swivels automatically by turning the rotary axes only, with no compensating move. The tool tip moves. A feed follows, with the retraction length (MB) as an option."
     },

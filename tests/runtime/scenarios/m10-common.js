@@ -54,7 +54,11 @@ export const SCRIPTS = {
   arithmetic: 'bundled:address_arithmetic.py',
 }
 
-/** The six bundled scripts after M10, sorted as the discovery lists them. */
+/**
+ * The six bundled scripts after M10, sorted as the discovery lists them. Nothing reads it any more (the
+ * scenarios that pin the list use `m5-common.BUNDLED` and `m4-scripts.js`'s own copy, which have
+ * the nine since P4a); it is kept as the record of what M10 shipped.
+ */
 export const BUNDLED_M10 = [
   'bundled:address_arithmetic.py',
   'bundled:extents.py',

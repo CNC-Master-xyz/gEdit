@@ -1,0 +1,35 @@
+{
+  "message": "Nothing was changed: 5 blocks cannot be mirrored: 5 blocks of a turning program. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 4,
+      "severity": "error",
+      "message": "N20 G0 X0. Y0. Z5.: a turning program can be mirrored in Z for the counter spindle, not in X.",
+      "reason": "lathe-x-mirror"
+    },
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "N30 G1 Z-1. F200.: a turning program can be mirrored in Z for the counter spindle, not in X.",
+      "reason": "lathe-x-mirror"
+    },
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "N40 G41 G1 X10. Y5.: a turning program can be mirrored in Z for the counter spindle, not in X.",
+      "reason": "lathe-x-mirror"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N50 G2 X20. Y5. I5. J0.: a turning program can be mirrored in Z for the counter spindle, not in X.",
+      "reason": "lathe-x-mirror"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "N60 G40 G0 Z5.: a turning program can be mirrored in Z for the counter spindle, not in X.",
+      "reason": "lathe-x-mirror"
+    }
+  ]
+}

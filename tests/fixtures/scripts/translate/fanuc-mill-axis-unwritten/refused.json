@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be moved by X1: 2 moves from a start the program has not written. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "G91 G1 X10. Y5. F200.: the shift moves an axis the program has not written before this block, so where it starts is not known.",
+      "reason": "axis-unwritten"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "G90 X20. Y20.: the shift moves an axis the program has not written before this block, so where it starts is not known.",
+      "reason": "axis-unwritten"
+    }
+  ]
+}

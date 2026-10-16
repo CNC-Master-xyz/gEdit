@@ -37,6 +37,7 @@
     "decimalPointSignificant": true,
     "wordSeparatorRequired": false,
     "variables": "#\\d+",
+    "systemVariableNumbers": 1000,
     "keywords": [
       "GOTO", "IF", "THEN", "WHILE", "DO", "END", "EQ", "NE", "GT", "LT", "GE", "LE", "AND", "OR", "XOR", "MOD",
       "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "ATN", "SQRT", "SQR", "ABS", "BIN", "BCD", "ROUND", "RND",

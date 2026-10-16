@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be moved by X1.5 Y-2: 2 cycles with positions of their own. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "4 CYCL DEF 254 CIRCULAR SLOT ~: a cycle with positions of its own (a pattern, a pocket, a contour elsewhere) that gEdit does not move.",
+      "reason": "cycle-position"
+    },
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "5 L X+70 Y+50 R0 FMAX M99: a cycle with positions of its own (a pattern, a pocket, a contour elsewhere) that gEdit does not move.",
+      "reason": "cycle-position"
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "$format": 1,
+  "note": [
+    "What a mirror swaps (Phase 4 plan section 6.2, AD-42; written by the P4a prelude, checked by G10): every entry that declares CodeSets.arcDirection ('cw' clockwise, 'ccw' counter-clockwise, as the control defines it: seen from the positive end of the axis normal to the plane) or CodeSets.compSide ('left', 'right' of the path seen along the direction of travel), one list per database file as the file itself writes it, in file order. Every entry written here carries review: 'pending' until the owner's review.",
+    "src/lib/data/codes/geometryFlags.test.ts holds the shipped files to this list in both directions, and holds the resolved databases to two rules: every flagged code has exactly one partner in its group with the other value (what mirror.py writes instead), and every arc code and every compensation-on code either carries its flag or is listed under 'unflagged' with the reason. tests/python/test_code_flags.py holds gedit_nc.arc_direction_of, comp_side_of and arc_direction_words_of to the same rows.",
+    "Sources (G10): Fanuc Series 30i/300i/300is Model A, operator's manual for both lathe and machining centre (circular interpolation G02/G03 and its viewing direction; helical interpolation) and the lathe and machining-centre operator's manuals (cutter and nose radius compensation G41/G42); Okuma OSP-P200L lathe programming manual (circular interpolation G02/G03 in the ZX plane, viewed from the positive end of the orthogonal axis; tool nose radius compensation G41/G42); Siemens SINUMERIK 840D sl programming manual, fundamentals (G2/G3, CR=, AR=; G41/G42); HEIDENHAIN TNC 640 Klartext user's manual (direction DR+ counter-clockwise, DR- clockwise; RL, RR)."
+  ],
+  "databases": {
+    "fanuc": [
+      { "code": "G2", "arcDirection": "cw" },
+      { "code": "G3", "arcDirection": "ccw" },
+      { "code": "G41", "compSide": "left" },
+      { "code": "G42", "compSide": "right" }
+    ],
+    "fanuc-lathe": [
+      { "code": "G41", "compSide": "left" },
+      { "code": "G42", "compSide": "right" }
+    ],
+    "fanuc-lathe-b": [],
+    "heidenhain": [
+      { "code": "RL", "compSide": "left" },
+      { "code": "RR", "compSide": "right" }
+    ],
+    "okuma": [
+      { "code": "G2", "arcDirection": "cw" },
+      { "code": "G3", "arcDirection": "ccw" },
+      { "code": "G41", "compSide": "left" },
+      { "code": "G42", "compSide": "right" }
+    ],
+    "sinumerik": [
+      { "code": "G2", "arcDirection": "cw" },
+      { "code": "G3", "arcDirection": "ccw" },
+      { "code": "G41", "compSide": "left" },
+      { "code": "G42", "compSide": "right" }
+    ]
+  },
+  "unflagged": {
+    "fanuc": {
+      "arc": {},
+      "comp": {
+        "G41.2": "five-axis compensation: the side is also a matter of the tool direction; refused under a mirror (and a second 'left' would make the partner of G42 ambiguous)",
+        "G41.3": "compensation on the leading edge: no side",
+        "G41.4": "five-axis compensation, older form; as G41.2",
+        "G41.5": "five-axis compensation, older form; as G41.2",
+        "G41.6": "five-axis compensation by I, J, K; as G41.2",
+        "G42.2": "five-axis compensation; as G41.2",
+        "G42.4": "five-axis compensation, older form; as G41.2",
+        "G42.5": "five-axis compensation, older form; as G41.2",
+        "G42.6": "five-axis compensation by I, J, K; as G41.2"
+      }
+    },
+    "fanuc-lathe": {
+      "arc": {},
+      "comp": {
+        "G41.2": "five-axis compensation: the side is also a matter of the tool direction; refused under a mirror (and a second 'left' would make the partner of G42 ambiguous)",
+        "G41.3": "compensation on the leading edge: no side",
+        "G41.4": "five-axis compensation, older form; as G41.2",
+        "G41.5": "five-axis compensation, older form; as G41.2",
+        "G41.6": "five-axis compensation by I, J, K; as G41.2",
+        "G42.2": "five-axis compensation; as G41.2",
+        "G42.4": "five-axis compensation, older form; as G41.2",
+        "G42.5": "five-axis compensation, older form; as G41.2",
+        "G42.6": "five-axis compensation by I, J, K; as G41.2"
+      }
+    },
+    "fanuc-lathe-b": {
+      "arc": {},
+      "comp": {
+        "G41.2": "five-axis compensation: the side is also a matter of the tool direction; refused under a mirror (and a second 'left' would make the partner of G42 ambiguous)",
+        "G41.3": "compensation on the leading edge: no side",
+        "G41.4": "five-axis compensation, older form; as G41.2",
+        "G41.5": "five-axis compensation, older form; as G41.2",
+        "G41.6": "five-axis compensation by I, J, K; as G41.2",
+        "G42.2": "five-axis compensation; as G41.2",
+        "G42.4": "five-axis compensation, older form; as G41.2",
+        "G42.5": "five-axis compensation, older form; as G41.2",
+        "G42.6": "five-axis compensation by I, J, K; as G41.2"
+      }
+    },
+    "heidenhain": {
+      "arc": {
+        "C": "the direction is the word DR+ or DR- in the block (profile addresses.arcDirectionWords)",
+        "CR": "the direction is the word DR+ or DR- in the block",
+        "CP": "the direction is the word DR+ or DR- in the block",
+        "CT": "tangential: the direction follows from the element before",
+        "CTP": "tangential: the direction follows from the element before",
+        "APPR CT": "the direction follows from the first contour element",
+        "APPR LCT": "the direction follows from the contour and the line before it",
+        "DEP CT": "the direction follows from the last contour element",
+        "DEP LCT": "the direction follows from the last contour element and the line after it"
+      },
+      "comp": {}
+    },
+    "okuma": {
+      "arc": {
+        "G102": "a contour arc with the C axis on the face: X and C, not a turning arc; refused by the transforms",
+        "G103": "as G102",
+        "G132": "a contour arc with the C axis on the side; refused by the transforms",
+        "G133": "as G132"
+      },
+      "comp": {}
+    },
+    "sinumerik": {
+      "arc": {
+        "CIP": "through an intermediate point: the points decide the direction",
+        "CT": "tangential: the direction follows from the element before"
+      },
+      "comp": {}
+    }
+  },
+  "profiles": {
+    "fanuc-gcode": {},
+    "fanuc-lathe": {},
+    "heidenhain-klartext": { "DR+": "ccw", "DR-": "cw" },
+    "okuma-osp": {},
+    "sinumerik": {},
+    "sinumerik-mill": {}
+  }
+}

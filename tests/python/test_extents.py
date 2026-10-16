@@ -65,6 +65,7 @@ REQUIRED_CASES = [
 ]
 
 gedit_nc = helpers.import_gedit_nc()
+import _nc_path  # noqa: E402  (the arc geometry is the tracker's)
 import extents  # noqa: E402  (the bundled folder is on sys.path from here on)
 
 
@@ -351,21 +352,21 @@ class TestGeometry(unittest.TestCase):
         z = Decimal(0)
         ten = Decimal(10)
         # From (10, 0) to (0, 10): the short way round (0, 0) or the long way round (10, 10).
-        self.assertEqual(extents.centre_from_radius(ten, z, z, ten, ten, "ccw"), (z, z))
-        self.assertEqual(extents.centre_from_radius(ten, z, z, ten, -ten, "ccw"), (ten, ten))
-        self.assertEqual(extents.centre_from_radius(ten, z, z, ten, ten, "cw"), (ten, ten))
-        self.assertIsNone(extents.centre_from_radius(z, z, Decimal(40), z, Decimal(5), "cw"))
+        self.assertEqual(_nc_path.centre_from_radius(ten, z, z, ten, ten, "ccw"), (z, z))
+        self.assertEqual(_nc_path.centre_from_radius(ten, z, z, ten, -ten, "ccw"), (ten, ten))
+        self.assertEqual(_nc_path.centre_from_radius(ten, z, z, ten, ten, "cw"), (ten, ten))
+        self.assertIsNone(_nc_path.centre_from_radius(z, z, Decimal(40), z, Decimal(5), "cw"))
 
     def test_an_angle_inside_a_sweep(self):
-        self.assertTrue(extents.within(45.0, 90.0, 90.0))
-        self.assertFalse(extents.within(45.0, 90.0, 180.0))
-        self.assertTrue(extents.within(45.0, -90.0, 0.0))
-        self.assertFalse(extents.within(0.0, 90.0, 0.0))  # an end point is no extreme of its own
+        self.assertTrue(_nc_path.within(45.0, 90.0, 90.0))
+        self.assertFalse(_nc_path.within(45.0, 90.0, 180.0))
+        self.assertTrue(_nc_path.within(45.0, -90.0, 0.0))
+        self.assertFalse(_nc_path.within(0.0, 90.0, 0.0))  # an end point is no extreme of its own
 
     def test_a_polar_point_is_exact_on_the_quarter_turns(self):
-        self.assertEqual(extents.polar_point(Decimal(30), Decimal(90)), (Decimal(0), Decimal(30)))
-        self.assertEqual(extents.polar_point(Decimal(30), Decimal(-90)), (Decimal(0), Decimal(-30)))
-        x, y = extents.polar_point(Decimal(30), Decimal(60))
+        self.assertEqual(_nc_path.polar_point(Decimal(30), Decimal(90)), (Decimal(0), Decimal(30)))
+        self.assertEqual(_nc_path.polar_point(Decimal(30), Decimal(-90)), (Decimal(0), Decimal(-30)))
+        x, y = _nc_path.polar_point(Decimal(30), Decimal(60))
         self.assertEqual((str(x), str(y)), ("15.000000", "25.980762"))
 
 

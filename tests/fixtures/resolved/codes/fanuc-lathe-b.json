@@ -132,7 +132,9 @@
       "group": "motion",
       "label": "Circular move, clockwise",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "arcDirection": "cw",
         "motion": "feed",
         "path": "arc"
       }
@@ -143,7 +145,9 @@
       "group": "motion",
       "label": "Circular move, counter-clockwise",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "arcDirection": "ccw",
         "motion": "feed",
         "path": "arc"
       }
@@ -673,7 +677,9 @@
       "group": "compensation",
       "label": "Nose radius compensation, tool left",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "compSide": "left",
         "radiusComp": "on"
       }
     },
@@ -683,7 +689,9 @@
       "group": "compensation",
       "label": "Nose radius compensation, tool right",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "compSide": "right",
         "radiusComp": "on"
       }
     },
@@ -951,7 +959,9 @@
       "description": "Sets a local coordinate system inside the active work offset. The axis words give where its zero lies, so they are a shift and not a move; G52 with every axis at zero ends it.",
       "group": "nonmodal",
       "label": "Local coordinate system",
-      "shift": true
+      "review": "pending",
+      "shift": true,
+      "shiftZeroIsNone": true
     },
     {
       "axisWords": "machine",
@@ -974,7 +984,9 @@
       ],
       "description": "Write it alone in the block after G68.2 or G68.4: the rotary axes move so that the tool stands at right angles to the tilted plane.",
       "group": "nonmodal",
-      "label": "Turn the tool axis to the tilted plane"
+      "label": "Turn the tool axis to the tilted plane",
+      "positionsRotary": true,
+      "review": "pending"
     },
     {
       "code": "G54",
@@ -1316,6 +1328,7 @@
           "block": 1,
           "label": "Number of roughing passes",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
@@ -1323,6 +1336,7 @@
           "block": 2,
           "label": "Block number of the first profile block",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
@@ -1330,6 +1344,7 @@
           "block": 2,
           "label": "Block number of the last profile block",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
@@ -1346,17 +1361,20 @@
           "address": "F",
           "block": 2,
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
-          "min": 0
+          "min": 0,
+          "position": "none"
         },
         {
           "address": "S",
           "block": 2,
-          "label": "Spindle speed for the roughing (an S inside the profile blocks applies to the finishing with G70 only)"
+          "label": "Spindle speed for the roughing (an S inside the profile blocks applies to the finishing with G70 only)",
+          "position": "none"
         },
         {
           "address": "T",
           "block": 2,
-          "label": "Tool for the roughing (a T inside the profile blocks applies to the finishing with G70 only)"
+          "label": "Tool for the roughing (a T inside the profile blocks applies to the finishing with G70 only)",
+          "position": "none"
         }
       ],
       "review": "pending",
@@ -1374,7 +1392,8 @@
         {
           "address": "R",
           "block": 1,
-          "label": "Back-off after each peck, a radius value without sign"
+          "label": "Back-off after each peck, a radius value without sign",
+          "position": "none"
         },
         {
           "address": "X",
@@ -1401,6 +1420,7 @@
           "block": 2,
           "label": "Step on X between the grooves, a radius value in least increments without a point (µm on a metric IS-B machine)",
           "min": 0,
+          "position": "none",
           "unit": "increment"
         },
         {
@@ -1408,18 +1428,21 @@
           "block": 2,
           "label": "Depth of each peck along Z, in least increments without a point (µm on a metric IS-B machine)",
           "min": 0,
+          "position": "none",
           "unit": "increment"
         },
         {
           "address": "R",
           "block": 2,
-          "label": "Relief at the bottom of the cut, a radius value; normally positive, with X and P left out its sign gives the direction"
+          "label": "Relief at the bottom of the cut, a radius value; normally positive, with X and P left out its sign gives the direction",
+          "position": "none"
         },
         {
           "address": "F",
           "block": 2,
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "position": "none"
         }
       ],
       "pitchFeedAmbiguous": true,
@@ -1441,6 +1464,7 @@
           "block": 1,
           "label": "Six digits packed: number of finishing passes (01-99), pull-out chamfer in tenths of the lead (00-99), insert angle (80, 60, 55, 30, 29 or 00 degrees); P010060 is one pass, no chamfer, 60°. Counted, never converted",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
@@ -1448,12 +1472,14 @@
           "block": 1,
           "label": "Smallest depth of cut, a radius value in least increments without a point (µm on a metric IS-B machine)",
           "min": 0,
+          "position": "none",
           "unit": "increment"
         },
         {
           "address": "R",
           "block": 1,
-          "label": "Finishing allowance, a radius value"
+          "label": "Finishing allowance, a radius value",
+          "position": "none"
         },
         {
           "address": "X",
@@ -1478,13 +1504,15 @@
         {
           "address": "R",
           "block": 2,
-          "label": "Taper: the difference in radius between the start and the end of the thread, with sign; 0 for a straight thread"
+          "label": "Taper: the difference in radius between the start and the end of the thread, with sign; 0 for a straight thread",
+          "position": "none"
         },
         {
           "address": "P",
           "block": 2,
           "label": "Thread height, a radius value in least increments without a point (µm on a metric IS-B machine); shown as written",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
@@ -1492,6 +1520,7 @@
           "block": 2,
           "label": "Depth of the first cut, a radius value in least increments without a point (µm on a metric IS-B machine)",
           "min": 0,
+          "position": "none",
           "unit": "increment"
         },
         {
@@ -1499,6 +1528,7 @@
           "block": 2,
           "label": "Thread lead per revolution",
           "min": 0,
+          "position": "none",
           "required": true,
           "unit": "feedPerRev"
         }
@@ -2030,8 +2060,10 @@
     {
       "code": "GOTO",
       "description": "Continues at the block with this N number. The target has to exist in the same program.",
+      "flow": "jump",
       "group": "macro",
-      "label": "Jump to a block"
+      "label": "Jump to a block",
+      "review": "pending"
     },
     {
       "code": "THEN",
@@ -2049,15 +2081,19 @@
     {
       "code": "DO",
       "description": "Opens the body of a WHILE loop. Its number has to match the END that closes the body.",
+      "flow": "loop",
       "group": "macro",
       "label": "Loop body start",
+      "review": "pending",
       "verify": true
     },
     {
       "code": "END",
       "description": "Closes the body of the WHILE loop with the same number.",
+      "flow": "loop-end",
       "group": "macro",
       "label": "Loop body end",
+      "review": "pending",
       "verify": true
     },
     {
@@ -2324,6 +2360,7 @@
           "address": "P",
           "label": "Block number of the first profile block",
           "min": 0,
+          "position": "none",
           "required": true,
           "unit": "count"
         },
@@ -2331,10 +2368,12 @@
           "address": "Q",
           "label": "Block number of the last profile block",
           "min": 0,
+          "position": "none",
           "required": true,
           "unit": "count"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -2355,13 +2394,15 @@
         {
           "address": "R",
           "block": 1,
-          "label": "Retract after each pass, a radius value without sign"
+          "label": "Retract after each pass, a radius value without sign",
+          "position": "none"
         },
         {
           "address": "P",
           "block": 2,
           "label": "Block number of the first profile block",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
@@ -2369,6 +2410,7 @@
           "block": 2,
           "label": "Block number of the last profile block",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
@@ -2385,17 +2427,20 @@
           "address": "F",
           "block": 2,
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
-          "min": 0
+          "min": 0,
+          "position": "none"
         },
         {
           "address": "S",
           "block": 2,
-          "label": "Spindle speed for the roughing (an S inside the profile blocks applies to the finishing with G70 only)"
+          "label": "Spindle speed for the roughing (an S inside the profile blocks applies to the finishing with G70 only)",
+          "position": "none"
         },
         {
           "address": "T",
           "block": 2,
-          "label": "Tool for the roughing (a T inside the profile blocks applies to the finishing with G70 only)"
+          "label": "Tool for the roughing (a T inside the profile blocks applies to the finishing with G70 only)",
+          "position": "none"
         }
       ],
       "review": "pending",
@@ -2419,13 +2464,15 @@
         {
           "address": "R",
           "block": 1,
-          "label": "Retract after each pass, a radius value without sign"
+          "label": "Retract after each pass, a radius value without sign",
+          "position": "none"
         },
         {
           "address": "P",
           "block": 2,
           "label": "Block number of the first profile block",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
@@ -2433,6 +2480,7 @@
           "block": 2,
           "label": "Block number of the last profile block",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
@@ -2449,17 +2497,20 @@
           "address": "F",
           "block": 2,
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
-          "min": 0
+          "min": 0,
+          "position": "none"
         },
         {
           "address": "S",
           "block": 2,
-          "label": "Spindle speed for the roughing (an S inside the profile blocks applies to the finishing with G70 only)"
+          "label": "Spindle speed for the roughing (an S inside the profile blocks applies to the finishing with G70 only)",
+          "position": "none"
         },
         {
           "address": "T",
           "block": 2,
-          "label": "Tool for the roughing (a T inside the profile blocks applies to the finishing with G70 only)"
+          "label": "Tool for the roughing (a T inside the profile blocks applies to the finishing with G70 only)",
+          "position": "none"
         }
       ],
       "review": "pending",
@@ -2477,7 +2528,8 @@
         {
           "address": "R",
           "block": 1,
-          "label": "Back-off after each peck, a radius value without sign"
+          "label": "Back-off after each peck, a radius value without sign",
+          "position": "none"
         },
         {
           "address": "X",
@@ -2504,6 +2556,7 @@
           "block": 2,
           "label": "Depth of each peck on X, a radius value in least increments without a point (µm on a metric IS-B machine)",
           "min": 0,
+          "position": "none",
           "unit": "increment"
         },
         {
@@ -2511,18 +2564,21 @@
           "block": 2,
           "label": "Step along Z between the grooves, in least increments without a point (µm on a metric IS-B machine)",
           "min": 0,
+          "position": "none",
           "unit": "increment"
         },
         {
           "address": "R",
           "block": 2,
-          "label": "Relief at the bottom of the cut, a radius value; normally positive, with Z and Q left out its sign gives the direction"
+          "label": "Relief at the bottom of the cut, a radius value; normally positive, with Z and Q left out its sign gives the direction",
+          "position": "none"
         },
         {
           "address": "F",
           "block": 2,
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "position": "none"
         }
       ],
       "review": "pending",

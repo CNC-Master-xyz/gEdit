@@ -84,6 +84,13 @@ function isZero(value: string): boolean {
   return Number(text.replace(/_/g, '')) === 0;
 }
 
+/** `_is_identity` (P4a fix B1, NC-15): a value written as a plain number equal to `identity`. */
+function isIdentity(value: string, identity: number): boolean {
+  const text = value.trim();
+  if (!PY_FLOAT.test(text)) return false;
+  return Number(text.replace(/_/g, '')) === identity;
+}
+
 /** `is_assignment`: an address written with `=` (`SB=1200`, `S3=2500`, `S[2]=500`, `F=R1`). */
 function isAssignment(token: NcToken): boolean {
   if (token.kind !== 'word' || !token.address) return false;
@@ -121,6 +128,16 @@ function zeroWordsOf(entry: CodeEntry): string[] {
   const words = entry.frameZeroWords;
   if (!Array.isArray(words)) return [];
   return words.filter((word) => typeof word === 'string' && word !== '').map((word) => word.toUpperCase());
+}
+
+/** `_identity_of` (P4a fix B1, NC-15): the value at which the `frameZeroWords` read as no frame; 0 without `frameIdentity`. */
+function identityOf(entry: CodeEntry): number {
+  const value = entry.frameIdentity;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value.trim());
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
 }
 
 /** `_empty_closes_of`: the sub-block number whose empty block closes the code's group. */
@@ -282,7 +299,10 @@ export class ModalInterpreter {
   private axisPlane = false;
   private callsBare = new Map<string, boolean>();
   private blockValues = false;
-  private blockWords = new Map<string, string>();
+  /** Rule 13 (`frameZeroWords`): the block's words, `[value, incremental]`; a word without a value has `''`. */
+  private blockWords = new Map<string, [string, boolean]>();
+  /** P4a integration (plan §7 #299): the profile's incremental prefix (Klartext `I`), for cycle 10's `IROT`. */
+  private readonly zeroPrefix: string;
   private blockSubs = new Map<string, string>();
 
   /** The **effective** compiled profile and database of the document (AD-31). */
@@ -307,6 +327,8 @@ export class ModalInterpreter {
     this.hasDistance = codes.some((e) => e.sets?.distance === 'absolute' || e.sets?.distance === 'incremental');
     this.hasBareFrames = codes.some((e) => e.frameWithoutValues === 'close');
     this.hasZeroFrames = codes.some((e) => zeroWordsOf(e).length > 0);
+    const prefix = record(profile.syntax).incrementalPrefix;
+    this.zeroPrefix = typeof prefix === 'string' && prefix.length === 1 ? prefix.toUpperCase() : '';
     this.hasEmptyCloses = codes.some((e) => emptyClosesOf(e) !== null);
     this.hasModalNext = codes.some((e) => e.sets?.cycle === 'call-modal-next');
     this.heads = new Set();
@@ -654,8 +676,11 @@ export class ModalInterpreter {
     if (this.hasZeroFrames) {
       this.blockWords.clear();
       for (const token of tokens) {
-        if (token.kind === 'word' && token.address && (token.valueText ?? '') !== '') {
-          this.blockWords.set(token.address.toUpperCase(), token.valueText ?? '');
+        if (token.kind === 'word' && token.address) {
+          const address = token.address.toUpperCase();
+          const value = token.valueText ?? '';
+          if (value === '' && this.blockWords.has(address)) continue;
+          this.blockWords.set(address, [value, token.incremental === true]);
         }
       }
     }
@@ -715,20 +740,32 @@ export class ModalInterpreter {
   /** Rule 13, `frameZeroWords` (owner decision of 2026-10-08) and `frameEmptyCloses` (M12.5). */
   private applyZeroFrame(entry: CodeEntry, words: readonly string[], code: string, group: string | null, line: number): void {
     const s = this.s;
-    const written = new Map<string, string>();
+    // P4a integration (§7 #299): a word without a value counts as not zero (cycle 8's
+    // `CYCL DEF 8.1 X Y`); an incremental word (or the word behind the incremental prefix,
+    // cycle 10's `IROT`) is an increment: any value but zero turns it, a zero adds nothing.
+    const written = new Map<string, [string, boolean]>();
     for (const word of words) {
-      const value = this.blockWords.get(word);
-      if (value !== undefined) written.set(word, value);
+      let found = this.blockWords.get(word);
+      if (found === undefined && this.zeroPrefix !== '') {
+        const prefixed = this.blockWords.get(this.zeroPrefix + word);
+        if (prefixed !== undefined && !words.includes(this.zeroPrefix + word)) found = [prefixed[0], true];
+      }
+      if (found !== undefined) written.set(word, found);
     }
     if (written.size === 0) {
       const empty = emptyClosesOf(entry);
       if (empty !== null && this.blockSubs.get(normalizeCode(code)) === empty) s.frames = s.frames.filter((f) => f.group !== group);
       return;
     }
+    if ([...written.values()].every(([value, incremental]) => incremental && isZero(value))) return;
+    // P4a fix B1 (NC-15, §7 #317): a scaling reads as none at its identity (`frameIdentity`).
+    const identity = identityOf(entry);
     const previous = s.frames.find((f) => f.code === code);
     const nonzero = new Set(previous?.nonzero ?? []);
-    for (const [word, value] of written) {
-      if (isZero(value)) nonzero.delete(word);
+    for (const [word, [value, incremental]] of written) {
+      if (incremental) {
+        if (!isZero(value)) nonzero.add(word);
+      } else if (isIdentity(value, identity)) nonzero.delete(word);
       else nonzero.add(word);
     }
     if (nonzero.size > 0) {

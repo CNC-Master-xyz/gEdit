@@ -79,6 +79,9 @@ REQUIRED_CASES = [
     "klartext-fk",
     # The Sinumerik milling cycles, SLOT2 and CYCLE72 among them (2026-10-12).
     "sinumerik-milling-cycles",
+    # P4a review NC-16: the values of the Fanuc lathe's G71-G76.
+    "b4-lathe-cycle-values",
+    "b4-lathe-cycle-multiply",
 ]
 
 #: The vocabulary of the README: block reasons, word reasons, notes and run notes.
@@ -931,3 +934,82 @@ class TestM13ReviewUnreadable(unittest.TestCase):
     def test_an_address_that_is_not_chosen_says_nothing(self):
         payload = run(self.PROGRAM, profile="fanuc-lathe", operation="subtract", operand=0.5, addresses=["X"])
         self.assertEqual(payload["findings"], [])
+
+
+class TestP4aReviewLatheCycleValues(unittest.TestCase):
+    """P4a review NC-16: since the Fanuc lathe's `G70`-`G76` carry roles (Phase 4 plan §7
+    #305), their reviewed values (`position: 'none'`) are values of the cycle: a shift leaves
+    them and lists them, and a multiply or divide never scales such a cycle in part."""
+
+    HEAD = "G21 G18 G99\nG0 X50. Z5.\n"
+
+    def lathe(self, body, **params):
+        return run(self.HEAD + body + "\nM30\n", profile="fanuc-lathe", **params)
+
+    def test_a_shift_of_r_leaves_the_relief_the_allowance_and_the_taper(self):
+        payload = self.lathe("G74 R1.\nG75 R1.\nG76 P020060 Q100 R0.05\nG76 X40. Z-20. R-2. P1000 Q300 F1.5", operand=1, addresses=["R"])
+        self.assertEqual(
+            lines_of(payload)[2:6],
+            ["G74 R1.", "G75 R1.", "G76 P020060 Q100 R0.05", "G76 X40. Z-20. R-2. P1000 Q300 F1.5"],
+        )
+        self.assertEqual([(f["line"], f["reason"], f["severity"]) for f in payload["findings"]], [(3, "data", "info"), (4, "data", "info"), (5, "data", "info"), (6, "data", "info")])
+        self.assertEqual(finding_at(payload, 6)["message"], "R-2.: a value of G76, not a position of this program.")
+
+    def test_a_shift_of_x_and_r_moves_the_end_point_and_leaves_the_values(self):
+        payload = self.lathe("G74 X20. Z-30. P3000 Q5000 R0.5 F0.1\nG76 X40. Z-20. R-2. P1000 Q300 F1.5", operand=1, addresses=["X", "R"])
+        self.assertEqual(lines_of(payload)[2:4], ["G74 X21. Z-30. P3000 Q5000 R0.5 F0.1", "G76 X41. Z-20. R-2. P1000 Q300 F1.5"])
+        self.assertEqual(reasons(payload), ["data", "data"])
+
+    def test_an_arc_radius_outside_a_cycle_is_still_changed(self):
+        payload = self.lathe("G2 X30. Z-15. R5.", operand=1, addresses=["R"])
+        self.assertEqual(lines_of(payload)[2], "G2 X30. Z-15. R6.")
+
+    def test_a_multiply_of_x_never_scales_a_thread_or_a_pecking_cycle_in_part(self):
+        program = "G74 R1.\nG74 X20. Z-30. P3000 Q5000 F0.1\nG76 P020060 Q100 R0.05\nG76 X40. Z-20. R-2. P1000 Q300 F1.5"
+        payload = self.lathe(program, operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[1:6], ["G0 X100. Z5."] + program.split("\n"))
+        self.assertEqual([finding_at(payload, line)["reason"] for line in (3, 4, 5, 6)], ["not-scaled"] * 4)
+        self.assertIn("G76 writes R-2.", finding_at(payload, 6)["message"])
+
+    def test_a_multiply_of_z_refuses_the_cycle_too(self):
+        payload = self.lathe("G74 R1.\nG74 Z-30. Q5000 F0.1", operation="multiply", operand=2, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[3], "G74 Z-30. Q5000 F0.1")
+        self.assertEqual(finding_at(payload, 4)["reason"], "not-scaled")
+
+    def test_an_end_point_without_the_lengths_is_not_scaled_either(self):
+        # The control takes Q and R from the first block or its own settings, unscaled.
+        payload = self.lathe("G76 X40. Z-20. F1.5", operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[2], "G76 X40. Z-20. F1.5")
+        self.assertEqual(
+            finding_at(payload, 3)["message"],
+            "G76 X40. Z-20. F1.5: G76 has depths or distances of its own (Q and R) that a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+        )
+
+    def test_an_incremental_end_point_is_refused_like_an_absolute_one(self):
+        payload = self.lathe("G74 U-30. W-35. P3000 Q5000 F0.1", operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[2], "G74 U-30. W-35. P3000 Q5000 F0.1")
+        self.assertEqual(finding_at(payload, 3)["reason"], "not-scaled")
+
+    def test_a_multiply_lists_a_roughing_cycle_as_not_scaled(self):
+        payload = self.lathe("G71 U2. R0.5\nG71 P10 Q20 U0.4 W0.1 F0.25\nN10 G0 X20.\nN20 G1 Z-10.\nG70 P10 Q20", operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[2:7], ["G71 U2. R0.5", "G71 P10 Q20 U0.4 W0.1 F0.25", "N10 G0 X40.", "N20 G1 Z-10.", "G70 P10 Q20"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "not-scaled"), (4, "not-scaled")])
+
+    def test_a_multiply_of_r_alone_leaves_the_cycle_values(self):
+        payload = self.lathe("G76 P020060 Q100 R0.05\nG76 X40. Z-20. R-2. P1000 Q300 F1.5", operation="multiply", operand=2, addresses=["R"])
+        self.assertEqual(lines_of(payload)[2:4], ["G76 P020060 Q100 R0.05", "G76 X40. Z-20. R-2. P1000 Q300 F1.5"])
+        self.assertEqual(reasons(payload), ["data", "data"])
+
+    def test_a_mill_drilling_cycle_keeps_its_rules(self):
+        # Its lengths lie on the tool axis: a multiply of X scales the hole positions.
+        payload = run("G90 G17\nG83 X10. Y10. Z-5. R2. Q1. F100.\nG80\n", operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[1], "G83 X20. Y10. Z-5. R2. Q1. F100.")
+        self.assertEqual(reasons(payload), [])
+
+    def test_cycle95_stays_refused_for_its_contour(self):
+        program = 'N10 G18 G90 DIAMON\nN20 G0 X50 Z5\nN30 CYCLE95("KONTUR",2,0,0.2,0.1,0.3,0.2,0.1,1,0,0,0.5)\nN40 M30\n'
+        for params in ({"operand": 1, "addresses": ["Z"]}, {"operation": "multiply", "operand": 2, "addresses": ["X"]}):
+            with self.subTest(params=params):
+                payload = run(program, profile="sinumerik", **params)
+                self.assertEqual(lines_of(payload)[2], program.split("\n")[2])
+                self.assertEqual(finding_at(payload, 3)["reason"], "cycle-position")

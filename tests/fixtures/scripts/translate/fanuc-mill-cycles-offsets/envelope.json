@@ -1,0 +1,17 @@
+{
+  "message": "Moved by X1.5 Y-0.25 Z-1: 20 words on 11 blocks. Left 2 blocks as written: 1 return to the reference point, 1 position in machine coordinates. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 21,
+      "severity": "info",
+      "message": "G91 G28 Z0.: a position in machine coordinates or an incremental return to the reference point; left as written.",
+      "reason": "machine-position"
+    },
+    {
+      "line": 22,
+      "severity": "info",
+      "message": "G53 G0 X0. Y0.: a position in machine coordinates or an incremental return to the reference point; left as written.",
+      "reason": "machine-position"
+    }
+  ]
+}

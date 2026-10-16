@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be mirrored: 2 blocks under a direction or side set above the selection. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "G1 X20. (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FO…: this block runs under an arc direction or a compensation side (G2/G3, G41/G42) set above the selection; the mirror would have to swap that code outside the selection. Start the selection at the block that sets it.",
+      "reason": "selection-mode"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "G2 X30. Y5. I5. J0.: this block runs under an arc direction or a compensation side (G2/G3, G41/G42) set above the selection; the mirror would have to swap that code outside the selection. Start the selection at the block that sets it.",
+      "reason": "selection-mode"
+    }
+  ]
+}

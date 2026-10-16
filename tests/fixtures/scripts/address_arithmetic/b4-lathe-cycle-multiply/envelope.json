@@ -1,0 +1,53 @@
+{
+  "message": "Multiplied X by 2 in 4 words on 4 blocks. Left 8 blocks as written: 8 blocks a multiply or divide does not scale. No machine chosen: words whose reading depends on the machine are left alone.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "warning",
+      "message": "G74 R1.: G74 writes R1., which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+      "reason": "not-scaled"
+    },
+    {
+      "line": 8,
+      "severity": "warning",
+      "message": "G74 X20. Z-30. P3000 Q5000 R0.5 F0.1: G74 writes P3000, which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+      "reason": "not-scaled"
+    },
+    {
+      "line": 10,
+      "severity": "warning",
+      "message": "G75 R1.: G75 writes R1., which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+      "reason": "not-scaled"
+    },
+    {
+      "line": 11,
+      "severity": "warning",
+      "message": "G75 X30. Z-20. P2000 Q4000 F0.08: G75 writes P2000, which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+      "reason": "not-scaled"
+    },
+    {
+      "line": 13,
+      "severity": "warning",
+      "message": "G76 P020060 Q100 R0.05: G76 writes Q100, which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+      "reason": "not-scaled"
+    },
+    {
+      "line": 14,
+      "severity": "warning",
+      "message": "G76 X40. Z-20. R-2. P1000 Q300 F1.5: G76 writes R-2., which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+      "reason": "not-scaled"
+    },
+    {
+      "line": 15,
+      "severity": "warning",
+      "message": "G71 U2. R0.5: G71 writes U2., which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+      "reason": "not-scaled"
+    },
+    {
+      "line": 16,
+      "severity": "warning",
+      "message": "G71 P10 Q20 U0.4 W0.1 F0.25: G71 writes U0.4, which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+      "reason": "not-scaled"
+    }
+  ]
+}

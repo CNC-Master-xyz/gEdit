@@ -46,6 +46,7 @@
       "TOOL CALL",
       "TOOL DEF",
       "CYCL DEF",
+      "PATTERN DEF",
       "CYCL CALL PAT",
       "CYCL CALL POS",
       "CYCL CALL",
@@ -127,7 +128,8 @@
     "spindle": "S",
     "axes": ["X", "Y", "Z", "A", "B", "C", "U", "V", "W"],
     "angular": ["A", "B", "C"],
-    "feedUnitWords": { "FU": "per-rev", "FZ": "per-tooth" }
+    "feedUnitWords": { "FU": "per-rev", "FZ": "per-tooth" },
+    "arcDirectionWords": { "DR+": "ccw", "DR-": "cw" }
   },
   "toolCall": {
     "trigger": "\\bTOOL\\s+CALL\\s+(\\d|\"|QS\\d)",
@@ -149,6 +151,7 @@
     { "kind": "end", "pattern": "\\bEND\\s+PGM\\b|\\bM(?:30|2)\\b" }
   ],
   "numbering": { "mode": "consecutive", "start": 0, "step": 1 },
+  "numberFormat": { "decimals": "keep", "trailingZeros": "keep", "keepPoint": true, "plusSign": "signed" },
   "editing": { "forceUppercase": true, "preventLineJoin": true },
   "compare": {
     "ignoreBlockNumbers": true,

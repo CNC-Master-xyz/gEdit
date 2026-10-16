@@ -80,6 +80,7 @@
         "maxWordDigits": 8,
         "plainTextRun": 3,
         "programNames": "<[A-Za-z0-9+\\-_.]+>",
+        "systemVariableNumbers": 1000,
         "variables": "#\\d+",
         "wordSeparatorRequired": false
       },
@@ -156,6 +157,7 @@
         "maxWordDigits": 8,
         "plainTextRun": 3,
         "programNames": "<[A-Za-z0-9+\\-_.]+>",
+        "systemVariableNumbers": 1000,
         "variables": "#\\d+",
         "wordSeparatorRequired": false
       },
@@ -206,6 +208,7 @@
           "TOOL CALL",
           "TOOL DEF",
           "CYCL DEF",
+          "PATTERN DEF",
           "CYCL CALL PAT",
           "CYCL CALL POS",
           "CYCL CALL",

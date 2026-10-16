@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be moved by X0.0005: 2 blocks with a word that cannot hold the shift. Machine 'Mill IS-B': numbers without a point are increments of 0.001 mm.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "G0 X0 Y0 Z50000: the result does not fit this word's form (its decimals, or whole increments of the machine) without rounding; give a shift the machine can write.",
+      "reason": "resolution"
+    },
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "G1 X10000 F200: the result does not fit this word's form (its decimals, or whole increments of the machine) without rounding; give a shift the machine can write.",
+      "reason": "resolution"
+    }
+  ]
+}

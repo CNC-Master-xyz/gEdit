@@ -20,7 +20,7 @@ the machine, not for the person who builds the editor — the build and design n
 | [Writing with templates](templates.md) | The Insert tab: program starts, tool changes and cycles from a form, templates in completion, Edit Cycle, formulas, favourites, the template manager, New Template from Selection, and where your templates are kept |
 | [Transformations](transformations.md) | The NC tab: renumbering, removing block numbers, the five cleanups, block skip and selecting a tool's lines |
 | [Channels](channels.md) | Twin-turret and multi-path programs: finding the channels, the wait codes, and checking that the waits fit |
-| [Scripts](scripts.md) | Running Python scripts, the six that ship (feeds, speeds, tool list, program checks, extents, address arithmetic), and how to write one |
+| [Scripts](scripts.md) | Running Python scripts, the nine that ship (feeds, speeds, tool list, program checks, extents, address arithmetic, translate, rotate, mirror), and how to write one |
 | [Regular expressions](regex.md) | Patterns for the editor's find and for Python scripts, with NC examples, and where the two differ |
 | [Shortcuts](shortcuts.md) | The keyboard |
 
@@ -43,7 +43,7 @@ Across the top is the **ribbon**, with seven tabs:
 | **Edit** | Undo, redo, find, replace, comment, duplicate, move, delete line, select all, upper and lower case (plain text commands; on a program use **Convert Case…** on the NC tab) · **Find All…**, **Replace All…**, **Find Whole Address…** ([Searching](#searching)) · **Go to Line or Block…** (group *Go To*) · **Typing**: **Upper-Case Typing** switches [upper case while you type](#typing-forced-upper-case-and-no-accidental-joins) off or on for this session |
 | **Insert** | The **templates** of the active program — **Program start** (the first lines of a program, in the dialect's own style) and end, tool change, drilling, tapping, turning and threading cycles, for all six dialects — as buttons and lists, **Favorites** first; **Edit Cycle…** for the cycle at the cursor; **Manage Templates…** and **New Template from Selection…** for your own. See [Writing with templates](templates.md) |
 | **NC** | Renumbering, removing block numbers, the cleanups, block skip and selecting a tool segment — see [Transformations](transformations.md) |
-| **Tools** | Compare ([Comparing two programs](#comparing-two-programs)) · the scripts that come with gEdit, in the **Built-in Scripts** group — **Program checks**, **Scale feed rates**, **Scale spindle speeds**, **Tool list**, **Extents**, **Address arithmetic** (see [Scripts](scripts.md)) · **Check Wait Codes** for [channels](channels.md#check-wait-codes) · **Test Profile on Document** for [profiles of your own](profiles.md#testing-a-profile-on-a-program) |
+| **Tools** | Compare ([Comparing two programs](#comparing-two-programs)) · the scripts that come with gEdit, in the **Built-in Scripts** group — **Program checks**, **Scale feed rates**, **Scale spindle speeds**, **Tool list**, **Extents**, **Address arithmetic**, **Translate**, **Rotate**, **Mirror** (see [Scripts](scripts.md)) · **Check Wait Codes** for [channels](channels.md#check-wait-codes) · **Test Profile on Document** for [profiles of your own](profiles.md#testing-a-profile-on-a-program) |
 | **Scripts** | Run a script, stop it, your own scripts (**My Scripts**), **New Script**, **Edit Script**, **Rescan**, **Add Folder** — see [Scripts](scripts.md) |
 | **View** | The command palette, the panels (Side Panel, Code Inspector, Bottom Panel, Script Output), the motion-colour switch, folding, display switches, zoom, theme, settings, the shortcut list and About |
 
@@ -696,7 +696,7 @@ at hand.
 
 ## Checking a program before the machine
 
-Two bundled scripts read a program without running it, and a third does arithmetic on it.
+Two bundled scripts read a program without running it, and four more change its numbers.
 They are on the Tools tab (group *Built-in Scripts*) and are described in [Scripts](scripts.md):
 
 | | What it tells you |
@@ -704,6 +704,7 @@ They are on the Tools tab (group *Built-in Scripts*) and are described in [Scrip
 | [Program checks](scripts.md#program-checks) | What the program does that the control or the machine will not like: a cut with the spindle stopped, a tool change inside a cycle, a jump to a block that is not there, a thread under constant surface speed, a number whose value depends on how your machine reads it, the stops |
 | [Extents](scripts.md#extents) | The smallest and largest value of every axis, for the program, each work offset and each tool, with the arcs counted, and how many positions could not be worked out |
 | [Address arithmetic](scripts.md#address-arithmetic) | Adds to, subtracts from, multiplies or divides chosen addresses. A Z shift moves the cycle positions that go with it, or refuses a block it cannot judge and lists it |
+| [Translate](scripts.md#translate), [Rotate](scripts.md#rotate), [Mirror](scripts.md#mirror) | Move the path by a shift, turn it about a point, or mirror it (on a lathe, in Z for the counter spindle). Arcs, cycle positions and the poles go with it, `G2`/`G3` and `G41`/`G42` swap in a mirror, and a block they cannot judge stops the whole run: nothing is written and every such block is listed |
 
 For a control that runs several programs at once, **Check Wait Codes** on the Tools tab
 compares the wait codes of the channels. It is described in [Channels](channels.md#check-wait-codes).
@@ -978,6 +979,14 @@ Being clear about this saves disappointment on the shop floor.
   know where the tool is.
 - **No machine communication.** No DNC, no serial, no FTP, no drip feed.
 - **No program management.** No library, no job list, no PDM or ERP link.
+- **Translate, rotate and mirror move the path, not the machine.** They work in the XY plane
+  of a milling program (rotate and mirror) and, on a lathe, translate and mirror in Z for the
+  counter spindle. They do not rotate a lathe program, do not follow a subprogram or macro
+  call, do not work on a program in a tilted plane, mirror or scaling, and do not reverse
+  the path to turn conventional milling back into climb milling. A block they cannot judge
+  stops the run and nothing is written. They do not set the tool nose direction of a
+  mirrored lathe program: you do. Check the result on the machine's own simulation. See
+  [Scripts](scripts.md#translate).
 - **Six dialects: Fanuc mill, Fanuc lathe, Heidenhain Klartext, Okuma OSP for turning, and
   Sinumerik 840D for turning and for milling.** Milling on an Okuma control is not covered:
   an Okuma milling program opens with the turning profile, which reads some of its codes

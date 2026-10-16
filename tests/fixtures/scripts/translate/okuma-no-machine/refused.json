@@ -1,0 +1,47 @@
+{
+  "message": "Nothing was changed: 7 blocks cannot be moved by X1 (diameter) Z-0.5: 6 blocks with a word whose reading depends on the machine, 1 move from a start the program has not written. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N5 G0 X60. Z2.: this number is read differently on the machines of this control; choose the machine of this document.",
+      "reason": "machine-dependent"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "N6 G1 Z-20. F0.2: this number is read differently on the machines of this control; choose the machine of this document.",
+      "reason": "machine-dependent"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "N7 G91 X5. Z-2.: the shift moves an axis the program has not written before this block, so where it starts is not known.",
+      "reason": "axis-unwritten"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "N8 G90 G2 X80. Z-30. I0. K-5.: this number is read differently on the machines of this control; choose the machine of this document.",
+      "reason": "machine-dependent"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "N9 G3 X90 Z-35 I5 K0: this number is read differently on the machines of this control; choose the machine of this document.",
+      "reason": "machine-dependent"
+    },
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "N10 G1 X100.: this number is read differently on the machines of this control; choose the machine of this document.",
+      "reason": "machine-dependent"
+    },
+    {
+      "line": 13,
+      "severity": "error",
+      "message": "N11 G0 X150. Z100.: this number is read differently on the machines of this control; choose the machine of this document.",
+      "reason": "machine-dependent"
+    }
+  ]
+}

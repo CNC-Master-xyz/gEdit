@@ -46,6 +46,7 @@ interpreter's state, which TypeScript mirrors; it is the scripts' reading of the
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from _nc_lex import CompiledProfile, LineState, Token, continues_block, decimal_of, mask_comments, normalize_code, tokenize_line
@@ -211,6 +212,27 @@ def _is_zero(value: str) -> bool:
         return False
 
 
+def _identity_of(entry: Optional[Dict[str, Any]]) -> float:
+    """``frameIdentity`` (P4a fix B1, NC-15): the value at which the ``frameZeroWords`` read as
+    no frame (``"1"``: a scaling factor of 1); ``0`` when the entry has none."""
+    value = entry.get("frameIdentity") if isinstance(entry, dict) else None
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            pass
+    return 0.0
+
+
+def _is_identity(value: str, identity: float) -> bool:
+    """A value written as a plain number equal to ``identity`` (``SCL1``, ``SCL+1.000`` for 1);
+    anything else, a variable included, is not."""
+    try:
+        return float(value.strip()) == identity
+    except ValueError:
+        return False
+
+
 def speed_limit_bound_of(entry: Optional[Dict[str, Any]]) -> Optional[str]:
     """Which side of the speed range this code's ``S`` bounds: ``'upper'``, ``'lower'`` or ``None``.
 
@@ -257,6 +279,62 @@ def tcp_of(entry: Optional[Dict[str, Any]]) -> Optional[str]:
     """
     value = _sets_of(entry).get("tcp")
     return value if value in ("on", "off") else None
+
+
+# -- Phase 4 (P4a prelude; Phase 4 plan section 6.2, AD-42): what a mirror swaps. The
+# TypeScript twins are `arcDirectionOf` and `compSideOf` in `src/lib/core/codes/lookup.ts`,
+# held to the same cases (`tests/python/test_code_flags.py`, `flagsContract.test.ts`) and
+# to the data golden `tests/fixtures/codes/geometry-flags.json`.
+
+
+def arc_direction_of(entry: Optional[Dict[str, Any]]) -> Optional[str]:
+    """``'cw'`` or ``'ccw'``: the direction of the arc this code cuts, as the control defines
+    it (``G2`` clockwise, ``G3`` counter-clockwise, seen from the positive end of the axis
+    normal to the plane), or ``None``. Only on an entry with ``sets.path == 'arc'``."""
+    sets = _sets_of(entry)
+    if sets.get("path") != "arc":
+        return None
+    value = sets.get("arcDirection")
+    return value if value in ("cw", "ccw") else None
+
+
+def comp_side_of(entry: Optional[Dict[str, Any]]) -> Optional[str]:
+    """``'left'`` or ``'right'``: the side the tool keeps to under this compensation code
+    (``G41``, ``RL`` / ``G42``, ``RR``), or ``None``. Only with ``sets.radiusComp == 'on'``."""
+    sets = _sets_of(entry)
+    if sets.get("radiusComp") != "on":
+        return None
+    value = sets.get("compSide")
+    return value if value in ("left", "right") else None
+
+
+#: What the app's validator accepts as a direction word: an ASCII letter, ASCII letters and digits,
+#: then the sign. The TypeScript twin is ``DIRECTION_WORD`` in ``src/lib/core/profiles/validate.ts``;
+#: both are held to the cases of ``tests/fixtures/codes/arc-direction-words.json``.
+_DIRECTION_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*[+-]")
+
+
+def arc_direction_words_of(profile: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """The profile's ``addresses.arcDirectionWords`` (Klartext ``{"DR+": "ccw", "DR-": "cw"}``),
+    keys upper case, as an address followed by its sign; ``{}`` when it has none. A word that is
+    not an ASCII letter, letters and digits, and a sign (the validator's rule), a word whose
+    direction is not ``'cw'``/``'ccw'``, a second word for one direction, and a key that differs
+    from an earlier one only in case are left out: the app's validator has already refused such a
+    profile, and a reader must not guess."""
+    addresses = profile.get("addresses") if isinstance(profile, dict) else None
+    words = addresses.get("arcDirectionWords") if isinstance(addresses, dict) else None
+    if not isinstance(words, dict):
+        return {}
+    out: Dict[str, str] = {}
+    taken = set()
+    for word, direction in words.items():
+        if not isinstance(word, str) or _DIRECTION_WORD.fullmatch(word) is None:
+            continue
+        if direction not in ("cw", "ccw") or direction in taken or word.upper() in out:
+            continue
+        taken.add(direction)
+        out[word.upper()] = direction
+    return out
 
 
 # -- B1 (plan "Two-block schema"; ``CodeEntry.blocks``, ``CodeParam.block``): the two blocks
@@ -622,6 +700,11 @@ class ModalInterpreter:
         #: tilt that reads as none when every angle is zero (`frameZeroWords`, Klartext cycle 19
         #: and `PLANE SPATIAL`).
         self._has_zero_frames = any(isinstance(entry, dict) and _zero_words_of(entry) for entry in self.codes)
+        #: P4a integration (plan §7 #299): the profile's incremental prefix (Klartext `I`), so
+        #: that `IROT+45` of cycle 10 is read as an increment of its `ROT` (`frameZeroWords`).
+        syntax = self._profile.get("syntax")
+        prefix = syntax.get("incrementalPrefix") if isinstance(syntax, dict) else None
+        self._zero_prefix = prefix.upper() if isinstance(prefix, str) and len(prefix) == 1 else ""
         #: M12.5 (`frameEmptyCloses`): the same walk reads the sub-block number of each
         #: keyword code (`CYCL DEF 19.1` is sub-block 1 of cycle 19).
         self._has_empty_closes = any(_empty_closes_of(entry) is not None for entry in self.codes)
@@ -687,7 +770,9 @@ class ModalInterpreter:
         #: Rule 13: the block's calls without arguments, and whether it writes any value.
         self._calls_bare = {}
         self._block_values = False
-        self._block_words: Dict[str, str] = {}
+        #: Rule 13 (`frameZeroWords`): the block's words by address, ``(value, incremental)``;
+        #: a word written without a value (`CYCL DEF 8.1 X Y`) has the value ``""``.
+        self._block_words: Dict[str, Tuple[str, bool]] = {}
         #: Rule 13 (`frameEmptyCloses`): the sub-block number each keyword code of the block
         #: was written with, by normalized code (``CYCL DEF 19`` -> ``"1"`` for ``19.1``).
         self._block_subs: Dict[str, str] = {}
@@ -969,8 +1054,12 @@ class ModalInterpreter:
         self._block_subs = {}
         if self._has_zero_frames:
             for token in tokens:
-                if token.kind == "word" and token.address and (token.value_text or "") != "":
-                    self._block_words[token.address.upper()] = token.value_text or ""
+                if token.kind == "word" and token.address:
+                    address = token.address.upper()
+                    value = token.value_text or ""
+                    if value == "" and address in self._block_words:
+                        continue
+                    self._block_words[address] = (value, bool(token.incremental))
         if self._has_empty_closes:
             count = len(tokens)
             for i, token in enumerate(tokens):
@@ -1042,8 +1131,23 @@ class ModalInterpreter:
         the block leaves out keeps its value, as the TNC manual says of cycle 19, and a value
         that is not a plain number (``SPB+Q5``) counts as not zero: in doubt the frame stays
         open, the safe reading for anything that moves positions.
+
+        P4a integration (plan §7 #299): a word written **without a value** counts as not zero
+        (cycle 8 names the mirrored axes, ``CYCL DEF 8.1 X Y``; its empty ``8.1`` is the
+        reset). A word written **incrementally** (the tokenizer's incremental word, or the
+        word with the profile's incremental prefix in front: cycle 10's ``IROT+45`` for
+        ``ROT``) is an increment: any value but zero turns it, and a zero adds nothing, so a
+        block of zero increments changes no frame.
         """
-        written = {word: self._block_words[word] for word in words if word in self._block_words}
+        written: Dict[str, Tuple[str, bool]] = {}
+        for word in words:
+            found = self._block_words.get(word)
+            if found is None and self._zero_prefix:
+                prefixed = self._block_words.get(self._zero_prefix + word)
+                if prefixed is not None and (self._zero_prefix + word) not in words:
+                    found = (prefixed[0], True)
+            if found is not None:
+                written[word] = found
         if not written:
             # M12.5 (§7.16 #180): the TNC 640 cycle manual ends cycle 19 by defining it
             # again and answering the angle question with NO ENT, which writes an empty
@@ -1055,10 +1159,18 @@ class ModalInterpreter:
             if empty is not None and self._block_subs.get(normalize_code(code)) == empty:
                 self._frames = [f for f in self._frames if f["group"] != group]
             return
+        if all(incremental and _is_zero(value) for value, incremental in written.values()):
+            return  # increments of zero: nothing turns, nothing is reset
+        # P4a fix B1 (NC-15, plan §7 #317): a scaling reads as none at its identity value
+        # (`frameIdentity`: cycle 11 `SCL1`, cycle 26 `X1 Y1`), a tilt or a rotation at zero.
+        identity = _identity_of(self._entries.get(normalize_code(code)))
         previous = next((f for f in self._frames if f["code"] == code), None)
         nonzero = set(previous.get("nonzero", ())) if previous is not None else set()
-        for word, value in written.items():
-            if _is_zero(value):
+        for word, (value, incremental) in written.items():
+            if incremental:
+                if not _is_zero(value):
+                    nonzero.add(word)
+            elif _is_identity(value, identity):
                 nonzero.discard(word)
             else:
                 nonzero.add(word)
@@ -1301,6 +1413,37 @@ class ModalInterpreter:
         self._tool = None
         self._last_tool = None
         return True
+
+    def fingerprint(self) -> Tuple[Any, ...]:
+        """P4a fix B1 (NC-5, plan §7 #312): what the geometry transforms read of the modal state,
+        as one comparable tuple, cheap to take on any line: the distance mode, the units, the
+        plane, the open frames, tool centre point control, the diameter mode and the cycles in
+        force. Two ways into one block (a jump and the straight run, a loop's start and its
+        end) that give different fingerprints read that block differently. Python only: it is
+        no member of the ``ModalState`` of §7.4, so the TypeScript twin has nothing to match.
+        """
+        diameter = self._diameter.get("mode") if self._diameter is not None else None
+        defined = self._defined_cycle["code"] if self._defined_cycle is not None else None
+        modal = self._modal_call["code"] if self._modal_call is not None else None
+        if self._active_cycle is not None:
+            active = self._active_cycle.get("code")
+        elif modal is not None and defined is not None:
+            active = defined
+        elif self._mcall is not None:
+            active = self._mcall.get("code")
+        else:
+            active = None
+        return (
+            self._distance,
+            self._units.get("value"),
+            self._plane,
+            tuple(f["code"] for f in self._frames) if self._frames else (),
+            self._tcp["code"] if self._tcp is not None else None,
+            diameter,
+            active,
+            defined,
+            modal,
+        )
 
     # -- what is in force ---------------------------------------------------
 

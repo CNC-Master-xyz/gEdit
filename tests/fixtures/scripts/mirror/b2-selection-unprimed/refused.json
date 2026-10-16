@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: this run saw only the selection, from line 6, so what is in force above it is not known. Run Mirror on the whole program. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "The lines above the selection were not available, so the distance mode, the units, a frame, a cycle, an arc direction and a compensation side in force there are not known; nothing was changed.",
+      "reason": "selection-unprimed"
+    }
+  ]
+}

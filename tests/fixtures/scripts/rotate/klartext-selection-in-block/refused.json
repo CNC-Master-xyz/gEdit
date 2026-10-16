@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be rotated: 2 blocks cut by the selection. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "Q201=-10 ;WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM ~: the selection starts or ends inside a cycle or a block that runs over several lines; select the whole of it.",
+      "reason": "selection-inside"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "5 L X+20 Y+10 FMAX M99: the selection starts or ends inside a cycle or a block that runs over several lines; select the whole of it.",
+      "reason": "selection-inside"
+    }
+  ]
+}

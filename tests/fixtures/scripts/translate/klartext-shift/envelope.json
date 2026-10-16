@@ -1,0 +1,11 @@
+{
+  "message": "Moved by X1.5 Y-2: 22 words on 11 blocks. Left 1 block as written: 1 position in machine coordinates. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 35,
+      "severity": "info",
+      "message": "25 L Z-5 R0 FMAX M91: a position in machine coordinates or an incremental return to the reference point; left as written.",
+      "reason": "machine-position"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "message": "Moved by X-2 (diameter) Z1.25: 12 words on 7 blocks. Left 1 block as written: 1 return to the reference point. Machine 'Lathe B': it does not say how it reads numbers, so a word whose reading depends on that would refuse the run; X is a diameter.",
+  "findings": [
+    {
+      "line": 16,
+      "severity": "info",
+      "message": "G28 U0. W0.: a position in machine coordinates or an incremental return to the reference point; left as written.",
+      "reason": "machine-position"
+    }
+  ]
+}

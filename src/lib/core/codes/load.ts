@@ -58,6 +58,10 @@ const SETS_VALUES = {
   // Phase 3 (P3a prelude, P3.7): an arc rather than a straight line, for the motion colours;
   // `cycle`: every block of the code is a whole pass (the lathe single-pass cycles).
   path: ['arc', 'cycle'],
+  // Phase 4 (P4a prelude, plan §6.2, AD-42): what a mirror swaps. Each needs its partner
+  // member (`path: 'arc'`, `radiusComp: 'on'`), checked in `readSets`.
+  arcDirection: ['cw', 'ccw'],
+  compSide: ['left', 'right'],
 } as const satisfies Record<string, readonly string[]>;
 
 /** P10: the `sets` members that are flags, `true` or absent (`false` is read as absent). */
@@ -76,6 +80,13 @@ const PARAM_UNITS: readonly (NumberClass | 'increment' | 'count')[] = [
 
 /** P10 (R8, §7.2, §7.16 #106). What a parameter is to a program shift. */
 const POSITIONS = ['tool-axis', 'none', 'other', 'mode'] as const;
+
+/** P4a fix B1 (NC-2, §7 #311): an angle or a side of the working plane (`CodeParam.inPlane`). */
+const IN_PLANE = ['angle', 'side'] as const;
+/** P4a fix B1 (NC-8, §7 #316): what the sign of a value is (`CodeParam.signOf`). */
+const SIGN_OF = ['next-move'] as const;
+/** P4a fix B1 (NC-5, §7 #312): what a code does to the order the blocks run in (`CodeEntry.flow`). */
+const FLOWS = ['jump', 'label', 'branch', 'else', 'branch-end', 'loop', 'loop-end', 'repeat'] as const;
 
 /** P11 (§7.6). How a parameter's value names a program. */
 const PROGRAM_NUMBERS = ['plain', 'packed'] as const;
@@ -273,6 +284,13 @@ function readParams(
     // P11: a parameter whose value names a program, for search; unknown values are dropped.
     const programNumber = oneOf(item.programNumber, PROGRAM_NUMBERS, `${at}.programNumber`, report);
     if (programNumber !== undefined) param.programNumber = programNumber;
+    // P4a fix B1: an angle or a side of the plane (NC-2), the parameter whose 0 keeps the rotary
+    // axes still (NC-11), a value whose sign is the direction of the next move (NC-8).
+    const inPlane = oneOf(item.inPlane, IN_PLANE, `${at}.inPlane`, report);
+    if (inPlane !== undefined) param.inPlane = inPlane;
+    if (flag(item.keepsRotary, `${at}.keepsRotary`, report)) param.keepsRotary = true;
+    const signOf = oneOf(item.signOf, SIGN_OF, `${at}.signOf`, report);
+    if (signOf !== undefined) param.signOf = signOf;
     // B1: the block of a two-block cycle this parameter belongs to; only on such an entry.
     if (item.block !== undefined) {
       if (item.block !== 1 && item.block !== 2) report({ path: `${at}.block`, message: 'block has to be 1 or 2' });
@@ -359,6 +377,17 @@ function readSets(raw: unknown, path: string, report: (p: CodeDbProblem) => void
     report({ path: `${path}.speedLimitBound`, message: 'speedLimitBound needs speedLimit: true' });
     delete out.speedLimitBound;
   }
+  // Phase 4 (plan §6.2): a direction belongs to an arc and a side to a compensation that is
+  // on; carried anywhere else, a mirror would swap a code that cuts no arc or compensates
+  // nothing.
+  if (out.arcDirection !== undefined && out.path !== 'arc') {
+    report({ path: `${path}.arcDirection`, message: "arcDirection needs path: 'arc'" });
+    delete out.arcDirection;
+  }
+  if (out.compSide !== undefined && out.radiusComp !== 'on') {
+    report({ path: `${path}.compSide`, message: "compSide needs radiusComp: 'on'" });
+    delete out.compSide;
+  }
   return Object.keys(out).length > 0 ? (out as CodeSets) : undefined;
 }
 
@@ -426,6 +455,24 @@ function readEntry(
       entry.frameEmptyCloses = sub;
     }
   }
+  // P4a fix B1 (NC-15, §7 #317): the value at which the frameZeroWords read as no frame (a
+  // scaling factor of 1); a plain number, and only beside frameZeroWords.
+  if (raw.frameIdentity !== undefined) {
+    const identity = typeof raw.frameIdentity === 'string' ? raw.frameIdentity.trim() : undefined;
+    if (identity === undefined || !/^[+-]?\d+(\.\d+)?$/.test(identity)) {
+      report({ path: `${path}.frameIdentity`, message: 'has to be a number written as text, such as "1"' });
+    } else if (!entry.frameZeroWords) {
+      report({ path: `${path}.frameIdentity`, message: `frameIdentity of ${entry.code} needs frameZeroWords` });
+    } else {
+      entry.frameIdentity = identity;
+    }
+  }
+  // P4a fix B1: the order the blocks run in (NC-5), the workpiece blank (NC-12) and a code that
+  // turns the rotary axes (NC-11); the geometry scripts read them from the loaded database.
+  const flow = oneOf(raw.flow, FLOWS, `${path}.flow`, report);
+  if (flow !== undefined) entry.flow = flow;
+  if (flag(raw.blank, `${path}.blank`, report)) entry.blank = true;
+  if (flag(raw.positionsRotary, `${path}.positionsRotary`, report)) entry.positionsRotary = true;
   // M10 (WP10.2): what the program checks read about a code besides its `sets`.
   const conflicts = readConflicts(raw.conflicts, `${path}.conflicts`, report);
   if (conflicts) entry.conflicts = conflicts;
@@ -443,6 +490,12 @@ function readEntry(
   if (pole !== undefined) entry.pole = pole;
   if (flag(raw.call, `${path}.call`, report)) entry.call = true;
   if (flag(raw.shift, `${path}.shift`, report)) entry.shift = true;
+  // P4a integration (§7 #299): a shift whose all-zero block is the reset (`_nc_geom.py` reads it).
+  // P4a fix B1 (CODE-13): only on a shift or a data code of the offset group, as types.ts says.
+  if (flag(raw.shiftZeroIsNone, `${path}.shiftZeroIsNone`, report)) {
+    if (entry.shift === true || (entry.axisWords === 'data' && entry.group === 'offset')) entry.shiftZeroIsNone = true;
+    else report({ path: `${path}.shiftZeroIsNone`, message: `shiftZeroIsNone of ${entry.code} needs shift or a data code of the offset group` });
+  }
   if (flag(raw.verify, `${path}.verify`, report)) entry.verify = true;
   // B1: written from the manuals and not reviewed by the owner yet; changes nothing else.
   if (raw.review !== undefined) {
@@ -457,7 +510,17 @@ function readEntry(
   const description = str(raw.description);
   if (description) entry.description = description;
   const params = readParams(raw.params, `${path}.params`, report, entry.blocks === 2);
-  if (params) entry.params = params;
+  if (params) {
+    // P4a fix B1 (NC-11): a parameter that keeps the rotary axes still means nothing on a code
+    // that does not turn them.
+    params.forEach((param, i) => {
+      if (param.keepsRotary && entry.positionsRotary !== true) {
+        report({ path: `${path}.params[${i}].keepsRotary`, message: 'keepsRotary needs positionsRotary on the entry' });
+        delete param.keepsRotary;
+      }
+    });
+    entry.params = params;
+  }
   const sets = readSets(raw.sets, `${path}.sets`, report);
   if (sets) entry.sets = sets;
 

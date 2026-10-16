@@ -136,7 +136,8 @@
       "code": "G2",
       "group": "motion",
       "modal": true,
-      "sets": { "motion": "feed", "path": "arc" },
+      "sets": { "motion": "feed", "path": "arc", "arcDirection": "cw" },
+      "review": "pending",
       "label": "Arc, clockwise",
       "description": "Cuts an arc clockwise in the turning plane. The centre is given by I and K, or the radius by L; with L both X and Z are needed and I and K may not stand in the block.",
       "params": [
@@ -151,7 +152,8 @@
       "code": "G3",
       "group": "motion",
       "modal": true,
-      "sets": { "motion": "feed", "path": "arc" },
+      "sets": { "motion": "feed", "path": "arc", "arcDirection": "ccw" },
+      "review": "pending",
       "label": "Arc, counter-clockwise",
       "description": "Cuts an arc counter-clockwise in the turning plane. The centre is given by I and K, or the radius by L; with L both X and Z are needed and I and K may not stand in the block.",
       "params": [
@@ -363,7 +365,8 @@
       "code": "G41",
       "group": "compensation",
       "modal": true,
-      "sets": { "radiusComp": "on" },
+      "sets": { "radiusComp": "on", "compSide": "left" },
+      "review": "pending",
       "label": "Nose radius compensation, tool left",
       "description": "Offsets the path by the nose radius, with the tool on the left of the part seen along the direction of travel. The radius comes from the nose radius number of the six-digit T word."
     },
@@ -371,7 +374,8 @@
       "code": "G42",
       "group": "compensation",
       "modal": true,
-      "sets": { "radiusComp": "on" },
+      "sets": { "radiusComp": "on", "compSide": "right" },
+      "review": "pending",
       "label": "Nose radius compensation, tool right",
       "description": "Offsets the path by the nose radius, with the tool on the right of the part seen along the direction of travel. The radius comes from the nose radius number of the six-digit T word."
     },
@@ -488,17 +492,19 @@
     {
       "code": "G75",
       "group": "nonmodal",
+      "review": "pending",
       "label": "Chamfer at the end of a G01 move",
       "description": "Adds a chamfer of size L at the end of the G01 move in the same block, which may carry only one of X and Z. It is not a grooving cycle as on other controls.",
-      "params": [{ "address": "L", "label": "Chamfer size", "unit": "length" }]
+      "params": [{ "address": "L", "label": "Chamfer size", "unit": "length", "signOf": "next-move" }]
     },
     {
       "code": "G76",
       "group": "nonmodal",
+      "review": "pending",
       "pitchFeedAmbiguous": true,
       "label": "Corner round at the end of a G01 move",
       "description": "Adds a round of radius L at the end of the G01 move in the same block, which may carry only one of X and Z. It is not a threading cycle here, but the same number cuts a thread on other lathe controls, so gEdit will not scale the F of such a block: a feed left alone costs one edit by hand, a scaled thread lead scraps the part.",
-      "params": [{ "address": "L", "label": "Radius of the round", "unit": "length" }]
+      "params": [{ "address": "L", "label": "Radius of the round", "unit": "length", "signOf": "next-move" }]
     },
     {
       "code": "G77",
@@ -1473,12 +1479,16 @@
     {
       "code": "GOTO",
       "group": "program",
+      "flow": "jump",
+      "review": "pending",
       "label": "Jump to a block",
       "description": "Continues at the block with that sequence name, in the same program."
     },
     {
       "code": "IF",
       "group": "program",
+      "flow": "jump",
+      "review": "pending",
       "label": "Conditional jump",
       "description": "Jumps to the named block when the condition in brackets holds. GOTO in front of the name may be left out."
     },

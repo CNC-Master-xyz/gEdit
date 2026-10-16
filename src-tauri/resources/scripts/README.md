@@ -16,17 +16,26 @@ unless an extra folder holds one too (Phase 1 plan §3, AD-13).
 | `_nc_lex.py` | the tokenizer and the number formatting behind it |
 | `_nc_modal.py` | `ModalInterpreter` and `FeedModeTracker`: what is in force after a block |
 | `_nc_machine.py` | the machine parameters, and what a written number is worth on one |
+| `_nc_path.py` | Phase 4 (P4a): the path tracker — where the tool is before and after each block, the arcs with their centres, the polar moves; read by `extents.py` and the geometry scripts |
+| `_nc_geom.py` | Phase 4 (P4a): the transform rules — the role of each word, how translate, rotate and mirror move it, and why a block is refused |
 | `tool_list.py` | tools in order of first use, with descriptions and call counts — `output = "report"` |
 | `scale_feed.py` | multiply `F` values by a percentage — `output = "replace"` |
 | `scale_speed.py` | multiply `S` values by a percentage — `output = "replace"` |
 | `program_checks.py` | M10 (WP10.2): what a program does that the control or the machine will not like — `output = "report"` |
 | `extents.py` | M10 (WP10.3): the smallest and largest value of every axis, per offset, tool and program — `output = "report"` |
 | `address_arithmetic.py` | M10 (WP10.4): add, subtract, multiply or divide the values of chosen addresses; a shift of the tool axis moves the cycle positions that hold one (roadmap R8) — `output = "replace"` |
+| `translate.py` | Phase 4 (P4a, P4.3): move the path by a shift in X, Y and Z — absolute positions, arc centres, the Klartext pole and cycle positions; on a lathe `X` as the machine reads it; all or nothing — `output = "replace"` |
+| `rotate.py` | Phase 4 (P4a, P4.4): turn a milling program in the XY plane about a point by an angle; exact at multiples of 90°, otherwise rounded with every arc checked; all or nothing — `output = "replace"` |
+| `mirror.py` | Phase 4 (P4a, P4.4): mirror a milling program in X, in Y or about a line, swapping `G2`/`G3` and `G41`/`G42`; on a lathe, a Z mirror for the counter spindle; all or nothing — `output = "replace"` |
 
 `gedit_nc.py`, and any file or folder whose name starts with `_` or `.`, is **not listed as
 a script**: discovery skips them, because they are library code, not commands. The `_nc_*`
 modules are the internals of `gedit_nc`, which re-exports everything that is public — a
 script imports `gedit_nc` and nothing else, so the split can move without breaking anyone.
+Two helpers sit **above** `gedit_nc` instead of inside it: `_nc_path` and `_nc_geom` import
+`gedit_nc` and are not re-exported by it. The bundled geometry scripts and `extents.py`
+import them by name (`import _nc_path`); they are internal, and a script of your own that
+imports them may break when they change.
 
 ---
 
@@ -357,6 +366,7 @@ docstrings in the file are the detail.
 | `speed_limit_of(codes, tokens)` | the code in this block whose `sets.speedLimit` makes the block's `S` a clamp, or `None` |
 | `axis_words_of(entry)`, `frame_of(entry)`, `speed_limit_bound_of(entry)`, `tcp_of(entry)` | how one code entry's flags read (§7.2): the block's axis words are `'data'` or a `'machine'` position; the code opens or closes a coordinate `frame`; the side a speed limit bounds; tool centre point control `'on'`/`'off'` (M10) |
 | `position_of(param)` | M10 (roadmap R8): what a cycle parameter is to a program shift — `'tool-axis'` (an absolute coordinate on the tool axis), `'none'`, `'other'` (an absolute position a shift cannot judge), `'mode'`, or `None` when nobody reviewed it |
+| `arc_direction_of(entry)`, `comp_side_of(entry)`, `arc_direction_words_of(profile)` | Phase 4 (P4a): what a mirror swaps — the direction of an arc code as the control defines it (`'cw'` for `G2`, `'ccw'` for `G3`; only on an arc), the side of a compensation code that is on (`'left'` for `G41`, `RL`; `'right'` for `G42`, `RR`), and the profile's direction words (Klartext `{"DR+": "ccw", "DR-": "cw"}`) |
 | `cycle_block_of(entry, addresses)`, `params_of_block(entry, block)`, `declares_blocks(entry)` | B1: the two blocks of a lathe roughing or threading cycle (`G71 U2. R.5` then `G71 P10 Q20 U.4 W.1 F.25`), from the entry's `CodeParam.block`: `2` when the block writes an address of the second block only (`P`/`Q` of `G71`, an axis word of `G74`, `X`/`Z` of `G76`), else `1` when it writes one of the first, else `None`; and the parameters of that block, whose labels say what each address means there. How a value is read never depends on it: an address declared in both blocks has the same `unit` and `position` in both |
 | `is_assignment(token)`, `same_spindle(written, main)` | M10 review: a word written with `=` (`S1=900`, an indexed `S[2]=500`), which is a value and never a code; whether `1`, `01` and `1` name one spindle (a letter without case) |
 | `program_start_of(line, cp)`, `ModalInterpreter.program_start(line)` | M13 review (NC-4): the program start a line writes (`O2`, `%_N_SUB_SPF`: the profile's `program.start` at the head of the line, outside comments), or `None`; and the hook a script calls there, before `update`, which forgets the tool (and the last tool written) at every start after the first and answers whether it did. The tool list and the extents call it; a subprogram behind `M30` is then charged to no tool of the main program |

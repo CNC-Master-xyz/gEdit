@@ -2827,7 +2827,8 @@ def format_number(
 
     ``fmt`` is the profile's ``numberFormat``: ``decimals`` (``'keep'`` or a count),
     ``trailingZeros`` (``'keep'`` or ``'drop'``), ``keepPoint`` and ``plusSign``
-    (``'keep'``, ``'always'`` or ``'never'``). ``original`` is the literal that stood in
+    (``'keep'``, ``'always'``, ``'never'`` or ``'signed'``: a word written with a sign of either
+    kind keeps one). ``original`` is the literal that stood in
     the file, so ``'keep'`` can mean "the precision it was written with".
 
     With ``decimal_point_significant`` (Fanuc's ``syntax.decimalPointSignificant``) the
@@ -2883,6 +2884,10 @@ def format_number(
     elif plus == "always":
         sign = "+"
     elif plus == "keep" and (original.sign if original is not None else parsed.sign) == "+":
+        sign = "+"
+    elif plus == "signed" and (original.sign != "" if original is not None else parsed.sign == "+"):
+        # P4a integration (plan §7 #308): a word written with a sign of either kind keeps
+        # one (Klartext `Y-2.5` turned positive is `Y+12.5`); one written without stays so.
         sign = "+"
 
     # The Klartext decimal comma (§7.16 / R4): a rewrite keeps the separator the value was

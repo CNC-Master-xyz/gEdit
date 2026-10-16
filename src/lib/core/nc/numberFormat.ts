@@ -20,7 +20,10 @@
 //                 with (`10.`) or drop it (`10`). It never adds one, because a value
 //                 written without a point is a count of increments, not millimetres.
 //   plusSign      'keep' writes `+` when `original` had one, 'always' on every value that
-//                 is not negative (Klartext writes `X+0`), 'never' on none of them.
+//                 is not negative, 'never' on none of them. 'signed' (P4a integration,
+//                 plan §7 #308) writes `+` when `original` was written with a sign of
+//                 either kind: a Klartext `Y-2.5` that a transform turns positive is
+//                 `Y+12.5`, and `F500`, written without one, stays without one.
 //
 // With `decimalPointSignificant` and an `original`, the point follows the original: a
 // value written without one never gains one and a value written with one never loses it,
@@ -97,6 +100,7 @@ export function formatNumber(
   if (negative) sign = '-';
   else if (fmt.plusSign === 'always') sign = '+';
   else if (fmt.plusSign === 'keep' && (original ? original.sign : parsed.sign) === '+') sign = '+';
+  else if (fmt.plusSign === 'signed' && (original ? original.sign !== '' : parsed.sign === '+')) sign = '+';
 
   // The Klartext decimal comma (§7.16 / R4): a rewrite keeps the separator the value was
   // written with. `parseNumber` reads only `.`, so a comma only ever reaches `original.raw`

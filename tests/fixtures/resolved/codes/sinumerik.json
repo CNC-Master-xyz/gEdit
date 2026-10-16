@@ -108,7 +108,9 @@
       "group": "motion",
       "label": "Arc, clockwise",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "arcDirection": "cw",
         "motion": "feed",
         "path": "arc"
       }
@@ -119,7 +121,9 @@
       "group": "motion",
       "label": "Arc, counter-clockwise",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "arcDirection": "ccw",
         "motion": "feed",
         "path": "arc"
       }
@@ -134,19 +138,23 @@
         {
           "address": "I1",
           "axis": "X",
-          "label": "Intermediate point, X"
+          "label": "Intermediate point, X",
+          "unit": "length"
         },
         {
           "address": "J1",
           "axis": "Y",
-          "label": "Intermediate point, Y"
+          "label": "Intermediate point, Y",
+          "unit": "length"
         },
         {
           "address": "K1",
           "axis": "Z",
-          "label": "Intermediate point, Z"
+          "label": "Intermediate point, Z",
+          "unit": "length"
         }
       ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "arc"
@@ -516,7 +524,9 @@
       "group": "compensation",
       "label": "Radius compensation, tool left",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "compSide": "left",
         "radiusComp": "on"
       }
     },
@@ -525,7 +535,9 @@
       "group": "compensation",
       "label": "Radius compensation, tool right",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "compSide": "right",
         "radiusComp": "on"
       }
     },
@@ -2623,65 +2635,80 @@
       "params": [
         {
           "address": "NPP",
-          "label": "Name of the contour subprogram"
+          "label": "Name of the contour subprogram",
+          "position": "other"
         },
         {
           "address": "MID",
-          "label": "Largest depth of cut when roughing"
+          "label": "Largest depth of cut when roughing",
+          "position": "none"
         },
         {
           "address": "FALZ",
-          "label": "Finishing allowance in Z"
+          "label": "Finishing allowance in Z",
+          "position": "none"
         },
         {
           "address": "FALX",
-          "label": "Finishing allowance in X"
+          "label": "Finishing allowance in X",
+          "position": "none"
         },
         {
           "address": "FAL",
-          "label": "Finishing allowance along the contour"
+          "label": "Finishing allowance along the contour",
+          "position": "none"
         },
         {
           "address": "FF1",
-          "label": "Feed for roughing"
+          "label": "Feed for roughing",
+          "position": "none"
         },
         {
           "address": "FF2",
-          "label": "Feed for plunging into undercuts"
+          "label": "Feed for plunging into undercuts",
+          "position": "none"
         },
         {
           "address": "FF3",
-          "label": "Feed for finishing"
+          "label": "Feed for finishing",
+          "position": "none"
         },
         {
           "address": "VARI",
           "label": "Kind of machining: roughing, finishing or both, along or across, outside or inside",
+          "position": "none",
           "unit": "count"
         },
         {
           "address": "DT",
           "label": "Dwell at each chip-breaking stop",
+          "position": "none",
           "unit": "dwell"
         },
         {
           "address": "DAM",
-          "label": "Path between two chip-breaking stops"
+          "label": "Path between two chip-breaking stops",
+          "position": "none"
         },
         {
           "address": "_VRT",
-          "label": "Lift-off from the contour"
+          "label": "Lift-off from the contour",
+          "position": "none"
         },
         {
           "address": "_GMODE",
           "label": "Whether the depth of cut follows the diameter mode",
+          "position": "mode",
           "unit": "count"
         },
         {
           "address": "_DMODE",
           "label": "Plane and display mode",
+          "position": "mode",
           "unit": "count"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -3372,6 +3399,7 @@
         },
         {
           "address": "_DIR",
+          "keepsRotary": true,
           "label": "Which way the rotary axes turn: -1 to the smaller value, +1 to the larger one, 0 compute the frame without moving",
           "position": "none",
           "unit": "count"
@@ -3387,7 +3415,9 @@
           "position": "mode",
           "unit": "count"
         }
-      ]
+      ],
+      "positionsRotary": true,
+      "review": "pending"
     },
     {
       "code": "CYCLE832",
@@ -3694,7 +3724,9 @@
       "frameWithoutValues": "close",
       "group": "frame",
       "label": "Programmable offset",
-      "shift": true
+      "review": "pending",
+      "shift": true,
+      "shiftZeroIsNone": true
     },
     {
       "axisWords": "data",
@@ -3702,7 +3734,9 @@
       "description": "Shifts the zero point by the values in the block, on top of the frame already programmed.",
       "group": "frame",
       "label": "Additive programmable offset",
-      "shift": true
+      "review": "pending",
+      "shift": true,
+      "shiftZeroIsNone": true
     },
     {
       "axisWords": "data",
@@ -3973,57 +4007,77 @@
     {
       "code": "GOTOF",
       "description": "Continues at the label, searching towards the end of the program.",
+      "flow": "jump",
       "group": "program",
-      "label": "Jump forward"
+      "label": "Jump forward",
+      "review": "pending"
     },
     {
       "code": "GOTOB",
       "description": "Continues at the label, searching towards the start of the program.",
+      "flow": "jump",
       "group": "program",
-      "label": "Jump backward"
+      "label": "Jump backward",
+      "review": "pending"
     },
     {
       "code": "GOTO",
       "description": "Continues at the label or the block number, searching forwards first and then backwards.",
+      "flow": "jump",
       "group": "program",
-      "label": "Jump"
+      "label": "Jump",
+      "review": "pending"
     },
     {
       "code": "GOTOC",
       "description": "Like GOTO, but the control does not stop when the target is missing.",
+      "flow": "jump",
       "group": "program",
-      "label": "Jump without an alarm"
+      "label": "Jump without an alarm",
+      "review": "pending"
     },
     {
       "code": "IF",
       "description": "Runs what follows when the condition holds.",
+      "flow": "branch",
       "group": "program",
-      "label": "Conditional"
+      "label": "Conditional",
+      "review": "pending"
     },
     {
       "code": "ELSE",
+      "flow": "else",
       "group": "program",
-      "label": "Otherwise"
+      "label": "Otherwise",
+      "review": "pending"
     },
     {
       "code": "ENDIF",
+      "flow": "branch-end",
       "group": "program",
-      "label": "End of the conditional"
+      "label": "End of the conditional",
+      "review": "pending"
     },
     {
       "code": "WHILE",
+      "flow": "loop",
       "group": "program",
-      "label": "Loop while the condition holds"
+      "label": "Loop while the condition holds",
+      "review": "pending"
     },
     {
       "code": "ENDWHILE",
+      "flow": "loop-end",
       "group": "program",
-      "label": "End of the while loop"
+      "label": "End of the while loop",
+      "review": "pending"
     },
     {
       "code": "FOR",
+      "flow": "loop",
       "group": "program",
-      "label": "Counting loop"
+      "label": "Counting loop",
+      "review": "pending"
     },
     {
       "code": "TO",
@@ -4032,33 +4086,45 @@
     },
     {
       "code": "ENDFOR",
+      "flow": "loop-end",
       "group": "program",
-      "label": "End of the counting loop"
+      "label": "End of the counting loop",
+      "review": "pending"
     },
     {
       "code": "REPEAT",
+      "flow": "repeat",
       "group": "program",
-      "label": "Repeat loop, or a section between two labels"
+      "label": "Repeat loop, or a section between two labels",
+      "review": "pending"
     },
     {
       "code": "REPEATB",
+      "flow": "repeat",
       "group": "program",
-      "label": "Repeat one block"
+      "label": "Repeat one block",
+      "review": "pending"
     },
     {
       "code": "UNTIL",
+      "flow": "loop-end",
       "group": "program",
-      "label": "Repeat until the condition holds"
+      "label": "Repeat until the condition holds",
+      "review": "pending"
     },
     {
       "code": "LOOP",
+      "flow": "loop",
       "group": "program",
-      "label": "Endless loop"
+      "label": "Endless loop",
+      "review": "pending"
     },
     {
       "code": "ENDLOOP",
+      "flow": "loop-end",
       "group": "program",
-      "label": "End of the endless loop"
+      "label": "End of the endless loop",
+      "review": "pending"
     },
     {
       "code": "CASE",

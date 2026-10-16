@@ -191,8 +191,8 @@ describe('hoverText: what the database does not describe', () => {
     // Every keyword the built-in profiles tokenize has an entry now (`load.test.ts`
     // keeps it that way), so the branch is exercised on the token directly — a user
     // profile (P2) may well bring a word its database does not describe.
-    const token: NcToken = { kind: 'keyword', start: 0, end: 11, text: 'PATTERN DEF', address: 'PATTERN DEF' };
-    expect(hoverText(token, null, t)).toContain('**PATTERN DEF**');
+    const token: NcToken = { kind: 'keyword', start: 0, end: 11, text: 'NO SUCH DEF', address: 'NO SUCH DEF' };
+    expect(hoverText(token, null, t)).toContain('**NO SUCH DEF**');
     expect(hoverText(token, null, t)).toContain('does not describe this word yet');
   });
 

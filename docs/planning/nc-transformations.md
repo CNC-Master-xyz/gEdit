@@ -220,39 +220,42 @@ Edge cases:
 
 ## Geometry transforms
 
+**Status of the section:** built in Phase 4 (P4a; on `p4a/intB`, in review as of 2026-10-15) as three bundled scripts, `translate.py`, `rotate.py` and `mirror.py`, on the path tracker `_nc_path.py` and the transform rules `_nc_geom.py`. The user guide is [Scripts](../user/scripts.md#translate). The plan is [phase-4-implementation.md](phase-4-implementation.md#p4a-move-the-path) (AD-41 to AD-44). Where this note and the guide differ, the guide is right.
+
 All three use the modal interpreter and share these options:
 
-- Arc-centre convention: auto (from profile), relative to arc start (default for ISO), or absolute.
-- Distance mode (absolute or incremental) to assume at the start, for files whose header does not set it.
-- Write every axis on every motion block after the transform, because axes that were omitted as modal may now change.
-- Number format and output target from the framework.
+- ~~Arc-centre convention: auto (from profile), relative to arc start (default for ISO), or absolute.~~ **Dropped** (AD-43): the convention is a fact of the control (the profile's `arcCenterMode`, with `AC()` and `IC()` per word), not a choice per run.
+- ~~Distance mode (absolute or incremental) to assume at the start, for files whose header does not set it.~~ **Dropped** (AD-43): the mode comes from the program or from the machine's power-on mode; a mode that is only assumed refuses the run (`distance-assumed`).
+- Write every axis on every motion block after the transform, because axes that were omitted as modal may now change. **Built for rotate**, which writes `X` and `Y` on every block that moves in both; the axis mirrors write only the words that were there.
+- Number format and output target from the framework. **Built:** each word is written back in its own form; the output replaces the text as one undo step.
+- **Added:** a run is all or nothing. One block gEdit cannot judge refuses the whole run, nothing is written, and every refused block is listed (AD-41).
 
 Common edge cases:
 
 - Machine-coordinate moves (G53) and reference-point returns (G28/G30) are never transformed. They are reported.
 - Radius-programmed arcs (`R`) keep their radius. Only the end points change.
-- Only the XY plane (G17) is supported for rotate and mirror at first. Other planes are reported and left unchanged.
-- Klartext: `CC` is an absolute pole and is transformed like a point. Polar moves (`LP`, `CP`) change their angle. Incremental words are kept.
+- Only the XY plane (G17) is supported for rotate and mirror at first. Other planes are reported and left unchanged. **As built:** a plane other than XY refuses the run (`plane`); the one exception is the lathe Z mirror, which works in the ZX plane (`G18`).
+- Klartext: `CC` is an absolute pole and is transformed like a point. Polar moves (`LP`, `CP`) change their angle. Incremental words are kept. **As built:** incremental words are kept under translate only; rotate and mirror turn or flip incremental moves, arc vectors and `IPA`, because an incremental move is a vector.
 - Canned cycle positions (the XY words after a cycle call) are transformed. The R plane and depth are left unchanged unless Z is shifted.
 
 ### Translate coordinates
 `P3 · M · Script`
 
-**Status:** not built (Phase 4).
+**Status:** built in P4a (`translate.py`), in review; every built-in profile. On a lathe, `X` is shifted as the machine reads it (diameter or radius, per word under Sinumerik `DIAMON`/`DIAMOF`). Exact; a shift a word cannot hold refuses the run.
 
 Shifts the path by dX, dY, dZ. Only absolute coordinates change. Incremental moves stay as they are. Absolute arc centres shift with the path.
 
 ### Rotate coordinates
 `P3 · L · Script`
 
-**Status:** not built (Phase 4).
+**Status:** built in P4a (`rotate.py`), in review; milling programs in the XY plane. Exact for multiples of 90 degrees; other angles round and every arc is checked (0.002 mm, 0.0001 in). A lathe program is refused.
 
 Rotates the path in the XY plane around a given point by an angle. Arc-centre vectors rotate with the path, and arc direction does not change. X and Y are written on every move after rotation.
 
 ### Mirror coordinates
 `P3 · L · Script`
 
-**Status:** not built (Phase 4).
+**Status:** built in P4a (`mirror.py`), in review; X, Y and a line at an angle on a mill, and on a lathe a Z mirror for the counter spindle (Q4-2). One warning says climb milling became conventional milling; the path is not reversed. A lathe X mirror, and threads, roughing and turning cycles under the Z mirror, are refused.
 
 Mirrors the path about an axis through a point at an angle (X or Y axis as presets). Mirroring swaps `G2`↔`G3` and `G41`↔`G42` (Klartext: `DR+`↔`DR-`, `RL`↔`RR`). This turns climb milling into conventional milling. Reversing the path direction to restore it is hard and is only offered for simple contours (lines and arcs without cycles) in a later version.
 

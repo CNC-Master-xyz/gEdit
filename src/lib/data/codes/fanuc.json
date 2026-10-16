@@ -124,7 +124,8 @@
       "code": "G2",
       "group": "motion",
       "modal": true,
-      "sets": { "motion": "feed", "path": "arc" },
+      "sets": { "motion": "feed", "path": "arc", "arcDirection": "cw" },
+      "review": "pending",
       "label": "Circular move, clockwise",
       "description": "Arc to the target in the active plane, turning clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R."
     },
@@ -132,7 +133,8 @@
       "code": "G3",
       "group": "motion",
       "modal": true,
-      "sets": { "motion": "feed", "path": "arc" },
+      "sets": { "motion": "feed", "path": "arc", "arcDirection": "ccw" },
+      "review": "pending",
       "label": "Circular move, counter-clockwise",
       "description": "Arc to the target in the active plane, turning counter-clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R."
     },
@@ -498,7 +500,8 @@
       "code": "G41",
       "group": "compensation",
       "modal": true,
-      "sets": { "radiusComp": "on" },
+      "sets": { "radiusComp": "on", "compSide": "left" },
+      "review": "pending",
       "label": "Cutter radius compensation, left",
       "description": "Offsets the path by the tool radius to the left of the direction of travel. Mills take the radius from the register D, lathes from the tool offset. Switch it on during an approach move.",
       "params": [
@@ -512,7 +515,8 @@
       "code": "G42",
       "group": "compensation",
       "modal": true,
-      "sets": { "radiusComp": "on" },
+      "sets": { "radiusComp": "on", "compSide": "right" },
+      "review": "pending",
       "label": "Cutter radius compensation, right",
       "description": "Offsets the path by the tool radius to the right of the direction of travel. Mills take the radius from the register D, lathes from the tool offset. Switch it on during an approach move.",
       "params": [
@@ -770,6 +774,8 @@
       "group": "nonmodal",
       "axisWords": "data",
       "shift": true,
+      "shiftZeroIsNone": true,
+      "review": "pending",
       "label": "Local coordinate system",
       "description": "Sets a local coordinate system inside the active work offset. The axis words give where its zero lies, so they are a shift and not a move; G52 with every axis at zero ends it."
     },
@@ -785,6 +791,8 @@
     {
       "code": "G53.1",
       "group": "nonmodal",
+      "positionsRotary": true,
+      "review": "pending",
       "conflicts": ["!frame:frame"],
       "alone": true,
       "label": "Turn the tool axis to the tilted plane",
@@ -1915,6 +1923,8 @@
     {
       "code": "GOTO",
       "group": "macro",
+      "flow": "jump",
+      "review": "pending",
       "label": "Jump to a block",
       "description": "Continues at the block with this N number. The target has to exist in the same program."
     },
@@ -1934,6 +1944,8 @@
     {
       "code": "DO",
       "group": "macro",
+      "flow": "loop",
+      "review": "pending",
       "verify": true,
       "label": "Loop body start",
       "description": "Opens the body of a WHILE loop. Its number has to match the END that closes the body."
@@ -1941,6 +1953,8 @@
     {
       "code": "END",
       "group": "macro",
+      "flow": "loop-end",
+      "review": "pending",
       "verify": true,
       "label": "Loop body end",
       "description": "Closes the body of the WHILE loop with the same number."

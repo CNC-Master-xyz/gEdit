@@ -1,0 +1,20 @@
+{
+  "about": "P4a integration (plan 7 #299): the TNC 640 cycle manual resets cycle 10 with a rotation angle of 0 and cycle 8 by defining it again without an axis (NO ENT, an empty 8.1). IROT is an increment of the angle: one of 0 changes nothing. Cycle 10 and cycle 8 each have a group of their own, so the reset of one leaves the other frame open.",
+  "input": "frame-resets.h",
+  "states": [
+    { "line": 5, "about": "10.0 only names the cycle.", "after": { "frame": null } },
+    { "line": 6, "about": "ROT+30 turns the coordinate system.", "after": { "frame": "CYCL DEF 10" } },
+    { "line": 7, "about": "An increment of 0 changes nothing.", "after": { "frame": "CYCL DEF 10" } },
+    { "line": 8, "about": "ROT+0 is the manual's reset.", "after": { "frame": null } },
+    { "line": 9, "about": "The move after the reset is in the program's own frame.", "after": { "frame": null } },
+    { "line": 10, "about": "IROT+15 turns it again.", "after": { "frame": "CYCL DEF 10" } },
+    { "line": 11, "about": "IROT+0 adds nothing: the rotation stays.", "after": { "frame": "CYCL DEF 10" } },
+    { "line": 12, "after": { "frame": null } },
+    { "line": 13, "about": "8.0 only names the cycle.", "after": { "frame": null } },
+    { "line": 14, "about": "8.1 names the mirrored axes, which carry no value.", "after": { "frame": "CYCL DEF 8" } },
+    { "line": 15, "after": { "frame": "CYCL DEF 10" } },
+    { "line": 16, "about": "The reset of the rotation leaves the mirror.", "after": { "frame": "CYCL DEF 8" } },
+    { "line": 17, "after": { "frame": "CYCL DEF 8" } },
+    { "line": 18, "about": "The empty 8.1 (NO ENT) ends the mirror.", "after": { "frame": null } }
+  ]
+}

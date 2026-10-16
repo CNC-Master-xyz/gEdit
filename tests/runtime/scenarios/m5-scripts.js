@@ -139,7 +139,7 @@ scenario('m5-scripts-ui', { timeout: 420 }, async (h) => {
     last: ctx.commands.get('script.runLast')?.keys,
   })
   h.check(
-    'the Tools group offers the six bundled scripts for a Fanuc program (three before M10)',
+    'the Tools group offers the nine bundled scripts for a Fanuc program (three before M10, six before P4a)',
     JSON.stringify([...menuScriptIds(h)].sort()) === JSON.stringify(BUNDLED),
     menuScriptIds(h),
   )

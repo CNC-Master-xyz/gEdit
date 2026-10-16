@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be moved by Z0.5: 2 blocks at a selection edge inside a cycle or a block. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "Q203=+0 ;WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FO…: the selection starts or ends inside a cycle or a block that runs over several lines; select the whole of it.",
+      "reason": "selection-inside"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "5 L X+20 Y+20 R0 FMAX M99: the selection starts or ends inside a cycle or a block that runs over several lines; select the whole of it.",
+      "reason": "selection-inside"
+    }
+  ]
+}

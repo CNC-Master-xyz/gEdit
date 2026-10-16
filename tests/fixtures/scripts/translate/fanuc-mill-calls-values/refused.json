@@ -1,0 +1,47 @@
+{
+  "message": "Nothing was changed: 7 blocks cannot be moved by X1 Y1 Z1: 1 absolute intermediate point of a return, 2 subprogram or macro calls, 2 blocks with a variable or calculation in a moved word, 1 block with a word whose reading depends on the machine, 1 block with a code the database does not know. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "M98 P1001: a subprogram or macro call: the called program's positions are not in this document, so it cannot be moved with the rest.",
+      "reason": "call"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "G65 P9010 A1. B2.: a subprogram or macro call: the called program's positions are not in this document, so it cannot be moved with the rest.",
+      "reason": "call"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "G1 X#1 F200.: a variable or a calculation in a word the transform has to change; gEdit only changes written numbers.",
+      "reason": "expression"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "X[#1+5.]: a variable or a calculation in a word the transform has to change; gEdit only changes written numbers.",
+      "reason": "expression"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "G1 Y10: this number is read differently on the machines of this control; choose the machine of this document.",
+      "reason": "machine-dependent"
+    },
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "G123 X5.: a code the database for this control does not know; it may change how the positions after it are read.",
+      "reason": "unknown-code"
+    },
+    {
+      "line": 13,
+      "severity": "error",
+      "message": "G90 G28 Z50.: the return to the reference point goes through this absolute intermediate point, which the transform would move; write it as an incremental zero return or check it by hand.",
+      "reason": "intermediate-point"
+    }
+  ]
+}

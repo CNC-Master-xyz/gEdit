@@ -1,0 +1,11 @@
+{
+  "message": "Rotated by 180° about X12.5 Y-3.25: 14 words on 8 blocks. Left 1 block as written: 1 return to the reference point. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 17,
+      "severity": "info",
+      "message": "G91 G28 Z0.: a position in machine coordinates or an incremental return to the reference point; left as written.",
+      "reason": "machine-position"
+    }
+  ]
+}

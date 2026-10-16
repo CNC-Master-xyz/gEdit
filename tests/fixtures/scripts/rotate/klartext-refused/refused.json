@@ -1,0 +1,83 @@
+{
+  "message": "Nothing was changed: 13 blocks cannot be rotated: 2 blocks in a frame, 1 coordinate setting or shift, 1 subprogram or macro call, 1 block with a variable or a calculation, 2 cycles not reviewed, 3 cycles with positions of their own, 1 free contour (FK) block, 1 tangential arc or arc through a point, 1 move around a pole that is not known. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "4 LP PR+5 PA+30: a move around the pole while the pole is not known or not moved with the path.",
+      "reason": "pole-unknown"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "6 L X+Q1 Y+0 FMAX: a variable or a calculation in a word the transform has to change; gEdit only changes written numbers.",
+      "reason": "expression"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "7 CT X+10 Y+10: a tangential arc or an arc through a point; gEdit cannot check it after the transform.",
+      "reason": "arc-tangential"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "9 FL LEN 10 AN+0: a free contour (FK): its points depend on each other and on the elements around them; gEdit does not move them.",
+      "reason": "fk-contour"
+    },
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "11 CYCL DEF 254 NUTKREIS ~: a cycle with positions of its own (a pattern, a pocket, a contour elsewhere) that gEdit does not move.",
+      "reason": "cycle-position"
+    },
+    {
+      "line": 15,
+      "severity": "error",
+      "message": "Q216=+50 ;MITTE 1. ACHSE ~: a cycle with positions of its own (a pattern, a pocket, a contour elsewhere) that gEdit does not move.",
+      "reason": "cycle-position"
+    },
+    {
+      "line": 16,
+      "severity": "error",
+      "message": "Q217=+50 ;MITTE 2. ACHSE: a cycle with positions of its own (a pattern, a pocket, a contour elsewhere) that gEdit does not move.",
+      "reason": "cycle-position"
+    },
+    {
+      "line": 17,
+      "severity": "error",
+      "message": "12 CYCL DEF 999 UNBEKANNT ~: a cycle whose parameters gEdit has not been told about (or one the database does not know); its positions could not be moved with the path.",
+      "reason": "cycle-not-reviewed"
+    },
+    {
+      "line": 18,
+      "severity": "error",
+      "message": "Q1=+5: a cycle whose parameters gEdit has not been told about (or one the database does not know); its positions could not be moved with the path.",
+      "reason": "cycle-not-reviewed"
+    },
+    {
+      "line": 19,
+      "severity": "error",
+      "message": "13 CALL LBL 1: a subprogram or macro call: the called program's positions are not in this document, so it cannot be moved with the rest.",
+      "reason": "call"
+    },
+    {
+      "line": 21,
+      "severity": "error",
+      "message": "15 CYCL DEF 7.1 X+10: this sets or shifts the coordinate system or writes offsets (a local shift, a coordinate set, a data setting that changes offsets); gEdit does not move the values it sets, so the positions after it would no longer match the moved path.",
+      "reason": "coordinate-shift"
+    },
+    {
+      "line": 22,
+      "severity": "error",
+      "message": "16 PLANE SPATIAL SPA+0 SPB+30 SPC+0 TURN MB MAX FMAX: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 23,
+      "severity": "error",
+      "message": "17 L X+10 Y+0 FMAX: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    }
+  ]
+}

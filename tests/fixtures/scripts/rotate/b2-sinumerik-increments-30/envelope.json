@@ -1,0 +1,11 @@
+{
+  "message": "Rotated by 30° about X0 Y0: 4 words on 2 blocks, 4 rounded. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 4,
+      "severity": "info",
+      "message": "N30 G91 G1 X10 Y10 F100: rounded to the word's decimals or to whole increments (the first of 2 rounded blocks).",
+      "reason": "rounded"
+    }
+  ]
+}

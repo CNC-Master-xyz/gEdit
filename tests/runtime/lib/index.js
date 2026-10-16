@@ -20,6 +20,9 @@
  * @property {Record<string, string>} [vars] extra environment variables
  * @property {Record<string, string | { text: string, mode?: number }>} [files] files
  *   written relative to the run folder before the app starts
+ * @property {boolean} [retry] `false`: `suite.sh` never runs this scenario a second time
+ *   after a failure (a long budget scenario such as `p4-perf`, where a second run of the same
+ *   cost would only double the time of a real regression); default `true`
  */
 
 /** @typedef {(h: Harness) => Promise<void>} ScenarioFn */

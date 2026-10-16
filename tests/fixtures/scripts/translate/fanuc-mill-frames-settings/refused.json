@@ -1,0 +1,47 @@
+{
+  "message": "Nothing was changed: 7 blocks cannot be moved by X10: 4 blocks in or opening a frame, 3 coordinate shifts or settings. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "G68 X0. Y0. R30.: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "G1 X10. Y0. F200.: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "G52 X100. Y0.: this sets or shifts the coordinate system or writes offsets (a local shift, a coordinate set, a data setting that changes offsets); gEdit does not move the values it sets, so the positions after it would no longer match the moved path.",
+      "reason": "coordinate-shift"
+    },
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "G92 X0. Y0. Z50.: this sets or shifts the coordinate system or writes offsets (a local shift, a coordinate set, a data setting that changes offsets); gEdit does not move the values it sets, so the positions after it would no longer match the moved path.",
+      "reason": "coordinate-shift"
+    },
+    {
+      "line": 13,
+      "severity": "error",
+      "message": "G10 L2 P1 X-200. Y-100. Z-50.: this sets or shifts the coordinate system or writes offsets (a local shift, a coordinate set, a data setting that changes offsets); gEdit does not move the values it sets, so the positions after it would no longer match the moved path.",
+      "reason": "coordinate-shift"
+    },
+    {
+      "line": 14,
+      "severity": "error",
+      "message": "G51.1 X0.: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 15,
+      "severity": "error",
+      "message": "G1 X5.: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    }
+  ]
+}

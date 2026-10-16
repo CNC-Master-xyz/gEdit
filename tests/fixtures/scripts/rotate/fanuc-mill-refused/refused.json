@@ -1,0 +1,83 @@
+{
+  "message": "Nothing was changed: 13 blocks cannot be rotated: 2 blocks in a frame, 1 coordinate setting or shift, 1 return through an intermediate point, 1 subprogram or macro call, 1 block with a variable or a calculation, 1 block whose reading depends on the machine, 1 block with an assumed distance mode, 1 block whose start is not known, 1 block with an unknown code, 2 blocks with a rotary axis away from 0, 1 block outside the working plane. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 4,
+      "severity": "error",
+      "message": "G0 X0.: the program does not say whether its positions are absolute or incremental before this block, and the machine sets no power-on mode; add G90 or G91 (or the control's form) at the top.",
+      "reason": "distance-assumed"
+    },
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "G0 X10.: where the tool is at the start of this block is not known (an axis not written yet, a machine position or a calculation before it, a jump or a loop that brings the tool here from another place or runs this block again from another position), and the transform needs it.",
+      "reason": "position-unknown"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "G1 X#1 F100.: a variable or a calculation in a word the transform has to change; gEdit only changes written numbers.",
+      "reason": "expression"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "G1 X1000 Y0.: this number is read differently on the machines of this control; choose the machine of this document.",
+      "reason": "machine-dependent"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "G52 X10. Y0.: this sets or shifts the coordinate system or writes offsets (a local shift, a coordinate set, a data setting that changes offsets); gEdit does not move the values it sets, so the positions after it would no longer match the moved path.",
+      "reason": "coordinate-shift"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "M98 P1000: a subprogram or macro call: the called program's positions are not in this document, so it cannot be moved with the rest.",
+      "reason": "call"
+    },
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "G28 X10. Y10.: the return to the reference point goes through this absolute intermediate point, which the transform would move; write it as an incremental zero return or check it by hand.",
+      "reason": "intermediate-point"
+    },
+    {
+      "line": 13,
+      "severity": "error",
+      "message": "G0 X0. Y0. B30.: a rotary axis moves to an angle other than 0 here, or stands at one; turning or mirroring the path would need its angle changed too, which gEdit does not do.",
+      "reason": "rotary-word"
+    },
+    {
+      "line": 14,
+      "severity": "error",
+      "message": "G123 X5. Y5.: a code the database for this control does not know; it may change how the positions after it are read.",
+      "reason": "unknown-code"
+    },
+    {
+      "line": 15,
+      "severity": "error",
+      "message": "G0 X0. Y0. Z5. B0.: a rotary axis moves to an angle other than 0 here, or stands at one; turning or mirroring the path would need its angle changed too, which gEdit does not do.",
+      "reason": "rotary-word"
+    },
+    {
+      "line": 17,
+      "severity": "error",
+      "message": "G1 X10. Z1.: the working plane is not the one this transform works in (XY on a milling program, ZX with G18 for the lathe Z mirror).",
+      "reason": "plane"
+    },
+    {
+      "line": 19,
+      "severity": "error",
+      "message": "G68 X0. Y0. R30.: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 20,
+      "severity": "error",
+      "message": "G1 X10. Y10.: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    }
+  ]
+}

@@ -26,6 +26,10 @@
         "B",
         "C"
       ],
+      "arcDirectionWords": {
+        "DR+": "ccw",
+        "DR-": "cw"
+      },
       "axes": [
         "X",
         "Y",
@@ -109,6 +113,12 @@
       "units": "mm"
     },
     "name": "Heidenhain Klartext",
+    "numberFormat": {
+      "decimals": "keep",
+      "keepPoint": true,
+      "plusSign": "signed",
+      "trailingZeros": "keep"
+    },
     "numbering": {
       "mode": "consecutive",
       "start": 0,
@@ -196,6 +206,7 @@
         "TOOL CALL",
         "TOOL DEF",
         "CYCL DEF",
+        "PATTERN DEF",
         "CYCL CALL PAT",
         "CYCL CALL POS",
         "CYCL CALL",

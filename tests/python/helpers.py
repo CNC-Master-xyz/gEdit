@@ -364,6 +364,90 @@ def script_cases(script: str) -> List[ScriptCase]:
     return cases
 
 
+@dataclass
+class GeometryCase(ScriptCase):
+    """One ``tests/fixtures/scripts/{translate,rotate,mirror}/<case>/`` folder (Phase 4 plan
+    section 6.1; the format is ``tests/fixtures/scripts/README.md``, "The geometry goldens").
+
+    A case either writes (``expected.nc`` and ``envelope.json``) or is refused
+    (``refused.json``, Q4-1). A refused run hands the input back unchanged, so
+    ``expected_file`` is ``input.nc`` then and :meth:`expected_text` is the input, byte for
+    byte. :meth:`envelope` is the ``{ "message", "findings" }`` the run must report, from
+    whichever of the two files the case has. Written by the P4a prelude.
+    """
+
+    envelope_file: Optional[Path] = None
+    refused_file: Optional[Path] = None
+
+    @property
+    def refused(self) -> bool:
+        return self.refused_file is not None
+
+    def envelope(self) -> Any:
+        return load_json(self.refused_file if self.refused_file is not None else self.envelope_file)
+
+
+def geometry_cases(script: str) -> List[GeometryCase]:
+    """Every case folder of a geometry script (``translate``, ``rotate``, ``mirror``), sorted.
+
+    A folder must hold ``input.nc`` and either ``expected.nc`` with ``envelope.json`` or
+    ``refused.json`` alone; anything else fails loudly, as :func:`script_cases` does.
+    """
+    root = SCRIPT_FIXTURES_DIR / script
+    if not root.is_dir():
+        return []
+    cases: List[GeometryCase] = []
+    for directory in sorted(p for p in root.iterdir() if p.is_dir()):
+        input_file = directory / "input.nc"
+        expected = directory / "expected.nc"
+        envelope_file = directory / "envelope.json"
+        refused_file = directory / "refused.json"
+        writes = expected.is_file() and envelope_file.is_file() and not refused_file.is_file()
+        refuses = refused_file.is_file() and not expected.is_file() and not envelope_file.is_file()
+        if not input_file.is_file() or not (writes or refuses):
+            raise AssertionError(
+                f"{directory} must hold input.nc and either expected.nc with envelope.json or refused.json"
+            )
+        params_file = directory / "params.json"
+        options_file = directory / "case.json"
+        preceding_file = directory / "preceding.nc"
+        cases.append(
+            GeometryCase(
+                script=script,
+                name=directory.name,
+                directory=directory,
+                input_file=input_file,
+                expected_file=expected if writes else input_file,
+                params=load_json(params_file) if params_file.is_file() else {},
+                options=load_json(options_file) if options_file.is_file() else {},
+                preceding_file=preceding_file if preceding_file.is_file() else None,
+                envelope_file=envelope_file if writes else None,
+                refused_file=refused_file if refuses else None,
+            )
+        )
+    return cases
+
+
+def geometry_context(case: GeometryCase) -> Dict[str, Any]:
+    """The context a geometry case runs with: the effective profile and machine of its
+    ``case.json`` (the generated ``resolved/effective`` entry when it names a machine), as the
+    address arithmetic goldens run (``test_address_arithmetic.context_of``)."""
+    context = case.context()
+    if isinstance(case.options.get("machine"), dict):
+        effective = effective_context(golden=case.directory / "case.json")
+    else:
+        effective = effective_context(case.profile_id)
+    context["profile"] = effective["profile"]
+    context["codes"] = effective["codes"]
+    context["machine"] = dict(effective["machine"])
+    name = case.options.get("machineName")
+    if isinstance(name, str) and name != "":
+        context["machine"]["id"] = name.lower().replace(" ", "-")
+        context["machine"]["name"] = name
+    context.pop("machineName", None)
+    return context
+
+
 def make_context(
     params: Optional[Dict[str, Any]] = None,
     profile: Optional[Dict[str, Any]] = None,
@@ -462,3 +546,41 @@ def run_script(
         stdout=completed.stdout.decode("utf-8"),
         stderr=completed.stderr.decode("utf-8"),
     )
+
+
+# ---------------------------------------------------------------------------
+# P4.5: plumbing for the differential oracle (tests/python/test_geometry_oracle.py)
+# ---------------------------------------------------------------------------
+
+#: ``tests/fixtures/nc/owner-public`` — the programs the owner published; the folder a
+#: program is in is the profile it opens with.
+OWNER_PUBLIC_DIR = FIXTURES_DIR / "nc" / "owner-public"
+
+
+def require_script(script_file: str) -> None:
+    """Fails (an ``AssertionError``, never a skip) when a bundled script (``translate.py``) is not
+    there: a deleted script has to turn the suite red, not quietly shrink it."""
+    if not (SCRIPTS_DIR / script_file).is_file():
+        raise AssertionError("%s is missing from %s" % (script_file, SCRIPTS_DIR))
+
+
+def decode_program(raw: bytes) -> str:
+    """A program as the app hands it to a script: UTF-8 (a byte-order mark dropped), else
+    Windows-1252, with LF line endings (the same reading as ``test_owner_public.decode``)."""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def owner_public_programs() -> List[Any]:
+    """``(rel, profile_id, path)`` of every owner-public program, sorted; ``rel`` is the path
+    below ``tests/fixtures`` as the golden files key it."""
+    found = []
+    for path in sorted(OWNER_PUBLIC_DIR.rglob("*")):
+        if path.is_file():
+            found.append((path.relative_to(FIXTURES_DIR).as_posix(), path.parent.name, path))
+    return found

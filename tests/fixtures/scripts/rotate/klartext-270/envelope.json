@@ -1,0 +1,17 @@
+{
+  "message": "Rotated by 270° about X0 Y0: 19 words on 10 blocks, 3 of them added, 1 rounded. Left 1 block as written: 1 position in machine coordinates. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 13,
+      "severity": "info",
+      "message": "12 L X+40: rounded to the word's decimals or to whole increments.",
+      "reason": "rounded"
+    },
+    {
+      "line": 27,
+      "severity": "info",
+      "message": "18 L Z+100 R0 FMAX M91: a position in machine coordinates or an incremental return to the reference point; left as written.",
+      "reason": "machine-position"
+    }
+  ]
+}

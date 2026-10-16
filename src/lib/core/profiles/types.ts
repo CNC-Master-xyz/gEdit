@@ -94,7 +94,12 @@ export interface NumberFormatOptions {
   trailingZeros: 'keep' | 'drop';
   /** Keep a trailing decimal point when the fraction is dropped (`10.` stays `10.`). */
   keepPoint: boolean;
-  plusSign: 'keep' | 'always' | 'never';
+  /**
+   * `signed` (P4a integration, plan §7 #308): `+` before a value whose written form had a
+   * sign of either kind, so a Klartext `Y-2.5` turned positive is written `Y+12.5` while
+   * `F500` stays `F500`. The Klartext profile uses it.
+   */
+  plusSign: 'keep' | 'always' | 'never' | 'signed';
 }
 
 /**
@@ -318,6 +323,15 @@ export interface Profile {
      */
     systemVariables?: Pattern;
     /**
+     * P4a fix B1 (NC-6; plan §7 #314). The number from which on a numbered variable of
+     * [`variables`] is one of the control's own system variables (Fanuc `1000`: `#5221` is the X
+     * of `G54`). For a dialect that writes its system variables like its common ones, where
+     * [`systemVariables`] cannot tell them apart. Read by the geometry scripts only: an
+     * assignment to a system variable may move the coordinate system, so they refuse it. It
+     * changes no token.
+     */
+    systemVariableNumbers?: number;
+    /**
      * P8. A header on the **first line** of the file, read as one `programMarker`: Okuma
      * `^\$[^%]*%`, Sinumerik `^%_N_\w+_(MPF|SPF)`. It is not an NC block, and the `$` of
      * the Okuma form is not the hexadecimal constant of an expression.
@@ -492,6 +506,13 @@ export interface Profile {
      */
     speedLimitWords?: string[];
     /**
+     * P4a fix B1 (NC-17; plan §7 #319). Words that select an offset by its number and are never
+     * a position, an angle or a length (Sinumerik `D`, the cutting edge of the active tool). The
+     * geometry transforms leave them as written. A dialect whose offset number belongs to a code
+     * (Fanuc `D` of `G41`) says so in the code database instead.
+     */
+    offsetWords?: string[];
+    /**
      * 2026-09 (owner decision of 2026-09-27). The number of the machine's main spindle
      * (Sinumerik `'1'`). A plain `S` while this spindle is the master (the default, or
      * after `SETMS(1)`) and the spindle word with this number (`S1=`) are the main
@@ -499,6 +520,16 @@ export interface Profile {
      * names no main spindle, and every numbered spindle is another one.
      */
     mainSpindle?: string;
+    /**
+     * Phase 4 (P4a prelude; Phase 4 plan §6.2, AD-42). The words that give an arc its
+     * direction in a dialect that writes no `G2`/`G3` (Klartext `{ "DR+": "ccw", "DR-": "cw" }`):
+     * the word as written, an address followed by its sign alone, mapped to the direction as
+     * the control defines it (`CodeSets.arcDirection`). `DR-1` (a tool call's radius delta) is
+     * no direction word: only the sign may follow the address. At most one word per direction,
+     * so a mirror can swap one for the other. Read by `_nc_path`/`_nc_geom`
+     * (`gedit_nc.arc_direction_words_of`); absent on a dialect whose arcs are codes.
+     */
+    arcDirectionWords?: Record<string, 'cw' | 'ccw'>;
   };
   toolCall: {
     /** A line that changes the tool (`M6`, `TOOL CALL …`). */

@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be rotated: 1 first move of the selection that would miss the moved path. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "G91 G1 X5. Y5.: this first move of the selection starts where the lines above the selection leave the tool, and that point is not moved with the selection, so an arc, an incremental move or (on a lathe) a move without Z, or without Y away from the turning axis, from there would miss the moved path. Start the selection at a block that moves to an absolute position, with Z on a lathe (and Y where Y is not 0).",
+      "reason": "selection-start"
+    }
+  ]
+}

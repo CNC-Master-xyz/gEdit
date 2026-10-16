@@ -1361,8 +1361,30 @@ class TestFramesAndTcp(ModalTestCase):
         self.assertEqual(
             self.frames(states),
             # The 19.0 line only names the cycle; its angles, and with them the tilt, come with
-            # 19.1 (`frameZeroWords`, owner decision of 2026-10-08).
-            ["CYCL DEF 8", "CYCL DEF 8", "PLANE SPATIAL", "PLANE VECTOR", "CYCL DEF 8", "CYCL DEF 8", "CYCL DEF 19", "CYCL DEF 8"],
+            # 19.1 (`frameZeroWords`, owner decision of 2026-10-08). The same holds for cycle 8
+            # since the P4a integration (plan §7 #299): 8.0 names it, 8.1 names the axes.
+            [None, "CYCL DEF 8", "PLANE SPATIAL", "PLANE VECTOR", "CYCL DEF 8", "CYCL DEF 8", "CYCL DEF 19", "CYCL DEF 8"],
+        )
+
+    def test_klartext_rotation_and_mirror_resets(self) -> None:
+        # TNC 640 cycle manual: cycle 10 is reset by a rotation angle of 0 and cycle 8 by
+        # defining it again with no axis (NO ENT). `IROT` is an increment of the angle: one of
+        # 0 changes nothing. Each is a group of its own, so one reset leaves the other frame.
+        states = self.run_lines(
+            "heidenhain-klartext",
+            [
+                "CYCL DEF 10.0 ROTATION", "CYCL DEF 10.1 ROT+30", "CYCL DEF 10.1 IROT+0", "CYCL DEF 10.1 ROT+0",
+                "CYCL DEF 10.1 IROT+15", "CYCL DEF 10.1 IROT+0", "CYCL DEF 10.1 ROT+0",
+                "CYCL DEF 8.0 MIRROR IMAGE", "CYCL DEF 8.1 X Y", "CYCL DEF 10.1 ROT+45", "CYCL DEF 10.1 ROT+0",
+                "CYCL DEF 8.0 MIRROR IMAGE", "CYCL DEF 8.1",
+            ],
+        )
+        self.assertEqual(
+            self.frames(states),
+            [
+                None, "CYCL DEF 10", "CYCL DEF 10", None, "CYCL DEF 10", "CYCL DEF 10", None,
+                None, "CYCL DEF 8", "CYCL DEF 10", "CYCL DEF 8", "CYCL DEF 8", None,
+            ],
         )
 
     def test_a_klartext_tilt_with_every_angle_zero_is_no_tilt(self) -> None:
@@ -1469,3 +1491,24 @@ class TestFramesAndTcp(ModalTestCase):
     def test_an_iso_plane_code_still_decides_there(self) -> None:
         states = self.run_lines("fanuc-gcode", ["G17", "G18", "G19"])
         self.assertEqual([state["plane"] for state in states], ["XY", "ZX", "YZ"])
+
+
+class FingerprintTest(unittest.TestCase):
+    """P4a fix B1 (NC-5, plan §7 #312): what the geometry transforms read of the modal state,
+    as one tuple (Python only; no member of the ModalState of §7.4)."""
+
+    def test_it_changes_with_what_the_transforms_read_and_not_with_the_rest(self) -> None:
+        context = helpers.effective_context("fanuc-gcode")
+        cp = gedit_nc.compile_profile(context["profile"])
+        interp = gedit_nc.ModalInterpreter(cp, context["codes"])
+        seen = []
+        state = None
+        for number, line in enumerate(["G90 G17 G21", "G1 X10. F100.", "M8", "G91", "G68 X0. Y0. R30.", "G69 G81 X0. Y0. Z-5. R2."], 1):
+            tokens, state = gedit_nc.tokenize_line(line, cp, state)
+            interp.update(tokens, number, gedit_nc.mask_comments(line, cp))
+            seen.append(interp.fingerprint())
+        self.assertEqual(seen[0], seen[1])  # a move and a feed
+        self.assertEqual(seen[1], seen[2])  # coolant
+        self.assertNotEqual(seen[2], seen[3])  # the distance mode
+        self.assertNotEqual(seen[3], seen[4])  # a frame
+        self.assertNotEqual(seen[4], seen[5])  # the frame closed, a cycle in force

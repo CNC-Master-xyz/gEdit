@@ -1,0 +1,59 @@
+{
+  "message": "Nothing was changed: 9 blocks cannot be moved by X1.5 Y-2: 5 blocks in or opening a frame, 1 coordinate shift or setting, 1 subprogram or macro call, 1 block with a variable or calculation in a moved word, 1 free contour (FK). No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "5 CYCL DEF 7.1 X+10: this sets or shifts the coordinate system or writes offsets (a local shift, a coordinate set, a data setting that changes offsets); gEdit does not move the values it sets, so the positions after it would no longer match the moved path.",
+      "reason": "coordinate-shift"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "7 FL X+20 Y+30 AN+45: a free contour (FK): its points depend on each other and on the elements around them; gEdit does not move them.",
+      "reason": "fk-contour"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "8 L X+Q1 Y+5: a variable or a calculation in a word the transform has to change; gEdit only changes written numbers.",
+      "reason": "expression"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "9 CALL LBL 5: a subprogram or macro call: the called program's positions are not in this document, so it cannot be moved with the rest.",
+      "reason": "call"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "10 PLANE SPATIAL SPA+0 SPB+30 SPC+0 TURN MB MAX FMAX: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "11 L Z+50 R0 FMAX: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 15,
+      "severity": "error",
+      "message": "14 CYCL DEF 10.1 ROT+30: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 16,
+      "severity": "error",
+      "message": "15 L X+5 Y+5 R0: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    },
+    {
+      "line": 17,
+      "severity": "error",
+      "message": "16 L Z+100 R0 FMAX M30: a coordinate rotation, mirror, scaling, polar command or tilted plane is in force here; gEdit cannot tell where these positions are. Move the path without it, or cancel it first.",
+      "reason": "frame"
+    }
+  ]
+}

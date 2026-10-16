@@ -104,7 +104,8 @@
       "code": "G2",
       "group": "motion",
       "modal": true,
-      "sets": { "motion": "feed", "path": "arc" },
+      "sets": { "motion": "feed", "path": "arc", "arcDirection": "cw" },
+      "review": "pending",
       "label": "Arc, clockwise",
       "description": "Cuts an arc clockwise to the end point in the axis words. I, J and K give the centre."
     },
@@ -112,7 +113,8 @@
       "code": "G3",
       "group": "motion",
       "modal": true,
-      "sets": { "motion": "feed", "path": "arc" },
+      "sets": { "motion": "feed", "path": "arc", "arcDirection": "ccw" },
+      "review": "pending",
       "label": "Arc, counter-clockwise",
       "description": "Cuts an arc counter-clockwise, described the same way as G2."
     },
@@ -123,10 +125,11 @@
       "sets": { "motion": "feed", "path": "arc" },
       "label": "Arc through a point",
       "description": "Cuts an arc through an intermediate point given with I1=, J1= and K1=.",
+      "review": "pending",
       "params": [
-        { "address": "I1", "label": "Intermediate point, X", "axis": "X" },
-        { "address": "J1", "label": "Intermediate point, Y", "axis": "Y" },
-        { "address": "K1", "label": "Intermediate point, Z", "axis": "Z" }
+        { "address": "I1", "label": "Intermediate point, X", "axis": "X", "unit": "length" },
+        { "address": "J1", "label": "Intermediate point, Y", "axis": "Y", "unit": "length" },
+        { "address": "K1", "label": "Intermediate point, Z", "axis": "Z", "unit": "length" }
       ]
     },
     {
@@ -370,7 +373,8 @@
       "code": "G41",
       "group": "compensation",
       "modal": true,
-      "sets": { "radiusComp": "on" },
+      "sets": { "radiusComp": "on", "compSide": "left" },
+      "review": "pending",
       "label": "Radius compensation, tool left",
       "description": "Offsets the path by the radius of the edge that D selects, seen along the direction of travel."
     },
@@ -378,7 +382,8 @@
       "code": "G42",
       "group": "compensation",
       "modal": true,
-      "sets": { "radiusComp": "on" },
+      "sets": { "radiusComp": "on", "compSide": "right" },
+      "review": "pending",
       "label": "Radius compensation, tool right"
     },
     {
@@ -2374,66 +2379,81 @@
       "code": "CYCLE95",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Stock removal cycle",
       "description": "Roughs and finishes along a contour that a subprogram describes. Its three feeds, for roughing, for plunging into undercuts and for finishing, are arguments.",
       "params": [
         {
           "address": "NPP",
+          "position": "other",
           "label": "Name of the contour subprogram"
         },
         {
           "address": "MID",
+          "position": "none",
           "label": "Largest depth of cut when roughing"
         },
         {
           "address": "FALZ",
+          "position": "none",
           "label": "Finishing allowance in Z"
         },
         {
           "address": "FALX",
+          "position": "none",
           "label": "Finishing allowance in X"
         },
         {
           "address": "FAL",
+          "position": "none",
           "label": "Finishing allowance along the contour"
         },
         {
           "address": "FF1",
+          "position": "none",
           "label": "Feed for roughing"
         },
         {
           "address": "FF2",
+          "position": "none",
           "label": "Feed for plunging into undercuts"
         },
         {
           "address": "FF3",
+          "position": "none",
           "label": "Feed for finishing"
         },
         {
           "address": "VARI",
+          "position": "none",
           "label": "Kind of machining: roughing, finishing or both, along or across, outside or inside",
           "unit": "count"
         },
         {
           "address": "DT",
+          "position": "none",
           "label": "Dwell at each chip-breaking stop",
           "unit": "dwell"
         },
         {
           "address": "DAM",
+          "position": "none",
           "label": "Path between two chip-breaking stops"
         },
         {
           "address": "_VRT",
+          "position": "none",
           "label": "Lift-off from the contour"
         },
         {
           "address": "_GMODE",
+          "position": "mode",
           "label": "Whether the depth of cut follows the diameter mode",
           "unit": "count"
         },
         {
           "address": "_DMODE",
+          "position": "mode",
           "label": "Plane and display mode",
           "unit": "count"
         }
@@ -3034,6 +3054,8 @@
       "group": "tilt",
       "frame": "open",
       "frameWithoutValues": "close",
+      "positionsRotary": true,
+      "review": "pending",
       "label": "Swivel the working plane",
       "description": "Swivels the working plane for 3+2 machining, or swivels or aligns the tool, with the swivel data set named in the second argument, and sets the frame that goes with it. Written with no arguments, CYCLE800() clears the swivel and its frames, which is why posts write it at the start of a program, some without the brackets. The reference points before and after the rotation are absolute positions. Older control versions take 15 arguments, without the last one.",
       "params": [
@@ -3050,7 +3072,7 @@
         { "address": "_X1", "label": "Reference point X after the rotation, as an absolute position", "position": "other" },
         { "address": "_Y1", "label": "Reference point Y after the rotation, as an absolute position", "position": "other" },
         { "address": "_Z1", "label": "Reference point Z after the rotation, as an absolute position", "position": "other" },
-        { "address": "_DIR", "label": "Which way the rotary axes turn: -1 to the smaller value, +1 to the larger one, 0 compute the frame without moving", "unit": "count", "position": "none" },
+        { "address": "_DIR", "label": "Which way the rotary axes turn: -1 to the smaller value, +1 to the larger one, 0 compute the frame without moving", "unit": "count", "position": "none", "keepsRotary": true },
         { "address": "_FR_I", "label": "Retract distance along the tool, for _FR 5", "position": "none" },
         { "address": "_DMODE", "label": "Display mode: ones the plane while the cycle runs (0 the plane in force, 1 G17, 2 G18, 3 G19)", "unit": "count", "position": "mode" }
       ]
@@ -3334,7 +3356,9 @@
       "group": "frame",
       "axisWords": "data",
       "shift": true,
+      "shiftZeroIsNone": true,
       "frameWithoutValues": "close",
+      "review": "pending",
       "label": "Programmable offset",
       "description": "Shifts the zero point by the values in the block. Written on its own it clears the programmable frame."
     },
@@ -3343,6 +3367,8 @@
       "group": "frame",
       "axisWords": "data",
       "shift": true,
+      "shiftZeroIsNone": true,
+      "review": "pending",
       "label": "Additive programmable offset",
       "description": "Shifts the zero point by the values in the block, on top of the frame already programmed."
     },
@@ -3615,56 +3641,76 @@
     {
       "code": "GOTOF",
       "group": "program",
+      "flow": "jump",
+      "review": "pending",
       "label": "Jump forward",
       "description": "Continues at the label, searching towards the end of the program."
     },
     {
       "code": "GOTOB",
       "group": "program",
+      "flow": "jump",
+      "review": "pending",
       "label": "Jump backward",
       "description": "Continues at the label, searching towards the start of the program."
     },
     {
       "code": "GOTO",
       "group": "program",
+      "flow": "jump",
+      "review": "pending",
       "label": "Jump",
       "description": "Continues at the label or the block number, searching forwards first and then backwards."
     },
     {
       "code": "GOTOC",
       "group": "program",
+      "flow": "jump",
+      "review": "pending",
       "label": "Jump without an alarm",
       "description": "Like GOTO, but the control does not stop when the target is missing."
     },
     {
       "code": "IF",
       "group": "program",
+      "flow": "branch",
+      "review": "pending",
       "label": "Conditional",
       "description": "Runs what follows when the condition holds."
     },
     {
       "code": "ELSE",
       "group": "program",
+      "flow": "else",
+      "review": "pending",
       "label": "Otherwise"
     },
     {
       "code": "ENDIF",
       "group": "program",
+      "flow": "branch-end",
+      "review": "pending",
       "label": "End of the conditional"
     },
     {
       "code": "WHILE",
       "group": "program",
+      "flow": "loop",
+      "review": "pending",
       "label": "Loop while the condition holds"
     },
     {
       "code": "ENDWHILE",
       "group": "program",
+      "flow": "loop-end",
+      "review": "pending",
       "label": "End of the while loop"
     },
     {
       "code": "FOR",
       "group": "program",
+      "flow": "loop",
+      "review": "pending",
       "label": "Counting loop"
     },
     {
@@ -3675,31 +3721,43 @@
     {
       "code": "ENDFOR",
       "group": "program",
+      "flow": "loop-end",
+      "review": "pending",
       "label": "End of the counting loop"
     },
     {
       "code": "REPEAT",
       "group": "program",
+      "flow": "repeat",
+      "review": "pending",
       "label": "Repeat loop, or a section between two labels"
     },
     {
       "code": "REPEATB",
       "group": "program",
+      "flow": "repeat",
+      "review": "pending",
       "label": "Repeat one block"
     },
     {
       "code": "UNTIL",
       "group": "program",
+      "flow": "loop-end",
+      "review": "pending",
       "label": "Repeat until the condition holds"
     },
     {
       "code": "LOOP",
       "group": "program",
+      "flow": "loop",
+      "review": "pending",
       "label": "Endless loop"
     },
     {
       "code": "ENDLOOP",
       "group": "program",
+      "flow": "loop-end",
+      "review": "pending",
       "label": "End of the endless loop"
     },
     {

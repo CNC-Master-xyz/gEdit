@@ -389,7 +389,10 @@ describe('the cycles', () => {
     // or K; `G34`/`G35` have the change of the lead in F) are declared as what they are, a
     // feed per revolution, so their I, J and K are no arc centres. The cycle pitch `PIT`
     // above is an argument and stays without a class.
-    expect([...units].sort()).toEqual(['count', 'dwell', 'feedPerRev']);
+    // P4a integration (§7 #307): the intermediate point of CIP (`I1=`, `J1=`, `K1=`) is a
+    // coordinate of its axis and has the axis word's class, length; no cycle argument has one.
+    expect([...units].sort()).toEqual(['count', 'dwell', 'feedPerRev', 'length']);
+    expect(ENTRIES.filter((e) => (e.params ?? []).some((p) => p.unit === 'length')).map((e) => e.code)).toEqual(['CIP']);
     expect(
       ENTRIES.filter((e) => (e.params ?? []).some((p) => p.unit === 'feedPerRev')).map((e) => e.code),
     ).toEqual(['G33', 'G331', 'G332', 'G34', 'G35', 'G335', 'G336']);

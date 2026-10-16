@@ -74,6 +74,14 @@ function declaredOf(entry: CodeEntry): Record<string, unknown> {
   if (entry.pole !== undefined) out.pole = entry.pole;
   if (entry.call !== undefined) out.call = entry.call;
   if (entry.shift !== undefined) out.shift = entry.shift;
+  // P4a integration (§7 #299): a shift whose all-zero block sets no shift.
+  if (entry.shiftZeroIsNone !== undefined) out.shiftZeroIsNone = entry.shiftZeroIsNone;
+  // P4a fix B1 (§7 #312, #315, #317, #318): the flow codes, a code that turns the rotary axes,
+  // the identity of a scaling and the workpiece blank.
+  if (entry.frameIdentity !== undefined) out.frameIdentity = entry.frameIdentity;
+  if (entry.flow !== undefined) out.flow = entry.flow;
+  if (entry.positionsRotary !== undefined) out.positionsRotary = entry.positionsRotary;
+  if (entry.blank !== undefined) out.blank = entry.blank;
   const sets: Record<string, unknown> = {};
   if (entry.sets?.speedLimit !== undefined) sets.speedLimit = entry.sets.speedLimit;
   if (entry.sets?.speedLimitBound !== undefined) sets.speedLimitBound = entry.sets.speedLimitBound;
@@ -366,11 +374,23 @@ describe('what the flags decide (the reasons are in the entries and in the G10 t
   });
 
   it('Klartext (owner decision of 2026-10-08, M10-2): the tilts that read as none at all-zero angles', () => {
-    expect(codesWith('heidenhain', (e) => e.frameZeroWords !== undefined)).toEqual(['CYCL DEF 19', 'PLANE SPATIAL', 'PLANE PROJECTED', 'PLANE EULER']);
+    // P4a integration (§7 #299): cycle 8 (its mirrored axes, named without a value) and cycle 10
+    // (ROT; IROT is an increment of it) read the same way, each in a group of its own.
+    // P4a fix B1 (NC-15, §7 #317): the scalings 11 and 26 read as none at the factor 1
+    // (`frameIdentity`), cycle 11 in a group of its own so the reset of one leaves the other.
+    expect(codesWith('heidenhain', (e) => e.frameZeroWords !== undefined)).toEqual([
+      'CYCL DEF 8', 'CYCL DEF 10', 'CYCL DEF 11', 'CYCL DEF 19', 'CYCL DEF 26', 'PLANE SPATIAL', 'PLANE PROJECTED', 'PLANE EULER',
+    ]);
+    expect(codesWith('heidenhain', (e) => e.frameIdentity !== undefined)).toEqual(['CYCL DEF 11', 'CYCL DEF 26']);
+    expect(loadedEntry('heidenhain', 'CYCL DEF 11').group).toBe('scaling');
+    expect(loadedEntry('heidenhain', 'CYCL DEF 10').frameZeroWords).toEqual(['ROT']);
+    expect(loadedEntry('heidenhain', 'CYCL DEF 10').group).toBe('rotation');
+    expect(loadedEntry('heidenhain', 'CYCL DEF 8').group).toBe('mirror');
     expect(loadedEntry('heidenhain', 'CYCL DEF 19').frameZeroWords).toEqual(['A', 'B', 'C']);
     expect(loadedEntry('heidenhain', 'PLANE SPATIAL').frameZeroWords).toEqual(['SPA', 'SPB', 'SPC']);
-    // M12.5 (B-3): an empty `CYCL DEF 19.1` ends the tilt; only cycle 19 says so.
-    expect(codesWith('heidenhain', (e) => e.frameEmptyCloses !== undefined)).toEqual(['CYCL DEF 19']);
+    // M12.5 (B-3): an empty `CYCL DEF 19.1` ends the tilt; since the P4a integration an empty
+    // `CYCL DEF 8.1` ends the mirror the same way.
+    expect(codesWith('heidenhain', (e) => e.frameEmptyCloses !== undefined)).toEqual(['CYCL DEF 8', 'CYCL DEF 19']);
     expect(loadedEntry('heidenhain', 'CYCL DEF 19').frameEmptyCloses).toBe('1');
     for (const dialect of DIALECTS.filter((d) => d !== 'heidenhain')) {
       expect(codesWith(dialect, (e) => e.frameEmptyCloses !== undefined), dialect).toEqual([]);

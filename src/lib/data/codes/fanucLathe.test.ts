@@ -225,6 +225,9 @@ describe('the shipped Fanuc databases', () => {
       // Phase 3 (P3a prelude; P3.7 sets it on G2 and G3): an arc, for the motion colours; a
       // single-pass turning or facing cycle (A G90, G94; B G77, G79), a cycle to the colours.
       path: ['arc', 'cycle'],
+      // Phase 4 (P4a prelude, plan §6.2): what a mirror swaps, on G2/G3 and G41/G42.
+      arcDirection: ['cw', 'ccw'],
+      compSide: ['left', 'right'],
     };
     for (const e of entriesOf(dialect)) {
       for (const [member, value] of Object.entries(e.sets ?? {})) {

@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be moved by Y2: 2 moves while a rotary axis stands turned. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "G0 X0. Y0. Z50.: a rotary axis stands turned here and tool centre point control is off, so a shift of the program is not a shift of these machine axes.",
+      "reason": "rotary-turned"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "G90 G1 X20. Y5.: a rotary axis stands turned here and tool centre point control is off, so a shift of the program is not a shift of these machine axes.",
+      "reason": "rotary-turned"
+    }
+  ]
+}

@@ -9,12 +9,15 @@
 // would prove nothing, so it is not retried and it never passes silently. A block with
 // the screen unlocked (the app's main thread did not answer an input in time, which a
 // shared CI runner does now and then) is retried once like a failure: a pass on the
-// retry is FLAKY, with the block kept as the first attempt.
+// retry is FLAKY, with the block kept as the first attempt. A scenario that declares
+// `retry: false` (`p4-perf`: three to five runs of minutes each on 300,000 lines) is never
+// run a second time, whatever the flags say: a failure is reported as it is.
 //
 // Usage: suite.sh <suite.txt | scenario>… [--no-retry] [--repeat N]
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { mayRetry } from '../lib/retry.js'
 import { expandSuiteArgs, focusStats, loadScenarios, rhDir, robustEnabled, runScenario, screenLocked, summarize, withLock } from './core.mjs'
 
 const argv = process.argv.slice(2)
@@ -99,7 +102,8 @@ async function runOnce(name, blockedSoFar) {
     first.status === 'blocked' &&
     first.screenLocked !== true &&
     !first.blocked.some((/** @type {{ where?: string }} */ b) => b.where === 'suite')
-  if (first.status === 'pass' || (first.status === 'blocked' && !transientBlock) || !retry) {
+  const retries = mayRetry(retry, known.get(name)?.options)
+  if (first.status === 'pass' || (first.status === 'blocked' && !transientBlock) || !retries) {
     return { status: first.status.toUpperCase(), result: first, first: null }
   }
   const kept = keepFirstAttempt(name)

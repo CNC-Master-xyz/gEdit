@@ -109,7 +109,9 @@ describe('lookupWord', () => {
 
   it('answers unknown when the database knows neither the code nor the address', () => {
     expect(lookupWord(fanuc, word(',R', '1.'))).toEqual({ entry: null, unknown: true });
-    expect(lookupWord(heidenhain, keyword('PATTERN DEF'))).toEqual({ entry: null, unknown: true });
+    // (PATTERN DEF has an entry since the P4a integration, plan §7 #301.)
+    expect(lookupWord(heidenhain, keyword('NO SUCH DEF'))).toEqual({ entry: null, unknown: true });
+    expect(lookupWord(heidenhain, keyword('PATTERN DEF'))?.entry?.code).toBe('PATTERN DEF');
   });
 
   it('reads a Klartext keyword', () => {

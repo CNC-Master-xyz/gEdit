@@ -252,3 +252,31 @@ export function tcpOf(entry: CodeEntry | null | undefined): 'on' | 'off' | null 
   const value = entry?.sets?.tcp;
   return value === 'on' || value === 'off' ? value : null;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 (P4a prelude; Phase 4 plan §6.2, AD-42). What a mirror swaps, with the Python
+// twins `gedit_nc.arc_direction_of` and `gedit_nc.comp_side_of`, held to the same cases
+// (`flagsContract.test.ts`, `tests/python/test_code_flags.py`) and to the data golden
+// `tests/fixtures/codes/geometry-flags.json`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The direction of the arc this code cuts, as the control defines it (`'cw'` for `G2`,
+ * `'ccw'` for `G3`), or `null`: the code cuts no arc, or one whose direction the data does not
+ * give (`CIP`, `CT`). Read only on an entry with `path: 'arc'`, as the loader keeps it.
+ */
+export function arcDirectionOf(entry: CodeEntry | null | undefined): 'cw' | 'ccw' | null {
+  const sets = entry?.sets;
+  if (sets?.path !== 'arc') return null;
+  return sets.arcDirection === 'cw' || sets.arcDirection === 'ccw' ? sets.arcDirection : null;
+}
+
+/**
+ * The side the tool keeps to under this compensation code (`'left'` for `G41`, `RL`;
+ * `'right'` for `G42`, `RR`), or `null`. Read only on an entry with `radiusComp: 'on'`.
+ */
+export function compSideOf(entry: CodeEntry | null | undefined): 'left' | 'right' | null {
+  const sets = entry?.sets;
+  if (sets?.radiusComp !== 'on') return null;
+  return sets.compSide === 'left' || sets.compSide === 'right' ? sets.compSide : null;
+}

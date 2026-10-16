@@ -1,0 +1,17 @@
+{
+  "message": "Mirrored about the line through X0 Y0 at 30°: 16 words and 2 codes on 7 blocks, 3 of them added, 10 rounded (G2 and G3 swapped). No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "info",
+      "message": "G0 X10. Y0. Z5.: rounded to the word's decimals or to whole increments (the first of 7 rounded blocks).",
+      "reason": "rounded"
+    },
+    {
+      "line": 5,
+      "severity": "warning",
+      "message": "Mirroring reverses the cutting direction: climb milling is now conventional milling, and the other way round. Check the cutting data.",
+      "reason": "climb-milling"
+    }
+  ]
+}

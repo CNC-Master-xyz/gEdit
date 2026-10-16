@@ -1,0 +1,35 @@
+{
+  "message": "Nothing was changed: 5 blocks cannot be mirrored for the counter spindle: 2 blocks with a rotary axis away from 0, 1 arc gEdit cannot compute, 1 thread block, 1 roughing cycle block. Machine 'Lathe 1': numbers are read as written.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "N30 G2 X50. Z-10. L20.: an arc gEdit cannot compute (an arc by an L radius, a contour arc with the C axis).",
+      "reason": "arc-unsupported"
+    },
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "N40 G85 NLAP1 D2. F0.3 U0.4 W0.1: a roughing cycle that works from a contour (its finishing allowance along Z has a direction); gEdit does not mirror it yet.",
+      "reason": "roughing-cycle"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "N50 G33 X30. Z-20. F1.5: a thread or tapping move or cycle: mirrored in Z it would cut the other hand of thread unless the counter spindle turns the other way, which the program does not say. Write the threads for the counter spindle by hand.",
+      "reason": "thread"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "N70 G102 X30. C90. L5. F100.: a rotary axis moves to an angle other than 0 here, or stands at one; turning or mirroring the path would need its angle changed too, which gEdit does not do.",
+      "reason": "rotary-word"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "N80 G0 X60. Z5.: a rotary axis moves to an angle other than 0 here, or stands at one; turning or mirroring the path would need its angle changed too, which gEdit does not do.",
+      "reason": "rotary-word"
+    }
+  ]
+}

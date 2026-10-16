@@ -1,0 +1,53 @@
+{
+  "message": "Added 1 to X (as a diameter) and R in 9 words on 8 blocks. Left 8 words as written: 8 data words. No machine chosen: words whose reading depends on the machine are left alone.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "info",
+      "message": "R1.: a value of G74, not a position of this program.",
+      "reason": "data"
+    },
+    {
+      "line": 8,
+      "severity": "info",
+      "message": "R0.5: a value of G74, not a position of this program.",
+      "reason": "data"
+    },
+    {
+      "line": 10,
+      "severity": "info",
+      "message": "R1.: a value of G75, not a position of this program.",
+      "reason": "data"
+    },
+    {
+      "line": 13,
+      "severity": "info",
+      "message": "R0.05: a value of G76, not a position of this program.",
+      "reason": "data"
+    },
+    {
+      "line": 14,
+      "severity": "info",
+      "message": "R-2.: a value of G76, not a position of this program.",
+      "reason": "data"
+    },
+    {
+      "line": 15,
+      "severity": "info",
+      "message": "U2.: a value of G71, not a position of this program.",
+      "reason": "data"
+    },
+    {
+      "line": 15,
+      "severity": "info",
+      "message": "R0.5: a value of G71, not a position of this program.",
+      "reason": "data"
+    },
+    {
+      "line": 16,
+      "severity": "info",
+      "message": "U0.4: a value of G71, not a position of this program.",
+      "reason": "data"
+    }
+  ]
+}

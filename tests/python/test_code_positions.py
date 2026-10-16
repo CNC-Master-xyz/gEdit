@@ -49,8 +49,11 @@ class PositionGoldenTest(unittest.TestCase):
                 count += 1
         self.assertGreaterEqual(count, 35)
 
-    def test_no_lathe_database_carries_a_role_even_inherited(self) -> None:
-        # The lathe's R is a machine parameter in G-code system A; every lathe cycle is refused.
+    def test_a_lathe_database_carries_roles_on_the_repetitive_cycles_only(self) -> None:
+        # The R of a lathe drilling cycle is a machine parameter in G-code system A; those
+        # cycles are refused. P4a integration (plan §7 #305): G70 to G76 are reviewed (their
+        # parameters are no positions), on both G-code systems; Okuma has no role.
+        repetitive = ["G70", "G71", "G72", "G73", "G74", "G75", "G76"]
         for dialect in ("fanuc-lathe", "fanuc-lathe-b", "okuma"):
             with self.subTest(dialect=dialect):
                 found = [
@@ -58,7 +61,7 @@ class PositionGoldenTest(unittest.TestCase):
                     for e in helpers.resolved_codes(dialect)
                     if any(gedit_nc.position_of(p) is not None for p in e.get("params") or [])
                 ]
-                self.assertEqual(found, [])
+                self.assertEqual(sorted(found), [] if dialect == "okuma" else repetitive)
 
 
 class OkumaHomeReturnTest(unittest.TestCase):

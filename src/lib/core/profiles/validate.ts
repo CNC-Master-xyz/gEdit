@@ -87,6 +87,9 @@ const EXTENSION = /^[a-z0-9][a-z0-9_+-]*$/;
 
 /** An address or keyword-like name: a letter, then letters and digits (`X`, `FMAX`, `GOTO`). */
 const ADDRESS = /^[A-Za-z][A-Za-z0-9]*$/;
+/** Phase 4 (plan §6.2): an arc direction word, an address and its sign (`DR+`). */
+const DIRECTION_WORD = /^[A-Za-z][A-Za-z0-9]*[+-]$/;
+const ARC_DIRECTIONS = ['cw', 'ccw'] as const;
 
 /** P9. A main-block prefix: one character that is neither a letter, a digit nor a blank (`:`). */
 const MAIN_PREFIX = /^[^A-Za-z0-9\s]$/;
@@ -654,6 +657,8 @@ function checkSyntax(value: unknown, p: Problems): void {
     p.add('syntax.extendedAddresses', 'can match an empty string, and an address has to take at least one letter');
   }
   optVariablePattern(syntax.systemVariables, 'syntax.systemVariables', caseSensitive, p);
+  // P4a fix B1 (NC-6): the first number of a numbered system variable (Fanuc #1000).
+  optNum(syntax.systemVariableNumbers, 'syntax.systemVariableNumbers', p, { int: true, min: 1 });
   optPattern(syntax.header, 'syntax.header', p);
   // M8 integration (§7.16): the names a program gives itself, one token each.
   optPattern(syntax.names, 'syntax.names', p);
@@ -808,6 +813,8 @@ function checkAddresses(value: unknown, p: Problems): void {
   // P8. `LIMS` is an address, not a code: it has to look like one so that a script can
   // find it and leave it alone.
   optStrArr(addresses.speedLimitWords, 'addresses.speedLimitWords', p, { allow: ADDRESS });
+  // P4a fix B1 (NC-17): offset numbers that are no position (Sinumerik `D`).
+  optStrArr(addresses.offsetWords, 'addresses.offsetWords', p, { allow: ADDRESS });
   // 2026-09: the main spindle's number, as a spindle word writes it (`S1=` is spindle 1).
   optStr(addresses.mainSpindle, 'addresses.mainSpindle', p, /^[A-Za-z0-9]+$/);
 
@@ -817,6 +824,32 @@ function checkAddresses(value: unknown, p: Problems): void {
       const at = `addresses.feedUnitWords.${word}`;
       if (!ADDRESS.test(word)) p.add(at, 'has to be an address or a keyword');
       enumOf(unit, at, p, FEED_UNITS);
+    }
+  }
+
+  // Phase 4 (P4a prelude, plan §6.2): the direction words of an arc (Klartext `DR+`, `DR-`).
+  // A mirror swaps a word for the one of the other direction, so each direction may have
+  // one word at most; the word is an address and a sign, nothing after it.
+  const directionWords = optObj(addresses.arcDirectionWords, 'addresses.arcDirectionWords', p);
+  if (directionWords) {
+    const seen = new Set<string>();
+    const spelled = new Set<string>();
+    for (const [word, direction] of Object.entries(directionWords)) {
+      const at = `addresses.arcDirectionWords.${word}`;
+      if (!DIRECTION_WORD.test(word)) {
+        p.add(at, 'has to be an address followed by + or -');
+        continue;
+      }
+      // A program is read in upper case, so `DR+` and `dr+` are one word.
+      if (spelled.has(word.toUpperCase())) {
+        p.add(at, 'the same word as an earlier one, apart from upper and lower case');
+        continue;
+      }
+      spelled.add(word.toUpperCase());
+      const value = enumOf(direction, at, p, ARC_DIRECTIONS);
+      if (value === null) continue;
+      if (seen.has(value)) p.add(at, `a second word for the direction ${value}`);
+      seen.add(value);
     }
   }
 }
@@ -1199,7 +1232,7 @@ function checkNumberFormat(value: unknown, p: Problems): void {
   if (fmt.decimals !== 'keep') num(fmt.decimals, 'numberFormat.decimals', p, { int: true, min: 0, max: 9 });
   enumOf(fmt.trailingZeros, 'numberFormat.trailingZeros', p, ['keep', 'drop'] as const);
   bool(fmt.keepPoint, 'numberFormat.keepPoint', p);
-  enumOf(fmt.plusSign, 'numberFormat.plusSign', p, ['keep', 'always', 'never'] as const);
+  enumOf(fmt.plusSign, 'numberFormat.plusSign', p, ['keep', 'always', 'never', 'signed'] as const);
 }
 
 function checkToolList(value: unknown, p: Problems): void {

@@ -140,6 +140,8 @@ export default {
      */
     scaling: 'Scaling',
     mirror: 'Mirror image',
+    /** P4a integration: Klartext cycle 10, apart from the mirror of cycle 8, so that its reset (ROT+0) ends the rotation only. */
+    rotation: 'Coordinate rotation',
     polar: 'Polar coordinate interpolation',
     cylindrical: 'Cylindrical interpolation',
     /** B1 (NC-02): Fanuc lathe G68/G69, a modal group of its own apart from G68.1/G69.1. */

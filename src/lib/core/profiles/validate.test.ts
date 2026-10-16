@@ -1,6 +1,8 @@
 // The profile validator (plan §5 WP3.1, §7.4, AD-11): what a profile has to carry, how a
 // problem is reported, and the pattern subset that keeps a profile usable from Python.
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
 import { BUILTIN_PROFILE_JSON } from '$lib/data/profiles';
@@ -18,6 +20,7 @@ import {
   type ProfileValidationOptions,
 } from './validate';
 import type { Profile } from './types';
+import { FIXTURES_DIR } from '../../../../tests/unit/helpers/fixtures';
 
 /** A fresh, valid profile object that a test can break in one place. */
 function fanuc(): Record<string, unknown> {
@@ -398,6 +401,46 @@ describe('the M6 profile fields', () => {
     expect(
       pathsOf((p) => ((p.addresses as Record<string, unknown>).feedUnitWords = { FU: 'per-revolution' })),
     ).toEqual(['addresses.feedUnitWords.FU']);
+  });
+
+  it('take an arc direction word as an address and its sign, one word per direction (P4a, plan §6.2)', () => {
+    const words = (value: unknown) =>
+      pathsOf((p) => ((p.addresses as Record<string, unknown>).arcDirectionWords = value));
+    expect(words({ 'DR+': 'ccw', 'DR-': 'cw' })).toEqual([]);
+    expect(words({ 'DR+': 'ccw' })).toEqual([]);
+    expect(words({ 'DR+': 'counter-clockwise' })).toEqual(['addresses.arcDirectionWords.DR+']);
+    expect(words({ DR: 'cw', 'DR-1': 'cw' })).toEqual(['addresses.arcDirectionWords.DR', 'addresses.arcDirectionWords.DR-1']);
+    expect(words({ 'DR+': 'cw', 'DR-': 'cw' })).toEqual(['addresses.arcDirectionWords.DR-']);
+    expect(words(['DR+'])).toEqual(['addresses.arcDirectionWords']);
+  });
+
+  it('take a word once, whatever its case: `DR+` and `dr+` are one word to the reader', () => {
+    const words = (value: unknown) =>
+      pathsOf((p) => ((p.addresses as Record<string, unknown>).arcDirectionWords = value));
+    expect(words({ 'DR+': 'ccw', 'dr+': 'cw' })).toEqual(['addresses.arcDirectionWords.dr+']);
+    expect(words({ 'DR+': 'ccw', 'DR-': 'cw' })).toEqual([]);
+  });
+
+  it('agree with the Python reader on which words are words (tests/fixtures/codes/arc-direction-words.json)', () => {
+    const golden = JSON.parse(
+      readFileSync(join(FIXTURES_DIR, 'codes', 'arc-direction-words.json'), 'utf8'),
+    ) as { cases: { name: string; words: Record<string, string>; valid: boolean }[] };
+    expect(golden.cases.length).toBeGreaterThan(10);
+    for (const c of golden.cases) {
+      const problems = pathsOf((p) => ((p.addresses as Record<string, unknown>).arcDirectionWords = c.words));
+      expect(problems.length === 0, c.name).toBe(c.valid);
+    }
+  });
+
+  it('accept the number format plus sign `signed` (a signed word keeps its sign), and no other value', () => {
+    const sign = (value: unknown) =>
+      pathsOf(
+        (p) => (p.numberFormat = { decimals: 'keep', trailingZeros: 'keep', keepPoint: true, plusSign: value }),
+      );
+    for (const ok of ['keep', 'always', 'never', 'signed']) expect(sign(ok), ok).toEqual([]);
+    expect(sign('Signed')).toEqual(['numberFormat.plusSign']);
+    expect(sign('sometimes')).toEqual(['numberFormat.plusSign']);
+    expect(sign(true)).toEqual(['numberFormat.plusSign']);
   });
 
   it('check the tool-call exception like any other pattern', () => {
@@ -856,5 +899,23 @@ describe('how long a name may be (CODE-17)', () => {
     expect(pathsOf((p) => ((p.detect as Record<string, unknown>).folders = ['/'.padEnd(MAX_FOLDER_LENGTH + 1, 'x')]))).toEqual(['detect.folders[0]']);
     expect(pathsOf((p) => ((p.detect as Record<string, unknown>).folders = ['/shop'.padEnd(MAX_FOLDER_LENGTH, 'x')]))).toEqual([]);
     expect(pathsOf((p) => (p.name = 'N'.repeat(MAX_NAME_LENGTH)))).toEqual([]);
+  });
+});
+
+describe('P4a fix B1: the members the geometry scripts read (plan §7 #314, #319)', () => {
+  const syntaxOf = (p: Record<string, unknown>): Record<string, unknown> => p.syntax as Record<string, unknown>;
+  const addressesOf = (p: Record<string, unknown>): Record<string, unknown> => p.addresses as Record<string, unknown>;
+
+  it('takes the first system variable number as a whole number of at least 1', () => {
+    expect(pathsOf((p) => (syntaxOf(p).systemVariableNumbers = 1000))).toEqual([]);
+    expect(pathsOf((p) => (syntaxOf(p).systemVariableNumbers = 0))).toEqual(['syntax.systemVariableNumbers']);
+    expect(pathsOf((p) => (syntaxOf(p).systemVariableNumbers = 10.5))).toEqual(['syntax.systemVariableNumbers']);
+    expect(pathsOf((p) => (syntaxOf(p).systemVariableNumbers = '1000'))).toEqual(['syntax.systemVariableNumbers']);
+  });
+
+  it('takes the offset words as addresses', () => {
+    expect(pathsOf((p) => (addressesOf(p).offsetWords = ['D']))).toEqual([]);
+    expect(pathsOf((p) => (addressesOf(p).offsetWords = ['D', '1D']))).toEqual(['addresses.offsetWords[1]']);
+    expect(pathsOf((p) => (addressesOf(p).offsetWords = 'D'))).toEqual(['addresses.offsetWords']);
   });
 });

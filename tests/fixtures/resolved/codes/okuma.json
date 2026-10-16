@@ -164,7 +164,9 @@
           "unit": "length"
         }
       ],
+      "review": "pending",
       "sets": {
+        "arcDirection": "cw",
         "motion": "feed",
         "path": "arc"
       }
@@ -199,7 +201,9 @@
           "unit": "length"
         }
       ],
+      "review": "pending",
       "sets": {
+        "arcDirection": "ccw",
         "motion": "feed",
         "path": "arc"
       }
@@ -596,7 +600,9 @@
       "group": "compensation",
       "label": "Nose radius compensation, tool left",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "compSide": "left",
         "radiusComp": "on"
       }
     },
@@ -606,7 +612,9 @@
       "group": "compensation",
       "label": "Nose radius compensation, tool right",
       "modal": true,
+      "review": "pending",
       "sets": {
+        "compSide": "right",
         "radiusComp": "on"
       }
     },
@@ -945,9 +953,11 @@
         {
           "address": "L",
           "label": "Chamfer size",
+          "signOf": "next-move",
           "unit": "length"
         }
-      ]
+      ],
+      "review": "pending"
     },
     {
       "code": "G76",
@@ -958,10 +968,12 @@
         {
           "address": "L",
           "label": "Radius of the round",
+          "signOf": "next-move",
           "unit": "length"
         }
       ],
-      "pitchFeedAmbiguous": true
+      "pitchFeedAmbiguous": true,
+      "review": "pending"
     },
     {
       "code": "G77",
@@ -2508,14 +2520,18 @@
     {
       "code": "GOTO",
       "description": "Continues at the block with that sequence name, in the same program.",
+      "flow": "jump",
       "group": "program",
-      "label": "Jump to a block"
+      "label": "Jump to a block",
+      "review": "pending"
     },
     {
       "code": "IF",
       "description": "Jumps to the named block when the condition in brackets holds. GOTO in front of the name may be left out.",
+      "flow": "jump",
       "group": "program",
-      "label": "Conditional jump"
+      "label": "Conditional jump",
+      "review": "pending"
     },
     {
       "code": "END",

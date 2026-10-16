@@ -170,6 +170,7 @@
     "diameter": ["X"],
     "angular": ["C", "AR", "SF"],
     "speedLimitWords": ["LIMS"],
+    "offsetWords": ["D"],
     "mainSpindle": "1"
   },
   "toolCall": {
