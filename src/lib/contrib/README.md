@@ -126,6 +126,8 @@ Each row names the owning work package and the feature.
 | `segments.ts` | WP10.1 | `nav.selectToolSegment` (Mod+F7): select from one tool change to the next |
 | `session.ts` | WP7.5 | session restore at start, and the per-file memory that follows the tabs |
 | `settings.ts` | WP2.7 | the settings dialog, `settings.open` (Mod+,), `profile.manage` (Settings on the Profiles page, no key; M13 integration), reload on save |
+| `splitView.ts` | P4.21 | split view: `view.splitEditor`, `view.splitEditorDown`, `view.closeSplit` (View tab, group Editor; no key), `view.focusNextPane` / `view.focusPreviousPane` (`F6` / `Shift+F6`); the groups are `monaco/editorService.ts` (Phase 4, P4e; the prelude pinned them) |
+| `channelPanes.ts` | P4.22b | the channel view: `channels.sideBySide` (NC tab, group Channels; no key) opens one pane per channel (sections of one program, or the open channel documents, the other channel files offered through the file dialog) lined up at the wait codes; the bar above the panes is a `banner` panel; the panes are `monaco/channelPanes.ts` (Phase 4, P4e) |
 | `tabs.ts` | WP1.2 | next/previous/switch tab |
 | `templates.ts` | P3.5 | the Insert tab's templates of the active document's effective database, `insert.template:<id>` per template, `templates.insert`, templates in completion (Phase 3, P3b; the prelude pinned them) |
 | `templateManager.ts` | P3.9 | the template manager and New Template from Selection: `templates.manage`, `templates.fromSelection` (Phase 3, P3b; the prelude pinned them) |

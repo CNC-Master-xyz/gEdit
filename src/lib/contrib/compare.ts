@@ -228,6 +228,14 @@ export default {
       run: () => compareController.toggleMode(),
     },
     {
+      id: 'compare.toggleAligned',
+      title: 'compare.toggleAligned',
+      category: 'compare.category',
+      global: true,
+      enabled: (context) => context.compareOpen,
+      run: () => compareController.toggleAligned(),
+    },
+    {
       id: 'compare.copyToModified',
       title: 'compare.copyToModified',
       category: 'compare.category',
@@ -244,6 +252,22 @@ export default {
       global: true,
       enabled: (context) => context.compareOpen,
       run: (_context, arg) => compareController.copyChange('toOriginal', copyOptions(arg)),
+    },
+    {
+      id: 'compare.copyWordToModified',
+      title: 'compare.copyWordToModified',
+      category: 'compare.category',
+      global: true,
+      enabled: (context) => context.compareOpen,
+      run: () => compareController.copyWord('toModified'),
+    },
+    {
+      id: 'compare.copyWordToOriginal',
+      title: 'compare.copyWordToOriginal',
+      category: 'compare.category',
+      global: true,
+      enabled: (context) => context.compareOpen,
+      run: () => compareController.copyWord('toOriginal'),
     },
     {
       id: 'compare.exportDiff',

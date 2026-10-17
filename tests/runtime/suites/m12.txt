@@ -17,8 +17,8 @@ m12-channels-config
 
 # One program, two channels with two sections each: the channel item follows the cursor, the map has a
 # row per channel with its tools and wait codes and an "Outside the channels" group, the tool list has a
-# Channel column, a script is told the channels, and Split into Channel Documents (a one-way copy that
-# warns once and writes nothing).
+# Channel column, a script is told the channels, and Split into Channel Documents (warns once and writes
+# nothing; since P4e its documents can be merged back, which p4-channels proves).
 m12-channels-single
 
 # One file per channel: the sibling not found / not open, the pick that opens it through the dialog in

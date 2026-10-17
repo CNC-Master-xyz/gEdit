@@ -7,6 +7,12 @@
 //  - **Only the visible lines** (plus `MOTION_BUDGETS.marginLines` above and below) carry
 //    marks, never the whole program, and never more than `maxMarks` at once. One decorations
 //    collection per editor instance, replaced in one `set()` call.
+//  - **One collection per group editor** (P4e, Phase 4 plan §6.7 rule 6): every editor of
+//    `groupViews()` is painted from its own visible range, and `onDidAttach` and `groups` tell
+//    of new ones. A channel pane's visible lines are pane lines: they are mapped to document
+//    lines, read with one `statesAfter` per run of consecutive document lines, and the marks
+//    are set at the pane's own lines; the whole update stays within `MAX_LINES` lines per
+//    group.
 //  - **One update per animation frame.** A scroll, an edit, a state that became known
 //    (`modal.changed`), a document or model switch, a machine or profile change and the
 //    setting only *schedule* the update; the editor's keystroke path does nothing else.
@@ -14,7 +20,7 @@
 //    after the line above is the `before` of the first line. A state the index has not
 //    reached yet is `null`, and then nothing is marked: a guess is never painted. The
 //    service bumps `changed` for every slice of every document, which is too often to ask
-//    again each time: the update is asked for only when `modal.revisionOf` of the active
+//    again each time: the update is asked for only when `modal.revisionOf` of the group's
 //    document is not the number the last update saw (an edit, a rebuild, or a slice that
 //    reached a line this update waited for), and a repaint that would set the marks that
 //    are already there (and no edit moved them) sets nothing.
@@ -80,6 +86,21 @@ export interface MotionEditor {
   createDecorationsCollection(decorations?: MotionDecoration[]): MotionCollection;
 }
 
+/** A channel pane's mapping (`PaneSource`): its lines are not the document's. */
+export interface MotionPane {
+  docLine(paneLine: number): number;
+  model(): { getLineCount(): number };
+}
+
+/** One group editor and what it shows (`GroupView`). */
+export interface MotionGroupView {
+  id: string;
+  editor: MotionEditor;
+  docId: DocId;
+  /** Set for a channel pane; null for a group that shows the document itself. */
+  pane: MotionPane | null;
+}
+
 /** One document's effective view: what the modal index was built from. */
 export interface MotionView {
   cp: CompiledProfile;
@@ -87,14 +108,14 @@ export interface MotionView {
 }
 
 export interface MotionColorsDeps {
-  editor: Pick<
-    EditorService,
-    'getLines' | 'getLineCount' | 'onDidAttach' | 'onDidActivate' | 'onDidChangeContent'
-  > & {
+  editor: Pick<EditorService, 'getLines' | 'getLineCount' | 'onDidAttach' | 'onDidActivate' | 'onDidChangeContent'> & {
     model(id: DocId): unknown;
-    editorInstance(): MotionEditor | undefined;
+    /** Every live group editor, in display order. */
+    groupViews(): MotionGroupView[];
+    /** The layout or the focus changed; a new group editor appears with `onDidAttach`. Optional for a test with one editor. */
+    groups?: Readable<unknown>;
   };
-  docs: Pick<DocumentStore, 'getActiveId' | 'get' | 'list'>;
+  docs: Pick<DocumentStore, 'get' | 'list'>;
   modal: Pick<ModalService, 'statesAfter' | 'changed' | 'revisionOf'>;
   /** The document's effective view, or null while its profile is unknown. Called rarely (see the header). */
   effective(id: DocId): MotionView | null;
@@ -130,7 +151,7 @@ export function motionVariable(kind: string): string {
 interface Painted {
   id: DocId;
   model: unknown;
-  /** The lines the marks cover (the visible range plus the margin). */
+  /** The lines the marks cover (the visible range plus the margin), in the editor's own lines. */
   from: number;
   to: number;
   /** The visible lines at the time. */
@@ -142,22 +163,43 @@ interface Painted {
   key: string | null;
 }
 
+/** One mark before it is a decoration: the editor line and the class. */
+interface Mark {
+  line: number;
+  className: string;
+}
+
+/** What one group editor carries: its collection, its listeners and what it was last painted with. */
+interface Slot {
+  editor: MotionEditor;
+  collection: MotionCollection;
+  hooks: { dispose(): void }[];
+  painted: Painted | null;
+  /** Something that can change a mark happened since the last update (an edit, the setting, a revision). */
+  dirty: boolean;
+  /** An edit happened since the marks were set: the editor has moved them, so they are set again. */
+  edited: boolean;
+  /** The document this editor showed at the last update, and `modal.revisionOf` of it as that update read it. */
+  docId: DocId | null;
+  seenRevision: number;
+  /** The editor shows a channel pane: its lines are not the document's, so an edit anywhere may move them. */
+  pane: boolean;
+  /**
+   * An edit since the last update was below the lines the marks cover, and none reached them: the
+   * text and the states of those lines are the same as when they were painted, so the index moving
+   * on after the edit (the revision) changes none of them. Another group of the split view, far
+   * above the edit, repaints nothing.
+   */
+  explained: boolean;
+}
+
 export function createMotionColors(deps: MotionColorsDeps): MotionColors {
   const delay = deps.viewCheckDelayMs ?? VIEW_CHECK_DELAY_MS;
   let started = false;
   let frame: Disposable | null = null;
   let viewCheck: Disposable | null = null;
-  /** Something that can change a mark happened since the last update (an edit, the setting, a revision). */
-  let dirty = true;
   let enabled = true;
-  let bound: MotionEditor | undefined;
-  let collection: MotionCollection | null = null;
-  let hooks: { dispose(): void }[] = [];
-  let painted: Painted | null = null;
-  /** `modal.revisionOf` of the active document as the last update read it. */
-  let seenRevision = -1;
-  /** An edit happened since the marks were set: the editor has moved them, so they are set again. */
-  let edited = true;
+  const slots = new Map<MotionEditor, Slot>();
   const views = new Map<DocId, { profileId: string; view: MotionView | null }>();
   let stops: Disposable[] = [];
 
@@ -169,8 +211,13 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
     });
   }
 
-  function markDirty(): void {
-    dirty = true;
+  function markDirty(slot: Slot): void {
+    slot.dirty = true;
+    schedule();
+  }
+
+  function markAllDirty(): void {
+    for (const slot of slots.values()) slot.dirty = true;
     schedule();
   }
 
@@ -183,45 +230,66 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
     return view;
   }
 
-  function clearMarks(): void {
-    collection?.clear();
-    painted = null;
-    edited = true;
+  function clearMarks(slot: Slot): void {
+    slot.collection.clear();
+    slot.painted = null;
+    slot.edited = true;
   }
 
-  /** `modal.changed` fired: ask for an update only when the active document's index changed in a way a mark can show. */
+  /**
+   * `modal.changed` fired: ask for an update only when a shown document's index changed in a way a
+   * mark can show. Whether it did is decided in the update, per group: an edit below the lines a
+   * group's marks cover (`explained`) accounts for the index moving on, and the listeners of the
+   * service and the index may run in any order, so the edit is not known yet here.
+   */
   function onModalChanged(): void {
-    const id = deps.docs.getActiveId();
-    if (id !== null && deps.modal.revisionOf(id) === seenRevision) return;
-    markDirty();
+    let any = slots.size === 0;
+    for (const slot of slots.values()) {
+      if (slot.docId === null || deps.modal.revisionOf(slot.docId) !== slot.seenRevision) any = true;
+    }
+    if (any) schedule();
   }
 
-  /** Binds the collection to the editor instance the service has now. */
-  function bind(editor: MotionEditor | undefined): void {
-    if (editor === bound) return;
-    for (const hook of hooks) hook.dispose();
-    hooks = [];
-    collection = null;
-    painted = null;
-    bound = editor;
-    if (editor === undefined) return;
-    collection = editor.createDecorationsCollection();
-    hooks.push(
-      editor.onDidScrollChange(() => schedule()),
-      editor.onDidLayoutChange(() => schedule()),
-      editor.onDidChangeModel(() => markDirty()),
-    );
-    dirty = true;
+  /** One collection and its listeners per live group editor; the slot of an editor that is gone is let go of. */
+  function sync(shown: MotionGroupView[]): void {
+    const live = new Set<MotionEditor>(shown.map((view) => view.editor));
+    for (const [editor, slot] of [...slots]) {
+      if (live.has(editor)) continue;
+      for (const hook of slot.hooks) hook.dispose();
+      slots.delete(editor);
+    }
+    for (const view of shown) {
+      if (slots.has(view.editor)) continue;
+      const editor = view.editor;
+      const slot: Slot = {
+        editor,
+        collection: editor.createDecorationsCollection(),
+        hooks: [],
+        painted: null,
+        dirty: true,
+        edited: true,
+        docId: null,
+        seenRevision: -1,
+        pane: false,
+        explained: false,
+      };
+      slot.hooks.push(
+        editor.onDidScrollChange(() => schedule()),
+        editor.onDidLayoutChange(() => schedule()),
+        editor.onDidChangeModel(() => markDirty(slot)),
+      );
+      slots.set(editor, slot);
+    }
   }
 
   /** The kinds of lines `from … to` of `id`, one `statesAfter` call. Null while a state is unknown. */
-  function paint(id: DocId, view: MotionView, from: number, to: number): MotionDecoration[] | null {
+  function paint(id: DocId, view: MotionView, from: number, to: number): Mark[] | null {
     const states = deps.modal.statesAfter(id, from - 1, to);
     if (states === null) return null;
     const start = Math.max(1, from - LOOKBACK_LINES);
     const lines = deps.editor.getLines(id, start, to);
     let lineState: LineState | undefined;
-    const marks: MotionDecoration[] = [];
+    const marks: Mark[] = [];
     for (let n = start; n <= to; n++) {
       const text = lines[n - start] ?? '';
       const result = tokenizeLine(text, view.cp, lineState);
@@ -232,29 +300,66 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
       if (before === undefined || after === undefined) break; // the document ended inside the range
       const kind = motionOfLine(result.tokens as NcToken[], before, after, view.cp, view.db);
       if (kind === null) continue;
-      marks.push({
-        range: { startLineNumber: n, startColumn: 1, endLineNumber: n, endColumn: 1 },
-        options: { linesDecorationsClassName: `${MOTION_MARK_CLASS} ${MOTION_CLASS_PREFIX}${kind}` },
-      });
+      marks.push({ line: n, className: `${MOTION_MARK_CLASS} ${MOTION_CLASS_PREFIX}${kind}` });
     }
     return marks;
   }
 
-  function update(): void {
-    const editor = deps.editor.editorInstance();
-    bind(editor);
-    if (editor === undefined || collection === null) return;
-    const id = deps.docs.getActiveId();
+  /**
+   * The marks of the editor lines `from … to`: the document's own lines, or for a channel pane one
+   * `paint` per run of consecutive document lines (the pane's lines are the document's with other
+   * channels' lines left out), set at the pane's lines. Null while a state is unknown.
+   */
+  function paintRange(group: MotionGroupView, view: MotionView, from: number, to: number, memo: Map<string, Mark[] | null>): Mark[] | null {
+    const pane = group.pane;
+    if (pane === null) {
+      // Two groups at the same place (a split just made) read the same lines once.
+      const key = `${group.docId}:${from}:${to}`;
+      if (memo.has(key)) return memo.get(key) ?? null;
+      const marks = paint(group.docId, view, from, to);
+      memo.set(key, marks);
+      return marks;
+    }
+    const marks: Mark[] = [];
+    let at = from;
+    while (at <= to) {
+      let end = at;
+      while (end < to && pane.docLine(end + 1) === pane.docLine(end) + 1) end++;
+      const first = pane.docLine(at);
+      const run = paint(group.docId, view, first, pane.docLine(end));
+      if (run === null) return null;
+      for (const mark of run) marks.push({ line: at + (mark.line - first), className: mark.className });
+      at = end + 1;
+    }
+    return marks;
+  }
+
+  function decorations(marks: Mark[]): MotionDecoration[] {
+    return marks.map((mark) => ({
+      range: { startLineNumber: mark.line, startColumn: 1, endLineNumber: mark.line, endColumn: 1 },
+      options: { linesDecorationsClassName: mark.className },
+    }));
+  }
+
+  function updateSlot(slot: Slot, group: MotionGroupView, memo: Map<string, Mark[] | null>): void {
+    const { editor, collection } = slot;
+    const id = group.docId;
     // Before the states are read, so an index that moves during the update asks again.
-    seenRevision = id === null ? -1 : deps.modal.revisionOf(id);
-    if (!enabled || id === null || !deps.isNc(id)) {
-      if (painted !== null || dirty) clearMarks();
-      dirty = false;
+    const revision = deps.modal.revisionOf(id);
+    // The index moved since this group was painted, and no edit below its lines explains it.
+    if (slot.docId === id && revision !== slot.seenRevision && !slot.explained) slot.dirty = true;
+    slot.docId = id;
+    slot.pane = group.pane !== null;
+    slot.seenRevision = revision;
+    slot.explained = false;
+    if (!enabled || !deps.isNc(id)) {
+      if (slot.painted !== null || slot.dirty) clearMarks(slot);
+      slot.dirty = false;
       return;
     }
-    const model = deps.editor.model(id);
+    const model = group.pane === null ? deps.editor.model(id) : group.pane.model();
     if (model === undefined || editor.getModel() !== model) {
-      clearMarks();
+      clearMarks(slot);
       return;
     }
     const ranges = editor.getVisibleRanges();
@@ -265,14 +370,14 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
       first = Math.min(first, range.startLineNumber);
       last = Math.max(last, range.endLineNumber);
     }
-    const count = deps.editor.getLineCount(id);
+    const count = group.pane === null ? deps.editor.getLineCount(id) : group.pane.model().getLineCount();
     last = Math.min(last, count);
     if (last < first) return;
 
     // A scroll that stays inside what is marked, away from its edges, needs no update. Near
     // an edge the marks are recentred before the lines run out.
-    const was = painted;
-    if (!dirty && was !== null && was.complete && was.id === id && was.model === model) {
+    const was = slot.painted;
+    if (!slot.dirty && was !== null && was.complete && was.id === id && was.model === model) {
       const slack = MOTION_BUDGETS.marginLines / 2;
       const topOk = was.from === 1 || first - was.from >= slack;
       const bottomOk = was.to >= count || was.to - last >= slack;
@@ -281,8 +386,8 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
 
     const view = viewOf(id);
     if (view === null) {
-      clearMarks();
-      dirty = false;
+      clearMarks(slot);
+      slot.dirty = false;
       return;
     }
     let from = Math.max(1, first - MOTION_BUDGETS.marginLines);
@@ -293,20 +398,31 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
       from = Math.max(1, first - Math.floor(spare / 2));
       to = Math.min(count, from + MAX_LINES - 1);
     }
-    const marks = paint(id, view, from, to);
-    dirty = false;
+    const marks = paintRange(group, view, from, to, memo);
+    slot.dirty = false;
     if (marks === null) {
       // Not known yet: no mark, and ask again when the index moves (`modal.changed`).
       collection.clear();
-      edited = true;
-      painted = { id, model, from, to, visibleFirst: first, visibleLast: last, complete: false, key: null };
+      slot.edited = true;
+      slot.painted = { id, model, from, to, visibleFirst: first, visibleLast: last, complete: false, key: null };
       return;
     }
-    const key = marks.map((mark) => `${mark.range.startLineNumber}:${mark.options.linesDecorationsClassName}`).join('|');
-    const same = !edited && was !== null && was.complete && was.id === id && was.model === model && was.key === key;
-    if (!same) collection.set(marks);
-    edited = false;
-    painted = { id, model, from, to, visibleFirst: first, visibleLast: last, complete: true, key };
+    const key = marks.map((mark) => `${mark.line}:${mark.className}`).join('|');
+    const same = !slot.edited && was !== null && was.complete && was.id === id && was.model === model && was.key === key;
+    if (!same) collection.set(decorations(marks));
+    slot.edited = false;
+    slot.painted = { id, model, from, to, visibleFirst: first, visibleLast: last, complete: true, key };
+  }
+
+  function update(): void {
+    const shown = deps.editor.groupViews();
+    sync(shown);
+    // What this update has read already, by document and lines.
+    const memo = new Map<string, Mark[] | null>();
+    for (const group of shown) {
+      const slot = slots.get(group.editor);
+      if (slot !== undefined) updateSlot(slot, group, memo);
+    }
   }
 
   function applyTheme(mode: 'light' | 'dark'): void {
@@ -320,18 +436,26 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
     viewCheck = deps.schedule(() => {
       viewCheck = null;
       views.clear();
-      markDirty();
+      markAllDirty();
     }, delay);
+  }
+
+  /** The profiles of the documents the groups show, as one text: a dialect switch changes it. */
+  function profilesShown(): string {
+    return deps.editor
+      .groupViews()
+      .map((group) => deps.docs.get(group.docId)?.profileId ?? '')
+      .join('|');
   }
 
   return {
     start(): Disposable {
       if (started) return () => {};
       started = true;
-      dirty = true;
       let firstEnabled = true;
       let firstChanged = true;
-      let activeProfile: string | undefined;
+      let firstGroups = true;
+      let shownProfiles: string | undefined;
       stops = [
         deps.theme.subscribe((mode) => applyTheme(mode)),
         deps.enabled.subscribe((value) => {
@@ -340,7 +464,7 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
             firstEnabled = false;
             return;
           }
-          markDirty();
+          markAllDirty();
         }),
         // The index moved (an edit, an idle slice, a rebuild after a machine switch): ask
         // again. Coalesced into one update per frame; nothing is cached across it, because
@@ -352,25 +476,52 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
           }
           onModalChanged();
         }),
-        deps.editor.onDidChangeContent((id) => {
-          if (id !== deps.docs.getActiveId()) return;
-          // The keystroke path: schedule and nothing else.
-          dirty = true;
-          edited = true;
-          schedule();
+        deps.editor.onDidChangeContent((id, change) => {
+          let shown = false;
+          let repaint = false;
+          for (const slot of slots.values()) {
+            if (slot.docId !== id) continue;
+            shown = true;
+            // An edit below the lines a group's marks cover cannot change them (a mark depends on
+            // the lines above it); the other group of a split view is not repainted for it.
+            const painted = slot.painted;
+            if (!slot.pane && !slot.dirty && painted !== null && painted.complete && change.startLine > painted.to) {
+              slot.explained = true;
+              continue;
+            }
+            // The keystroke path: schedule and nothing else.
+            slot.dirty = true;
+            slot.edited = true;
+            slot.explained = false;
+            repaint = true;
+          }
+          if (!shown) return;
+          if (repaint) schedule();
           armViewCheck();
         }),
-        deps.editor.onDidActivate(() => markDirty()),
-        deps.editor.onDidAttach(() => markDirty()),
+        deps.editor.onDidActivate(() => markAllDirty()),
+        // A new editor gets a slot of its own, dirty; the others have nothing to repaint.
+        deps.editor.onDidAttach(() => schedule()),
         // A dialect switch changes the document's profile id; the list emits for many other reasons.
         deps.docs.list.subscribe(() => {
-          const id = deps.docs.getActiveId();
-          const profile = id === null ? undefined : deps.docs.get(id)?.profileId;
-          if (profile === activeProfile) return;
-          activeProfile = profile;
-          markDirty();
+          const profiles = profilesShown();
+          if (profiles === shownProfiles) return;
+          shownProfiles = profiles;
+          markAllDirty();
         }),
       ];
+      // A new layout (split view opened, a pane closed) brings editors in and out.
+      if (deps.editor.groups !== undefined) {
+        stops.push(
+          deps.editor.groups.subscribe(() => {
+            if (firstGroups) {
+              firstGroups = false;
+              return;
+            }
+            schedule();
+          }),
+        );
+      }
       for (const revision of [deps.machineRevision, deps.profileRevision]) {
         if (revision === undefined) continue;
         let first = true;
@@ -381,7 +532,7 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
               return;
             }
             views.clear();
-            markDirty();
+            markAllDirty();
           }),
         );
       }
@@ -397,11 +548,11 @@ export function createMotionColors(deps: MotionColorsDeps): MotionColors {
         frame = null;
         viewCheck?.();
         viewCheck = null;
-        clearMarks();
-        for (const hook of hooks) hook.dispose();
-        hooks = [];
-        collection = null;
-        bound = undefined;
+        for (const slot of slots.values()) {
+          slot.collection.clear();
+          for (const hook of slot.hooks) hook.dispose();
+        }
+        slots.clear();
         views.clear();
       };
     },

@@ -21,7 +21,7 @@ const fake = vi.hoisted(() => {
     /** The text of the open documents (`editor`). */
     texts: new Map<string, string>(),
     lines: [] as string[],
-    selection: null as { startLine: number; endLine: number; empty: boolean } | null,
+    selection: null as { startLine: number; endLine: number; empty: boolean; crossesJunction?: boolean } | null,
     cursor: { line: 1 } as { line: number } | null,
     /** What `files.open` does: the paths asked for and the id it answers. */
     openPaths: [] as string[][],
@@ -286,6 +286,21 @@ describe('New Template from Selection', () => {
     await run('templates.fromSelection');
     expect(fake.shown.map((s) => s.text)).toEqual(Array(2).fill('Select the blocks to turn into a template first.'));
     expect(fake.opened).toEqual([]);
+  });
+
+  it('refuses a selection that runs over the lines of another channel, with a message and no dialog (P4e CODE-8)', async () => {
+    addDoc();
+    fake.lines = ['%', 'O1000', 'N10 G1 X10.', 'N20 G1 X20.', 'M30'];
+    fake.selection = { startLine: 3, endLine: 4, empty: false, crossesJunction: true };
+    await run('templates.fromSelection');
+    expect(fake.shown).toEqual([{ text: 'The selection runs over the lines of another channel. Select within one section.', error: true }]);
+    expect(fake.opened).toEqual([]);
+    // The same lines inside one section are a selection like any other.
+    fake.shown.length = 0;
+    fake.selection = { startLine: 3, endLine: 4, empty: false };
+    await run('templates.fromSelection');
+    expect(fake.shown).toEqual([]);
+    expect(fake.opened).toHaveLength(1);
   });
 
   it('refuses a selection longer than a template body may be', async () => {

@@ -188,7 +188,7 @@ describe('typing in a 300k-line program with the inspector open and the colours 
         onDidActivate: (cb) => activated.on((docId) => cb(docId)),
         onDidChangeContent: (cb) => content.on((docId, change) => cb(docId, change)),
         model: () => model,
-        editorInstance: () => editor,
+        groupViews: () => [{ id: 'g1', editor, docId: id, pane: null }],
       },
       docs,
       modal,

@@ -148,17 +148,8 @@ async function selectToolSegment(context: CommandContext, arg?: unknown): Promis
   const lastLine = Math.min(raw, editor.getLineCount(id));
   const lines = editor.getLines(id, first, lastLine);
   const last = trimBlankEnd(first, lastLine, (line) => lines[line - first] ?? '');
-  const instance = editor.editorInstance();
-  const model = instance?.getModel();
-  if (!instance || !model) return;
-  instance.setSelection({
-    startLineNumber: first,
-    startColumn: 1,
-    endLineNumber: last,
-    endColumn: model.getLineMaxColumn(last),
-  });
-  instance.revealLinesInCenterIfOutsideViewport(first, last);
-  instance.focus();
+  // Document lines, in the group that shows them (the coordinate rule, §6.7 rule 3).
+  editor.selectLines(id, first, last);
 
   if (tool !== null && count > 1) status.show(t('segments.several', { tool: item.tool ?? tool, count }));
   else if (item.tool !== undefined) status.show(t('segments.selected', { tool: item.tool, first, last }));

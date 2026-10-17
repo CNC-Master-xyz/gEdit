@@ -25,6 +25,7 @@ import { decodeFile, fnv1a32 } from '$lib/core/text';
 import { createProfileRegistry } from '$lib/stores/profiles';
 import { baseName } from '$lib/utils/platform';
 import { t } from '$lib/i18n';
+import { oneGroup } from '../../../tests/unit/helpers/editorGroups';
 import type { FileStat } from '$lib/platform/commands';
 import type {
   ContentChange,
@@ -96,6 +97,7 @@ function createFakeEditor(docs: DocumentStore): FakeEditor {
   const off = (): Disposable => () => {};
 
   const editor: FakeEditor = {
+    ...oneGroup(),
     calls,
     languages,
     eols,
@@ -127,6 +129,7 @@ function createFakeEditor(docs: DocumentStore): FakeEditor {
     getLineCount: (id) => (texts.get(id) ?? '').split('\n').length,
     getLines: (id, start, end) => (texts.get(id) ?? '').split('\n').slice(start - 1, end),
     versionId: (id) => versions.get(id) ?? 0,
+    recheckDirty() {},
     markClean(id) {
       calls.push(`markClean:${id}`);
       cleanAt.set(id, versions.get(id) ?? 0);

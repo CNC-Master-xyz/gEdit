@@ -352,6 +352,84 @@ export interface ContentChange {
   versionId: number;
 }
 
+// --- Phase 4, P4e: editor groups (Phase 4 plan AD-50, AD-51, §6.7) ---------------------
+// Written by the P4e prelude; P4.21 implements the groups, P4.22b registers the panes.
+
+/** An editor group's id. `g1` is the first group and always exists; the others are `g2`…`g4`. */
+export type GroupId = string;
+
+/** How the groups are laid out: one editor, split view (two), or the channel view (2–4). */
+export type GroupLayout = 'single' | 'side-by-side' | 'stacked' | 'channels';
+
+/**
+ * What a group shows. A `document` group shows the document's own model (split view, and
+ * the channel view of a program with one file per channel); a `pane` group shows a channel
+ * pane of a program with channel sections: a model of its own, mapped into the document
+ * (AD-51), registered by `monaco/channelPanes.ts` through `EditorService.registerPane`.
+ */
+export type GroupContent =
+  | { kind: 'document'; docId: DocId; channelId?: string }
+  | { kind: 'pane'; docId: DocId; channelId: string };
+
+export interface EditorGroupInfo {
+  id: GroupId;
+  /** Null only for `g1` while no document is open. */
+  content: GroupContent | null;
+}
+
+export interface EditorGroupsState {
+  layout: GroupLayout;
+  /** In display order (left to right, or top to bottom); 1 entry for `single`, 2 for split view, 2–4 for `channels`. */
+  groups: readonly EditorGroupInfo[];
+  /** The group with the keyboard focus (the last one that had it); always one of `groups`. */
+  focused: GroupId;
+}
+
+/**
+ * A channel pane's line mapping, as the editor service needs it for the coordinate rule
+ * (§6.7 rule 3). Every line number is 1-based; `docLine` answers for every line of the pane,
+ * `paneLine` null for a document line the pane does not show.
+ */
+export interface PaneSource {
+  readonly docId: DocId;
+  readonly channelId: string;
+  /** The pane's Monaco model. Only `src/lib/monaco/**` may call it. */
+  model(): import('$lib/monaco/core').editor.ITextModel;
+  docLine(paneLine: number): number;
+  paneLine(docLine: number): number | null;
+  /**
+   * P4.22b (§7 #420): set while the pane must not be edited although its document may be: a channel that
+   * left the program keeps its pane, empty. A pane is also read-only whenever its document is.
+   * Read again when the same pane is registered anew.
+   */
+  readonly readOnly?: boolean;
+}
+
+/** A live group editor and what it shows: the decoration owners paint every group with this (§6.7 rule 6). */
+export interface GroupView {
+  id: GroupId;
+  editor: import('$lib/monaco/core').editor.IStandaloneCodeEditor;
+  /** The document the group's lines belong to. */
+  docId: DocId;
+  /** Set for a `pane` group; null for a `document` group (its lines are the document's). */
+  pane: PaneSource | null;
+  focused: boolean;
+}
+
+/** `selectionLines()`: the document lines a selection covers (P4e adds `crossesJunction`). */
+export interface SelectionLines {
+  startLine: number;
+  endLine: number;
+  empty: boolean;
+  /**
+   * P4e (§6.7 rule 3): set when the selection is in a channel pane and its lines are not one run
+   * of document lines (it crosses from one section of the channel to the next, over the lines of
+   * another channel). `startLine`…`endLine` then span the lines in between too, and a command
+   * that acts on the selected lines refuses with `channelPanes.selectionCrosses`.
+   */
+  crossesJunction?: true;
+}
+
 /** monaco/editorService.ts → `export const editor: EditorService` */
 export interface EditorService {
   attach(container: HTMLElement): Promise<void>;
@@ -367,6 +445,12 @@ export interface EditorService {
   /** `alternativeVersionId`. */
   versionId(id: DocId): number;
   markClean(id: DocId): void;
+  /**
+   * Re-reads the dirty flag from the text. The flag follows the content events; an undo that
+   * applies no edit (an edit taken back inside its own undo element) fires none, yet moves the
+   * version id, so whoever does that calls this.
+   */
+  recheckDirty(id: DocId): void;
   setLanguage(id: DocId, languageId: string): void;
   /** `pushEOL` (undoable) between crlf and lf; 'cr' keeps an LF model. */
   setModelEol(id: DocId, eol: Eol): void;
@@ -386,7 +470,7 @@ export interface EditorService {
   /** Activates the document if needed, sets the cursor, centers and focuses. */
   reveal(id: DocId, line: number, column?: number): void;
   cursor(): CursorInfo | null;
-  selectionLines(): { startLine: number; endLine: number; empty: boolean } | null;
+  selectionLines(): SelectionLines | null;
   selectedText(): string;
   triggerAction(actionId: string, payload?: unknown): void;
   /** Fills the find widget's search without showing it, so `findWithArgs` does not seed it from the cursor word. */
@@ -405,7 +489,44 @@ export interface EditorService {
   onDidAttach(cb: () => void): Disposable;
   /** Escape hatches: only `src/lib/monaco/**` may call these. */
   model(id: DocId): import('$lib/monaco/core').editor.ITextModel | undefined;
+  /** P4e: the FOCUSED group's editor (§6.7 rule 2); its model may be a channel pane's. */
   editorInstance(): import('$lib/monaco/core').editor.IStandaloneCodeEditor | undefined;
+
+  // --- P4e, editor groups (Phase 4 plan AD-50, §6.7); implemented by `monaco/editorService.ts`
+  // (P4.21): up to four groups, each with its own editor, in one of the layouts below. -------
+  /** The layout, the groups and the focused group; emits on every change of any of them. */
+  readonly groups: Readable<EditorGroupsState>;
+  groupsState(): EditorGroupsState;
+  /** `EditorGroup.svelte` on mount: builds the group's editor in `container` (§6.7 rule 1). `attach(c)` is `attachGroup('g1', c)`. */
+  attachGroup(id: GroupId, container: HTMLElement): Promise<void>;
+  /** `EditorGroup.svelte` on destroy: keeps the group's view state, disposes its editor; the group itself stays. */
+  detachGroup(id: GroupId): void;
+  /**
+   * Opens split view (`side-by-side`, `stacked`: exactly 2 contents) or the channel view
+   * (`channels`: 2–`MAX_GROUPS` contents), replacing any layout of more than one group. Answers
+   * the group ids in display order; focuses `contents[focus ?? 0]`. Throws `RangeError` on a count
+   * the layout does not allow, and on a `pane` content no `registerPane` has registered.
+   */
+  openGroups(o: { layout: Exclude<GroupLayout, 'single'>; contents: GroupContent[]; focus?: number }): GroupId[];
+  /** Closes one group; the layout falls back to `single` when one is left (§6.7 rule 8). */
+  closeGroup(id: GroupId): void;
+  /** Back to `single`, showing the focused group's document at the focused group's cursor (mapped for a pane). */
+  closeGroups(): void;
+  focusGroup(id: GroupId): void;
+  /** The next (`1`) or previous (`-1`) group in display order, wrapping. */
+  focusNextGroup(dir: 1 | -1): void;
+  /** Selects document lines `startLine`…`endLine` whole in the group that shows them (the coordinate rule), and reveals them. */
+  selectLines(id: DocId, startLine: number, endLine: number): void;
+  /** The first visible document line of the focused group, or null without an editor. */
+  topLine(): number | null;
+  /** Scrolls the focused group so that document line `line` is the first visible one. */
+  scrollToTop(line: number): void;
+  /** Only `src/lib/monaco/**`: the channel pane module registers a pane before `openGroups` shows it. */
+  registerPane(source: PaneSource): Disposable;
+  /** Only `src/lib/monaco/**`: every live group editor, in display order (§6.7 rule 6). */
+  groupViews(): GroupView[];
+  /** The focused group changed (a click, `focusGroup`, a new layout). */
+  onDidFocusGroup(cb: (id: GroupId) => void): Disposable;
 }
 
 /** `text` is LF-joined; `eol` is null when the file has no line break. */
@@ -1453,6 +1574,42 @@ export interface AppContext {
   modal: ModalService;
   // Phase 3, P3b (P3.5)
   templates: TemplateService;
+  // Phase 4, P4e (P4.22b; the prelude wires the stub)
+  channelPanes: ChannelPaneService;
+}
+
+/**
+ * Phase 4, P4e (Phase 4 plan AD-51, §6.7): `monaco/channelPanes.ts` → `export const channelPanes:
+ * ChannelPaneService`, the harness hook `h.app.ctx.channelPanes`. The channel view: one pane per
+ * channel (2–4), lined up at the wait codes, always scrolling together. **P4.22b** implements it.
+ */
+export interface ChannelViewState {
+  open: boolean;
+  /** `single-file`: the program the panes are views of; `multi-file`: the channel documents' set. */
+  layout: 'single-file' | 'multi-file' | null;
+  /** The document the view was opened from. */
+  docId: DocId | null;
+  /** The panes in display order (declared channel order). */
+  panes: { channelId: string; name: string; groupId: GroupId; docId: DocId }[];
+  /** Declared channels that are not shown: more than four, or (one file per channel) not open. */
+  notShown: string[];
+  /** `single-file`: lines after the header that belong to no channel (no pane shows them). */
+  outsideLines: number;
+  /** The wait marks of all panes by state (`core/channels/panes.ts` `MarkState`). */
+  marks: { matched: number; unmatched: number; none: number };
+}
+
+export interface ChannelPaneService {
+  readonly state: Readable<ChannelViewState>;
+  /** "Channels Side by Side" on document `id`; answers why not in plain words (§6.7 rule 9). */
+  open(id: DocId): Promise<{ ok: true } | { ok: false; reason: Msg }>;
+  /** Closes the channel view (`EditorService.closeGroups`); nothing when it is not open. */
+  close(): void;
+  /** The view's one undo history (§6.7 rules 11 and 15): Ctrl+Z / Ctrl+Shift+Z in a pane, Edit ▸ Undo / Redo. */
+  undo(): void;
+  redo(): void;
+  /** Runs a pending re-projection and alignment now (tests, the harness). */
+  flush(): void;
 }
 
 /**

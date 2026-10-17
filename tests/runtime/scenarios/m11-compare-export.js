@@ -167,19 +167,28 @@ scenario('m11-compare-export', { timeout: 240 }, async (h) => {
     await h.waitFor(() => h.q('editor-host')?.dataset.docId === doc, { timeout: 5000 })
     ctx.editor.reveal(doc, 500, 1)
     await h.idle()
-    const topLine = () => /** @type {any} */ (ctx.editor.editorInstance())?.getVisibleRanges?.()?.[0]?.startLineNumber ?? 0
-    h.check('the compared document is scrolled to about line 500', topLine() > 400 && topLine() < 520, topLine())
+    // P4e: while a comparison is open the editor groups are detached and `editorInstance()` is undefined, and
+    // it is built again a moment after the comparison closes. A check that read the instance too early got
+    // `undefined`, and `undefined ?? 0` is `0 <= 2`: it passed for the wrong reason. So the instance is waited
+    // for, the line is read from it, and a missing editor is a failed check, not a pass.
+    /** The first visible line of the editor on screen, or null while there is no editor or it has not laid out yet. */
+    const topLine = () => {
+      const range = /** @type {any} */ (ctx.editor.editorInstance())?.getVisibleRanges?.()?.[0]
+      return typeof range?.startLineNumber === 'number' ? /** @type {number} */ (range.startLineNumber) : null
+    }
+    await h.waitFor(() => topLine() !== null, { timeout: 5000 })
+    h.check('the compared document is scrolled to about line 500', topLine() !== null && /** @type {number} */ (topLine()) > 400 && /** @type {number} */ (topLine()) < 520, topLine())
     await openCompare(h, reg, doc, /** @type {any} */ (source))
     await setMode(h, 'raw')
     const id = await exported(() => h.click(h.q('compare-export')))
-    await h.sleep(600)
-    const instance = /** @type {any} */ (ctx.editor.editorInstance())
-    const firstVisible = () => instance?.getVisibleRanges?.()?.[0]?.startLineNumber ?? 0
-    h.check('the new tab opens at line 1', ctx.docs.getActiveId() === id && firstVisible() <= 2, { active: ctx.docs.getActiveId(), top: firstVisible() })
+    const built = await h.waitFor(() => topLine() !== null && ctx.editor.editorInstance()?.getModel() === ctx.editor.model(id), { timeout: 10000 })
+    const first = topLine()
+    h.check('the editor is built again and shows the new tab\'s model', !!built && ctx.editor.editorInstance()?.getModel() === ctx.editor.model(id), { active: ctx.docs.getActiveId(), id })
+    h.check('the new tab opens at line 1 (the first visible line is a number, and at most 2)', ctx.docs.getActiveId() === id && first !== null && first <= 2, { active: ctx.docs.getActiveId(), top: first })
     ctx.docs.activate(doc)
     await h.waitFor(() => h.q('editor-host')?.dataset.docId === doc, { timeout: 5000 })
-    await h.sleep(600)
-    const top = /** @type {any} */ (ctx.editor.editorInstance())?.getVisibleRanges?.()?.[0]?.startLineNumber ?? 0
-    h.check('switching back shows the compared document still near line 500', top > 400 && top < 520, top)
+    await h.waitFor(() => (topLine() ?? 0) > 400, { timeout: 5000 })
+    const top = topLine()
+    h.check('switching back shows the compared document still near line 500', top !== null && top > 400 && top < 520, top)
   })
 })

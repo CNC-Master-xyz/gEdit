@@ -32,7 +32,7 @@ person on a real machine can see.
 
 ## On each platform
 
-The first release that gets this check on all three platforms is v1.1.0 (v1.0.0 was never published, the owner, 2026-10-12). Its run also settles the open Phase 1 exit check: the bundles on Windows and Linux.
+The first release that gets this check on all three platforms is v1.2.0 (v1.0.0 was never published, the owner, 2026-10-12; v1.1.0 stays unpublished too, 2026-10-17). Its run also settles the open Phase 1 exit check: the bundles on Windows and Linux.
 
 Use the sample programs in `tests/fixtures/exit/` (open them by the application, not in
 another editor first: they contain a BOM, CRLF, NUL bytes and Windows-1252 bytes on
@@ -57,6 +57,10 @@ purpose).
 The "without Python" row needs a machine that has none (a fresh account, a clean VM).
 If you cannot arrange one for a platform, leave the box empty and say so in the notes
 rather than ticking it.
+
+## The release's own checks
+
+- [ ] The release's manual checks from the phase plan (§10 of [phase-4-implementation.md](../planning/phase-4-implementation.md#10-manual-checks-for-the-owner)) are done, or what is not done is written into the notes as a known limit. (v1.2.0: P4a's four checks and P4e's.)
 
 ## Publish
 

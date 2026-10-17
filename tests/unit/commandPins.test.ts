@@ -105,6 +105,10 @@ const PINNED: { id: string; keys?: Keys; title: string; owner: string; pending?:
   { id: 'compare.exportDiff', title: 'compare.exportDiff', owner: 'compare.ts' },
   { id: 'compare.files', title: 'compare.files', owner: 'compare.ts' },
   { id: 'compare.toggleReview', title: 'compare.toggleReview', owner: 'compare.ts' },
+  // P4.25, the aligned view of a comparison (no default keys; enabled only while a comparison is open)
+  { id: 'compare.toggleAligned', title: 'compare.toggleAligned', owner: 'compare.ts' },
+  { id: 'compare.copyWordToModified', title: 'compare.copyWordToModified', owner: 'compare.ts' },
+  { id: 'compare.copyWordToOriginal', title: 'compare.copyWordToOriginal', owner: 'compare.ts' },
   // M12, WP12.5 (P12; registered by WP12.5). Navigation on the NC tab, group
   // `channels.group`; the check on the Tools tab, group `channels.toolsGroup`. `Mod+Alt+P`
   // collides with Monaco's own "toggle preserve case" on macOS (Cmd+Option+P, editor focus,
@@ -163,6 +167,22 @@ const PINNED: { id: string; keys?: Keys; title: string; owner: string; pending?:
   { id: 'nc.editCycle', title: 'cycleForm.edit', owner: 'cycleForms.ts' },
   { id: 'templates.manage', title: 'templateManager.manage', owner: 'templateManager.ts' },
   { id: 'templates.fromSelection', title: 'templateManager.fromSelection', owner: 'templateManager.ts' },
+  // Phase 4, P4e (pinned by the P4e prelude; Phase 4 plan §6.11). Split view
+  // (`contrib/splitView.ts`, P4.21): View tab, group `splitView.group`, after the motion colours'
+  // Lines group; no key for the split commands (the backslash of the usual split key needs AltGr on the owner's
+  // Swiss German keyboard, and the `Mod+Alt` letters left are on the AltGr check). Moving between
+  // panes is `F6` / `Shift+F6`: free in gEdit (`findConflicts` below), not bound by Monaco 0.55.1
+  // (no `KeyCode.F6` binding in `monaco-editor/esm`), and the F-key row is where gEdit's
+  // navigation keys live (F2, F7, F9). The channel view (`contrib/channelPanes.ts`, P4.22b) and
+  // the merge (`contrib/channels.ts`, P4.23): NC tab, group `channels.group`, after Split into
+  // Channel Documents (orders 94, 95).
+  { id: 'view.splitEditor', title: 'splitView.split', owner: 'splitView.ts' },
+  { id: 'view.splitEditorDown', title: 'splitView.splitDown', owner: 'splitView.ts' },
+  { id: 'view.closeSplit', title: 'splitView.close', owner: 'splitView.ts' },
+  { id: 'view.focusNextPane', keys: 'F6', title: 'splitView.focusNext', owner: 'splitView.ts' },
+  { id: 'view.focusPreviousPane', keys: 'Shift+F6', title: 'splitView.focusPrevious', owner: 'splitView.ts' },
+  { id: 'channels.sideBySide', title: 'channelPanes.sideBySide', owner: 'channelPanes.ts' },
+  { id: 'channels.mergeBack', title: 'channels.mergeBack', owner: 'channels.ts' },
 ];
 /**
  * The ribbon groups of those entries: NC tab (M10, M12 navigation), Edit tab (search, M13
@@ -183,6 +203,7 @@ const PINNED_GROUPS = [
   'templates.groupTemplates',
   'cycleForm.group',
   'templateManager.group',
+  'splitView.group',
 ];
 /** The palette categories of those entries. */
 const PINNED_CATEGORIES = [
@@ -199,6 +220,8 @@ const PINNED_CATEGORIES = [
   'templates.category',
   'cycleForm.category',
   'templateManager.category',
+  'splitView.category',
+  'channelPanes.category',
 ];
 
 const asDefs = (rows: { id: string; keys?: Keys }[]): CommandDef[] =>

@@ -54,6 +54,9 @@ const P3A_SERVICES = ['modal'] as const;
 /** What P3b adds (Phase 3 plan §6.11). */
 const P3B_SERVICES = ['templates'] as const;
 
+/** What P4e adds (Phase 4 plan §6.7; the prelude wires the stub, P4.22b implements it). */
+const P4E_SERVICES = ['channelPanes'] as const;
+
 const SERVICES = [
   ...M1_SERVICES,
   ...M2_SERVICES,
@@ -66,10 +69,11 @@ const SERVICES = [
   ...M13_SERVICES,
   ...P3A_SERVICES,
   ...P3B_SERVICES,
+  ...P4E_SERVICES,
 ];
 
 describe('app context', () => {
-  it('exposes every M1 to M7, M12, M13, P3a and P3b service', () => {
+  it('exposes every M1 to M7, M12, M13, P3a, P3b and P4e service', () => {
     expect(Object.keys(ctx).sort()).toEqual([...SERVICES].sort());
   });
 

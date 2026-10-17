@@ -1,11 +1,11 @@
 // Compare (plan §5 WP2.5, §7.3): picking what a document is held against, the 50 MB
-// guard (F8), and the bookkeeping around the overlay — one view state, and exactly one way
-// out of a session. M11 (WP11.3, AD-26): review mode, the saved options, the merge (the
+// guard (F8), and the bookkeeping around the overlay — exactly one way out of a session
+// (P4.25: the editor's view state is no longer captured here; the editor groups keep it). M11 (WP11.3, AD-26): review mode, the saved options, the merge (the
 // target and direction rules and the edit are pure functions; the service runs against a
 // fake diff handle), the export and two files.
 //
 // The real document store, the real layout store and the real i18n catalog are used; only
-// the disk, the sizes and the editor's view state are fakes, so no test needs Monaco or a
+// the disk and the sizes are fakes, so no test needs Monaco or a
 // webview. The markup check at the end drives the real singleton, which is also the proof
 // that `app/compare.ts` is wired to the stores the app ships.
 
@@ -99,8 +99,6 @@ interface Harness {
   disk: Map<string, DecodeResult | null>;
   sizes: Map<DocId, number>;
   detect: ReturnType<typeof vi.fn>;
-  restored: unknown[];
-  captured: number;
   /** What `files_stat` answers per path; a path that is not in here stats as unknown. */
   diskSizes: Map<string, number | null>;
   /** Every path `readDisk` was asked for, in order. */
@@ -119,6 +117,8 @@ interface Harness {
   /** The new untitled documents `files.newUntitled` made. */
   untitled: { id: DocId; text: string; profileId: string | undefined; activate: boolean | undefined }[];
   diff: FakeDiff | null;
+  /** How often a session ended and asked for the keyboard to go back to the editor. */
+  focused: number;
 }
 
 /**
@@ -212,7 +212,6 @@ function harness(): Harness {
   const diskSizes = new Map<string, number | null>();
   const reads: string[] = [];
   const sizes = new Map<DocId, number>();
-  const restored: unknown[] = [];
   const detect = vi.fn((_path: string, _text: string, fallback: string) => `${fallback}-detected`);
 
   const status: StatusService = {
@@ -232,8 +231,6 @@ function harness(): Harness {
     reads,
     sizes,
     detect,
-    restored,
-    captured: 0,
     texts: new Map(),
     machines: new Map(),
     memory: { value: undefined, writes: [] },
@@ -242,6 +239,7 @@ function harness(): Harness {
     openAnswer: null,
     untitled: [],
     diff: null,
+    focused: 0,
     service: undefined as unknown as CompareController,
   };
 
@@ -288,9 +286,8 @@ function harness(): Harness {
         state.memory.writes.push(memo);
       },
     },
-    captureViewState: () => `view-${++state.captured}`,
-    restoreViewState: (snapshot) => {
-      restored.push(snapshot);
+    focusEditorWhenBack: () => {
+      state.focused++;
     },
   };
   state.service = createCompareService(deps);
@@ -487,12 +484,10 @@ describe('open', () => {
     expect(h.reads).toEqual(['/edge.nc', '/unknown.nc']);
   });
 
-  it('activates the compared document and takes the view state afterwards', async () => {
+  it('activates the compared document', async () => {
     h.docs.activate(b);
     expect(await h.service.open(a, { kind: 'document', docId: b })).toBe(true);
     expect(h.docs.getActiveId()).toBe(a);
-    expect(h.captured).toBe(1);
-    expect(h.restored).toEqual([]);
   });
 });
 
@@ -513,31 +508,42 @@ describe('close', () => {
     await h.service.open(a, { kind: 'document', docId: b });
   });
 
-  it('clears the session, hides the overlay and puts the editor back', () => {
+  it('clears the session and hides the overlay', () => {
     h.service.close();
     expect(get(h.service.session)).toBeNull();
     expect(get(h.service.content)).toBeNull();
     expect(get(h.layout.state).overlay).toBeNull();
-    expect(h.restored).toEqual(['view-1']);
   });
 
   it('is harmless a second time', () => {
     h.service.close();
     h.service.close();
-    expect(h.restored).toEqual(['view-1']);
+    expect(get(h.service.session)).toBeNull();
+  });
+
+  it('asks for the keyboard to go back to the editor once per session, however the session ends', async () => {
+    // The groups keep the view state now (P4.21); the keyboard was what `restoreEditorViewState` also put back.
+    expect(h.focused).toBe(0);
+    h.service.close();
+    h.service.close();
+    expect(h.focused).toBe(1);
+    await h.service.open(a, { kind: 'document', docId: b });
+    h.layout.closeOverlay();
+    expect(h.focused).toBe(2);
+    await h.service.open(a, { kind: 'document', docId: b });
+    h.docs.activate(b);
+    expect(h.focused).toBe(3);
   });
 
   it('follows the overlay when something else closes it (the panel header ✕)', () => {
     h.layout.closeOverlay();
     expect(get(h.service.session)).toBeNull();
-    expect(h.restored).toEqual(['view-1']);
   });
 
   it('follows the overlay when another panel takes the region', () => {
     h.layout.openOverlay('somethingElse');
     expect(get(h.service.session)).toBeNull();
     expect(get(h.layout.state).overlay).toBe('somethingElse');
-    expect(h.restored).toEqual(['view-1']);
   });
 
   it('ends when the user switches to another tab', () => {
@@ -552,19 +558,14 @@ describe('close', () => {
     expect(get(h.layout.state).overlay).toBeNull();
   });
 
-  it('takes a fresh view state for every session', async () => {
+  it('opens a session again after it was closed, and replaces one that is still open', async () => {
     h.service.close();
-    await h.service.open(a, { kind: 'document', docId: b });
-    h.service.close();
-    expect(h.restored).toEqual(['view-1', 'view-2']);
-  });
-
-  it('keeps the first view state when a comparison is replaced without closing', async () => {
+    expect(await h.service.open(a, { kind: 'document', docId: b })).toBe(true);
     h.disk.set('/nc/A.nc', decoded('SAVED'));
     expect(await h.service.open(a, { kind: 'saved' })).toBe(true);
-    expect(h.captured).toBe(1);
+    expect(get(h.service.session)?.source).toEqual({ kind: 'saved' });
     h.service.close();
-    expect(h.restored).toEqual(['view-1']);
+    expect(get(h.service.session)).toBeNull();
   });
 });
 
@@ -1299,9 +1300,6 @@ describe('exportDiff', () => {
     expect(h.untitled[0]).toMatchObject({ profileId: 'fanuc-gcode', activate: false });
     expect(get(h.service.session)).toBeNull();
     expect(h.docs.getActiveId()).toBe(id);
-    // CODE-5: the view state is not restored into whatever the editor shows a frame later
-    // (the new tab); the compared document gets its own state from the editor service.
-    expect(h.restored).toEqual([]);
   });
 
   it('exports the normalized sides in review mode, where only the real change is left', async () => {
@@ -1424,7 +1422,7 @@ describe('contrib/compare', () => {
     };
   }
 
-  it('registers exactly the compare commands, and only `compare.with` and the two copy keys claim one', () => {
+  it('registers exactly the compare commands, and only `compare.with` and the two copy keys claim one (P4.25 added three commands without a key)', () => {
     expect([...byId.keys()]).toEqual([
       'compare.with',
       'compare.withDocument',
@@ -1435,8 +1433,11 @@ describe('contrib/compare', () => {
       'compare.prevDiff',
       'compare.toggleInline',
       'compare.toggleReview',
+      'compare.toggleAligned',
       'compare.copyToModified',
       'compare.copyToOriginal',
+      'compare.copyWordToModified',
+      'compare.copyWordToOriginal',
       'compare.exportDiff',
       'compare.files',
     ]);
@@ -1450,6 +1451,9 @@ describe('contrib/compare', () => {
       'compare.prevDiff': null,
       'compare.toggleInline': null,
       'compare.toggleReview': null,
+      'compare.toggleAligned': null,
+      'compare.copyWordToModified': null,
+      'compare.copyWordToOriginal': null,
       'compare.copyToModified': 'Mod+Alt+Right',
       'compare.copyToOriginal': 'Mod+Alt+Left',
       'compare.exportDiff': null,

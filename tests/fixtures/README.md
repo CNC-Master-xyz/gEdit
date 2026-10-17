@@ -356,6 +356,10 @@ Synthetic programs for the review-mode normalization and the unified diff (X5), 
 
 The multi-channel programs (Fanuc multi-path, Okuma two turrets, Sinumerik two channels) with what `resolveDocument` and the wait-code check answer for them; see [`channels/README.md`](channels/README.md). They are not under `nc/`: wait codes such as `M130`, `M9xx` and `M100` are builder codes that no built-in code database describes, and `src/lib/core/codes/load.test.ts` would fail on them there (plan §7.16 #166). `src/lib/core/channels/goldens.test.ts` checks them in place of the detection and outline goldens.
 
+## `p4e/`: the P4e side-by-side programs
+
+`p4e/channels/twin-sections.nc` (two channels in one file) and `p4e/channels/threepath.NC1` to `.NC3` (one file per path) with the owner's wait codes `M901P12` and `M910P123`, read by the runtime scenario `p4-channels`; see [`p4e/README.md`](p4e/README.md). Like `channels/` they are not under `nc/` (builder wait codes), and no unit test walks them.
+
 ## Expectations and golden files
 
 Not NC programs: tables that say what a module must answer. The sample lines in them are

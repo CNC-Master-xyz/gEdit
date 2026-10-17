@@ -27,6 +27,11 @@ export default {
   files: 'Compare Two Files…',
   /** `compare.toggleReview`: raw ↔ review mode. */
   toggleReview: 'Review Mode',
+  /** P4.25: `compare.toggleAligned`, the aligned view on and off. */
+  toggleAligned: 'Aligned View',
+  /** P4.25: `compare.copyWordToModified` / `compare.copyWordToOriginal`, in the aligned view. */
+  copyWordToModified: 'Copy Word to Current Document',
+  copyWordToOriginal: 'Copy Word to Original',
 
   // Pickers
   pickSource: 'Compare the current document with…',
@@ -47,6 +52,9 @@ export default {
   // Review mode (M11, AD-26)
   modeRaw: 'Raw',
   modeReview: 'Review',
+  /** P4.25: the third view; both programs as written, level on their blocks. */
+  modeAligned: 'Aligned',
+  modeAlignedHint: 'Both programs as written, level on their blocks; the review options decide what counts as a difference',
   reviewBar: 'Review options',
   optionIgnoreBlockNumbers: 'Block numbers',
   optionIgnoreWhitespace: 'Whitespace',
@@ -63,6 +71,11 @@ export default {
   copyToModifiedShort: '→',
   copyToOriginalShort: '←',
   copyTitle: '{action}. Shift+click copies only the line at the cursor.',
+  copyWordToModifiedShort: 'Word →',
+  copyWordToOriginalShort: '← Word',
+  copyWordTitle: '{action}: the marked words at the cursor.',
+  alignedArrowToModified: 'Copy this change to the current document. Shift+click copies only this line.',
+  alignedArrowToOriginal: 'Copy this change to the original. Shift+click copies only this line.',
   labelOriginal: 'the original',
   labelModified: 'the current document',
   machineNone: 'no machine',
@@ -92,6 +105,13 @@ export default {
   copyLocked: 'The document to copy into is read-only.',
   copyBusy: 'The comparison is still updating. Try again in a moment.',
   copyNoChange: 'There is no change at the cursor to copy.',
+  wordNeedsAligned: 'Words can be copied in the aligned view only.',
+  wordNoWord: 'Put the cursor in a marked word to copy it.',
+  wordNoPair: 'This line has no matching line on the other side to copy words into.',
+  /** Review NC-1: the copy would leave an address twice on the line or drop one. */
+  wordMoved: 'The words of this line moved, so copying this word would leave a letter twice or drop one. Copy the line instead (Shift+click the arrow).',
+  /** Review NC-13: the copied words would run into the words next to them. */
+  wordJoins: 'The copied word would run into the word next to it. Copy the line instead (Shift+click the arrow).',
   noSuchLine: 'There is no such line in this comparison.',
   noDifferences: 'There are no differences.',
   sideSaved: '{name} (saved version)',

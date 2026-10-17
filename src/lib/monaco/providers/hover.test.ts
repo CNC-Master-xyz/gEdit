@@ -15,7 +15,8 @@ import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
 import { t } from '$lib/i18n';
 import { MAX_INSPECT_LINE } from '$lib/app/inspectorService';
 import { profileOf } from '../../../../tests/unit/helpers/profiles';
-import { hoverInfoAtPosition, type HoverView } from './hover';
+import { hoverInfoAtPosition, hoverTarget, type HoverView } from './hover';
+import type { PaneSource } from '$lib/app/types';
 import type * as MonacoApi from 'monaco-editor/esm/vs/editor/editor.api.js';
 
 const DBS = resolveCodeDbFiles(BUILTIN_CODE_DB_JSON, (dialect, problem) => {
@@ -89,3 +90,52 @@ describe('the hover with the modal context', () => {
     expect(states.stateAfter).toHaveBeenCalled();
   });
 });
+
+// P4.22b (Phase 4 plan §5 P4e decision 11): a channel pane is a model of its own, mapped into its program.
+describe('the hover of a channel pane', () => {
+  // The program, and the pane of the channel that has its lines 4 and 5: `O0001` (the header) and the two lines.
+  const PROGRAM_LINES = ['O0001', 'G21 G90 G54', 'G0 X50 Y10', 'G1 X50. F200', 'M30'];
+  const PANE_LINES = ['O0001', 'G1 X50. F200', 'M30'];
+  const DOC_LINE = [1, 4, 5];
+  const pane = (model: object): PaneSource => ({
+    docId: 'd1',
+    channelId: '2',
+    model: () => model as never,
+    docLine: (n) => DOC_LINE[n - 1],
+    paneLine: (n) => (DOC_LINE.includes(n) ? DOC_LINE.indexOf(n) + 1 : null),
+  });
+
+  it('reads the program’s line the pane line shows, with the program’s document and modal states', () => {
+    const paneModel = fakeModel(PANE_LINES);
+    const program = fakeModel(PROGRAM_LINES);
+    const target = hoverTarget(paneModel, { lineNumber: 2, column: 7 }, (m) => (m === paneModel ? pane(m) : undefined), (id) => (id === 'd1' ? program : undefined));
+    expect(target).toEqual({ model: program, position: { lineNumber: 4, column: 7 }, docId: 'd1' });
+
+    // The modal states are asked in the program's own line numbers, around the program's block.
+    const states = spy(PROGRAM_LINES);
+    const info = hoverInfoAtPosition(target.model, target.position, { ...view, docId: target.docId }, states);
+    const asked = states.stateAfter.mock.calls.map(([, line]) => line);
+    expect(asked).toEqual([3, 4]);
+    expect(info).toEqual(hoverInfoAtPosition(program, { lineNumber: 4, column: 7 }, view, spy(PROGRAM_LINES)));
+    expect(info).not.toBeNull();
+  });
+
+  it('is richer than the pane model read on its own, which has no document behind it', () => {
+    const paneModel = fakeModel(PANE_LINES);
+    const alone = hoverInfoAtPosition(paneModel, { lineNumber: 2, column: 7 }, { cp, db, docId: null });
+    const mapped = hoverInfoAtPosition(fakeModel(PROGRAM_LINES), { lineNumber: 4, column: 7 }, view, spy(PROGRAM_LINES));
+    expect(alone).not.toBeNull();
+    expect(mapped!.markdown.length).toBeGreaterThan(alone!.markdown.length);
+  });
+
+  it('reads any other model as it is, and a pane line the mapping cannot answer', () => {
+    const plain = fakeModel(PROGRAM_LINES);
+    expect(hoverTarget(plain, { lineNumber: 2, column: 3 }, () => undefined)).toEqual({ model: plain, position: { lineNumber: 2, column: 3 }, docId: null });
+    const paneModel = fakeModel(PANE_LINES);
+    const throwing: PaneSource = { ...pane(paneModel), docLine: () => { throw new RangeError('outside'); } };
+    expect(hoverTarget(paneModel, { lineNumber: 9, column: 1 }, () => throwing, () => fakeModel(PROGRAM_LINES))).toEqual({ model: paneModel, position: { lineNumber: 9, column: 1 }, docId: null });
+    // A program that is gone.
+    expect(hoverTarget(paneModel, { lineNumber: 2, column: 1 }, () => pane(paneModel), () => undefined)).toEqual({ model: paneModel, position: { lineNumber: 2, column: 1 }, docId: null });
+  });
+});
+

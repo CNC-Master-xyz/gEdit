@@ -42,10 +42,10 @@ Across the top is the **ribbon**, with seven tabs:
 | **File** | New, Open, Save, Save As, Save All, Close, **Reload** (read the file again from disk, [below](#reload-from-disk)) · the recent-files list |
 | **Edit** | Undo, redo, find, replace, comment, duplicate, move, delete line, select all, upper and lower case (plain text commands; on a program use **Convert Case…** on the NC tab) · **Find All…**, **Replace All…**, **Find Whole Address…** ([Searching](#searching)) · **Go to Line or Block…** (group *Go To*) · **Typing**: **Upper-Case Typing** switches [upper case while you type](#typing-forced-upper-case-and-no-accidental-joins) off or on for this session |
 | **Insert** | The **templates** of the active program — **Program start** (the first lines of a program, in the dialect's own style) and end, tool change, drilling, tapping, turning and threading cycles, for all six dialects — as buttons and lists, **Favorites** first; **Edit Cycle…** for the cycle at the cursor; **Manage Templates…** and **New Template from Selection…** for your own. See [Writing with templates](templates.md) |
-| **NC** | Renumbering, removing block numbers, the cleanups, block skip and selecting a tool segment — see [Transformations](transformations.md) |
+| **NC** | Renumbering, removing block numbers, the cleanups, block skip and selecting a tool segment — see [Transformations](transformations.md) · group **Channels**: the sync-point keys, **Channels Side by Side**, **Split into Channel Documents**, **Merge Channels Back** — see [Channels](channels.md) |
 | **Tools** | Compare ([Comparing two programs](#comparing-two-programs)) · the scripts that come with gEdit, in the **Built-in Scripts** group — **Program checks**, **Scale feed rates**, **Scale spindle speeds**, **Tool list**, **Extents**, **Address arithmetic**, **Translate**, **Rotate**, **Mirror** (see [Scripts](scripts.md)) · **Check Wait Codes** for [channels](channels.md#check-wait-codes) · **Test Profile on Document** for [profiles of your own](profiles.md#testing-a-profile-on-a-program) |
 | **Scripts** | Run a script, stop it, your own scripts (**My Scripts**), **New Script**, **Edit Script**, **Rescan**, **Add Folder** — see [Scripts](scripts.md) |
-| **View** | The command palette, the panels (Side Panel, Code Inspector, Bottom Panel, Script Output), the motion-colour switch, folding, display switches, zoom, theme, settings, the shortcut list and About |
+| **View** | The command palette, the panels (Side Panel, Code Inspector, Bottom Panel, Script Output), the motion-colour switch, folding, display switches · group **Editor**: **Split Editor**, **Split Editor Down**, **Close Split** ([below](#two-panes-split-editor)) · zoom, theme, settings, the shortcut list and About |
 
 The ribbon starts at the top of the window. The program's name is in the window's own title bar
 (with a dot in front of it while the program has unsaved changes); there is no second title row
@@ -84,6 +84,30 @@ every command by name. **View ▸ Keyboard Shortcuts** lists the commands that h
 In this guide `View ▸ Side Panel` means the **Side Panel** button on the ribbon's View tab,
 `Settings ▸ Files ▸ …` a field on a page of the settings dialog, and *File: Open Recent…* an
 entry of the command palette. The macOS menu bar holds only the standard system items.
+
+## Two panes: Split Editor
+
+**Split Editor** (View tab, group **Editor**) shows the document a second time, in a second pane
+**beside** the first. **Split Editor Down** puts the second pane **below** it. From an open
+split, the other command lays the same two panes out the other way. The new pane gets the
+keyboard. Neither command has a key.
+
+Both panes show **one text**. An edit in one is in the other at once, and there is **one undo
+history**. Each pane has **its own cursor, scroll position and folds**, so you can read the
+header of a program in one pane and edit further down in the other. The bookmarks, the status
+bar, the inspector and the program map follow the pane that has the keyboard.
+
+- **The active pane** has a border in the accent colour of the theme (only when there is more
+  than one pane).
+- **`F6`** moves to the next pane and **`Shift+F6`** to the previous one. The keys also work
+  in the channel view.
+- **The splitter** between the panes moves with the mouse or with the arrow keys when it has
+  the keyboard. A double click makes the panes equal again.
+- **Close Split** (View tab, or the **X** in a pane's header) goes back to one editor.
+  Nothing is lost: it is one text.
+
+Split Editor is off while a comparison is open and while the channel view is open. To see
+the channels of a program lined up at their waits, use the channel view: **Channels Side by Side** ([Channels](channels.md#the-channel-view)).
 
 ## Files
 
@@ -718,12 +742,13 @@ prove-out section, is on the NC tab ([Transformations](transformations.md#block-
 
 `Cmd/Ctrl+Alt+C` compares the current document with the version on disk, another open tab,
 or any file you pick. The comparison opens over the editor, side by side or inline, with
-buttons for the next and previous difference.
+buttons for the next and previous difference. A third view, **Aligned**, shows both programs
+level, block by block ([below](#the-aligned-view)).
 
 The current document stays editable in the comparison, unless it is locked; the other side
 is read-only. Files above 50 MB are refused.
 
-A comparison has two modes.
+A comparison has three views: two modes, **Raw** and **Review**, and the **Aligned** view. The **Raw | Review | Aligned** switch in the toolbar chooses.
 
 - **Raw** shows every difference in the text. **Ignore whitespace**
   (off by default) leaves out differences in the blanks at the start and the end of a line,
@@ -732,6 +757,11 @@ A comparison has two modes.
   different and shows what the machine would read differently. The **Raw** and **Review**
   buttons in the comparison switch between the two; the command **Review Mode** (command
   palette) does the same.
+
+- **Aligned** shows both programs **as written**, in two editors, lined up block by block, so
+  you can read and merge them side by side. It is described [below](#the-aligned-view).
+
+In the raw view and in review mode, a changed line is marked [word by word](#word-marks).
 
 Without a choice from you, a comparison opens in raw mode the first time. gEdit remembers
 the mode afterwards, also after a restart.
@@ -824,9 +854,83 @@ dialect's defaults is remembered, and the rest keeps following the defaults. The
 sets the options back to what the dialect starts with (the button says "profile" where this
 guide says "dialect": it is the same thing).
 
+### Word marks
+
+Where a line changed, gEdit marks the **words** that differ, not the single characters. A word
+is a word of the program: `F1200` against `F1000` marks both words whole, and the same
+for `Q203=+0` against `Q203=-5` (the marks are on `+0` and `-5`) and for `X=AC(5)`, which is
+one word. The marks are in raw mode and in review mode (where the tidied lines are compared)
+and, in the aligned view, in both editors.
+
+- An **address word that only moved** is not marked: `X10 Y20` against `Y20 X10` marks nothing.
+  Only a letter with a plain number counts; the parts of a calculation are never taken for
+  moved, so `R1=R2-R3` against `R1=R3-R2` marks the swapped operands, and a moved comment or
+  a moved call is marked too.
+- A line with **more than 500 words** on a side gets no word marks. It stays marked as a changed line.
+- A line that is only on one side is a whole added or removed line and has no word marks.
+- Inside a changed line, the editor's own character marks are not drawn, so the two kinds do
+  not pile up.
+
+### The aligned view
+
+The **Aligned** button of the toolbar (command **Aligned View**; hint: *Both programs as written,
+level on their blocks; the review options decide what counts as a difference*) shows the original on
+the left and the current document on the right, **as written**. The two editors scroll as
+one.
+
+- **Alignment.** The programs are lined up block by block (a block is one NC line). Where one side has lines the
+  other has not, the other side shows hatched empty space of the same height, so the lines
+  below stay level. What counts as a difference is decided by the **review options**, which
+  stay on screen in this view: with *Block numbers* on, a renumbered program lines up line for
+  line and the numbers are no difference. A stretch the options leave out on both sides keeps
+  the two sides level and offers no merge. Inside a change the rows face each other by their
+  **words**: a line faces the line on the other side that shares a word with it, other than the
+  motion code (`G1`), so an inserted line does not make a copy act on an unrelated line. Where
+  nothing is shared, the lines face each other in order.
+- **Colours.** A changed line is tinted, and its changed [words](#word-marks) are marked. A line
+  that is only in the original is red, a line that is only in the current document is green.
+- **Arrows.** At the first line of a change there is an arrow in the margin (hover:
+  *Copy this change to the current document. Shift+click copies only this line.*, or *… to the
+  original …*). A click on the arrow itself copies the **change**; **Shift+click** copies only that
+  line. The rest of the margin does not copy. The arrow in the hatched space can also be reached
+  **by keyboard**: `Tab` to it, `Enter` or `Space` copies the change, `Shift+Enter` one line. The
+  **right-click menu** of the original has **Copy Change to Current Document**; that of the current
+  document has **Copy Change to Original**, each for the change at the cursor, and the **←** and **→** buttons of the toolbar and
+  `Cmd/Ctrl+Alt+Right` / `Cmd/Ctrl+Alt+Left` work as in the raw view.
+- **Words.** The buttons **Word →** and **← Word** (commands **Copy Word to Current
+  Document** and **Copy Word to Original**, no keys) copy the marked words at the cursor into
+  the line on the other side. Put the cursor in a marked word first: *Put the cursor in a marked
+  word to copy it.* A word needs a matching line on the other side (*This line has no matching
+  line on the other side to copy words into.*), and works in the aligned view only (*Words can be
+  copied in the aligned view only.*).
+  **A word copy never leaves a letter twice or drops one.** If the letter of the copied word
+  (`F`, say) stands exactly **once on each line**, the copy replaces that word where it stands, even
+  at another place in the line: `F100` at the end against `F200` behind `G1` becomes `F200` in place.
+  Otherwise, when the words of the line moved, or a letter stands twice, or the copied word would
+  run into the word next to it, the copy is **refused**, and the message points you to **Copy
+  Line** (Shift+click the arrow): *The words of this line moved, so copying this word would leave a
+  letter twice or drop one. Copy the line instead (Shift+click the arrow).* Where the new word would run
+  into its neighbour, gEdit puts a blank between them where the line has blanks or the dialect needs one (and keeps them
+  packed where the line is packed and that reads the same); it refuses the copy (*The copied word
+  would run into the word next to it …*) if no spacing reads right.
+- **Undo.** Every copy is **one undo step** of the side that received it, and that side gets the
+  keyboard, so `Cmd/Ctrl+Z` takes it back.
+- **Editing.** You can edit **both sides** in this view, with the same typing helpers as in the
+  editor ([forced upper case and no accidental joins](#typing-forced-upper-case-and-no-accidental-joins),
+  each side by the settings of its own document). The side that is a version on disk has none. No
+  suggestion list pops up while you type (`Ctrl+Space` still opens it), and the font and display
+  settings you chose apply. The original only if it is an open
+  document (a version on disk is read-only), and a locked document stays locked. After
+  your last keystroke the alignment is worked out again within a moment (about a sixth of a
+  second); a copy asked for before it is done is refused with *The comparison is still updating. Try
+  again in a moment.*
+- **Limits.** There is no inline form of the aligned view. A stretch the options drop on both
+  sides cannot be merged. A word is copied only into a line that is in the same row. The editors
+  have no minimap.
+
 ### Merging
 
-In raw mode a difference can be copied from one side to the other:
+In the raw view and in the aligned view a difference can be copied from one side to the other:
 
 | Command | Key | Does |
 |---|---|---|
@@ -841,7 +945,7 @@ edit the comparison needs a moment to find the differences again; a copy asked f
 moment is refused with a message ("still updating"), so a held key never copies twice.
 A copy is one undo step in the document that received it. Copying into the other side is possible only when that side is an open
 document; the version on disk is not edited this way, and a locked document refuses a
-copy like any other change. Review mode is for reading: switch back to raw to merge.
+copy like any other change. Review mode is for reading: switch to raw or to the aligned view to merge.
 
 ### Exporting the differences
 
@@ -995,10 +1099,11 @@ Being clear about this saves disappointment on the shop floor.
 - **Channels are read, not run.** For a control with several channels (two turrets, two
   paths) gEdit can show the channels apart and check that the wait codes fit each other. It
   does not know what a wait does at the machine, it reorders and synchronizes nothing, and a
-  clean check is no proof that the program runs. Showing two channels **side by side** is not
-  there, and today you step between the channels. **Split into Channel
-  Documents** makes copies for reading: nothing you change in them comes back into the
-  program. See [Channels](channels.md).
+  clean check is no proof that the program runs. **Channels Side by Side** opens the channel view, which shows the channels
+  in panes next to each other, lined up at the waits, up to four; it does not run them or
+  show a time axis. **Split into Channel
+  Documents** makes one document for each channel, and **Merge Channels Back** writes your
+  changes in them back into the program. See [Channels](channels.md).
 - **A profile of your own describes; it does not compute.** It changes how a dialect's
   programs are recognised, numbered and explained and what typing does. It cannot run code,
   and a control gEdit has no profile for is still read by the closest dialect — see

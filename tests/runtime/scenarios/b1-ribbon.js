@@ -52,6 +52,9 @@ scenario('b1-ribbon-tabs', { timeout: 180 }, async (h) => {
 
   const view = await groupsOn('view')
   h.check('View: panels, Code Inspector, Motion Colors, theme, settings and help', ['view.toggleSidePanel', 'view.toggleInspector', 'view.toggleBottomPanel', 'view.toggleMotionColors'].every((c) => view.some((g) => g.commands.includes(c))), labels(view))
+  // P4e (P4.21): the View tab gains the group Editor (after Lines, before Appearance); F6 and Shift+F6 are palette-only.
+  const editorGroup = view.find((g) => g.label === ctx.t('splitView.group'))
+  h.check('View: a group "Editor" holds Split Editor, Split Editor Down and Close Split (P4e), and no key-only pane command is a button', editorGroup?.commands.join() === 'view.splitEditor,view.splitEditorDown,view.closeSplit' && !view.some((g) => g.commands.includes('view.focusNextPane')), view)
 
   // The command is real: Reload on a program that was never saved says so, and asks nothing.
   await ribbonTab(h, 'file')

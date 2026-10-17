@@ -23,6 +23,15 @@
 // whose model was replaced (reload from disk, a reopened tab) drops its stale ids instead
 // of reporting lines from a model nobody can see.
 //
+// **Per editor (P4e, Phase 4 plan §6.7 rule 6).** As model decorations of the document the bookmarks
+// show in every group that shows the document by themselves. A channel pane has a model of its
+// own, so it gets a *mirror*: decorations on the pane model at `paneLine(line)` of every bookmark
+// the pane shows, set again when the bookmarks, the groups or the document change (one
+// microtask after the change, and only when a pane is open). The mirror holds no state the
+// document does not have: it is read from `lines()` and thrown away with the pane. Toggling in a
+// pane toggles the document's bookmark at the cursor's document line (`EditorService.cursor()`
+// answers document lines), and the glyph margin stays one shared option.
+//
 // Monaco is reached through `$lib/monaco/editorService`; nothing here may statically
 // import `$lib/monaco/core`, or Monaco would land in the initial bundle and be evaluated
 // during prerender (`app/context.test.ts` is the tripwire, because `app/context.ts`
@@ -92,6 +101,11 @@ export interface BookmarkApi extends BookmarkService {
 
 export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
   const entries = new Map<DocId, Entry>();
+  /** The mirror decorations on each pane model: their ids and the pane lines they were set at. */
+  const mirrors = new Map<MonacoApi.editor.ITextModel, { ids: string[]; lines: number[] }>();
+  let mirrorScheduled = false;
+  /** Whether the last `syncMirrors` found a pane; the keystroke path costs one test of this when there is none. */
+  let hasPanes = false;
   let api: BookmarkMonaco | undefined;
   let options: MonacoApi.editor.IModelDecorationOptions | undefined;
   /**
@@ -170,6 +184,59 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
     return [...new Set(lines)].sort((a, b) => a - b);
   }
 
+  /**
+   * The mirror of the bookmarks on every channel pane that is open (§6.7 rule 6): for each pane
+   * the bookmarks of its document that it shows, at its own lines. A pane whose decorations are
+   * where they should be is left alone, so this costs a read of the bookmarks per pane.
+   */
+  function syncMirrors(): void {
+    mirrorScheduled = false;
+    const shown = api === undefined ? [] : deps.editor.groupViews().filter((view) => view.pane !== null);
+    hasPanes = shown.length > 0;
+    const live = new Set(shown.map((view) => view.pane!.model()));
+    for (const [model, mirror] of [...mirrors]) {
+      if (live.has(model)) continue;
+      mirrors.delete(model);
+      // A pane model that was disposed has no decorations left to remove.
+      if (!(model as { isDisposed?: () => boolean }).isDisposed?.()) model.deltaDecorations(mirror.ids, []);
+    }
+    if (api === undefined) return;
+    const decoration = (options ??= decorationOptions(api));
+    for (const view of shown) {
+      const pane = view.pane!;
+      const model = pane.model();
+      const wanted: number[] = [];
+      for (const line of linesOf(view.docId)) {
+        const paneLine = pane.paneLine(line);
+        if (paneLine !== null) wanted.push(paneLine);
+      }
+      const mirror = mirrors.get(model);
+      if (
+        mirror !== undefined &&
+        mirror.lines.length === wanted.length &&
+        mirror.ids.every((id, i) => model.getDecorationRange(id)?.startLineNumber === wanted[i])
+      ) {
+        continue;
+      }
+      const ids = model.deltaDecorations(
+        mirror?.ids ?? [],
+        wanted.map((line) => ({
+          range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
+          options: decoration,
+        })),
+      );
+      mirrors.set(model, { ids, lines: wanted });
+    }
+  }
+
+  function scheduleMirrors(): void {
+    if (mirrorScheduled || api === undefined) return;
+    mirrorScheduled = true;
+    queueMicrotask(() => {
+      if (mirrorScheduled) syncMirrors();
+    });
+  }
+
   /** Replaces the bookmarks of `id` with `lines`, in one `deltaDecorations` call. */
   function setLines(id: DocId, lines: number[]): void {
     const model = deps.editor.model(id);
@@ -188,6 +255,7 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
     if (ids.length === 0) entries.delete(id);
     else entries.set(id, { model, ids });
     syncGlyphMargin();
+    scheduleMirrors();
   }
 
   /** The cursor's line, but only when `id` is the document the cursor is in. */
@@ -260,12 +328,28 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
       // *then* removes the document, so by the time this fires the entry is already
       // stale and `syncGlyphMargin` sees it.
       const stopDocs = deps.docs.list.subscribe(() => syncGlyphMargin());
+      // The panes: a new editor or layout, and an edit of a document a pane shows (the pane is
+      // re-projected, so its lines move). Nothing to do while no pane is open.
+      const stopAttach = deps.editor.onDidAttach(scheduleMirrors);
+      const stopGroups = deps.editor.groups.subscribe(scheduleMirrors);
+      const stopContent = deps.editor.onDidChangeContent(() => {
+        if (hasPanes) scheduleMirrors();
+      });
       let disposed = false;
       return () => {
         if (disposed) return;
         disposed = true;
         stopCreate();
         stopDocs();
+        stopAttach();
+        stopGroups();
+        stopContent();
+        mirrorScheduled = false;
+        for (const [model, mirror] of mirrors) {
+          if (!(model as { isDisposed?: () => boolean }).isDisposed?.()) model.deltaDecorations(mirror.ids, []);
+        }
+        mirrors.clear();
+        hasPanes = false;
         for (const [id, entry] of entries) {
           if (deps.editor.model(id) === entry.model) entry.model.deltaDecorations(entry.ids, []);
         }

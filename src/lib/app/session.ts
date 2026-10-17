@@ -64,6 +64,7 @@ import { get, type Readable } from 'svelte/store';
 import type {
   Disposable,
   DocId,
+  EditorService,
   FileMemo,
   FileMemoryStore,
   SessionService,
@@ -614,23 +615,33 @@ export const session: SessionService = createSessionService({
 });
 
 /**
- * The first visible line of the editor.
- *
- * `EditorService` has no `topLine()` — `monaco/editorService.ts` belongs to WP7.3 in
- * this milestone — so this is the one place that reaches for the instance, and it is a
- * read that cannot damage anything. The hand-off asks for the two calls below to move
- * behind `EditorService.topLine()`/`scrollToLine()` in M8.
+ * The editor half of the per-file memory: the cursor and the viewport of the document on screen,
+ * and putting them back. Every line is a document line and the focused group answers (the
+ * coordinate rule, Phase 4 plan §6.7 rule 3), so `EditorService.topLine`/`scrollToTop` are
+ * used and never the editor instance.
  */
-function topLineOf(): number | undefined {
-  const instance = appEditor.editorInstance();
-  return instance?.getVisibleRanges()[0]?.startLineNumber;
-}
-
-/** Puts the first visible line back where it was, once the cursor is in place. */
-function scrollToLine(top: number): void {
-  const instance = appEditor.editorInstance();
-  if (!instance) return;
-  instance.setScrollTop(instance.getTopForLineNumber(top));
+export function editorPositionDeps(
+  editor: Pick<EditorService, 'cursor' | 'topLine' | 'scrollToTop' | 'reveal' | 'hasModel' | 'editorInstance'>,
+  activeId: () => DocId | null,
+): Pick<FileTrackerDeps, 'position' | 'applyPosition'> {
+  return {
+    position: (id) => {
+      // Only the document on screen has a cursor and a viewport; for any other one the
+      // last value `onDidChangeCursor` recorded is the whole truth.
+      if (activeId() !== id) return null;
+      const at = editor.cursor();
+      if (at === null) return null;
+      return { line: at.line, column: at.column, top: editor.topLine() ?? at.line };
+    },
+    applyPosition: (id, at) => {
+      if (!editor.hasModel(id) || editor.editorInstance() === undefined) return false;
+      editor.reveal(id, at.line, at.column);
+      // After `reveal`, which centres the cursor line: the remembered viewport wins, and
+      // a file whose cursor was at the top comes back at the top rather than centred.
+      editor.scrollToTop(at.top);
+      return true;
+    },
+  };
 }
 
 /** Starts the per-file memory of the real application. `contrib/session.ts` calls it. */
@@ -647,22 +658,7 @@ export function startFileTracker(): Disposable {
     hasModel: (id) => appEditor.hasModel(id),
     bookmarkLines: (id) => appBookmarks.lines(id),
     setBookmarks: (id, lines) => appBookmarks.set(id, lines),
-    position: (id) => {
-      // Only the document on screen has a cursor and a viewport; for any other one the
-      // last value `onDidChangeCursor` recorded is the whole truth.
-      if (appDocs.getActiveId() !== id) return null;
-      const at = appEditor.cursor();
-      if (at === null) return null;
-      return { line: at.line, column: at.column, top: topLineOf() ?? at.line };
-    },
-    applyPosition: (id, at) => {
-      if (!appEditor.hasModel(id) || appEditor.editorInstance() === undefined) return false;
-      appEditor.reveal(id, at.line, at.column);
-      // After `reveal`, which centres the cursor line: the remembered viewport wins, and
-      // a file whose cursor was at the top comes back at the top rather than centred.
-      scrollToLine(at.top);
-      return true;
-    },
+    ...editorPositionDeps(appEditor, () => appDocs.getActiveId()),
     // The same two promises `contrib/bookmarks.ts` awaits before it installs the
     // decoration service, and in the same order — the contributions are loaded by file
     // name, so `bookmarks` has registered its handler before this one is created.

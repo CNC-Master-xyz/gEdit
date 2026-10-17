@@ -1,5 +1,5 @@
 # The runtime harness (tests/runtime) on a GitHub-hosted macOS runner: the cumulative suite
-# m0..m12, rp (M12.5), m13 (M13, with the Phase 2 exit criteria), p3a (P3a, Phase 3), p3b (P3b), b1 (the bug-fix round B1) and p4a (P4a, Phase 4), 151 scenarios that drive the real app
+# m0..m12, rp (M12.5), m13 (M13, with the Phase 2 exit criteria), p3a (P3a, Phase 3), p3b (P3b), b1 (the bug-fix round B1), p4a (P4a, Phase 4) and p4e (P4e, Phase 4), 154 scenarios that drive the real app
 # with native key and mouse events.
 #
 # Why not on every pull request: the job takes about 40 minutes of a macOS runner before P4a and about 100 with
@@ -53,6 +53,17 @@ jobs:
     # able to report that instead of the job being cancelled under it. p4-perf is not retried (it declares
     # `retry: false`; a second run of five scripts would double its time). Tighten this after the first hosted run
     # and after the optimisation of the scripts.
+    #
+    # P4e adds three scenarios, p4-split, p4-channels and p4-compare (none has been run on a runner yet, and the
+    # numbers here are an estimate by counting, not a measurement). They are key and mouse scenarios on programs of
+    # a few hundred lines, with no larger program and no script; their cost is the settle waits (`idle`, at least
+    # 0.15 s each) after every command, key press and layout change, about 70, 150 and 60 of them, a few dozen
+    # native key presses, and the build of two to three editors per section. Against the nearest measured ones,
+    # the M12 channel and M11 compare scenarios (1.5 to 4 minutes each on a runner), that is 3 minutes for
+    # p4-split, 7 for p4-channels and 3 for p4-compare, 13 minutes together; their own timeouts are 7, 15 and 7
+    # minutes. So the job is about 115 minutes by the estimate above (141 if all five p4-perf scripts run into
+    # their 900 s). The limit stays 150: it holds both, and is exceeded only when p4-perf is killed on every script
+    # AND two of the P4e scenarios fail and are run a second time. Tighten or widen this after the first hosted run.
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
@@ -85,9 +96,9 @@ jobs:
           tests/runtime/sync.sh 2>&1 | tee "$RUNNER_TEMP/logs/sync.log"
 
       # Exits non-zero on a FAIL or a BLOCKED; a pass on the retry is FLAKY and does not. p4-perf is never retried.
-      - name: Suite m0..m12, rp, m13, p3a, p3b, b1 and p4a
+      - name: Suite m0..m12, rp, m13, p3a, p3b, b1, p4a and p4e
         run: |
-          tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a}.txt 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"
+          tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"
           exit "${PIPESTATUS[0]}"
         shell: bash
 

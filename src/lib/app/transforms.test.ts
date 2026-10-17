@@ -57,7 +57,7 @@ interface Harness {
   docs: DocumentStore;
   docId: DocId;
   lines: string[];
-  selection: { startLine: number; endLine: number; empty: boolean } | null;
+  selection: { startLine: number; endLine: number; empty: boolean; crossesJunction?: true } | null;
   status: { text: string; error: boolean }[];
   forms: { title: string; fields: FieldSpec[]; values?: Record<string, unknown> }[];
   formAnswers: (Record<string, unknown> | undefined)[];
@@ -437,6 +437,33 @@ describe('TransformService.run: the output', () => {
     expect(seen.ctx?.firstLine).toBe(2);
     expect(h.applied[0]).toMatchObject({ startLine: 2, endLine: 3 });
     expect(h.applied[0].lines).toEqual(['n20 g1 x10.', 'n30 m30']);
+  });
+
+  it('refuses a selection that runs over the lines of another channel, before it asks or changes anything (P4e)', async () => {
+    const h = harness();
+    h.selection = { startLine: 1, endLine: 3, empty: false, crossesJunction: true };
+    let ran = false;
+    const result = await h.service.run(
+      upperCase({
+        options: () => [{ kind: 'number', key: 'n', label: 'N' } as never],
+        run: () => {
+          ran = true;
+          return { lines: [], summary: { key: 'common.ok' }, skipped: [], warnings: [] };
+        },
+      }),
+    );
+    expect(result).toBeNull();
+    expect(ran).toBe(false);
+    expect(h.forms).toHaveLength(0);
+    expect(h.applied).toHaveLength(0);
+    expect(h.status).toEqual([{ text: t('channelPanes.selectionCrosses'), error: true }]);
+  });
+
+  it('runs on a selection within one section as ever (P4e)', async () => {
+    const h = harness();
+    h.selection = { startLine: 2, endLine: 3, empty: false };
+    await h.service.run(upperCase());
+    expect(h.applied).toHaveLength(1);
   });
 
   it('says in the status bar that only the selection ran', async () => {

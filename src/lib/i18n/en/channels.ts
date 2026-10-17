@@ -25,8 +25,11 @@ export default {
   assign: 'Assign to Channel…',
   /** `channels.checkSync`: Tools tab, `channels.toolsGroup`, next to the M10 checks. */
   checkSync: 'Check Wait Codes',
-  /** `channels.splitToDocuments`: `single-file` only; a one-way copy for reading. */
+  /** `channels.splitToDocuments`: `single-file` only; the documents can be merged back (P4.23). */
   splitToDocuments: 'Split into Channel Documents',
+  /** `channels.mergeBack` (Phase 4, P4.23; pinned by the P4e prelude): writes the edited channel
+   *  documents of a split back into their program, as one undo step. */
+  mergeBack: 'Merge Channels Back',
   /** `channels.testOnDocument`: the Channels tester's report in the Results panel. */
   testOnDocument: 'Test Channel Rules on Document',
 
@@ -190,10 +193,27 @@ export default {
     nothing: 'No channel sections were found.',
     confirmTitle: 'Split into channel documents',
     confirm:
-      'This makes one new document for each channel, for reading. Changes you make in them do not come back into this program.',
+      'This makes one new document for each channel. To bring changes made in them back into this program, use Merge Channels Back while this program is open.',
     ok: 'Split',
-    done: 'Made {count} documents for reading. Changes in them do not come back into the program.',
+    done: 'Made {count} documents. Merge Channels Back brings your changes in them back into the program.',
     name: '{title} — {channel}',
+  },
+
+  /** `channels.mergeBack` (P4.23, `core/channels/merge.ts`): the answers in the status bar. `{channel}` is the machine's own name. */
+  merge: {
+    sourceChanged:
+      'The program was changed in the lines of {channel} after the split, so that document cannot be merged back. Nothing was changed.',
+    headerChanged:
+      'The lines at the top of {channel} (before the first channel section) were changed. They belong to every channel: change them in the program. Nothing was changed.',
+    sectionsMoved:
+      'Merging would move lines into another channel ({channel} would no longer read as expected): a section start or a wait code was typed or removed. Nothing was changed.',
+    sharedChanged:
+      'The channel documents changed the same shared lines differently ({channel}). Nothing was changed.',
+    nothing: 'Nothing to merge: none of the open channel documents has changes.',
+    noRecord: 'This document was not made by Split into Channel Documents in this session.',
+    sourceClosed: 'The program these channel documents came from is closed. Nothing was changed.',
+    done_one: 'Merged {count} channel document into the program. Undo takes it back in one step.',
+    done_other: 'Merged {count} channel documents into the program. Undo takes it back in one step.',
   },
 
   /** The plain wait-code list (`parseWaitCodes`); `item` is quoted as the user wrote it. */

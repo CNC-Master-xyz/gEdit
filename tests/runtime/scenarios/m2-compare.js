@@ -159,7 +159,7 @@ scenario('m2-compare', { timeout: 300 }, async (h) => {
   // The inline toggle is the only toggle button without a test id (Raw/Review and the review
   // options have one).
   const inlineButton = () => /** @type {HTMLElement | null} */ (view()?.querySelector('button.tool[aria-pressed]:not([data-testid])') ?? null)
-  h.check('the toolbar has the M11 controls: Raw and Review, copy both ways, export, go to line', h.qa('compare-mode').map((e) => e.dataset.mode).join() === 'raw,review' && h.qa('compare-copy').length === 2 && !!h.q('compare-export') && !!h.q('compare-goto'))
+  h.check('the toolbar has the M11 controls: Raw and Review, copy both ways, export, go to line (P4e adds the third button, Aligned)', h.qa('compare-mode').map((e) => e.dataset.mode).join() === 'raw,review,aligned' && h.qa('compare-copy').length === 2 && !!h.q('compare-export') && !!h.q('compare-goto'))
   h.check('Raw is pressed and the raw whitespace switch is offered', h.q('compare-mode', { mode: 'raw' })?.getAttribute('aria-pressed') === 'true' && !!view()?.querySelector('input[type="checkbox"]'))
   h.check('it starts side by side', inlineButton()?.getAttribute('aria-pressed') === 'false', inlineButton()?.getAttribute('aria-pressed'))
   await ctx.commands.run('compare.toggleInline')

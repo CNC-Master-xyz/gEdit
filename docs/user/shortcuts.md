@@ -48,10 +48,13 @@ a broken keyboard.
 | `Cmd/Ctrl+Alt+O` | Switch tab… (pick from a list) |
 | `Cmd/Ctrl+Alt+A` | Code Inspector — show or hide the [inspector](inspector.md) on the left |
 | `F1` | Command palette |
+| `F6` / `Shift+F6` | Focus the next / previous pane — with a split editor or the channel view open (wraps around; the active pane has the accent border) |
 
 On Windows and Linux, `Ctrl+Alt+A` is `AltGr+A` on some keyboard layouts (a Polish layout types
 `ą` with it). If the key types a letter on your keyboard, use the **Code Inspector** button on the
 View tab (*Panels*) or the palette; they do the same.
+
+**Split Editor**, **Split Editor Down** and **Close Split** (View tab, *Editor*) have no key; see [Two panes](README.md#two-panes-split-editor). **Channels Side by Side** has none either (NC tab, *Channels*).
 
 The side panel, the bottom panel, the Script Output panel, the display switches and the zoom
 are on the View tab, without shortcuts. So are **Motion Colors** (View tab, *Lines*) and
@@ -135,7 +138,7 @@ Some Linux desktops (KDE and Xfce, for one) use `Alt+F7` to move a window and ta
 before gEdit sees it. If that is your desktop, use the ribbon (NC tab, **Channels**) or the
 palette (`F1`, then *Next Sync Point*); they do the same.
 
-**Check Wait Codes**, **Split into Channel Documents**, **Channel…** and **Assign to
+**Check Wait Codes**, **Channels Side by Side**, **Split into Channel Documents**, **Merge Channels Back**, **Channel…** and **Assign to
 Channel…** have no key; they are on the ribbon (NC and Tools tabs) and in the palette.
 
 ## Scripts
@@ -192,7 +195,7 @@ None of these has a key; they are on the ribbon or in the palette (`F1`).
 | `Cmd/Ctrl+,` | Settings |
 
 Next and previous difference (the arrow buttons), the inline view, the **Raw** and **Review**
-buttons (the command is called Review Mode), the copy buttons ← and →, Export Differences… and closing
+buttons (the command is called Review Mode), the **Aligned** button (the command is called Aligned View), the copy buttons ← and → and **Word →** / **← Word** (Copy Word to Current Document, Copy Word to Original), Export Differences… and closing
 a comparison are buttons in the comparison itself; **Compare Two Files…** is on the Tools tab. None of them has a key,
 and all are in the palette. See [Comparing two programs](README.md#comparing-two-programs).
 On Windows and Linux some graphics drivers and desktops take `Ctrl+Alt+Arrow` for

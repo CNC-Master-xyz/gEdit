@@ -13,10 +13,12 @@
 // with sections in one file the item reads "Channel: <name>", and the scenario reads the
 // channel off `data-channel-id` instead of the text.
 //
-// **The split** is a one-way copy for reading: two untitled tabs whose text is the program's
-// header plus that channel's ranges, in document order. The expected text is built here from the
-// golden's ranges and the program's lines, never from what the command made. The command warns
-// once per session, and writes nothing: the folder holds the same files afterwards.
+// **The split** makes two untitled tabs whose text is the program's header plus that channel's
+// ranges, in document order. The expected text is built here from the golden's ranges and the
+// program's lines, never from what the command made. The command warns once per session, and
+// writes nothing: the folder holds the same files afterwards. Since P4e (P4.23) the documents can
+// be merged back into the program (`channels.mergeBack`, scenario `p4-channels`), so the warning
+// says where the changes can go instead of saying they are lost.
 
 import { scenario } from '../lib/index.js'
 import { listDir } from './m2-common.js'
@@ -212,7 +214,7 @@ scenario('m12-channels-single', { timeout: 240, files: REPO_FILE }, async (h) =>
   const docsBefore = ctx.docs.all().length
   const running = ctx.commands.run('channels.splitToDocuments')
   const alert = await h.alert.wait({ timeout: 8000 })
-  h.check('the first split says what it is: a copy for reading, whose changes do not come back', !!alert && /do not come back/i.test((alert.texts ?? []).join(' ')), alert)
+  h.check('the first split says what it makes and how changes made in the documents come back: with Merge Channels Back (P4e: no longer a copy for reading)', !!alert && (alert.texts ?? []).join(' ').includes(ctx.t('channels.mergeBack')) && !/do not come back/i.test((alert.texts ?? []).join(' ')), alert)
   await h.alert.click('Split')
   await running
   await h.idle()

@@ -527,6 +527,7 @@ function renderLine(
   cp: CompiledProfile,
   o: CompareOptions,
   ctx: NormalizeContext,
+  trace?: (index: number, text: string | null) => void,
 ): string | null {
   const rules = rulesOf(cp);
   // Both are asked only when a token needs the answer: most lines have neither a comment
@@ -563,13 +564,16 @@ function renderLine(
       readComments ??= ctx.keepComments.some((re) => re.test(line));
       if (o.ignoreComments && !readComments && !gluesNames(tokens, index, rules)) {
         dropped = droppedLast = true;
+        trace?.(index, null);
         continue;
       }
     } else if (kind === 'blockNumber' && dropsBlockNumber(token, tokens[index + 1], o, ctx, rules)) {
       dropped = droppedLast = true;
+      trace?.(index, null);
       continue;
     } else if (names?.has(index)) {
       dropped = droppedLast = true;
+      trace?.(index, null);
       continue;
     }
     droppedLast = false;
@@ -579,6 +583,7 @@ function renderLine(
     let text = token.text;
     if (kind === 'string' || (kind === 'comment' && readComments)) {
       out += text;
+      trace?.(index, text);
       previous = token;
       continue;
     }
@@ -595,6 +600,7 @@ function renderLine(
     if (o.ignoreWhitespace) text = collapseBlanks(text, rules.strings);
     if (o.ignoreCase) text = foldCase(text, rules.strings);
     out += text;
+    trace?.(index, text);
     previous = token;
   }
 
@@ -615,6 +621,36 @@ export function normalizeLine(
 ): NormalizedLine {
   const { tokens, state } = tokenizeLine(line, cp, prev);
   return { text: renderLine(line, tokens, cp, o, ctx), state };
+}
+
+/**
+ * P4.25 (the aligned diff, X30). The words of one line as the options read them: every token
+ * of the line that is not a blank and not dropped by the options (a block number, a comment,
+ * a cycle name), each with its `text` replaced by what normalization writes for it and its
+ * `start`/`end` still the offsets in the line **as written**. Changes no rule: it is
+ * `normalizeLine` with a record of what became of each token. The aligned diff compares
+ * these words, so that a block number or `X5.0` against `X5` that the options ignore is not
+ * marked, and draws the marks on the original text.
+ */
+export function normalizedWords(
+  line: string,
+  cp: CompiledProfile,
+  o: CompareOptions,
+  ctx: NormalizeContext,
+  prev?: LineState,
+): { words: NcToken[]; state: LineState } {
+  const { tokens, state } = tokenizeLine(line, cp, prev);
+  const written: (string | null)[] = new Array(tokens.length).fill(null);
+  renderLine(line, tokens, cp, o, ctx, (index, text) => {
+    written[index] = text;
+  });
+  const words: NcToken[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const text = written[i];
+    if (text === null || tokens[i].kind === 'whitespace' || tokens[i].end <= tokens[i].start) continue;
+    words.push(text === tokens[i].text ? tokens[i] : { ...tokens[i], text });
+  }
+  return { words, state };
 }
 
 // ---------------------------------------------------------------------------

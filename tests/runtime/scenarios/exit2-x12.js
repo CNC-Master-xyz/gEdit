@@ -201,7 +201,7 @@ export async function runX12(h, { noPython = false } = {}) {
   const docsBefore = ctx.docs.all().length
   const running = ctx.commands.run('channels.splitToDocuments')
   const alert = await h.alert.wait({ timeout: 8000 })
-  h.check('the split warns that it is a one-way copy', !!alert && /do not come back/i.test((alert.texts ?? []).join(' ')), alert)
+  h.check('the split says how changes made in the documents come back: with Merge Channels Back (P4e: it was a one-way copy before)', !!alert && (alert.texts ?? []).join(' ').includes(ctx.t('channels.mergeBack')) && !/do not come back/i.test((alert.texts ?? []).join(' ')), alert)
   await h.alert.click('Split')
   await running
   await h.idle()

@@ -4,7 +4,7 @@
 // check's report.
 
 import { describe, expect, it, vi } from 'vitest';
-import type { ChannelParams, ChannelSet, SyncHit } from '$lib/core/channels/types';
+import type { ChannelParams, ChannelSet, SyncHit, SyncRule } from '$lib/core/channels/types';
 import { hasKey } from '$lib/i18n';
 
 /** The machine's channel block `channels.params` answers (`markName`, M13 review NC-10). */
@@ -12,7 +12,6 @@ let machineParams: ChannelParams | null = null;
 
 vi.mock('$lib/stores/channels', () => ({
   channels: { ruleLabel: (_id: string, ruleId: string) => (ruleId === 'stops' ? 'Stops and ends' : ''), params: () => machineParams },
-  sameMarkId: (a: string, b: string) => a === b || a.replace(/^M0+/, 'M') === b.replace(/^M0+/, 'M'),
 }));
 vi.mock('$lib/app/dialogs', () => ({ dialogs: {} }));
 vi.mock('$lib/app/fileOps', () => ({ files: {} }));
@@ -30,10 +29,10 @@ const hit = (line: number, mark: string, channel: string, ruleId = 'w', partners
 const ref = (id: string, index: number) => ({ id, name: `Channel ${id}`, index });
 
 describe('the contribution', () => {
-  it('declares the eight pinned commands with their keys', () => {
+  it('declares the nine pinned commands with their keys', () => {
     const cmds = Object.fromEntries((contribution.commands ?? []).map((c) => [c.id, c]));
     expect(Object.keys(cmds).sort()).toEqual(
-      ['channels.assign', 'channels.checkSync', 'channels.gotoPartner', 'channels.nextSyncPoint', 'channels.prevSyncPoint', 'channels.select', 'channels.splitToDocuments', 'channels.testOnDocument'],
+      ['channels.assign', 'channels.checkSync', 'channels.gotoPartner', 'channels.mergeBack', 'channels.nextSyncPoint', 'channels.prevSyncPoint', 'channels.select', 'channels.splitToDocuments', 'channels.testOnDocument'],
     );
     expect(cmds['channels.nextSyncPoint'].keys).toBe('Alt+F7');
     expect(cmds['channels.prevSyncPoint'].keys).toBe('Shift+Alt+F7');
@@ -55,6 +54,7 @@ describe('the contribution', () => {
       'channels.prevSyncPoint': 'nc/channels.group',
       'channels.gotoPartner': 'nc/channels.group',
       'channels.splitToDocuments': 'nc/channels.group',
+      'channels.mergeBack': 'nc/channels.group',
       'channels.checkSync': 'tools/channels.toolsGroup',
     });
   });
@@ -115,6 +115,82 @@ describe('findPartner', () => {
     expect(findPartner({ order, self: '1', mark: p1[1], ownMarks: p1, marksOf })).toMatchObject({ kind: 'found', channel: { id: '2' }, docId: 'd2', hit: { line: 1 } });
     const without3 = (c: string) => (c === '2' ? { docId: 'd2', marks: p2 } : null);
     expect(findPartner({ order, self: '1', mark: p1[0], ownMarks: p1, marksOf: without3 })).toMatchObject({ kind: 'notOpen', channel: { id: '3' } });
+  });
+
+  // §7 #388, the owner's `P`-set rule: the pairing key of the channel view (`waitKey`).
+  it('does not pair an M901 P12 with an M901 P123 (and the other way round)', () => {
+    const mine12 = [hit(5, 'M901', '1', 'w', ['1', '2'])];
+    const theirs123 = [hit(7, 'M901', '2', 'w', ['1', '2', '3'])];
+    const marksOf = (c: string) => (c === '2' ? { docId: 'd2', marks: theirs123 } : null);
+    expect(findPartner({ order, self: '1', mark: mine12[0], ownMarks: mine12, marksOf })).toEqual({ kind: 'none' });
+    const mine123 = [hit(5, 'M901', '1', 'w', ['1', '2', '3'])];
+    const theirs12 = [hit(7, 'M901', '2', 'w', ['1', '2'])];
+    const marksOf12 = (c: string) => (c === '2' ? { docId: 'd2', marks: theirs12 } : null);
+    expect(findPartner({ order, self: '1', mark: mine123[0], ownMarks: mine123, marksOf: marksOf12 })).toMatchObject({ kind: 'notOpen', channel: { id: '3' } });
+  });
+
+  it('finds the P12 wait among P123 waits of the same channel, counting only waits of its own key', () => {
+    // Channel 1: P123 (line 1), P12 (line 5), P12 (line 9). Channel 2: P12 (line 2), P123 (line 6), P12 (line 10).
+    const mine = [hit(1, 'M901', '1', 'w', ['1', '2', '3']), hit(5, 'M901', '1', 'w', ['1', '2']), hit(9, 'M901', '1', 'w', ['1', '2'])];
+    const theirs = [hit(2, 'M901', '2', 'w', ['1', '2']), hit(6, 'M901', '2', 'w', ['1', '2', '3']), hit(10, 'M901', '2', 'w', ['1', '2'])];
+    const marksOf = (c: string) => (c === '2' ? { docId: 'd2', marks: theirs } : { docId: 'd3', marks: [hit(3, 'M901', '3', 'w', ['1', '2', '3'])] });
+    expect(findPartner({ order, self: '1', mark: mine[1], ownMarks: mine, marksOf })).toMatchObject({ kind: 'found', channel: { id: '2' }, hit: { line: 2 } });
+    expect(findPartner({ order, self: '1', mark: mine[2], ownMarks: mine, marksOf })).toMatchObject({ kind: 'found', channel: { id: '2' }, hit: { line: 10 } });
+    // The P123 wait meets the P123 of channel 2 (line 6), the first of its key there.
+    expect(findPartner({ order, self: '1', mark: mine[0], ownMarks: mine, marksOf })).toMatchObject({ kind: 'found', channel: { id: '2' }, hit: { line: 6 } });
+  });
+
+  it('pairs the P set by its members, not by how the machine wrote it', () => {
+    // `P12` seen from channel 1 and the same wait written `WAITM(1,1,2)` seen from channel 2 name the same channels.
+    const mine = [hit(4, 'M901', '1', 'w', ['2'])];
+    const theirs = [hit(8, 'M901', '2', 'w', ['1', '2'])];
+    const marksOf = (c: string) => (c === '2' ? { docId: 'd2', marks: theirs } : null);
+    expect(findPartner({ order, self: '1', mark: mine[0], ownMarks: mine, marksOf })).toMatchObject({ kind: 'found', hit: { line: 8 } });
+  });
+  // P4e review NC-4: Siemens WAITM lists pair channel by channel (as Check Wait Codes), a SETM answers.
+  const siemens: SyncRule[] = [
+    { id: 'waitm', label: 'WAITM', match: { kind: 'regex', pattern: { source: 'x' } as never }, partners: { kind: 'line', pattern: { source: 'x' } as never } },
+    { id: 'setm', label: 'SETM', blocking: false, answers: true, match: { kind: 'regex', pattern: { source: 'x' } as never }, partners: { kind: 'all' } },
+  ];
+  const waitm = (line: number, mark: string, channel: string, partners: string[]): SyncHit => ({ ruleId: 'waitm', mark, line, channel, partners, blocking: true });
+
+  it('finds the partner of WAITM lists that differ per channel (NC-4)', () => {
+    // WAITM(1,1,2,3) in channel 1, WAITM(1,1,2) in channel 2, WAITM(1,1,3) in channel 3: legal, the check is clean.
+    const one = [waitm(2, '1', '1', ['1', '2', '3'])];
+    const marksOf = (c: string) =>
+      c === '2' ? { docId: 'd2', marks: [waitm(2, '1', '2', ['1', '2'])] } : c === '3' ? { docId: 'd3', marks: [waitm(2, '1', '3', ['1', '3'])] } : null;
+    expect(findPartner({ order, self: '1', mark: one[0], ownMarks: one, marksOf, rules: siemens })).toMatchObject({ kind: 'found', channel: { id: '2' }, hit: { line: 2 } });
+    const three = [waitm(2, '1', '3', ['1', '3'])];
+    const fromThree = (c: string) => (c === '1' ? { docId: 'd1', marks: one } : null);
+    expect(findPartner({ order, self: '3', mark: three[0], ownMarks: three, marksOf: fromThree, rules: siemens })).toMatchObject({ kind: 'found', channel: { id: '1' }, hit: { line: 2 } });
+  });
+
+  it('goes to the SETM that answers a WAITM, and pairs the n-th naming each other (NC-4)', () => {
+    const one = [waitm(2, '7', '1', ['1', '2'])];
+    const setm: SyncHit = { ruleId: 'setm', mark: '7', line: 3, channel: '2', partners: ['1', '2'], blocking: false };
+    expect(findPartner({ order, self: '1', mark: one[0], ownMarks: one, marksOf: (c) => (c === '2' ? { docId: 'd2', marks: [setm] } : null), rules: siemens })).toMatchObject({
+      kind: 'found',
+      hit: { line: 3, ruleId: 'setm' },
+    });
+    // Channel 1: WAITM(5,1,3) then WAITM(5,1,2); channel 2: WAITM(5,1,2). The second of channel 1 is the one naming channel 2.
+    const mine = [waitm(1, '5', '1', ['1', '3']), waitm(4, '5', '1', ['1', '2'])];
+    const theirs = [waitm(6, '5', '2', ['1', '2'])];
+    expect(findPartner({ order, self: '1', mark: mine[1], ownMarks: mine, marksOf: (c) => (c === '2' ? { docId: 'd2', marks: theirs } : null), rules: siemens })).toMatchObject({
+      kind: 'found',
+      hit: { line: 6 },
+    });
+  });
+
+  it('keeps the same-P key for a P-word rule without samePartners, and keys a P-less Fanuc wait apart (NC-3, NC-4)', () => {
+    const word: SyncRule[] = [{ id: 'w', label: 'Waits', match: { kind: 'codes', codes: 'M900-M999' }, partners: { kind: 'word', address: 'P', decode: 'digits' } }];
+    const mine12 = [hit(5, 'M901', '1', 'w', ['1', '2'])];
+    const theirs123 = (c: string) => (c === '2' ? { docId: 'd2', marks: [hit(7, 'M901', '2', 'w', ['1', '2', '3'])] } : null);
+    expect(findPartner({ order, self: '1', mark: mine12[0], ownMarks: mine12, marksOf: theirs123, rules: word })).toEqual({ kind: 'none' });
+    const fanuc: SyncRule[] = [{ ...word[0], samePartners: true }];
+    const bare = [{ ...hit(5, 'M901', '1', 'w', ['1', '2']), absent: true as const }];
+    const withP = (c: string) => (c === '2' ? { docId: 'd2', marks: [hit(7, 'M901', '2', 'w', ['1', '2'])] } : null);
+    expect(findPartner({ order, self: '1', mark: bare[0], ownMarks: bare, marksOf: withP, rules: fanuc })).toEqual({ kind: 'none' });
+    expect(findPartner({ order, self: '1', mark: bare[0], ownMarks: bare, marksOf: withP })).toMatchObject({ kind: 'found', hit: { line: 7 } });
   });
 });
 

@@ -18,6 +18,15 @@ interface FakeModel {
   getLanguageId(): string;
   setValue(text: string): void;
   dispose(): void;
+  getLineCount(): number;
+  getLineContent(n: number): string;
+  getLineMaxColumn(n: number): number;
+}
+
+/** One decoration a fake editor was given (P4.24 word marks). */
+interface FakeDecoration {
+  range: [number, number, number, number];
+  className: string | undefined;
 }
 
 const fake = vi.hoisted(() => ({
@@ -42,12 +51,26 @@ const fake = vi.hoisted(() => ({
   viewModels: [] as { model: { original: unknown; modified: unknown }; disposed: boolean; dispose(): void }[],
   /** Models whose text changed while a live view model held them. */
   filledWhileComputing: [] as FakeModel[],
+  /** What `getLineChanges()` answers (the diff Monaco computed). */
+  lineChanges: null as unknown[] | null,
+  /** The decoration collections of the last diff editor, by pane; `cleared` when `clear()` ran. */
+  collections: [] as { side: 'original' | 'modified'; items: unknown[]; cleared: boolean }[],
 }));
 
 interface FakeViewModel {
   model: { original: unknown; modified: unknown };
   disposed: boolean;
   dispose(): void;
+}
+
+/** The lines of a fake model, split once per text (a 40,000-line model is read line by line). */
+const splitLines = new WeakMap<FakeModel, { text: string; lines: string[] }>();
+function linesOf(model: FakeModel): string[] {
+  const known = splitLines.get(model);
+  if (known && known.text === model.text) return known.lines;
+  const lines = model.text.split('\n');
+  splitLines.set(model, { text: model.text, lines });
+  return lines;
 }
 
 function viewModel(pair: { original: unknown; modified: unknown }): FakeViewModel {
@@ -69,6 +92,14 @@ function listen(list: (() => void)[], fn: () => void): { dispose(): void } {
 
 vi.mock('$lib/monaco/setup', () => ({
   getMonaco: async () => ({
+    Range: class {
+      constructor(
+        public startLineNumber: number,
+        public startColumn: number,
+        public endLineNumber: number,
+        public endColumn: number,
+      ) {}
+    },
     editor: {
       createModel: (text: string, language: string) => {
         const model: FakeModel = {
@@ -77,6 +108,9 @@ vi.mock('$lib/monaco/setup', () => ({
           disposed: false,
           isDisposed: () => model.disposed,
           getLanguageId: () => model.language,
+          getLineCount: () => linesOf(model).length,
+          getLineContent: (n: number) => linesOf(model)[n - 1],
+          getLineMaxColumn: (n: number) => linesOf(model)[n - 1].length + 1,
           setValue: (value: string) => {
             if (fake.current && (fake.current.original === model || fake.current.modified === model)) {
               fake.filledWhileShown.push(model);
@@ -103,11 +137,26 @@ vi.mock('$lib/monaco/setup', () => ({
         fake.listeners.content.length = 0;
         fake.listeners.model.length = 0;
         fake.listeners.diff.length = 0;
-        const editorStub = {
+        fake.collections.length = 0;
+        const editorStub = (side: 'original' | 'modified') => ({
           onDidFocusEditorText: () => ({ dispose: () => {} }),
           onDidChangeModelContent: (fn: () => void) => listen(fake.listeners.content, fn),
           onDidChangeModel: (fn: () => void) => listen(fake.listeners.model, fn),
-        };
+          getModel: () => (current?.model as Record<string, unknown> | undefined)?.[side] ?? null,
+          createDecorationsCollection: () => {
+            const collection = { side, items: [] as unknown[], cleared: false };
+            fake.collections.push(collection);
+            return {
+              append: (list: unknown[]) => void collection.items.push(...list),
+              clear: () => {
+                collection.cleared = true;
+                collection.items.length = 0;
+              },
+            };
+          },
+        });
+        const originalStub = editorStub('original');
+        const modifiedStub = editorStub('modified');
         return {
           createViewModel: (pair: { original: unknown; modified: unknown }) => viewModel(pair),
           setModel: (given: FakeViewModel | { original: unknown; modified: unknown } | null) => {
@@ -122,8 +171,9 @@ vi.mock('$lib/monaco/setup', () => ({
           },
           getModel: () => current?.model ?? null,
           onDidUpdateDiff: (fn: () => void) => listen(fake.listeners.diff, fn),
-          getOriginalEditor: () => editorStub,
-          getModifiedEditor: () => editorStub,
+          getLineChanges: () => fake.lineChanges,
+          getOriginalEditor: () => originalStub,
+          getModifiedEditor: () => modifiedStub,
           dispose: () => {},
           updateOptions: (o: Record<string, unknown>) => fake.updates.push(o),
         };
@@ -184,6 +234,8 @@ afterEach(() => {
   fake.filledWhileComputing.length = 0;
   fake.viewModels.length = 0;
   fake.current = null;
+  fake.lineChanges = null;
+  fake.collections.length = 0;
 });
 
 describe('createDiff and the read-only lock', () => {
@@ -418,5 +470,187 @@ describe('settleCreated (CODE-11)', () => {
       { sides: null, inline: true, ignoreTrimWhitespace: true },
     );
     expect(calls).toEqual(['inline:true', 'trim:true']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Word marks (P4.24, AD-52, plan §6.7 rule 17)
+// ---------------------------------------------------------------------------
+
+describe('word marks', () => {
+  interface Drawn {
+    line: number;
+    from: number;
+    to: number;
+    className: string;
+  }
+
+  /** What a pane was given, as plain rows. */
+  function drawn(side: 'original' | 'modified'): Drawn[] {
+    return fake.collections
+      .filter((c) => c.side === side)
+      .flatMap((c) => c.items as { range: { startLineNumber: number; startColumn: number; endColumn: number }; options: { inlineClassName: string } }[])
+      .map((d) => ({ line: d.range.startLineNumber, from: d.range.startColumn, to: d.range.endColumn, className: d.options.inlineClassName }));
+  }
+  const words = (rows: Drawn[]) => rows.filter((d) => d.className === 'gedit-word-changed');
+  const whole = (rows: Drawn[]) => rows.filter((d) => d.className === 'gedit-word-line');
+  const change = (o: [number, number], m: [number, number]) => ({
+    originalStartLineNumber: o[0],
+    originalEndLineNumber: o[1],
+    modifiedStartLineNumber: m[0],
+    modifiedEndLineNumber: m[1],
+  });
+  const diffUpdated = () => [...fake.listeners.diff].forEach((fn) => fn());
+
+  async function shown(original: string, modified: string, languageId = 'fanuc-gcode') {
+    const handle = await createDiff({
+      container: {} as HTMLElement,
+      modifiedDocId: open(false),
+      sides: {
+        original: { kind: 'text', text: original, languageId },
+        modified: { kind: 'text', text: modified, languageId },
+      },
+      inline: false,
+      ignoreTrimWhitespace: false,
+    });
+    return handle;
+  }
+
+  it('marks the whole word that differs on each side once Monaco has computed the diff (X30)', async () => {
+    const handle = await shown('G0 X0.\nN10 G1 X10. F1200\nM30', 'G0 X0.\nN10 G1 X10. F1000\nM30');
+    fake.lineChanges = [change([2, 2], [2, 2])];
+    diffUpdated();
+    // Columns are 1-based and `to` is exclusive: `F1200` is offsets 12..17 of line 2.
+    expect(words(drawn('original'))).toEqual([{ line: 2, from: 13, to: 18, className: 'gedit-word-changed' }]);
+    expect(words(drawn('modified'))).toEqual([{ line: 2, from: 13, to: 18, className: 'gedit-word-changed' }]);
+    handle.dispose();
+  });
+
+  it('lays gedit-word-line over each line of a pair that has marks, which hides Monaco\'s character marks', async () => {
+    const handle = await shown('G1 X1. F1200', 'G1 X1. F1000');
+    fake.lineChanges = [change([1, 1], [1, 1])];
+    diffUpdated();
+    expect(whole(drawn('original'))).toEqual([{ line: 1, from: 1, to: 13, className: 'gedit-word-line' }]);
+    expect(whole(drawn('modified'))).toEqual([{ line: 1, from: 1, to: 13, className: 'gedit-word-line' }]);
+    handle.dispose();
+  });
+
+  it('keeps Monaco\'s marks on a pair that has no word marks (a moved word, a whole added line)', async () => {
+    const handle = await shown('G1 X1. Y2.\nM5', 'G1 Y2. X1.\nM5\nM30');
+    fake.lineChanges = [change([1, 1], [1, 1]), change([2, 0], [3, 3])];
+    diffUpdated();
+    expect(drawn('original')).toEqual([]);
+    expect(drawn('modified')).toEqual([]);
+    handle.dispose();
+  });
+
+  it('pairs the lines of a change in order and leaves the extra lines of the longer side alone', async () => {
+    const handle = await shown('A1\nG1 F1', 'A1\nG1 F2\nG1 F3');
+    fake.lineChanges = [change([2, 2], [2, 3])];
+    diffUpdated();
+    expect(words(drawn('original')).map((d) => d.line)).toEqual([2]);
+    expect(words(drawn('modified')).map((d) => d.line)).toEqual([2]);
+    handle.dispose();
+  });
+
+  it('reads each side with its own profile (the language of its model)', async () => {
+    const handle = await createDiff({
+      container: {} as HTMLElement,
+      modifiedDocId: open(false),
+      sides: {
+        original: { kind: 'text', text: 'Q203=+0', languageId: 'heidenhain-klartext' },
+        modified: { kind: 'text', text: 'Q203=-5', languageId: 'heidenhain-klartext' },
+      },
+      inline: false,
+      ignoreTrimWhitespace: false,
+    });
+    fake.lineChanges = [change([1, 1], [1, 1])];
+    diffUpdated();
+    expect(words(drawn('original'))).toEqual([{ line: 1, from: 6, to: 8, className: 'gedit-word-changed' }]);
+    handle.dispose();
+  });
+
+  it('draws nothing for a language the registry does not know, and does not throw', async () => {
+    const handle = await shown('G1 F1', 'G1 F2', 'no-such-profile');
+    fake.lineChanges = [change([1, 1], [1, 1])];
+    expect(() => diffUpdated()).not.toThrow();
+    expect(drawn('modified')).toEqual([]);
+    handle.dispose();
+  });
+
+  it('draws nothing while the diff has not arrived or has no changes', async () => {
+    const handle = await shown('G1 F1', 'G1 F2');
+    fake.lineChanges = null;
+    diffUpdated();
+    fake.lineChanges = [];
+    diffUpdated();
+    expect(drawn('modified')).toEqual([]);
+    handle.dispose();
+  });
+
+  it('replaces the marks of the old diff with those of the new one', async () => {
+    const handle = await shown('G1 F1\nG1 F1', 'G1 F2\nG1 F1');
+    fake.lineChanges = [change([1, 1], [1, 1])];
+    diffUpdated();
+    const first = fake.collections.slice();
+    fake.lineChanges = [];
+    diffUpdated();
+    expect(first.every((c) => c.cleared)).toBe(true);
+    expect(drawn('modified')).toEqual([]);
+    handle.dispose();
+  });
+
+  it('takes the marks away before a scratch model is refilled, and when the comparison closes', async () => {
+    const handle = await shown('G1 F1', 'G1 F2');
+    fake.lineChanges = [change([1, 1], [1, 1])];
+    diffUpdated();
+    const live = fake.collections.slice();
+    expect(live.some((c) => c.items.length > 0)).toBe(true);
+    handle.show({
+      original: { kind: 'text', text: 'G1 F5', languageId: 'fanuc-gcode' },
+      modified: { kind: 'text', text: 'G1 F6', languageId: 'fanuc-gcode' },
+    });
+    expect(live.every((c) => c.cleared && c.items.length === 0)).toBe(true);
+    // The new text has no marks until Monaco has diffed it.
+    expect(drawn('modified')).toEqual([]);
+    fake.lineChanges = [change([1, 1], [1, 1])];
+    diffUpdated();
+    expect(words(drawn('modified'))).toHaveLength(1);
+    const second = fake.collections.slice();
+    handle.dispose();
+    expect(second.every((c) => c.cleared)).toBe(true);
+  });
+
+  it('marks a large diff in slices and stops when the text changes under it', async () => {
+    const count = 40_000;
+    const a = Array.from({ length: count }, (_, i) => `G1 X${i}. F100`).join('\n');
+    const b = Array.from({ length: count }, (_, i) => `G1 X${i}. F200`).join('\n');
+    const handle = await shown(a, b);
+    fake.lineChanges = [change([1, count], [1, count])];
+    diffUpdated();
+    const afterFirstSlice = words(drawn('modified')).length;
+    // One slice is a few milliseconds of work, not the whole diff.
+    expect(afterFirstSlice).toBeGreaterThan(0);
+    expect(afterFirstSlice).toBeLessThan(count);
+    // An edit makes the diff stale: the run ends, whatever is left is not drawn.
+    for (const fn of [...fake.listeners.content]) fn();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(words(drawn('modified')).length).toBe(afterFirstSlice);
+    handle.dispose();
+  });
+
+  it('finishes a large diff when nothing interrupts it', async () => {
+    const count = 6000;
+    const a = Array.from({ length: count }, (_, i) => `G1 X${i}. F100`).join('\n');
+    const b = Array.from({ length: count }, (_, i) => `G1 X${i}. F200`).join('\n');
+    const handle = await shown(a, b);
+    fake.lineChanges = [change([1, count], [1, count])];
+    diffUpdated();
+    for (let waited = 0; waited < 5000 && words(drawn('modified')).length < count; waited += 20) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(words(drawn('modified'))).toHaveLength(count);
+    expect(words(drawn('original'))).toHaveLength(count);
+    handle.dispose();
   });
 });

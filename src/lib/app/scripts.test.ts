@@ -144,7 +144,7 @@ interface Harness {
   docs: DocumentStore;
   docId: DocId;
   lines: string[];
-  selection: { startLine: number; endLine: number; empty: boolean } | null;
+  selection: { startLine: number; endLine: number; empty: boolean; crossesJunction?: true } | null;
   cursor: { line: number; column: number; selectedChars: number; selections: number } | null;
   version: number;
   /** Runs this before answering `script_run`, to simulate an edit during the run. */
@@ -606,6 +606,23 @@ describe('ScriptService.run: the input scope', () => {
       entries: [entry('user:whole.py', { meta: meta({ input: 'document', output: 'panel' }) })],
     });
     h.selection = { startLine: 3, endLine: 4, empty: false };
+    await h.service.run('user:whole.py');
+    expect((h.requests[0].context as ScriptContextV2).input).toMatchObject({ scope: 'document' });
+  });
+
+  it('refuses a script that takes the selection when it runs over the lines of another channel (P4e)', async () => {
+    const h = await ready();
+    h.selection = { startLine: 2, endLine: 5, empty: false, crossesJunction: true };
+    await h.service.run('bundled:scale_feed.py');
+    expect(lastStatus(h)).toMatchObject({ text: 'channelPanes.selectionCrosses', error: true });
+    expect(h.requests).toHaveLength(0);
+  });
+
+  it('runs a script that asks for the document whatever the selection is (P4e)', async () => {
+    const h = await ready({
+      entries: [entry('user:whole.py', { meta: meta({ input: 'document', output: 'panel' }) })],
+    });
+    h.selection = { startLine: 2, endLine: 5, empty: false, crossesJunction: true };
     await h.service.run('user:whole.py');
     expect((h.requests[0].context as ScriptContextV2).input).toMatchObject({ scope: 'document' });
   });

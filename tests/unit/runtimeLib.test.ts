@@ -9,8 +9,9 @@ import { mayRetry } from '../runtime/lib/retry.js';
 import { scenarios } from '../runtime/lib/index.js';
 import { CHOICES, DEFAULTS, FORM_IDS, arcProgram, nearDifferences, wantedArcLine } from '../runtime/scenarios/p4-geometry-common.js';
 import { trimBlankEnd } from '$lib/contrib/segments';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 type Selection = { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number };
 const select = (a: number, b: number, c: number, d: number): Selection => ({ startLineNumber: a, startColumn: b, endLineNumber: c, endColumn: d });
@@ -201,5 +202,66 @@ describe('the form of the geometry scenarios follows the headers of the three sc
     expect(CHOICES.mirror?.about?.[0]).toBe('auto');
     expect(CHOICES.mirror?.about?.indexOf('z')).toBe(4);
     expect(CHOICES.mirror?.about?.indexOf('y-axis')).toBe(1);
+  });
+});
+
+describe('the P4e scenarios (H4e) and the suites around them', () => {
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const suiteDir = join(root, 'tests', 'runtime', 'suites');
+  const suiteFiles = readdirSync(suiteDir).filter((f) => f.endsWith('.txt')).sort();
+  const namesIn = (file: string): string[] =>
+    readFileSync(join(suiteDir, file), 'utf8')
+      .split('\n')
+      .map((line) => line.replace(/#.*/, '').trim())
+      .filter((line) => line !== '');
+
+  it('registers p4-split, p4-channels and p4-compare, and suites/p4e.txt lists exactly those three', async () => {
+    await import('../runtime/scenarios/p4-split.js');
+    await import('../runtime/scenarios/p4-channels.js');
+    await import('../runtime/scenarios/p4-compare.js');
+    expect(namesIn('p4e.txt')).toEqual(['p4-split', 'p4-channels', 'p4-compare']);
+    for (const name of namesIn('p4e.txt')) expect(scenarios.get(name), name).toBeDefined();
+    // p4-channels reads the repository's goldens (the machine of the two-channel program).
+    expect(scenarios.get('p4-channels')?.options.files).toEqual({ 'repo-path.txt': '{repo}' });
+  });
+
+  it('runs every suite file on the hosted runner: the glob of harness.yml names them all', () => {
+    const workflow = readFileSync(join(root, '.github', 'workflows', 'harness.yml'), 'utf8');
+    const glob = /suites\/\{(.+)\}\.txt/.exec(workflow)?.[1] ?? '';
+    // `m{0,1,2},rp,m13` -> m0, m1, m2, rp, m13 (the one nested brace is the milestone digits)
+    const names = glob
+      .replace(/m\{([0-9,]+)\}/g, (_all, digits: string) => digits.split(',').map((d) => `m${d}`).join(','))
+      .split(',');
+    expect([...names].sort()).toEqual(suiteFiles.map((f) => f.replace(/\.txt$/, '')).sort());
+  });
+
+  it('states the number of scenarios as the sum of the lines of the suites, in harness.yml and CONTRIBUTING.md', () => {
+    const total = suiteFiles.reduce((sum, f) => sum + namesIn(f).length, 0);
+    expect(readFileSync(join(root, '.github', 'workflows', 'harness.yml'), 'utf8')).toContain(`${total} scenarios that drive the real app`);
+    expect(readFileSync(join(root, 'CONTRIBUTING.md'), 'utf8')).toContain(`The suite is ${total} scenarios`);
+  });
+
+  it('every line of every suite names a registered scenario (a typo is found here, not on the runner)', async () => {
+    const dir = join(root, 'tests', 'runtime', 'scenarios');
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.js')).sort()) await import(join(dir, file));
+    const missing = suiteFiles.flatMap((f) => namesIn(f).filter((name) => !scenarios.has(name)).map((name) => `${f}: ${name}`));
+    expect(missing).toEqual([]);
+  });
+
+  it('m11-compare-export no longer reads the editor in a way that passes while it is detached (the comparison removes the editor, `editorInstance()` is undefined)', () => {
+    const source = readFileSync(join(root, 'tests', 'runtime', 'scenarios', 'm11-compare-export.js'), 'utf8');
+    // The old check read `editorInstance()?.getVisibleRanges?.()?.[0]?.startLineNumber ?? 0` and compared with `<= 2`.
+    expect(source).not.toMatch(/editorInstance\(\)\)\?\.getVisibleRanges\?\.\(\)\?\.\[0\]\?\.startLineNumber \?\? 0/);
+    expect(source).not.toMatch(/firstVisible\(\) <= 2/);
+    expect(source).toMatch(/first !== null && first <= 2/);
+  });
+
+  it('the first Split into Channel Documents no longer promises that changes are lost (P4.23)', () => {
+    for (const file of ['m12-channels-single.js', 'exit2-x12.js']) {
+      const source = readFileSync(join(root, 'tests', 'runtime', 'scenarios', file), 'utf8');
+      // The old check was `!!alert && /do not come back/i.test(…)`; the new one holds the same words negated, `&& !/do not come back/i`.
+      expect(source, file).not.toMatch(/ \/do not come back\/i\.test\(\(alert/);
+      expect(source, file).toContain("ctx.t('channels.mergeBack')");
+    }
   });
 });

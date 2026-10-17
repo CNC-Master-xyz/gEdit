@@ -31,10 +31,21 @@
 //    change they work out which lines to read and which to replace, and the one edit goes
 //    into the target model between two undo stack elements, so one Cmd+Z takes it back.
 //
+// P4.25 (X30): the third view, **aligned** (`aligned`, `setAligned`). Both panes show the
+// programs as written, level on the blocks of a line diff that runs on the review-mode
+// normalization (the ignore options in force), with the word marks of P4.24 inside a changed
+// block (`core/compare/aligned.ts`, `monaco/alignedView.ts`). It is a view and not a third
+// `mode`: the mode (raw or review) is what the Raw and Review buttons set and what the
+// compare memo remembers; `aligned` sits over it and is cleared by choosing either. The
+// review toggles apply to it as they do to review mode; the merge works on the written text
+// (a block, one row, or one run of words) as one undo step of the target.
+//
 // Closing is funnelled through one place. The overlay's own ✕ (PanelHost) and anything
 // else that changes `layout.overlay` go through the layout subscription below, so the
-// session ends and the editor's view state is restored no matter who closed the view. The
-// temporary models are not disposed (see `monaco/diff.ts`).
+// session ends no matter who closed the view. The editor's own view state (cursor, scroll,
+// folds) is saved by its group when the compare overlay unmounts the editors and put back
+// when they are mounted again (`detachGroup` / `attachGroup`, P4.21), so nothing is captured
+// here. The temporary models are not disposed (see `monaco/diff.ts`).
 
 import { derived, get, writable, type Readable } from 'svelte/store';
 import { dialogs as appDialogs } from '$lib/app/dialogs';
@@ -48,10 +59,8 @@ import { machines as appMachines } from '$lib/stores/machines';
 import { profiles as appProfiles } from '$lib/stores/profiles';
 import { uiState as appUiState } from '$lib/stores/uiState';
 import {
-  captureEditorViewState,
   currentDiff,
   modelCharCount,
-  restoreEditorViewState,
   MODEL_SYNC_LIMIT_CHARS,
   type DiffCursor,
   type DiffHandle,
@@ -60,6 +69,7 @@ import {
   type DiffSides,
 } from '$lib/monaco/diff';
 import type { LineOperation } from '$lib/monaco/applyLines';
+import { isAlignedHandle, type AlignedResult } from '$lib/monaco/alignedView';
 import { editor as appEditor } from '$lib/monaco/editorService';
 import { t } from '$lib/i18n';
 import {
@@ -71,12 +81,14 @@ import {
   normalizeLines,
   offeredOptions,
   pointSignificant,
+  prepareNormalize,
   unifiedDiff,
   type CompareMemo,
   type CompareOptions,
   type Normalized,
   type NormalizeOverrides,
 } from '$lib/core/compare';
+import { alignSides, makePairReader, wordMergePlan } from '$lib/core/compare/aligned';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import type { EffectiveMachine, EffectiveProfile } from '$lib/core/machines/types';
 import type {
@@ -161,6 +173,22 @@ export interface CompareController extends CompareService {
   readonly reviewInfo: Readable<ReviewInfo | null>;
   /** Per direction: why a copy is not offered right now, or null. */
   readonly copyBlock: Readable<Record<CopyDirection, CopyBlock | null>>;
+  /** P4.25: the aligned view is showing (over `mode`; the Raw and Review buttons clear it). */
+  readonly aligned: Readable<boolean>;
+  setAligned(on: boolean): void;
+  toggleAligned(): void;
+  /**
+   * P4.25: aligns the two texts as they are under the review toggles in force, for the aligned
+   * view. `reuse`: only the toggles changed, so the normalization the review bar was built
+   * from is still right. Null when no comparison is open.
+   */
+  align(o?: { reuse?: boolean }): AlignedResult | null;
+  /**
+   * P4.25: copies the marked run of words at the cursor of the aligned view into the other
+   * pane (replacing the words there, inserting them, or removing them), as one undo step of
+   * the target. False when nothing was copied.
+   */
+  copyWord(direction: CopyDirection): Promise<boolean>;
   setInline(inline: boolean): void;
   setIgnoreTrimWhitespace(ignore: boolean): void;
   toggleInline(): void;
@@ -202,8 +230,12 @@ export interface CompareDeps {
     read(): unknown;
     write(memo: CompareMemo): void;
   };
-  captureViewState(): unknown;
-  restoreViewState(snapshot: unknown): void;
+  /**
+   * The compare overlay replaced the editors (the groups saved their view state and were
+   * unmounted); once they are built again, the keyboard goes back to the focused one. Called
+   * when a session ends.
+   */
+  focusEditorWhenBack(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,16 +294,22 @@ function fileName(path: string): string {
 // The saved options (pure)
 // ---------------------------------------------------------------------------
 
+/** `CompareMemo` plus the view P4.25 remembers: whether the aligned view was showing. */
+export interface StoredMemo extends CompareMemo {
+  aligned?: boolean;
+}
+
 /**
  * `ui.lastParams.compare` as it may be read from a hand-edited file: member by member, and
  * anything that is not the declared type is dropped, so a bad file can only bring the
  * defaults back (§7.11). Profile entries keep only the review toggles, as booleans.
  */
-export function compareMemoOf(raw: unknown): CompareMemo {
-  const out: CompareMemo = {};
+export function compareMemoOf(raw: unknown): StoredMemo {
+  const out: StoredMemo = {};
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return out;
   const memo = raw as Record<string, unknown>;
   if (memo.mode === 'raw' || memo.mode === 'review') out.mode = memo.mode;
+  if (typeof memo.aligned === 'boolean') out.aligned = memo.aligned;
   if (typeof memo.inline === 'boolean') out.inline = memo.inline;
   if (typeof memo.ignoreTrimWhitespace === 'boolean') out.ignoreTrimWhitespace = memo.ignoreTrimWhitespace;
   const review = memo.review;
@@ -332,6 +370,17 @@ function sideOf(
 }
 
 /**
+ * One rule for both sides: an increment-reading side would see `X10` and `X10.` apart, so the
+ * calculator-reading side must not make them equal on its own (§7.16 #144).
+ */
+function sharedOverrides(modified: ReviewInput, original: ReviewInput): NormalizeOverrides {
+  return {
+    pointSignificant:
+      pointSignificant(modified.cp.profile, modified.machine) || pointSignificant(original.cp.profile, original.machine),
+  };
+}
+
+/**
  * Normalizes both sides, each with its own profile and machine (AD-26) but with one
  * decimal-point rule, the stricter of the two (§7.16 #144, review NC-6), and collects what
  * the review bar says: that the two effective machines differ, that the sides are read
@@ -340,12 +389,7 @@ function sideOf(
  * machine says how numbers are read).
  */
 export function buildReview(modified: ReviewInput, original: ReviewInput, o: CompareOptions): ReviewView {
-  // One rule for both sides: an increment-reading side would see `X10` and `X10.` apart,
-  // so the calculator-reading side must not make them equal on its own.
-  const over: NormalizeOverrides = {
-    pointSignificant:
-      pointSignificant(modified.cp.profile, modified.machine) || pointSignificant(original.cp.profile, original.machine),
-  };
+  const over = sharedOverrides(modified, original);
   const m = sideOf(modified, o, over);
   const a = sideOf(original, o, over);
   const notes: ReviewNote[] = [];
@@ -561,10 +605,10 @@ export function createCompareService(deps: CompareDeps): CompareController {
   const content = writable<CompareContent | null>(null);
   const view = writable<DiffViewOptions>({ inline: false, ignoreTrimWhitespace: false });
   const mode = writable<CompareMode>('raw');
+  const aligned = writable(false);
   const reviewOptions = writable<CompareOptions>({ ...COMPARE_FALLBACK });
   const info = writable<ReviewInfo | null>(null);
   const reviewView = writable<ReviewView | null>(null);
-  let snapshot: unknown = null;
 
   // The saved options (§7.11): read on first use, because the UI state is loaded after
   // this module is created.
@@ -576,6 +620,7 @@ export function createCompareService(deps: CompareDeps): CompareController {
     loaded = true;
     const memo = compareMemoOf(deps.memory.read());
     mode.set(memo.mode ?? 'raw');
+    aligned.set(memo.aligned === true);
     // A store that is told what it holds already tells its subscribers again; a view that
     // is the same stays the same object.
     const saved = { inline: memo.inline ?? false, ignoreTrimWhitespace: memo.ignoreTrimWhitespace ?? false };
@@ -585,11 +630,12 @@ export function createCompareService(deps: CompareDeps): CompareController {
   }
 
   function persist(): void {
-    const memo: CompareMemo = {
+    const memo: StoredMemo = {
       mode: get(mode),
       inline: get(view).inline,
       ignoreTrimWhitespace: get(view).ignoreTrimWhitespace,
     };
+    if (get(aligned)) memo.aligned = true;
     if (Object.keys(savedReview).length > 0) memo.review = savedReview;
     deps.memory.write(memo);
   }
@@ -603,16 +649,14 @@ export function createCompareService(deps: CompareDeps): CompareController {
     return fail('compare.tooLarge', { limit: formatBytes(MODEL_SYNC_LIMIT_CHARS) });
   }
 
-  /** Clears the session, closes the overlay if it is still ours, and restores the editor. */
-  function finish(o: { restore?: boolean } = {}): void {
+  /** Clears the session and closes the overlay if it is still ours. */
+  function finish(): void {
     if (get(content) === null) return;
     content.set(null);
     info.set(null);
     reviewView.set(null);
     if (get(deps.layout.state).overlay === COMPARE_PANEL_ID) deps.layout.closeOverlay();
-    const restoring = snapshot;
-    snapshot = null;
-    if (o.restore !== false) deps.restoreViewState(restoring);
+    deps.focusEditorWhenBack();
   }
 
   // Whoever closes the overlay closes the comparison: the ✕ in the panel header, another
@@ -670,15 +714,24 @@ export function createCompareService(deps: CompareDeps): CompareController {
     };
   }
 
-  function buildCurrentReview(): ReviewView | null {
+  /** The two sides as they are now, ready to normalize; null with no comparison. */
+  function currentInputs(): { modified: ReviewInput; original: ReviewInput } | null {
     const session = get(content);
     if (!session) return null;
-    return buildReview(modifiedInput(session.docId), originalInput(session, session.docId), get(reviewOptions));
+    return { modified: modifiedInput(session.docId), original: originalInput(session, session.docId) };
   }
 
-  /** Rebuilds the normalized sides when the comparison is in review mode. */
+  function buildCurrentReview(): ReviewView | null {
+    const inputs = currentInputs();
+    return inputs ? buildReview(inputs.modified, inputs.original, get(reviewOptions)) : null;
+  }
+
+  /**
+   * Rebuilds the normalized sides when the comparison is in review mode or the aligned view
+   * is showing (it needs the same normalization, and the review bar's notes).
+   */
   function rebuild(): void {
-    reviewView.set(get(content) !== null && get(mode) === 'review' ? buildCurrentReview() : null);
+    reviewView.set(get(content) !== null && (get(mode) === 'review' || get(aligned)) ? buildCurrentReview() : null);
   }
 
   /** The toggles of the compared document's profile: its defaults, with what the user saved. */
@@ -760,13 +813,8 @@ export function createCompareService(deps: CompareDeps): CompareController {
     if (mine !== openSeq) return false;
     if (!deps.docs.get(docId)) return fail('compare.noDocument');
 
-    // The modified side is the document on screen, so it has to be the active tab; the
-    // view state is taken after the switch, because that is what `close()` puts back.
-    // Comparing again without closing keeps the first snapshot: the editor is unmounted
-    // while the overlay is up, so a second capture would only record the state the
-    // detached editor already had.
+    // The modified side is the document on screen, so it has to be the active tab.
     if (deps.docs.getActiveId() !== docId) deps.docs.activate(docId);
-    if (get(content) === null) snapshot = deps.captureViewState();
 
     ensureLoaded();
     content.set({ docId, source, title: compareTitle(doc.title, source, other), original });
@@ -780,8 +828,19 @@ export function createCompareService(deps: CompareDeps): CompareController {
 
   function setMode(m: CompareMode): void {
     ensureLoaded();
-    if (get(mode) === m) return;
+    // Choosing Raw or Review leaves the aligned view, even for the mode that is already set.
+    const wasAligned = get(aligned);
+    if (get(mode) === m && !wasAligned) return;
+    aligned.set(false);
     mode.set(m);
+    persist();
+    rebuild();
+  }
+
+  function setAligned(on: boolean): void {
+    ensureLoaded();
+    if (get(aligned) === on) return;
+    aligned.set(on);
     persist();
     rebuild();
   }
@@ -832,13 +891,14 @@ export function createCompareService(deps: CompareDeps): CompareController {
     const session = get(content);
     const target = targetDoc(direction);
     return copyBlocker(direction, {
-      mode: get(mode),
+      // The aligned view shows the programs as written, so it copies like the raw view.
+      mode: get(aligned) ? 'raw' : get(mode),
       originalIsDocument: session?.original.kind === 'document',
       targetLocked: target !== null && deps.docs.get(target)?.readOnly === true,
     });
   }
 
-  const copyBlock = derived([content, mode, deps.docs.list], () => ({
+  const copyBlock = derived([content, mode, aligned, deps.docs.list], () => ({
     toModified: blockOf('toModified'),
     toOriginal: blockOf('toOriginal'),
   }));
@@ -863,7 +923,12 @@ export function createCompareService(deps: CompareDeps): CompareController {
     if (!handle || !changes || !cursor) return fail('compare.copyNoChange');
     const change = changeAtCursor(changes, cursor);
     if (!change) return fail('compare.copyNoChange');
-    const plan = mergePlan(change, direction, { lineOnly: o?.lineOnly, cursor });
+    // The aligned view pairs lines by rows (a comment the options drop does not count), so
+    // a one-line copy asks it for the plan; a block copy is the same in every view.
+    const plan =
+      o?.lineOnly === true && isAlignedHandle(handle)
+        ? handle.planCopy(change, direction, cursor)
+        : mergePlan(change, direction, { lineOnly: o?.lineOnly, cursor });
     if (!plan) return fail('compare.copyNoChange');
 
     const from = handle.model(direction === 'toModified' ? 'original' : 'modified');
@@ -881,6 +946,8 @@ export function createCompareService(deps: CompareDeps): CompareController {
     to.pushStackElement();
     to.pushEditOperations(null, [operation], () => null);
     to.pushStackElement();
+    // The aligned view has two real editors: the target takes the focus, so Cmd+Z undoes this.
+    if (isAlignedHandle(handle)) handle.focusSide(direction === 'toModified' ? 'modified' : 'original');
 
     if (o?.thenNext === true) {
       // The modified pane's cursor is where "next" starts from: behind the block just
@@ -895,6 +962,73 @@ export function createCompareService(deps: CompareDeps): CompareController {
       handle.reveal('modified', line);
       handle.nextWhenUpdated();
     }
+    return true;
+  }
+
+  // -- the aligned view -------------------------------------------------------
+
+  /**
+   * The alignment of the two texts under the toggles in force (`CompareController.align`).
+   * The normalization is the review bar's (`reuse` takes the one already built; otherwise it
+   * is built from the texts as they are now and the bar's notes follow it); the diff, the
+   * rows and the word reader are `core/compare/aligned.ts`.
+   */
+  function align(o: { reuse?: boolean } = {}): AlignedResult | null {
+    const inputs = currentInputs();
+    if (!inputs) return null;
+    let review = o.reuse === true ? get(reviewView) : null;
+    if (review === null) {
+      review = buildReview(inputs.modified, inputs.original, get(reviewOptions));
+      reviewView.set(review);
+    }
+    const asInput = (side: ReviewSide, lines: readonly string[]) => ({
+      lineCount: lines.length,
+      normalized: reviewLines(side),
+      lineMap: side.lineMap,
+    });
+    const diff = alignSides(asInput(review.original, inputs.original.lines), asInput(review.modified, inputs.modified.lines));
+    const over = sharedOverrides(inputs.modified, inputs.original);
+    const wordSide = (input: ReviewInput) => ({
+      cp: input.cp,
+      ctx: prepareNormalize(input.lines, input.cp, input.machine, over),
+      lines: input.lines,
+    });
+    return { diff, reader: makePairReader(wordSide(inputs.original), wordSide(inputs.modified), get(reviewOptions)) };
+  }
+
+  async function copyWord(direction: CopyDirection): Promise<boolean> {
+    if (get(content) === null) return fail('compare.noDocument');
+    const blocked = blockOf(direction);
+    if (blocked === 'notDocument') return fail('compare.copyNotDocument');
+    if (blocked === 'locked') return fail('compare.copyLocked');
+    const handle = deps.diff();
+    if (!isAlignedHandle(handle)) return fail('compare.wordNeedsAligned');
+    if (!handle.isCurrent()) return fail('compare.copyBusy');
+    const result = handle.result();
+    const cursor = handle.cursorAt();
+    const original = handle.model('original');
+    const modified = handle.model('modified');
+    if (!result || !cursor || !original || !modified) return fail('compare.copyNoChange');
+
+    const plan = wordMergePlan(result.diff, result.reader, cursor, direction, {
+      original: (line) => original.getLineContent(line),
+      modified: (line) => modified.getLineContent(line),
+    });
+    if (typeof plan === 'string') {
+      const refusals = { noWord: 'compare.wordNoWord', noPair: 'compare.wordNoPair', moved: 'compare.wordMoved', joins: 'compare.wordJoins' } as const;
+      return fail(refusals[plan]);
+    }
+    const to = handle.model(plan.target);
+    if (!to) return fail('compare.copyNoChange');
+    const { edit } = plan;
+    to.pushStackElement();
+    to.pushEditOperations(
+      null,
+      [{ range: { startLineNumber: edit.line, startColumn: edit.startColumn, endLineNumber: edit.line, endColumn: edit.endColumn }, text: edit.text }],
+      () => null,
+    );
+    to.pushStackElement();
+    handle.focusSide(plan.target);
     return true;
   }
 
@@ -933,14 +1067,11 @@ export function createCompareService(deps: CompareDeps): CompareController {
       deps.status.show(t('compare.noDifferences'));
       return null;
     }
-    // The new tab takes the editor's place, so the comparison ends first and the editor's
-    // view state goes back to the compared document, not to the new one.
+    // The new tab takes the editor's place, so the comparison ends first. The compared
+    // document gets its own view state back from the editor service when it is activated
+    // again (the group saved it when the editor was unmounted).
     const id = deps.files.newUntitled({ profileId: doc.profileId, text, activate: false });
-    // CODE-5: the view state is not put back here. The restore runs a frame or two later,
-    // into whatever the remounted editor shows by then, and that is the new tab; the
-    // compared document gets its own state back from the editor service when it is
-    // activated again.
-    finish({ restore: false });
+    finish();
     deps.docs.activate(id);
     return id;
   }
@@ -966,7 +1097,8 @@ export function createCompareService(deps: CompareDeps): CompareController {
     const handle = deps.diff();
     if (!handle || get(content) === null) return false;
     if (!Number.isInteger(line) || line < 1) return fail('compare.noSuchLine');
-    const review = get(reviewView);
+    // The aligned view shows the files as written: a line is the file's line.
+    const review = get(aligned) ? null : get(reviewView);
     if (review === null) {
       handle.reveal(side, line);
       return true;
@@ -977,9 +1109,9 @@ export function createCompareService(deps: CompareDeps): CompareController {
     return true;
   }
 
-  const sides = derived([content, reviewView], ([session, review]): DiffSides | null => {
+  const sides = derived([content, reviewView, aligned], ([session, review, isAligned]): DiffSides | null => {
     if (!session) return null;
-    if (review) {
+    if (review && !isAligned) {
       return {
         original: { kind: 'text', text: review.original.text, languageId: review.original.languageId },
         modified: { kind: 'text', text: review.modified.text, languageId: review.modified.languageId },
@@ -1006,6 +1138,13 @@ export function createCompareService(deps: CompareDeps): CompareController {
     content: derived(content, (c) => c),
     view: derived(view, (o) => o),
     sides,
+    aligned: derived(aligned, (a) => a),
+    setAligned,
+    toggleAligned(): void {
+      setAligned(!get(aligned));
+    },
+    align,
+    copyWord,
     review: derived(reviewView, (r) => r),
     reviewInfo: derived(info, (i) => i),
     copyBlock,
@@ -1054,9 +1193,20 @@ export const compareController: CompareController = createCompareService({
     read: () => appUiState.getLastParams(COMPARE_MEMO_KEY),
     write: (memo) => appUiState.setLastParams(COMPARE_MEMO_KEY, memo as Record<string, unknown>),
   },
-  captureViewState: captureEditorViewState,
-  restoreViewState: (snapshot) =>
-    restoreEditorViewState(snapshot as ReturnType<typeof captureEditorViewState>),
+  focusEditorWhenBack() {
+    // The editors are built again a moment after the overlay closes (`attachGroup`); the first
+    // one that ends up with the text focus ends the wait, and nothing waits for ever.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const listener = appEditor.onDidAttach(() => {
+      appEditor.focus();
+      if (appEditor.hasFocus()) stop();
+    });
+    function stop(): void {
+      listener();
+      clearTimeout(timer);
+    }
+    timer = setTimeout(stop, 2000);
+  },
 });
 
 /** The §7.3 view of the same object. */

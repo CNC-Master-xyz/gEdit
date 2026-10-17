@@ -135,7 +135,7 @@ export async function closeCompare(h) {
   await h.idle()
 }
 
-/** A mode switch: click the toolbar button and wait for the view to say so. @param {Harness} h @param {'raw' | 'review'} mode */
+/** A mode switch: click the toolbar button and wait for the view to say so (`aligned` is the third button, P4.25). @param {Harness} h @param {'raw' | 'review' | 'aligned'} mode */
 export async function setMode(h, mode) {
   h.click(h.q('compare-mode', { mode }))
   await h.waitFor(() => view(h)?.dataset.mode === mode && h.q('compare-mode', { mode })?.getAttribute('aria-pressed') === 'true', { timeout: 10000 })

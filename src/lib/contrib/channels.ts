@@ -12,11 +12,16 @@
 // gEdit opens nothing by itself (standing rule 14): "Open the other channels" is the file
 // dialog, in this document's folder, and the user picks.
 //
+// The split keeps a record of what it made, for this session (`splitRecords`); "Merge Channels
+// Back" (P4.23) turns the record and the documents' current text into the program's new text
+// with `core/channels/merge.ts` and writes it as one undo step.
+//
 // Channel names are the machine's own text and stay untranslated (README rule 3).
 
 import ArrowLeftRight from 'lucide-svelte/icons/arrow-left-right';
 import Columns2 from 'lucide-svelte/icons/columns-2';
 import Hourglass from 'lucide-svelte/icons/hourglass';
+import Merge from 'lucide-svelte/icons/merge';
 import Split from 'lucide-svelte/icons/split';
 import ChannelStatus from '$lib/components/status/ChannelStatus.svelte';
 import { asIcon } from '$lib/app/icons';
@@ -24,17 +29,21 @@ import { dialogs } from '$lib/app/dialogs';
 import { files } from '$lib/app/fileOps';
 import { modals } from '$lib/app/modals';
 import { computeJumpLines } from '$lib/app/outlineService';
-import { channelsAt } from '$lib/core/channels/resolve';
-import { shownMark } from '$lib/core/channels/marks';
+import { channelRefs, channelsAt } from '$lib/core/channels/resolve';
+import { resolveDocument, shownMark } from '$lib/core/channels/marks';
+import { planMerge, splitRecord, type SplitRecord } from '$lib/core/channels/merge';
+import { answersWait, markIdOf, pairsByList, waitKey } from '$lib/core/channels/panes';
 import { status } from '$lib/app/status';
-import { CHANNEL_CAPS, type ChannelRef, type ChannelSet, type SyncFinding, type SyncHit } from '$lib/core/channels/types';
+import { CHANNEL_CAPS, type ChannelParams, type ChannelRef, type ChannelSet, type SyncFinding, type SyncHit, type SyncRule } from '$lib/core/channels/types';
+import { applyLines } from '$lib/monaco/applyLines';
 import { editor } from '$lib/monaco/editorService';
-import { channels, sameMarkId } from '$lib/stores/channels';
+import { channels } from '$lib/stores/channels';
 import { docs } from '$lib/stores/documents';
 import { machines } from '$lib/stores/machines';
 import { results } from '$lib/stores/results';
+import { lockRefusal } from '$lib/app/readOnlyLock';
 import { t } from '$lib/i18n';
-import type { ChannelService, CommandContext, Contribution, Disposable, DocId, Msg, QuickPickItem, ReportData } from '$lib/app/types';
+import type { ChannelService, CommandContext, Contribution, Disposable, DocId, DocMeta, Msg, QuickPickItem, ReportData } from '$lib/app/types';
 
 function hasDocument(context: CommandContext): boolean {
   return context.activeDocId !== null;
@@ -67,12 +76,20 @@ export type PartnerAnswer =
   | { kind: 'none' };
 
 /**
- * The same wait code in the next channel the mark names. A wait that lists channels
- * (`P12`, `WAITM(1,1,2)`) is answered only by those, and only by a mark that names this
- * channel back; the k-th mark of an id that names the other channel meets the k-th of that
- * id in the other (the check's own rule), so a program that waits on `M901` three times has
- * three distinct partners. A channel that is not open cannot answer (`marksOf` null); it is
- * named when no open channel does.
+ * The same wait in the next channel it names, paired as the channel view pairs it
+ * (`alignPanes`, `core/channels/panes.ts`). Only the channels the wait names are asked. A
+ * channel that is not open cannot answer (`marksOf` null); it is named when no open channel does.
+ *
+ * - By the pairing key (`waitKey`, the owner's rule of 2026-10-17, §7 #388): the same code
+ *   **and the same `P` set** (the channel's own included), the n-th occurrence in this channel
+ *   with the n-th in the other. So an `M901 P12` is answered by the `M901 P12` of the other
+ *   channel and never by an `M901 P123`, and a program that waits on `M901 P12` three times has
+ *   three distinct partners. With `rules`, a `samePartners` rule's `P`-less wait meets only a
+ *   `P`-less one (P4e review NC-3).
+ * - A rule that `pairsByList` (the Siemens `WAITM`, P4e review NC-4; needs `rules`): the n-th
+ *   wait of its id in this channel that names the other channel meets the n-th wait of that id
+ *   there that names this one, as Check Wait Codes pairs them; when there is none, a mark there
+ *   that answers it (`SETM` of the id) is the partner.
  */
 export function findPartner(o: {
   order: readonly ChannelRef[];
@@ -80,8 +97,15 @@ export function findPartner(o: {
   mark: SyncHit;
   ownMarks: readonly SyncHit[];
   marksOf(channelId: string): { docId: DocId; marks: readonly SyncHit[] } | null;
+  /** The machine's wait rules (`ChannelParams.syncMarks`); absent: every rule pairs by `waitKey`. */
+  rules?: readonly SyncRule[];
 }): PartnerAnswer {
-  const alike = (h: SyncHit): boolean => h.ruleId === o.mark.ruleId && sameMarkId(h.mark, o.mark.mark);
+  const ruleOf = (id: string): SyncRule | undefined => o.rules?.find((r) => r.id === id);
+  const rule = ruleOf(o.mark.ruleId);
+  const byList = o.mark.blocking && pairsByList(rule);
+  const key = waitKey(o.mark, rule);
+  const id = markIdOf(o.mark);
+  const k = o.ownMarks.filter((h) => h.channel === o.mark.channel && h.line <= o.mark.line && waitKey(h, rule) === key).length - 1;
   const at = o.order.findIndex((c) => c.id === o.self);
   let notOpen: ChannelRef | null = null;
   for (let step = 1; step < o.order.length; step++) {
@@ -92,8 +116,17 @@ export function findPartner(o: {
       notOpen ??= channel;
       continue;
     }
-    const k = o.ownMarks.filter((h) => alike(h) && h.partners.includes(channel.id) && h.line <= o.mark.line).length - 1;
-    const hit = info.marks.filter((h) => alike(h) && h.partners.includes(o.self))[Math.max(k, 0)];
+    if (byList) {
+      // Channel by channel: the n-th of this id naming that channel meets the n-th there naming this one.
+      const sameWait = (h: SyncHit): boolean => h.blocking && h.ruleId === o.mark.ruleId && markIdOf(h) === id;
+      const n = o.ownMarks.filter((h) => h.channel === o.mark.channel && h.line <= o.mark.line && sameWait(h) && h.partners.includes(channel.id)).length - 1;
+      const hit = info.marks.filter((h) => sameWait(h) && h.partners.includes(o.self))[Math.max(n, 0)];
+      if (hit) return { kind: 'found', channel, docId: info.docId, hit };
+      const answer = info.marks.find((h) => markIdOf(h) === id && answersWait(h, ruleOf(h.ruleId)));
+      if (answer) return { kind: 'found', channel, docId: info.docId, hit: answer };
+      continue;
+    }
+    const hit = info.marks.filter((h) => waitKey(h, rule) === key)[Math.max(k, 0)];
     if (hit) return { kind: 'found', channel, docId: info.docId, hit };
   }
   return notOpen ? { kind: 'notOpen', channel: notOpen } : { kind: 'none' };
@@ -190,6 +223,7 @@ function gotoPartner(): void {
     self: mark.channel,
     mark,
     ownMarks: set.marks.filter((m) => m.channel === mark.channel),
+    rules: params.syncMarks,
     marksOf: (channelId) => {
       if (set.layout === 'single-file') {
         return set.members.some((m) => m.channel.id === channelId) ? { docId: id, marks: set.marks.filter((m) => m.channel === channelId) } : null;
@@ -521,8 +555,149 @@ async function splitToDocuments(): Promise<void> {
     if (machineId !== null) machines.setForDoc(next, machineId);
     made.push(next);
   }
+  splitRecords.remember(
+    splitRecord({ sourceId: id, lines, set, made: texts.map((x, i) => ({ channelId: x.channel.id, docId: made[i] })) }),
+  );
   docs.activate(made[0]);
   status.show(t('channels.split.done', { count: made.length }));
+}
+
+// --- the merge back (P4.23) -----------------------------------------------------------
+
+/**
+ * What the splits of this session made, by program, newest record first. A merge renews the
+ * record; the older ones stay (at most `KEPT`) so that undoing a merge, which puts the
+ * program back as the older record holds it, can be merged again.
+ */
+const KEPT = 4;
+
+function createSplitRecords() {
+  const bySource = new Map<DocId, SplitRecord[]>();
+  return {
+    /** A new split of a program replaces what was kept for it. */
+    remember(record: SplitRecord): void {
+      bySource.set(record.sourceId, [record]);
+    },
+    /** A merge's renewed record, in front of the older ones. */
+    renew(record: SplitRecord): void {
+      bySource.set(record.sourceId, [record, ...(bySource.get(record.sourceId) ?? [])].slice(0, KEPT));
+    },
+    /** The records of the program the document is, or a channel document of. */
+    forDoc(id: DocId): SplitRecord[] {
+      const own = bySource.get(id);
+      if (own !== undefined) return own;
+      for (const records of bySource.values()) {
+        if (records[0].channels.some((c) => c.docId === id)) return records;
+      }
+      return [];
+    },
+    clear(): void {
+      bySource.clear();
+    },
+  };
+}
+
+export const splitRecords = createSplitRecords();
+
+/** Everything `mergeBack` touches, so a test can drive it without the app. */
+export interface MergeBackDeps {
+  docs: { get(id: DocId): DocMeta | undefined; activate(id: DocId): void };
+  editor: { getLines(id: DocId, from: number, to: number): string[]; getLineCount(id: DocId): number };
+  fresh(id: DocId): ChannelSet;
+  /** The program's lines read with its machine. */
+  resolve(id: DocId, lines: readonly string[]): ChannelSet;
+  applyLines(id: DocId, startLine: number, endLine: number, newLines: string[]): { changedLines: number; locked?: true };
+  say(msg: Msg, error?: boolean): void;
+}
+
+/** `lines` read for channels the way the service reads the document (`single-file` only). */
+function resolveLines(id: DocId, lines: readonly string[]): ChannelSet {
+  const empty: ChannelSet = { layout: 'none', self: null, members: [], missing: [], outside: [], marks: [], problems: [], truncated: false };
+  const params: ChannelParams | null = channels.params(id);
+  if (params === null || params.layout !== 'single-file') return empty;
+  const now = () => Date.now();
+  const read = resolveDocument('', lines, machines.effective(id).cp, params, { deadline: now() + CHANNEL_CAPS.resolveMs, now });
+  if (read.layout !== 'single-file') return { ...empty, problems: read.problems, truncated: read.abandoned };
+  const found = new Set(read.sections.map((section) => section.channel.id));
+  return {
+    layout: 'single-file',
+    self: null,
+    members: read.sections.map((section) => ({ kind: 'section' as const, channel: section.channel, docId: id, ranges: section.ranges })),
+    missing: channelRefs(params).filter((ref) => !found.has(ref.id)),
+    outside: read.outside,
+    marks: read.marks,
+    problems: read.problems,
+    truncated: read.dropped > 0,
+  };
+}
+
+/**
+ * `channels.mergeBack` for the program `activeId` is, or a channel document of: refused in
+ * plain words (the three refusals of `planMerge`, a locked program, a closed program), else
+ * written with one `applyLines` (one undo step) and the record renewed. No question first: the
+ * merge is one undo step (plan §5 P4e decision 15).
+ */
+export function mergeBack(deps: MergeBackDeps, activeId: DocId): void {
+  const records = splitRecords.forDoc(activeId);
+  if (records.length === 0) {
+    deps.say({ key: 'channels.merge.noRecord' }, true);
+    return;
+  }
+  const sourceId = records[0].sourceId;
+  const source = deps.docs.get(sourceId);
+  if (source === undefined) {
+    deps.say({ key: 'channels.merge.sourceClosed' }, true);
+    return;
+  }
+  const locked = lockRefusal(source, t('channels.mergeBack'));
+  if (locked !== null) {
+    deps.say(locked, true);
+    return;
+  }
+  const set = deps.fresh(sourceId);
+  if (tooSlow(set)) {
+    deps.say({ key: 'channels.problems.tooSlow' }, true);
+    return;
+  }
+  const count = deps.editor.getLineCount(sourceId);
+  const lines = deps.editor.getLines(sourceId, 1, count);
+  type Planned = ReturnType<typeof planMerge>;
+  let refused: Extract<Planned, { ok: false }> | null = null;
+  let idle: Extract<Planned, { ok: true }> | null = null;
+  let answer: Extract<Planned, { ok: true }> | null = null;
+  for (const record of records) {
+    const planned = planMerge({
+      record,
+      source: { lines, set },
+      channelLines: (docId) => (deps.docs.get(docId) === undefined ? null : deps.editor.getLines(docId, 1, deps.editor.getLineCount(docId))),
+      resolve: (merged) => deps.resolve(sourceId, merged),
+    });
+    if (planned.ok && planned.merged.length > 0) {
+      answer = planned;
+      break;
+    }
+    // An older record helps when the program no longer reads as the newer one holds it, or the
+    // newer one finds the documents in step with the program (a merge undone).
+    if (planned.ok) idle ??= planned;
+    else refused ??= planned;
+  }
+  answer ??= idle;
+  if (answer === null) {
+    deps.say((refused as NonNullable<typeof refused>).reason, true);
+    return;
+  }
+  if (answer.merged.length === 0) {
+    deps.say({ key: 'channels.merge.nothing' });
+    return;
+  }
+  const done = deps.applyLines(sourceId, 1, count, answer.lines);
+  if (done.locked) {
+    deps.say({ key: 'readOnly.refusedUser', params: { name: source.title, action: t('channels.mergeBack') } }, true);
+    return;
+  }
+  splitRecords.renew(answer.record);
+  deps.docs.activate(sourceId);
+  deps.say({ key: 'channels.merge.done', params: { count: answer.merged.length } });
 }
 
 export default {
@@ -593,6 +768,29 @@ export default {
       run: () => splitToDocuments(),
     },
     {
+      id: 'channels.mergeBack',
+      title: 'channels.mergeBack',
+      category: 'channels.category',
+      icon: asIcon(Merge),
+      global: true,
+      enabled: (c) => c.activeDocId !== null && splitRecords.forDoc(c.activeDocId).length > 0,
+      run: () => {
+        const id = docs.getActiveId();
+        if (id === null) return;
+        mergeBack(
+          {
+            docs,
+            editor,
+            fresh: (id) => channels.fresh(id),
+            resolve: resolveLines,
+            applyLines,
+            say,
+          },
+          id,
+        );
+      },
+    },
+    {
       id: 'channels.testOnDocument',
       title: 'channels.testOnDocument',
       category: 'channels.category',
@@ -607,6 +805,7 @@ export default {
     { tab: 'nc', group: 'channels.group', command: 'channels.prevSyncPoint', order: 91 },
     { tab: 'nc', group: 'channels.group', command: 'channels.gotoPartner', order: 92 },
     { tab: 'nc', group: 'channels.group', command: 'channels.splitToDocuments', order: 93 },
+    { tab: 'nc', group: 'channels.group', command: 'channels.mergeBack', order: 95 },
     { tab: 'tools', group: 'channels.toolsGroup', command: 'channels.checkSync', order: 60 },
   ],
   // Next to the machine item (15): the machine says how the control reads the program, the

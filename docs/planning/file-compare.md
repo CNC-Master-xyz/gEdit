@@ -4,7 +4,7 @@ Compare two NC programs side by side, for example a re-posted program against th
 
 Tag format: `Priority · Size · Delivery`.
 
-> **Status.** Design note from 2026-09-19. What shipped is described in the user guide ([Comparing two programs](../user/README.md#comparing-two-programs)); where this note and the guide differ, the guide is right. Status per section: starting a comparison, the review mode with its ignore options, merging in both directions, export and two files on disk shipped (Phase 1 and M11). Not built: a numeric tolerance (cut), word-level marking (deferred to Phase 4) and the aligned diff with merge (Phase 4, only if review mode proves too limited). The `P2` tags below were met in M11, not earlier; the tag `P3` on the aligned diff means Phase 4 (the roadmap says which is which).
+> **Status.** Design note from 2026-09-19. What shipped is described in the user guide ([Comparing two programs](../user/README.md#comparing-two-programs)); where this note and the guide differ, the guide is right. Status per section: starting a comparison, the review mode with its ignore options, merging in both directions, export and two files on disk shipped (Phase 1 and M11). Not built: a numeric tolerance (cut). Built in Phase 4: word-level marking (P4.24) and the aligned diff with merge (P4.25). The `P2` tags below were met in M11, not earlier; the tag `P3` on the aligned diff means Phase 4 (the roadmap says which is which).
 
 ## Starting a comparison
 
@@ -66,14 +66,16 @@ Limitation: merging is only available in the raw view.
 ### Aligned NC-aware diff with merge
 `P3 · L · Core`
 
-**Status:** not built (Phase 4, only if review mode proves too limited).
+**Status:** built in Phase 4 (P4.25, X30; the owner asked for it, Q4-14). The third button of the compare toolbar, *Aligned*, next to Raw and Review.
 
-The full version: compute the line diff on the normalized lines (a Myers or patience diff in TypeScript), then show the **original** text in two synced editors. Differences are decorations, and view zones fill gaps so matching lines stay level. Merging copies original lines. Needed only if review mode plus raw merge turns out to be too limiting.
-
+- **What it shows.** Both programs as written, in two ordinary editors side by side. The line diff runs on the review-mode normalization (the toggles of the review bar apply and stay on screen), so a renumbered program or a comment the options drop is not a difference; the result is mapped back to the lines as written. Where one side has lines the other lacks, a hatched filler keeps the panes level, and they scroll as one. The diff is a patience diff (lines that occur once on each side anchor the rest) with the capped Myers diff between the anchors. Lines the options drop sit in the block they fall in: facing a dropped line of the other side, or on a row of their own.
+- **Word marks.** Inside a changed block the whole words that differ are marked (P4.24), read after the options: a block number or `X5.50` against `X5.5` that the options ignore is not marked.
+- **Merging.** The arrow in the column between the line numbers and the text copies a block to the other side (Shift+click: one row); the toolbar buttons and `Mod+Alt+Right` / `Mod+Alt+Left` copy the block at the cursor as in the raw view. *Word →* and *← Word* (and the commands *Copy Word to Current Document* / *Copy Word to Original*) copy the marked words at the cursor: they replace the words on the other side, put them in, or take them out. Every merge is one undo step of the target, and the target takes the keyboard so that Cmd+Z reaches it. Both panes are editable (unless locked); the alignment is redone a moment after the last change, and a merge is refused until it has been.
+- **Not done.** No inline form; no merge of a stretch the options drop on both sides (it is not a difference); no word merge across a line pair the alignment does not pair.
 ### Word-level marking
 `P2 · S · Core`
 
-**Status:** not built (deferred to Phase 4).
+**Status:** built in Phase 4 (P4.24, X30) for the raw view and review mode, and in the aligned diff (P4.25).
 
 Inside a changed line, mark the whole NC word that differs (`F1200` → `F1000` highlights both words completely), not single digits. Uses the tokenizer on both lines. It applies to review mode and later to the aligned diff.
 

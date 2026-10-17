@@ -265,6 +265,7 @@ interface FakeEditorInstance {
   updateOptions(o: Record<string, unknown>): void;
   onDidChangeCursorPosition(cb: () => void): { dispose(): void };
   onDidChangeCursorSelection(cb: () => void): { dispose(): void };
+  onDidFocusEditorText(cb: () => void): { dispose(): void };
   dispose(): void;
 }
 
@@ -392,6 +393,9 @@ function fakeMonaco(): { api: Monaco; state: FakeMonaco } {
       },
       onDidChangeCursorSelection(cb) {
         editorInstance.cursorListeners.push(cb);
+        return { dispose() {} };
+      },
+      onDidFocusEditorText() {
         return { dispose() {} };
       },
       dispose() {

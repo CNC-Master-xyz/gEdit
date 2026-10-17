@@ -38,6 +38,7 @@ import {
 } from '$lib/app/templateManager';
 import { userConfig } from '$lib/app/userConfig';
 import { TEMPLATE_LIMITS, templateFromSelection, type TemplateEnv } from '$lib/core/templates';
+import { SELECTION_CROSSES } from '$lib/core/transforms/scope';
 import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
 import { editor } from '$lib/monaco/editorService';
 import { userFileCreate, userFilePath, userFilesList } from '$lib/platform/commands';
@@ -217,6 +218,12 @@ async function fromSelection(): Promise<void> {
   const selection = editor.selectionLines();
   if (selection === null || selection.empty) {
     status.show(t('templateManager.selectFirst'), { error: true });
+    return;
+  }
+  // P4e: a selection made in a channel pane that runs over another channel's lines (decision 10) would pull
+  // those lines into the draft. Refused with a message, as the commands that act on the selected lines do.
+  if (selection.crossesJunction === true) {
+    status.show(t(SELECTION_CROSSES.key), { error: true });
     return;
   }
   const count = selection.endLine - selection.startLine + 1;

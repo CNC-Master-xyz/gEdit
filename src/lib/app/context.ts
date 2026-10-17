@@ -30,6 +30,7 @@ import { templates } from '$lib/app/templateService';
 import { transforms } from '$lib/app/transforms';
 import { userConfig } from '$lib/app/userConfig';
 import { bookmarks } from '$lib/monaco/bookmarks';
+import { channelPanes } from '$lib/monaco/channelPanes';
 import { editor } from '$lib/monaco/editorService';
 import { channels } from '$lib/stores/channels';
 import { codes } from '$lib/stores/codes';
@@ -78,4 +79,5 @@ export const ctx: AppContext = {
   userConfig,
   modal,
   templates,
+  channelPanes,
 };

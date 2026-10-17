@@ -20,7 +20,17 @@ export interface TransformScope {
   endLine: number;
   /** True when the user had a selection; the status summary says "in the selection". */
   fromSelection: boolean;
+  /**
+   * True when the selection ran over the lines of another channel (it was made in a channel pane
+   * and is not one run of document lines, Phase 4 plan §6.7 rule 3). Acting on the document lines
+   * in between would change a channel the user cannot see in that pane, so a command that acts on
+   * the selected lines refuses (`SELECTION_CROSSES`).
+   */
+  crossesJunction?: true;
 }
+
+/** The refusal of every command that acts on the selected lines when `TransformScope.crossesJunction` is set. */
+export const SELECTION_CROSSES: Readonly<{ key: string }> = Object.freeze({ key: 'channelPanes.selectionCrosses' });
 
 /** The selection as `EditorService.selectionLines()` reports it. */
 export interface ScopeSelection {
@@ -28,6 +38,8 @@ export interface ScopeSelection {
   endLine: number;
   /** A caret with nothing selected. */
   empty: boolean;
+  /** The selection is not one run of document lines (a channel pane's selection across a junction). */
+  crossesJunction?: boolean;
 }
 
 /** `value` as a line number inside `1..lineCount`; anything unusable becomes 1. */
@@ -58,5 +70,6 @@ export function transformScope(lineCount: number, selection: ScopeSelection | nu
     startLine: Math.min(a, b),
     endLine: Math.max(a, b),
     fromSelection: true,
+    ...(selection.crossesJunction === true ? { crossesJunction: true as const } : {}),
   };
 }

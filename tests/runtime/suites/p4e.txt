@@ -1,0 +1,35 @@
+# P4e: "Side by side" - split view, the side-by-side channel view with Merge Channels Back, and the word marks and the
+# aligned view in a comparison (plan docs/planning/phase-4-implementation.md, H4e), and the Phase 4 exit criteria X29 and X30
+# that the running app proves.
+# Run with: tests/runtime/suites/m0.txt tests/runtime/suites/m1.txt tests/runtime/suites/m2.txt tests/runtime/suites/m3.txt tests/runtime/suites/m4.txt tests/runtime/suites/m5.txt tests/runtime/suites/m6.txt tests/runtime/suites/m7.txt tests/runtime/suites/m8.txt tests/runtime/suites/m9.txt tests/runtime/suites/m10.txt tests/runtime/suites/m11.txt tests/runtime/suites/m12.txt tests/runtime/suites/rp.txt tests/runtime/suites/m13.txt tests/runtime/suites/p3a.txt tests/runtime/suites/p3b.txt tests/runtime/suites/b1.txt tests/runtime/suites/p4a.txt tests/runtime/suites/p4e.txt
+#
+# Every expected text comes from the programs themselves (tests/fixtures/p4e/, whose README lists every line number the
+# checks rely on, and the comparison pair written in p4-compare), from ctx.t(...) or from the owner's rule for the wait
+# codes (2026-10-17: P lists the channels as digits, M901P12 meets in channels 1 and 2, M910P123 in all three). Nothing is
+# read from what the app shows except through the test ids and the editors' own models.
+#
+# Intentional changes to earlier scenarios, made with this suite (plan "Intentional behaviour changes when P4e lands"):
+#   - m2-compare: the compare switch has a third button, Aligned (raw, review, aligned).
+#   - m11-compare-export: the check "the new tab opens at line 1" waits for the editor and reads its first visible line;
+#     it passed for the wrong reason (0 <= 2) while the editor groups were detached by the comparison.
+#   - m12-channels-single and exit2-x12 (and exit2-nopython, which runs the same X12 function): the first Split into
+#     Channel Documents no longer says "do not come back"; it names Merge Channels Back.
+#   - m1-keys needed no change: F6 and Shift+F6 are in tests/runtime/lib/shortcuts.js since P4.21 (P4e prelude plan),
+#     and the split and channel commands carry no key.
+#   - Go to the Matching Mark (m12-channels-nav, exit2-x12) needed no change: the programs of those scenarios pair the
+#     same under the new key (code and P set); the new rule is held by p4-channels (section N).
+# The grep of tests/runtime for channels.gotoPartner, compare-mode, editorInstance, the View tab's groups and the
+# ribbon/palette counts found no other scenario that pins what P4e changed (b1-ribbon-tabs only asks for the commands
+# it names; m1-layout, m4-editing and p3-inspector ask for "at least" the buttons they name).
+
+# X29 (split view): Split Editor / Split Editor Down / Close Split from the View tab, F6 and Shift+F6, one model with an own
+# cursor and scroll per pane and one undo history, the 2 px accent border, the splitter, no theme leak in the light and the dark
+# theme, and the comparison that detaches and builds the panes again.
+p4-split
+
+# X29 (channel view and merge back): the program with two channel sections and the set with one file per path, lined up at
+# the owner's wait codes, scrolling together, one undo history, closing, and Merge Channels Back with its refusal.
+p4-channels
+
+# X30: word marks in the raw view and review mode, and the aligned view with block and word merges.
+p4-compare

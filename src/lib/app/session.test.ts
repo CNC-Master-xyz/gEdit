@@ -14,7 +14,7 @@
 
 import { get, writable, type Readable } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFileTracker, createSessionService, snapshotOf, statSessionPaths } from './session';
+import { createFileTracker, createSessionService, editorPositionDeps, snapshotOf, statSessionPaths } from './session';
 import { createFileMemory } from '$lib/stores/fileMemory';
 import { t } from '$lib/i18n';
 import type { Disposable, DocId, FileMemo, FileMemoryStore } from '$lib/app/types';
@@ -1121,5 +1121,42 @@ describe('a session list that cannot be stored', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].detail).toContain('1048576');
     stop();
+  });
+});
+
+// P4e (Phase 4 plan §6.7 rule 3): the editor half of the per-file memory goes through the service's
+// document-line methods, never the instance, so it is right in the focused group of split view and
+// in a channel pane.
+describe('the cursor and the viewport of the document on screen (the coordinate rule)', () => {
+  function fakeEditor() {
+    const log: string[] = [];
+    const editor = {
+      cursor: () => ({ line: 120, column: 4, selectedChars: 0, selections: 1 }),
+      topLine: (): number | null => 100,
+      scrollToTop: (line: number) => void log.push(`scrollToTop:${line}`),
+      reveal: (id: string, line: number, column?: number) => void log.push(`reveal:${id}:${line}:${column}`),
+      hasModel: () => true,
+      // Any use of the instance for a line number would fail the test: it has no methods.
+      editorInstance: () => ({}) as never,
+    };
+    return { editor, log };
+  }
+
+  it('remembers the cursor line and the first visible line the service answers (document lines)', () => {
+    const { editor } = fakeEditor();
+    const deps = editorPositionDeps(editor, () => 'a');
+    expect(deps.position('a')).toEqual({ line: 120, column: 4, top: 100 });
+    expect(deps.position('b')).toBeNull(); // not the document on screen
+    editor.topLine = () => null;
+    expect(deps.position('a')).toEqual({ line: 120, column: 4, top: 120 });
+  });
+
+  it('puts the cursor back with reveal and the viewport with scrollToTop, in that order', () => {
+    const { editor, log } = fakeEditor();
+    const deps = editorPositionDeps(editor, () => 'a');
+    expect(deps.applyPosition('a', { line: 120, column: 4, top: 100 })).toBe(true);
+    expect(log).toEqual(['reveal:a:120:4', 'scrollToTop:100']);
+    editor.editorInstance = () => undefined as never;
+    expect(deps.applyPosition('a', { line: 1, column: 1, top: 1 })).toBe(false);
   });
 });

@@ -29,14 +29,15 @@ import { MAX_INSPECT_LINE } from '$lib/app/inspectorService';
 import { modal } from '$lib/app/modalService';
 import { tokenizeLine } from '$lib/core/nc/tokenizer';
 import { t } from '$lib/i18n';
-import { docIdOf } from '$lib/monaco/editorService';
+import { paneSourceOfModel } from '$lib/monaco/channelPanes';
+import { docIdOf, editor } from '$lib/monaco/editorService';
 import { channels } from '$lib/stores/channels';
 import { codes } from '$lib/stores/codes';
 import { machines } from '$lib/stores/machines';
 import { profiles } from '$lib/stores/profiles';
 import { settings } from '$lib/stores/settings';
 import type { Monaco } from '$lib/monaco/setup';
-import type { Disposable, DocId, ModalService } from '$lib/app/types';
+import type { Disposable, DocId, ModalService, PaneSource } from '$lib/app/types';
 import type { EffectiveMachine } from '$lib/core/machines/types';
 import type { CodeDb } from '$lib/core/codes/types';
 import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
@@ -67,8 +68,9 @@ export function stateBefore(
 function viewOf(
   model: MonacoApi.editor.ITextModel,
   profileId: string,
+  documentOf: DocId | null = null,
 ): { cp: CompiledProfile; db: CodeDb; waitCode?: WaitCodeLookup; docId: DocId | null; profile?: Profile; machine?: EffectiveMachine } {
-  const docId = docIdOf(model);
+  const docId = documentOf ?? docIdOf(model);
   if (docId !== null) {
     const effective = machines.effective(docId);
     // M12.5 (§7.16 #178): the document's machine's wait codes win over the database.
@@ -136,13 +138,40 @@ export function hoverInfoAtPosition(
   return hoverAt(line, offset, cp, db, t, prev, { waitCode, context });
 }
 
+/**
+ * Where a hover is read (P4.22b, Phase 4 plan §5 P4e decision 11). A channel pane is a model of its
+ * own, mapped into its program, and the program is what the hover reads: the block around the line,
+ * the modal state before it and after it, the machine. So the hover of a pane line is the hover of
+ * the program's line it shows, through the pane's mapping; the answer's range stays in the pane's
+ * coordinates (the columns are the same). Any other model is read as it is.
+ */
+export function hoverTarget(
+  model: MonacoApi.editor.ITextModel,
+  position: { lineNumber: number; column: number },
+  paneOf: (model: MonacoApi.editor.ITextModel) => PaneSource | undefined = paneSourceOfModel,
+  documentModel: (id: DocId) => MonacoApi.editor.ITextModel | undefined = (id) => editor.model(id),
+): { model: MonacoApi.editor.ITextModel; position: { lineNumber: number; column: number }; docId: DocId | null } {
+  const pane = paneOf(model);
+  if (pane === undefined) return { model, position, docId: null };
+  const program = documentModel(pane.docId);
+  let line: number;
+  try {
+    line = pane.docLine(position.lineNumber);
+  } catch {
+    return { model, position, docId: null };
+  }
+  if (program === undefined || line < 1 || line > program.getLineCount()) return { model, position, docId: null };
+  return { model: program, position: { lineNumber: line, column: position.column }, docId: pane.docId };
+}
+
 /** Registers the hover provider for one profile (Monaco language id = profile id). */
 export function registerHover(monaco: Monaco, profileId: string): Disposable {
   const registration = monaco.languages.registerHoverProvider(profileId, {
     provideHover(model, position) {
       if (!settings.get('assist.hover')) return null;
 
-      const info = hoverInfoAtPosition(model, position, viewOf(model, profileId));
+      const target = hoverTarget(model, position);
+      const info = hoverInfoAtPosition(target.model, target.position, viewOf(target.model, profileId, target.docId));
       if (!info) return null;
 
       return {

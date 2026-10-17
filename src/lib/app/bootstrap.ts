@@ -97,6 +97,10 @@ export function watchContext(notify: () => void): Disposable {
     layout.state.subscribe(notify),
     modals.isOpen.subscribe(notify),
     runningScript.subscribe(notify),
+    // A machine change (another machine, a machine edited) changes what the channel commands
+    // may do and what their titles say, without any document, layout or cursor change.
+    machines.revision.subscribe(notify),
+    channels.revision.subscribe(notify),
     editor.onDidChangeCursor(notify),
     editor.onDidActivate(notify),
   ];

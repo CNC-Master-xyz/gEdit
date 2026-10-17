@@ -16,6 +16,8 @@ import {
   type MotionColorsDeps,
   type MotionDecoration,
   type MotionEditor,
+  type MotionGroupView,
+  type MotionPane,
   type MotionView,
 } from '$lib/monaco/motionColors';
 import type { Profile } from '$lib/core/profiles/types';
@@ -89,10 +91,17 @@ export interface Harness {
   runFrames(): void;
   fireTimers(): void;
   scrollTo(first: number, last: number): void;
-  edit(): void;
+  /** An edit of the document that starts at `startLine`. */
+  edit(startLine?: number): void;
   setStatesNull(value: boolean): void;
   swapEditor(): FakeEditor;
   instances: FakeEditor[];
+  /**
+   * A second group editor (split view), or a channel pane when `pane` is given (its own model of
+   * `paneLines` lines); it has its own visible range and collection. `attach()` tells the service.
+   */
+  addGroup(o: { visible: { first: number; last: number }; pane?: MotionPane & { lines: number } }): { editor: FakeEditor; visible: { first: number; last: number }; sets: MotionDecoration[][] };
+  removeGroup(editor: FakeEditor): void;
   active: { id: DocId | null };
   model: { current: object | undefined };
   profileIdOf: { current: string };
@@ -136,7 +145,7 @@ export function harness(program: string[], o?: { view?: MotionView; index?: Moda
   const hooks: Harness['hooks'] = { scroll: new Set(), layout: new Set(), model: new Set(), content: new Set(), activate: new Set(), attach: new Set() };
   const instances: FakeEditor[] = [];
 
-  function makeEditor(): FakeEditor {
+  function makeEditor(vis: { first: number; last: number } = visible, shown: { current: object | undefined } = model): FakeEditor {
     const editorHooks = { count: 0 };
     const collectionSets: MotionDecoration[][] = [];
     const hook = (set: Set<() => void>) => (cb: () => void) => {
@@ -152,8 +161,8 @@ export function harness(program: string[], o?: { view?: MotionView; index?: Moda
     return {
       collectionSets,
       hookCount: () => editorHooks.count,
-      getModel: () => model.current,
-      getVisibleRanges: () => (model.current === undefined ? [] : [{ startLineNumber: visible.first, endLineNumber: visible.last }]),
+      getModel: () => shown.current,
+      getVisibleRanges: () => (shown.current === undefined ? [] : [{ startLineNumber: vis.first, endLineNumber: vis.last }]),
       onDidScrollChange: hook(hooks.scroll),
       onDidLayoutChange: hook(hooks.layout),
       onDidChangeModel: hook(hooks.model),
@@ -169,6 +178,7 @@ export function harness(program: string[], o?: { view?: MotionView; index?: Moda
     };
   }
   instances.push(makeEditor());
+  const extras: MotionGroupView[] = [];
 
   const deps: MotionColorsDeps = {
     editor: {
@@ -187,10 +197,9 @@ export function harness(program: string[], o?: { view?: MotionView; index?: Moda
         return () => hooks.content.delete(cb);
       },
       model: () => model.current,
-      editorInstance: () => instances[instances.length - 1],
+      groupViews: () => (active.id === null ? [] : [{ id: 'g1', editor: instances[instances.length - 1], docId: active.id, pane: null }, ...extras]),
     },
     docs: {
-      getActiveId: () => active.id,
       get: (id) => (id === 'a' ? doc('a', profileIdOf.current) : undefined),
       list: { subscribe: docsList.subscribe },
     },
@@ -267,8 +276,8 @@ export function harness(program: string[], o?: { view?: MotionView; index?: Moda
       visible.last = last;
       for (const cb of [...hooks.scroll]) cb();
     },
-    edit() {
-      for (const cb of [...hooks.content]) cb('a', { startLine: 1, endLine: 1 } as unknown as ContentChange);
+    edit(startLine = 1) {
+      for (const cb of [...hooks.content]) cb('a', { startLine, endLineOld: startLine, endLineNew: startLine, flush: false, versionId: 1 } satisfies ContentChange);
     },
     setStatesNull(value) {
       statesNull = value;
@@ -278,6 +287,20 @@ export function harness(program: string[], o?: { view?: MotionView; index?: Moda
       instances.push(next);
       for (const cb of [...hooks.attach]) cb();
       return next;
+    },
+    addGroup(o) {
+      const vis = { ...o.visible };
+      const shown: { current: object | undefined } = o.pane ? { current: o.pane.model() } : model;
+      const editor = makeEditor(vis, shown);
+      extras.push({ id: `g${extras.length + 2}`, editor, docId: active.id ?? 'a', pane: o.pane ?? null });
+      for (const cb of [...hooks.attach]) cb();
+      const sets: MotionDecoration[][] = editor.collectionSets;
+      return { editor, visible: vis, sets };
+    },
+    removeGroup(editor) {
+      const at = extras.findIndex((view) => view.editor === editor);
+      if (at >= 0) extras.splice(at, 1);
+      for (const cb of [...hooks.attach]) cb();
     },
     instances,
     active,

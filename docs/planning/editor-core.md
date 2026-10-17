@@ -4,7 +4,7 @@ Core editing, file handling and navigation. NC-specific text transformations are
 
 Tag format: `Priority · Size · Delivery` (see [README](README.md#conventions-used-in-these-documents)).
 
-> **Status.** Design note from 2026-09-21. What shipped is described in the [user guide](../user/README.md); where this note and the guide differ, the guide is right. The [roadmap](roadmap.md) gives the status of every item (its rows link to the sections below), and a *Status* line under a heading below says where this note was brought up to date. In short: Phases 1 and 2 shipped everything tagged P1 and P2 except the items the roadmap lists as deferred (bookmark names and panel, block range, insert and append file, OS file associations, next and previous NC event) or cut (a global viewer mode, an in-app user guide); the P3 items (split view, printing, find files in folders, auto-space, automatic block number) are Phase 4 and not built.
+> **Status.** Design note from 2026-09-21. What shipped is described in the [user guide](../user/README.md); where this note and the guide differ, the guide is right. The [roadmap](roadmap.md) gives the status of every item (its rows link to the sections below), and a *Status* line under a heading below says where this note was brought up to date. In short: Phases 1 and 2 shipped everything tagged P1 and P2 except the items the roadmap lists as deferred (bookmark names and panel, block range, insert and append file, OS file associations, next and previous NC event) or cut (a global viewer mode, an in-app user guide); the P3 items are Phase 4: split view is built (P4e, see [Split view](#split-view)); printing, find files in folders, auto-space and automatic block number are not built.
 
 ## What Monaco gives us
 
@@ -56,7 +56,7 @@ Closing a modified document asks Save / Don't Save / Cancel. Close all and app q
 ### Split view
 `P3 · M · Core`
 
-**Status:** not built (Phase 4).
+**Status:** built in P4e (P4.21): **Split Editor**, **Split Editor Down**, **Close Split** on the View tab, `F6` / `Shift+F6` to move between the panes, the active pane with an accent border; see [Two panes](../user/README.md#two-panes-split-editor). The same editor groups carry the channel view ([Channels side by side](../user/channels.md#channels-side-by-side)).
 
 Two editor groups side by side or stacked. The same document can be shown in both, sharing one model, for example to view the header while editing further down. Overlapping child windows are not needed.
 

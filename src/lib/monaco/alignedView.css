@@ -1,0 +1,111 @@
+/* The aligned NC-aware diff (Phase 4 plan X30, P4.25). Owner: P4.25.
+
+   Imported by `alignedView.ts`, so the feature carries its own styles. The colours are the
+   tokens of `src/app.css` (a literal colour outside that file is a bug), so every rule follows
+   the theme: a line that differs on both sides is tinted with the info colour, a line that
+   exists on one side only with the danger colour (original) or the success colour (current
+   document). The word marks of P4.24 (`wordMarks.css`) sit on top of these tints.
+
+   `.gedit-aligned-filler` is the view zone that keeps the other side's extra lines level; it
+   is drawn as a faint hatch so a gap is not mistaken for blank lines. The arrow in the narrow
+   column between the line numbers and the text (`linesDecorationsClassName`) is a triangle
+   made of borders, so it needs no icon font and no wider column. The size and place of the
+   margin arrow (5 px down, 7 px wide, the left-pointing one 2 px in) is what `ARROW_BOX` in
+   `alignedView.ts` allows a click on: change one, change the other. The arrow inside a filler
+   is a focusable button (Tab, then Enter or Space copies) and shows a focus ring. */
+
+.gedit-aligned {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.gedit-aligned-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.gedit-aligned-pane + .gedit-aligned-pane {
+  border-left: 1px solid var(--border-color);
+}
+
+.monaco-editor .gedit-aligned-changed {
+  background-color: var(--info-surface);
+}
+
+.monaco-editor .gedit-aligned-only-original {
+  background-color: var(--danger-surface);
+}
+
+.monaco-editor .gedit-aligned-only-modified {
+  background-color: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.gedit-aligned-filler {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--surface-hover) 0,
+    var(--surface-hover) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+.monaco-editor .gedit-aligned-arrow-right::before,
+.monaco-editor .gedit-aligned-arrow-left::before {
+  content: '';
+  display: block;
+  width: 0;
+  height: 0;
+  margin-top: 5px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  /* The hand shows over the drawn triangle only: the rest of the strip does not copy. */
+  cursor: pointer;
+}
+
+.monaco-editor .gedit-aligned-arrow-right::before {
+  border-left: 7px solid var(--accent-hover);
+}
+
+.monaco-editor .gedit-aligned-arrow-left::before {
+  margin-left: 2px;
+  border-right: 7px solid var(--accent-hover);
+}
+
+/* The arrow of a side that has no line in the block: inside its filler, at the top. */
+.gedit-aligned-filler .gedit-aligned-filler-arrow {
+  position: absolute;
+  top: 4px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  cursor: pointer;
+  /* Monaco's text layer lies over the view zones and takes the click (no z-index inside a zone
+     lifts the arrow above it): `alignedView.ts` copies when Monaco reports a click on the zone
+     that lands on the arrow. */
+}
+
+.gedit-aligned-filler .gedit-aligned-filler-arrow[data-side='original'] {
+  /* The fallback: `alignedView.ts` places the arrow inline from the pane's visible right edge (a
+     view zone is as wide as the scroll width, so its own right edge can lie far outside the
+     pane), clear of the scrollbar and the overview ruler, and moves it with the horizontal scroll. */
+  right: 6px;
+  border-left: 7px solid var(--accent-hover);
+}
+
+.gedit-aligned-filler .gedit-aligned-filler-arrow[data-side='modified'] {
+  left: 6px;
+  border-right: 7px solid var(--accent-hover);
+}
+
+.gedit-aligned-filler .gedit-aligned-filler-arrow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

@@ -1,0 +1,42 @@
+/* The channel view's marks (Phase 4 plan AD-51, §6.7 rule 13; P4.22b). Imported by `channelPanes.ts`.
+
+   A wait line carries one of two classes in the line-decorations margin, between the line numbers
+   and the text: `gedit-wait-matched` (lined up with the same wait in every channel it names) or
+   `gedit-wait-unmatched` (a channel it names has no matching wait, or it is out of order). The
+   colours are tokens of both themes, each held at 3:1 or better against the editor background by
+   `channelPanes.test.ts`; the fallbacks are the dark theme's values.
+
+   Monaco writes the width of the margin into the element's own style, so the width of the bar has
+   to be `!important`. The filler zone is the empty space that lines the panes up. */
+
+:root {
+  --gedit-wait-matched: #3fb950;
+  --gedit-wait-unmatched: #f85149;
+}
+
+:root[data-theme='light'] {
+  --gedit-wait-matched: #1a7f37;
+  --gedit-wait-unmatched: #cf222e;
+}
+
+.monaco-editor .gedit-wait-matched,
+.monaco-editor .gedit-wait-unmatched {
+  width: 4px !important;
+  margin-left: 3px;
+  box-sizing: border-box;
+}
+
+.monaco-editor .gedit-wait-matched {
+  background-color: var(--gedit-wait-matched, #3fb950);
+}
+
+.monaco-editor .gedit-wait-unmatched {
+  background-color: var(--gedit-wait-unmatched, #f85149);
+}
+
+.gedit-align-zone {
+  box-sizing: border-box;
+  height: 100%;
+  background-image: repeating-linear-gradient(135deg, transparent 0 5px, var(--border-color, #444) 5px 6px);
+  opacity: 0.5;
+}

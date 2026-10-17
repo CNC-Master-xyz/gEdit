@@ -15,6 +15,7 @@ import { createTemplateManager, type ManagerState, type TemplateManager, type Te
 import { createDocumentStore } from '$lib/stores/documents';
 import { createProfileRegistry } from '$lib/stores/profiles';
 import { loadTemplates } from '$lib/core/templates';
+import { oneGroup } from '../../../tests/unit/helpers/editorGroups';
 import type { ContentChange, CursorInfo, Disposable, DocId, DocumentStore, EditorService, Eol, NativeDialogs, StatusService } from '$lib/app/types';
 
 const DIR = '/cfg/codes';
@@ -39,6 +40,7 @@ function fakeEditor(docs: DocumentStore): EditorService & { type(id: DocId, text
   };
   const off = (): Disposable => () => {};
   return {
+    ...oneGroup(),
     type: change,
     attach: () => Promise.resolve(),
     ready: Promise.resolve(),
@@ -55,6 +57,7 @@ function fakeEditor(docs: DocumentStore): EditorService & { type(id: DocId, text
     getLineCount: (id) => (texts.get(id) ?? '').split('\n').length,
     getLines: (id, a, b) => (texts.get(id) ?? '').split('\n').slice(a - 1, b),
     versionId: (id) => versions.get(id) ?? 0,
+    recheckDirty() {},
     markClean(id) {
       cleanAt.set(id, versions.get(id) ?? 0);
       sync(id);

@@ -22,8 +22,10 @@ const fake = vi.hoisted(() => ({
   path: null as string | null,
   editing: { forceUppercase: true, preventLineJoin: true } as { forceUppercase?: boolean; preventLineJoin?: boolean },
   profileId: 'fanuc-gcode',
+  /** Other documents (an aligned compare pane shows one that is not the active one). */
+  others: {} as Record<string, { readOnly: boolean; path: string | null; editing?: { forceUppercase?: boolean; preventLineJoin?: boolean } }>,
   instance: null as unknown,
-  listeners: { attach: [] as (() => void)[] },
+  listeners: { attach: [] as (() => void)[], focus: [] as ((id: string) => void)[] },
 }));
 
 vi.mock('$lib/app/status', () => ({ status: { show: (text: string) => fake.messages.push(text) } }));
@@ -43,12 +45,14 @@ vi.mock('$lib/monaco/editorService', () => ({
   editor: {
     editorInstance: () => fake.instance,
     onDidAttach: (cb: () => void) => (fake.listeners.attach.push(cb), () => fake.listeners.attach.splice(0)),
+    onDidFocusGroup: (cb: (id: string) => void) => (fake.listeners.focus.push(cb), () => fake.listeners.focus.splice(0)),
   },
 }));
 vi.mock('$lib/stores/documents', () => ({
   docs: {
     getActiveId: () => fake.activeId,
-    get: (id: string) => (id === fake.activeId ? { id, readOnly: fake.readOnly, path: fake.path } : undefined),
+    get: (id: string) =>
+      id === fake.activeId ? { id, readOnly: fake.readOnly, path: fake.path } : fake.others[id] ? { id, ...fake.others[id] } : undefined,
   },
 }));
 vi.mock('$lib/stores/machines', async () => {
@@ -57,20 +61,21 @@ vi.mock('$lib/stores/machines', async () => {
   const cache = new Map<string, CompiledProfile>();
   return {
     machines: {
-      effective: () => {
+      effective: (id?: string) => {
         let cp = cache.get(fake.profileId);
         if (!cp) {
           cp = compile(all.find((p) => (p as Profile).id === fake.profileId) as Profile);
           cache.set(fake.profileId, cp);
         }
-        return { cp, profile: { ...cp.profile, editing: fake.editing } };
+        const own = id !== undefined ? fake.others[id]?.editing : undefined;
+        return { cp, profile: { ...cp.profile, editing: own ?? fake.editing } };
       },
     },
   };
 });
 
 const typing = (await import('./typing')).default;
-const { handleKey, uppercaseOn, resetUppercaseOverride, isNcDocument, MAX_TYPING_LINE } = await import('./typing');
+const { handleKey, hookTyping, uppercaseOn, resetUppercaseOverride, isNcDocument, MAX_TYPING_LINE } = await import('./typing');
 const { hasKey, t } = await import('$lib/i18n');
 
 // -- a fake code editor ---------------------------------------------------------------------
@@ -156,6 +161,7 @@ beforeEach(() => {
   fake.path = null;
   fake.editing = { forceUppercase: true, preventLineJoin: true };
   fake.profileId = 'fanuc-gcode';
+  fake.others = {};
   fake.instance = null;
   resetUppercaseOverride();
 });
@@ -461,6 +467,128 @@ describe('hooking the editor', () => {
     (disposable as () => void)();
     expect(second.calls.some((c) => c.kind === 'disposeKeyDown')).toBe(true);
     expect(fake.listeners.attach).toHaveLength(0);
+    expect(fake.listeners.focus).toHaveLength(0);
+  });
+
+  it('follows the focused group in split view: the editor that gets the focus is the one that is hooked (§6.7 rule 3)', async () => {
+    const left = makeEditor(['G1 '], [sel([1, 4])]);
+    const right = makeEditor(['G1 '], [sel([1, 4])]);
+    fake.instance = left.instance;
+    const disposable = await typing.activate?.();
+    left.press(keyEvent('x').e);
+    expect(left.calls.filter((c) => c.kind === 'trigger')).toHaveLength(1);
+
+    // The second group takes the focus: `editorInstance()` answers it from now on.
+    fake.instance = right.instance;
+    for (const cb of fake.listeners.focus) cb('g2');
+    right.press(keyEvent('x').e);
+    expect(right.calls.filter((c) => c.kind === 'trigger')).toHaveLength(1);
+    expect(left.calls.some((c) => c.kind === 'disposeKeyDown')).toBe(true);
+
+    // And back: a hook per focus change, never two on one editor.
+    fake.instance = left.instance;
+    for (const cb of fake.listeners.focus) cb('g1');
+    left.press(keyEvent('x').e);
+    expect(left.calls.filter((c) => c.kind === 'trigger')).toHaveLength(2);
+    (disposable as () => void)();
+  });
+});
+
+describe('a pane of the aligned compare view (P4e FT)', () => {
+  // The active document is the compared one; the pane shows another (or the same) document and the
+  // keys follow the document the pane names, with its own settings.
+  const pane = (docId: string | null, lines = ['G1 '], selections = [sel([1, 4])]) => {
+    const made = makeEditor(lines, selections);
+    const hooked = hookTyping(made.instance as never, () => docId);
+    return { ...made, hooked };
+  };
+  const triggers = (calls: { kind: string }[]) => calls.filter((c) => c.kind === 'trigger');
+
+  it('types g1x10 as G1X10: each letter becomes a capital, the digits stay the editor\'s', () => {
+    fake.others.p1 = { readOnly: false, path: null };
+    const { calls, press } = pane('p1');
+    for (const key of ['g', '1', 'x', '1', '0']) press(keyEvent(key).e);
+    expect(calls.filter((c) => c.kind === 'trigger').map((c) => (c.args[2] as { text: string }).text)).toEqual(['G', 'X']);
+  });
+
+  it('follows the pane\'s own document, not the active one', () => {
+    fake.editing = { forceUppercase: false, preventLineJoin: true }; // the active document: off
+    fake.others.p1 = { readOnly: false, path: null, editing: { forceUppercase: true } };
+    fake.others.p2 = { readOnly: false, path: null, editing: { forceUppercase: false } };
+    const on = pane('p1');
+    on.press(keyEvent('x').e);
+    expect(triggers(on.calls)).toHaveLength(1);
+    const off = pane('p2');
+    fake.editing = { forceUppercase: true, preventLineJoin: true }; // now the active one is on
+    off.press(keyEvent('x').e);
+    expect(triggers(off.calls)).toEqual([]);
+  });
+
+  it('follows the session switch like the main editor', () => {
+    fake.others.p2 = { readOnly: false, path: null, editing: { forceUppercase: false } };
+    const { calls, press } = pane('p2');
+    press(keyEvent('x').e);
+    expect(triggers(calls)).toEqual([]);
+    void typing.commands?.find((c) => c.id === 'edit.toggleForceUppercase')?.run({ activeDocId: 'p2' } as never);
+    press(keyEvent('x').e);
+    expect(triggers(calls)).toHaveLength(1);
+  });
+
+  it('leaves a locked document, a document that is not an NC program and a pane without a document alone', () => {
+    fake.others.ro = { readOnly: true, path: null };
+    fake.others.js = { readOnly: false, path: '/profiles/mine.json' };
+    for (const id of ['ro', 'js', null]) {
+      const { calls, press } = pane(id);
+      press(keyEvent('x').e);
+      press(keyEvent('Backspace').e);
+      expect(calls.filter((c) => c.kind !== 'disposeKeyDown')).toEqual([]);
+    }
+  });
+
+  it('keeps two blocks apart in the pane: Backspace in column 1 says why, with the pane\'s own setting', () => {
+    fake.others.p1 = { readOnly: false, path: null };
+    fake.others.p2 = { readOnly: false, path: null, editing: { preventLineJoin: false } };
+    const lines = ['N10 G1 X1', 'N20 G2 X2'];
+    const guarded = pane('p1', lines, [sel([2, 1])]);
+    const { e, log } = keyEvent('Backspace');
+    guarded.press(e);
+    expect(log).toEqual(['preventDefault', 'stopPropagation']);
+    expect(fake.messages).toEqual([t('typing.noJoin')]);
+    const free = pane('p2', lines, [sel([2, 1])]);
+    const second = keyEvent('Backspace');
+    free.press(second.e);
+    expect(second.log).toEqual([]);
+  });
+
+  it('is a hook of its own: the main editor\'s hook is not involved, and dispose leaves no listener', () => {
+    fake.others.p1 = { readOnly: false, path: null };
+    const { instance, calls, press, hooked } = (() => {
+      const made = makeEditor(['G1 '], [sel([1, 4])]);
+      const starts: unknown[] = [];
+      const ends: unknown[] = [];
+      let down = 0;
+      const wrapped = {
+        ...made.instance,
+        onKeyDown: (cb: (e: unknown) => void) => {
+          down++;
+          const inner = made.instance.onKeyDown(cb);
+          return { dispose: () => (down--, inner.dispose()) };
+        },
+        onDidCompositionStart: () => (starts.push(1), { dispose: () => void starts.pop() }),
+        onDidCompositionEnd: () => (ends.push(1), { dispose: () => void ends.pop() }),
+      };
+      const h = hookTyping(wrapped as never, () => 'p1');
+      return { instance: { down: () => down, open: () => starts.length + ends.length }, calls: made.calls, press: made.press, hooked: h };
+    })();
+    expect(instance.down()).toBe(1);
+    expect(instance.open()).toBe(2);
+    hooked.dispose();
+    expect(instance.down()).toBe(0);
+    expect(instance.open()).toBe(0);
+    expect(calls.some((c) => c.kind === 'disposeKeyDown')).toBe(true);
+    hooked.dispose();
+    expect(instance.down()).toBe(0);
+    void press;
   });
 });
 

@@ -24,7 +24,8 @@ you.
 | [Presets, and what to check on your machine](#presets-and-what-to-check-on-your-machine) | Starting points, all marked "verify" |
 | [Seeing the channels](#seeing-the-channels) | The status bar, the program map, the keys |
 | [Check Wait Codes](#check-wait-codes) | What it finds, and what to do about each finding |
-| [Split into Channel Documents](#split-into-channel-documents) | A copy for reading |
+| [The channel view](#the-channel-view) | One pane for each channel, lined up at the waits |
+| [Split into Channel Documents](#split-into-channel-documents) | One document for each channel, and merging them back |
 | [In a script](#in-a-script) | |
 | [Known limits](#known-limits) | |
 
@@ -32,12 +33,13 @@ you.
 
 ## What gEdit does with a channel, and what it does not
 
-gEdit does **four** things with channels:
+gEdit does **five** things with channels:
 
 1. It finds out which lines belong to which channel, or which file is which channel.
 2. It shows them apart: in the program map, in the status bar, in the tool list.
 3. It finds the **wait codes** and lets you jump from a wait to the wait that answers it.
 4. It compares the waits of the channels and tells you where they do not fit.
+5. It shows the channels in the **channel view**, lined up at the waits ([below](#the-channel-view)).
 
 gEdit does **not**:
 
@@ -48,10 +50,11 @@ gEdit does **not**:
   channel to the other, and nothing is written for you.
 - **Synchronize anything.** gEdit never adds, removes or renumbers a wait. It tells you
   what does not fit and you decide.
-- **Show the channels side by side.** One channel is shown at a time. A side-by-side view
-  with the time axis is planned for a later version.
+- **Show a time axis.** The panes are lined up at the wait codes, not at the clock. A line
+  that takes long and a line that takes no time are one line high.
 - **Open files by itself.** For a program with one file per channel, gEdit looks whether the
-  other files are there, and tells you. You open them yourself.
+  other files are there, and tells you. You open them yourself, or pick them in the file
+  dialog that **Channels Side by Side** opens.
 
 So the check is a second pair of eyes on **what is written**: the numbers of the waits and
 the order they are written in. It is not a simulation, and a clean result is not a proof
@@ -504,7 +507,7 @@ shows the map as before.
 |---|---|
 | `Alt+F7` | **Next Sync Point**: the next wait of the channel the cursor is in. At the last one it starts over from the first and says so. In lines that belong to no channel it steps over the waits of all channels |
 | `Shift+Alt+F7` | **Previous Sync Point** |
-| `Cmd/Ctrl+Alt+P` | **Go to the Matching Mark**: with the cursor on a wait, jump to the wait in the other channel that answers it. The first `M901` of one channel meets the first `M901` of the other, the second the second. With one file for each channel it switches to the other tab. If that channel is not open it says so and moves nothing |
+| `Cmd/Ctrl+Alt+P` | **Go to the Matching Mark**: with the cursor on a wait, jump to the wait in the other channel that answers it. A wait is answered by the same code with the same `P`: an `M901 P12` meets the `M901 P12` of the other channel, never an `M901 P123`. The first of them in one channel meets the first in the other, the second the second ([the rule](#how-the-waits-line-up) is the one the channel view uses). With one file for each channel it switches to the other tab. If that channel is not open it says so and moves nothing |
 
 On macOS, `Cmd+Alt+P` is the editor's own key for *Preserve Case* in the find box. gEdit
 takes it over there. The button in the find box still works. On Windows and Linux the
@@ -582,6 +585,184 @@ Say path 1 and path 2, with `M901 P3`-style waits.
 
 ---
 
+## The channel view
+
+**Channels Side by Side** (NC tab, group **Channels**; palette: *Channels: Channels Side by Side*) opens
+the **channel view**: the channels of a program in **channel panes** next to each other, **one pane for each
+channel**, up to four. The panes are lined up at the wait codes: a wait and the wait that answers it
+stand at the same height, and the shorter channel gets empty space until the longer one catches up.
+It has no key. It is offered when the program's machine has channel settings, and not while a comparison
+is open.
+
+The channel view is not the [split view](README.md#two-panes-split-editor). The split view shows
+documents in editor groups with no lining up; the channel view shows the channels of one program,
+lined up. The two exclude each other.
+
+It works for both layouts:
+
+- **All channels in one file.** Each channel pane shows the sections of one channel. The panes are
+  made from the program itself, so what you type in a pane is typed in the program.
+- **One file for each channel.** Each channel pane shows one of the open channel files. gEdit first
+  looks for the other files of the program. If some exist and are not open, the status bar says
+  *Choose the other channel files to open beside this one.* and the file dialog opens in the
+  folder of the document. Pick the files (several at once). gEdit opens **nothing by itself**. If
+  you pick nothing, it says *No files were opened. Showing the channels that are open.* and goes on
+  with the files that are open.
+
+Run the command again while the view is open to open it afresh. A channel file you opened since
+joins the view then. When it opens, the status bar says *The channel view shows 3 channels.*
+
+The view does not open, and says why, when:
+
+| You see | What it means |
+|---|---|
+| This program has no channels, so there is nothing to show in the channel view. | The machine has channels, the program has no sections |
+| Only one channel of this program was found. The view needs at least two. | One section name is all there is |
+| Open at least two channel files to open the channel view. | One file for each channel, and fewer than two are open |
+| This program took too long to read for channels, so channels are off for it. | See *Channels: too slow to read* in [the status bar](#the-status-bar) |
+
+### The bar and the channel panes
+
+Above the panes is a bar. It says which layout the view reads (*Channel sections of one program*
+or *One file per channel*) and counts the waits:
+
+- **N of M waits lined up.** And, when there are some, **N waits have no partner**.
+- **Not shown: Turret C, Turret D.** The view shows the first **four** channels in the order the
+  machine declares them. The bar names the rest.
+- **N lines are in no channel and are not shown.** The lines outside channels, between the
+  sections, are in no pane.
+
+The button at the right end of the bar closes the view.
+
+Every pane has a header with the name of its channel (with one file for each channel, also the
+file's name). The lines of a pane are the lines of its channel, but the **line numbers are those
+of the program**, so a number in a pane is the line you would reach in the whole program. The
+header of the program (the lines above the first section start) is in every pane. A pane has no code
+folding, and its outline is empty. The minimap follows the setting *Show minimap*, one for each pane. Every
+pane has its own overview ruler.
+
+**Word wrap is off** in every pane of the channel view, with one file for each channel as well as
+with sections, whatever the setting says. A wrapped line is taller than one line and would put
+the lining up at the waits out of step. The setting you chose comes back when the view closes.
+
+If a channel is no longer in the program (you deleted its last section, say), its pane stays,
+empty and read-only, titled *Turret B (no longer in the program)*. **Undo** brings the section
+back, and the pane with it. If no section is left at all, the view closes with a message; so it
+does if the program takes too long to read, or if the channels of the machine change.
+
+### How the waits line up
+
+A wait carries a `P` word. It lists the channels that take part, as digits (when the
+machine reads the `P` word as digits; see [Which channels a wait names](#which-channels-a-wait-names)).
+A wait meets the same code with the same `P` in the channels the `P` names, and
+**the first of them meets the first, the second the second**. Two synthetic examples:
+
+```
+Channel 1:  M901P12      Channel 2:  M901P12      Channel 3:  (nothing)
+Channel 1:  M910P123     Channel 2:  M910P123     Channel 3:  M910P123
+```
+
+- `M901P12` meets in channels 1 and 2 **only**. Channel 3 is not named, takes no part and does
+  not stop. It gets no line-up point for it.
+- `M910P123` meets in all three channels. The pane that gets there first waits for the other two.
+
+A different `P` is a different wait: `M901P12` does not meet `M901P123`. This is gEdit's rule,
+and it holds for **every wait written with a `P` word**, also for a wait rule you built yourself on
+the machine page. A wait with no `P` word meets only a wait with no `P` word (Fanuc presets): `M901`
+against `M901 P3` is unmatched, as Check Wait Codes reports it. If a channel the `P`
+names **and that is shown** has no matching wait, the wait is **unmatched** in all the channels
+that have it. A channel the `P` names that is **not shown** (more than four channels) is
+not judged.
+
+**A Sinumerik `WAITM` lists its channels** (`WAITM(1,1,2,3)`), and the lists need not be the
+same in every channel. Those waits are paired **channel by channel**, as Check Wait Codes does: the
+n-th wait of channel 1 that names channel 2 meets the n-th wait of channel 2 that names channel 1. A
+`SETM` of the same mark number in a named channel **answers** the wait, so the wait needs no
+matching `WAITM` there and is not red.
+
+A few waits are **not judged**, and get no red mark:
+
+- **A wait inside a loop or a jump** (between a jump target and a backward jump) whose number differs
+  between the channels, when each channel has that wait at least once (a channel without it is
+  still unmatched, *missing*, even inside a loop). How often a loop runs is not written anywhere. This is the same as
+  *Count not checked* in Check Wait Codes; the view only shows where you are working.
+- A wait **whose other channels are not shown**.
+
+A wait that names a channel the machine **does not declare** (`M901 P14` on a machine with three
+channels) is unmatched: the control would wait for ever.
+
+When the channels have the same waits in a different order, the view keeps the longest run of waits
+that are in the same order in both and marks the others unmatched (with three or four channels it
+drops the wait that crosses the most others first). Two waits on one line whose partners are on
+different lines cannot both be lined up: the second is unmatched.
+
+The marks stand in the margin of the pane, and in its overview ruler. **Hover a mark** and it says
+why:
+
+| Mark | Hover |
+|---|---|
+| matched | *Waits with Turret B, line 120; Turret C, line 98* |
+| unmatched | *Turret C has no matching wait for "M910P123"* |
+| unmatched | *This wait names no other channel, so nothing can meet it.* |
+| unmatched | *This wait names channel 4, which this machine does not have. The control would wait here for ever.* |
+| unmatched | *This wait comes in another order here than in the other channels, so it is not lined up.* |
+| unmatched | *Another wait on this line is already lined up with a different line, so this one is unmatched.* |
+| not judged | *This wait is inside a loop or a jump, so how often it runs is not checked here.* |
+| not judged | *A SETM in Turret B answers this wait, so it needs no matching wait there.* |
+
+A wait that needs no partner in view gets no mark: a code that does not block, a numbered wait
+that is in one channel only, a wait whose other channels are not shown. This is what *Check Wait
+Codes* also checks. It is not a simulation.
+
+### Scrolling, editing, undo
+
+- **The panes always scroll together.** Whichever pane the mouse is over takes the wheel and the
+  others follow. There is no leading pane to choose. The lining up at the waits decides how
+  they follow.
+- **You can edit in every pane, in its own channel's lines.** An edit goes to the program (or to the
+  channel's file), and the other panes are lined up again. A whole new line (text ending in Enter)
+  typed or pasted at the start of a **section start** line (`G13`, `$1`), other than the first
+  section's, goes to the end of the section above it, so it stays in your channel. The same at
+  the first section start, or characters typed in front of a section start, are refused (below).
+- **A pane edit that would move lines to another channel is refused.** Typing characters in front of a section
+  start, taking one out, typing a new one, or, on a machine whose sections have an end line,
+  typing that end line in the middle of a section or adding a line after it, would hand lines to
+  a different channel. (Without an end line a section runs to the next start, so typing `M30` or
+  Enter after its last line moves nothing and is allowed.)
+  gEdit does not apply the edit, puts the pane back as it was and says: *A pane only edits its own
+  channel's lines. To end a section early or add lines after its end, edit the program itself.* The
+  refused edit is no step of the view's undo. Deleting a whole section's lines in its pane, or lines
+  inside a section, is fine.
+- **There is one undo history for the view**, not one for each channel. With all channels in
+  one file it is the program's own history. With one file for each channel it holds only the edits
+  made **while the view is open**: the history starts when the view opens, and what you typed
+  before is not on it. After the view closes, each file has its own history again.
+  A file that is **reloaded from disk** is one step of the view's history: Undo takes the reload
+  back. Only a file whose document was replaced by another one drops its steps. An undo
+  of a step for a file that was changed outside the view says *That file was changed outside the
+  view. Close the channel view to undo in that file.*
+- **Save stays per file.** With one file for each channel, each channel file is saved on its
+  own, as before. With all channels in one file there is one file, the program.
+- **The active pane** is the one with the keyboard. It has a coloured border in the accent
+  colour of the theme, and the status bar, the inspector and the program map show **that**
+  channel's line. `F6` and `Shift+F6` move to the next and the previous pane.
+- **A selection across channels is refused.** A line command, a clean-up or a script that works on
+  the selection stops with *The selection runs over the lines of another channel. Select within one
+  section.* if a selection in a pane covers lines of another channel. The same goes for
+  *New Template from Selection*.
+
+### Closing it
+
+**Close Split** (View tab, group **Editor**), the button in the bar and the **X** in a pane header
+close the view. Closing a pane of three leaves two, and the remaining panes keep scrolling together
+and showing only their own channel's marks. When one is left, the view ends. The
+program stays as it is.
+
+While the view is open, **Split Editor** and **Split Editor Down** are off, and the channel view
+cannot be opened while a comparison is open.
+
+---
+
 ## Split into Channel Documents
 
 On a program with all channels in one file, **Split into Channel Documents** (NC tab, group
@@ -589,10 +770,44 @@ On a program with all channels in one file, **Split into Channel Documents** (NC
 section (the header, `%`, the `O` number), then all of the channel's sections in order.
 Lines that belong to no channel, between the sections, are not copied.
 
-It is **a one-way copy for reading**. It is useful to read one turret's program from
-start to end, or to print it. Nothing you change in the new documents goes back into the
-program, and it writes no file. gEdit asks once per session to make sure you know. The
-new documents are untitled, with names such as `SHAFT — Turret A`.
+Use it to read one turret's program from start to end, to print it, or to work on one
+channel alone. It writes no file. gEdit asks once per session to make sure you know. The new
+documents are untitled, with names such as `SHAFT — Turret A`. gEdit remembers which
+documents it made from which program until you quit.
+
+### Merge Channels Back
+
+**Merge Channels Back** (NC tab, group **Channels**; offered on the program that was split
+and on each of its channel documents) writes the changes you made in the channel documents
+back into the program, each into the lines of its own channel. It asks nothing first and is
+**one undo step** of the program: **Undo** takes all of it back.
+
+- A line you changed stays where it was. A line you added goes right after the line above it
+  in the same channel, so a line added at the end of a section stays in that section. A
+  line you deleted is deleted in the program.
+- A channel document you closed is skipped, and so is one you did not change.
+- Lines the program has outside every channel are never touched.
+- A shared section (`+S1/S3`) is the same lines in each channel that shares it. If two
+  documents changed the same shared line in two ways, nothing is merged.
+
+gEdit **refuses the whole merge** and changes nothing, saying why, when:
+
+- **The program changed in the lines of a channel you are merging** since the split (or the
+  last merge). Merge before you edit that channel in the program, or split again. Changes in
+  the lines of another channel, or between the channels, do not matter.
+- **The lines at the top of a channel document changed** (the header, before the first
+  section). They belong to every channel. Change them in the program. Lines added between
+  the header and the first section count as the header.
+- **Two channel documents changed the same shared line differently**, or only one of them
+  changed a line the channels share: a shared line is the same line in every channel, so the
+  change has to be made in the program (the message says *shared lines*).
+- **The merge would move lines into another channel.** A section start or a wait that opens a
+  section was typed into, or taken out of, a channel document, so the program would read
+  differently afterwards. Take it out of the document, or make the change in the program.
+
+After a merge the channel documents and the program are in step again, so you can go on
+editing and merge again. If you undo a merge in the program, merge again brings the same
+changes back from the documents.
 
 It is not offered for a machine with one file for each channel; they are separate documents
 already.
@@ -625,5 +840,9 @@ them. See [Scripts](scripts.md#channels-in-a-script). The bundled
 - **A broken pattern costs the channels, not the machine.** If a pattern in the channel
   settings is not valid, the machine keeps all its other settings. Only the channels are
   off, and the page says what is wrong.
-- **No side-by-side view.** See [What gEdit does not do](README.md#what-gedit-does-not-do).
+- **The channel view shows four channels at most**, the first four in the order the machine
+  declares them, and the bar names the rest. The speed of the view is proven for two panes on
+  programs of 300,000 lines, not for three or four.
+- **A program with sections of one channel in several places** shows them in one pane, in
+  program order. Lines in no channel are not shown.
 - **The presets are documented defaults, not facts about your machine.**

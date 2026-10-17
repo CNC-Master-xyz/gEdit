@@ -1,6 +1,8 @@
 <!--
   The comparison overlay (plan §5 WP2.5, §7.9: `compare-view` with `data-source`; M11:
-  `data-mode`, the Raw/Review switch, the review bar, copy, export and go to line).
+  `data-mode`, the Raw/Review switch, the review bar, copy, export and go to line; P4.25:
+  the third button of the switch, Aligned, which swaps the diff editor for `AlignedDiff`
+  and keeps the review bar (its toggles decide what is equal there too)).
 
   Mounted by `PanelHost` in the `overlay` region, which means it takes the editor's place
   in the shell (AD-6). The diff editor itself lives in `$lib/monaco/diff`; this component
@@ -22,6 +24,7 @@
   import { get } from 'svelte/store';
   import { compareController } from '$lib/app/compare';
   import { createDiff, currentDiff, setCurrentDiff, settleCreated, type DiffHandle } from '$lib/monaco/diff';
+  import AlignedDiff from './AlignedDiff.svelte';
   import { t } from '$lib/i18n';
 
   import { COMPARE_OPTION_KEYS, type CompareOptions } from '$lib/core/compare/types';
@@ -29,6 +32,7 @@
   const content = compareController.content;
   const options = compareController.view;
   const mode = compareController.mode;
+  const aligned = compareController.aligned;
   const review = compareController.review;
   const reviewInfo = compareController.reviewInfo;
   const reviewOptions = compareController.options;
@@ -124,6 +128,10 @@
     void compareController.copyChange(direction, { lineOnly: event.shiftKey, thenNext: !event.shiftKey });
   }
 
+  function copyWord(direction: 'toModified' | 'toOriginal'): void {
+    void compareController.copyWord(direction);
+  }
+
   let gotoLine = $state('');
   function onGoto(event: KeyboardEvent): void {
     if (event.key !== 'Enter') return;
@@ -145,7 +153,7 @@
   class="compare-view"
   data-testid="compare-view"
   data-source={$content?.source.kind ?? ''}
-  data-mode={$mode}
+  data-mode={$aligned ? 'aligned' : $mode}
   aria-label={$content?.title ?? t('compare.title')}
   onkeydown={onKeyDown}
 >
@@ -158,7 +166,7 @@
         class="tool"
         data-testid="compare-mode"
         data-mode="raw"
-        aria-pressed={$mode === 'raw'}
+        aria-pressed={!$aligned && $mode === 'raw'}
         onclick={() => compareController.setMode('raw')}
       >{t('compare.modeRaw')}</button>
       <button
@@ -166,12 +174,21 @@
         class="tool"
         data-testid="compare-mode"
         data-mode="review"
-        aria-pressed={$mode === 'review'}
+        aria-pressed={!$aligned && $mode === 'review'}
         title={t('compare.toggleReview')}
         onclick={() => compareController.setMode('review')}
       >{t('compare.modeReview')}</button>
+      <button
+        type="button"
+        class="tool"
+        data-testid="compare-mode"
+        data-mode="aligned"
+        aria-pressed={$aligned}
+        title={t('compare.modeAlignedHint')}
+        onclick={() => compareController.setAligned(true)}
+      >{t('compare.modeAligned')}</button>
     </div>
-    {#if $mode === 'raw'}
+    {#if $mode === 'raw' && !$aligned}
       <label class="switch">
         <input
           type="checkbox"
@@ -181,13 +198,15 @@
         {t('compare.ignoreWhitespace')}
       </label>
     {/if}
-    <button
-      type="button"
-      class="tool"
-      aria-pressed={$options.inline}
-      title={$options.inline ? t('compare.sideBySide') : t('compare.inline')}
-      onclick={() => compareController.toggleInline()}
-    >{$options.inline ? t('compare.inline') : t('compare.sideBySide')}</button>
+    {#if !$aligned}
+      <button
+        type="button"
+        class="tool"
+        aria-pressed={$options.inline}
+        title={$options.inline ? t('compare.sideBySide') : t('compare.inline')}
+        onclick={() => compareController.toggleInline()}
+      >{$options.inline ? t('compare.inline') : t('compare.sideBySide')}</button>
+    {/if}
     <button
       type="button"
       class="tool"
@@ -224,6 +243,30 @@
       aria-label={t('compare.copyToModified')}
       onclick={(event) => copy(event, 'toModified')}
     >{t('compare.copyToModifiedShort')}</button>
+    {#if $aligned}
+      <button
+        type="button"
+        class="tool"
+        data-testid="compare-copy-word"
+        data-direction="toOriginal"
+        data-disabled={$copyBlock.toOriginal !== null}
+        title={t('compare.copyWordTitle', { action: t('compare.copyWordToOriginal') })}
+        aria-disabled={$copyBlock.toOriginal !== null}
+        aria-label={t('compare.copyWordToOriginal')}
+        onclick={() => copyWord('toOriginal')}
+      >{t('compare.copyWordToOriginalShort')}</button>
+      <button
+        type="button"
+        class="tool"
+        data-testid="compare-copy-word"
+        data-direction="toModified"
+        data-disabled={$copyBlock.toModified !== null}
+        title={t('compare.copyWordTitle', { action: t('compare.copyWordToModified') })}
+        aria-disabled={$copyBlock.toModified !== null}
+        aria-label={t('compare.copyWordToModified')}
+        onclick={() => copyWord('toModified')}
+      >{t('compare.copyWordToModifiedShort')}</button>
+    {/if}
     <button
       type="button"
       class="tool"
@@ -253,7 +296,7 @@
     >✕</button>
   </div>
 
-  {#if $mode === 'review' && $content}
+  {#if ($mode === 'review' || $aligned) && $content}
     <div class="review-bar" role="group" aria-label={t('compare.reviewBar')}>
       <!-- The toggles the compared profile offers (§7.16 #148: cycle names only where it declares them). -->
       {#each $reviewInfo?.offered ?? COMPARE_OPTION_KEYS.filter((key) => key !== 'ignoreCycleNames') as key (key)}
@@ -282,7 +325,9 @@
     </div>
   {/if}
 
-  {#if $content}
+  {#if $content && $aligned}
+    <AlignedDiff />
+  {:else if $content}
     <div class="diff-host" bind:this={host}></div>
   {:else}
     <p class="empty">{t('compare.empty')}</p>

@@ -2,6 +2,32 @@
 
 What changed in each release of gEdit, written for the person who edits NC programs. The release workflow publishes the entry of a version as the notes of its draft release, so the top of each entry has to make sense on its own. An entry called `Unreleased`, when there is one, is what has been fixed or added on `main` since the last release; it gets its version and date when that version is tagged.
 
+## Unreleased
+
+P4e, "Side by side" ([phase-4-implementation.md](docs/planning/phase-4-implementation.md#p4e-side-by-side)): two places of one program at once, the channels of a program next to each other, and a comparison that shows which words changed. The words of the interface and the guide follow a [glossary](GLOSSARY.md).
+
+### New
+
+- **Split Editor, Split Editor Down and Close Split** on the View tab (group *Editor*): the same document in two editor groups, beside each other or one above the other, with one text and one undo history and a cursor, scroll position and folds for each pane. `F6` and `Shift+F6` move between the panes; the active pane has a border in the accent colour. See [Two panes](docs/user/README.md#two-panes-split-editor).
+- **Channels Side by Side** on the NC tab (group *Channels*) opens the **channel view**: one channel pane for each channel, up to four, lined up at the waits, for a program with all channels in one file and for one file for each channel. A bar names the layout, the waits that are lined up and without a partner, the channels not shown and the lines outside channels; the panes scroll together, share one undo history, and a wait is marked in the margin as matched or unmatched, and the hover says why. See [The channel view](docs/user/channels.md#the-channel-view).
+- **A channel pane edits only its own channel's lines:** an edit that would hand lines to another channel (typing characters in front of a section start, taking one out, typing a new one and, on a machine whose sections have an end line, typing that end line in the middle of a section or adding a line after it) is refused, the pane stays as it was, and the status bar says: A pane only edits its own channel's lines. To end a section early or add lines after its end, edit the program itself. A line typed just above a section start goes to the end of the section above, in the same channel.
+- **Merge Channels Back** on the NC tab (group *Channels*): writes the changes made in the channel documents of **Split into Channel Documents** back into the program as one undo step. It refuses the whole merge, and says why, when the program changed in those channels, a document's header changed, the merge would move lines into another channel or two documents changed a shared line differently. See [Merge Channels Back](docs/user/channels.md#merge-channels-back).
+- **Word marks in the comparison:** a changed line marks the words that differ, whole (`F1200` against `F1000`), not the characters; an address word that only moved is not marked, and a line with more than 500 words gets no marks. See [Word marks](docs/user/README.md#word-marks).
+- **The aligned view:** a third view in the comparison (*Raw | Review | Aligned*) shows both programs as written, level block by block with hatched filler space, scrolling as one and both editable, with forced upper case and the line-join guard of the editor in every editable pane and no suggestion pop-ups. An arrow at the first line of a change copies it (Shift+click copies one line; the arrow also works with `Tab` and `Enter`, and the right-click menu has *Copy Change to Current Document* and *Copy Change to Original*), **Word →** and **← Word** copy the marked words at the cursor, and every copy is one undo step of the side that received it. See [The aligned view](docs/user/README.md#the-aligned-view).
+
+### Changed
+
+- **Go to the Matching Mark follows the `P` word:** an `M901P12` meets only an `M901P12` in the channels the `P` names, and an `M901P123` is another wait; the first of a code in one channel meets the first in the other. Before, an `M901P12` could meet an `M901P123`. See [Keys](docs/user/channels.md#keys) and [How the waits line up](docs/user/channels.md#how-the-waits-line-up).
+- **Waits in the channel view follow Check Wait Codes more closely:** a Sinumerik `WAITM` list is paired channel by channel and a `SETM` answers it; a wait inside a loop is not judged; a wait that names a channel the machine does not have is unmatched; a Fanuc `M901` without `P` does not meet an `M901 P3`; when the order of waits differs, the longest run in the same order stays lined up instead of dropping most waits.
+- **Comparison, Merging:** copying a difference now also works in the aligned view; review mode stays read-only.
+- **Word copy in the aligned view never leaves a letter twice or drops one:** a word copy replaces the word with the same address letter where it stands when that letter is once on each line, and otherwise stops with a message that points to the line copy; copying a word next to a comment or a moved word no longer overwrites what lies between. Rows of a change now face each other by the words they share.
+- **Word marks:** swapped operands (`R1=R2-R3` against `R1=R3-R2`) and moved comments or calls are marked; only an address word that merely moved is left unmarked.
+- **Undo in the channel view starts when the view opens**, so the first thing typed after opening can be undone; a file that cannot be undone from the view says: That file was changed outside the view. Close the channel view to undo in that file. A reload from disk is one step of the view's history.
+- **Word wrap is off in every channel pane**, also with one file for each channel, so the lining up in lines is exact; your setting comes back when the view closes.
+- **Closing the first or a middle pane of three** no longer leaves a pane unlined or with another channel's marks, and two edits in a pane within one moment no longer raise an error.
+- **New Template from Selection** refuses a selection across another channel's lines in a channel pane.
+- **The channel commands of the NC tab follow a machine change at once:** Split into Channel Documents, Merge Channels Back and Channels Side by Side are on or off as soon as you choose another machine, not only after the cursor moves.
+
 ## v1.1.0 (2026-10-17)
 
 The first 1.x release. It includes everything of [v1.0.0](https://github.com/CNC-Master-xyz/gEdit/blob/v1.1.0/CHANGELOG.md#v100-2026-10-10), which was built but never published as a release: if you come from v0.5.0, read that entry too.

@@ -39,7 +39,7 @@ import { status as appStatus } from '$lib/app/status';
 import { lockRefusal } from '$lib/app/readOnlyLock';
 import { initialValues } from '$lib/core/forms/values';
 import { GUARDED_TRANSFORMS, contradictionRefusal } from '$lib/core/profiles/contradiction';
-import { transformScope } from '$lib/core/transforms/scope';
+import { SELECTION_CROSSES, transformScope } from '$lib/core/transforms/scope';
 import { applyLines as applyLinesToModel } from '$lib/monaco/applyLines';
 import { editor as appEditor } from '$lib/monaco/editorService';
 import { docs as appDocs } from '$lib/stores/documents';
@@ -200,6 +200,11 @@ export function createTransformService(deps: TransformDeps): TransformService {
       // The scope belongs to the moment the command was invoked (see the header).
       const lineCount = deps.editor.getLineCount(docId);
       const scope = transformScope(lineCount, deps.editor.selectionLines());
+      // P4e: a selection in a channel pane over another channel's lines (scope.ts); nothing is asked or changed.
+      if (scope.crossesJunction === true) {
+        say(SELECTION_CROSSES, true);
+        return null;
+      }
 
       // 2. The options form.
       const fields = def.options?.(cp) ?? [];

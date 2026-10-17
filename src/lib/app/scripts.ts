@@ -47,7 +47,7 @@ import { initialValues } from '$lib/core/forms/values';
 import { decideApply } from '$lib/core/scripting/apply';
 import { buildContext, MAX_PRECEDING_LINES } from '$lib/core/scripting/context';
 import { scriptLabel, scriptsForProfile } from '$lib/core/scripting/filter';
-import { transformScope } from '$lib/core/transforms/scope';
+import { SELECTION_CROSSES, transformScope } from '$lib/core/transforms/scope';
 import { applyLines as applyLinesToModel } from '$lib/monaco/applyLines';
 import { editor as appEditor } from '$lib/monaco/editorService';
 import {
@@ -379,7 +379,7 @@ export function createScriptService(deps: ScriptDeps): ScriptService {
   function resolveInput(
     docId: DocId,
     meta: ScriptEntry['meta'],
-    selection: { startLine: number; endLine: number; empty: boolean } | null,
+    selection: { startLine: number; endLine: number; empty: boolean; crossesJunction?: true } | null,
     lineCount: number,
     label: string,
   ): { input: ScriptContextInput; stdin: string } | Msg {
@@ -390,6 +390,9 @@ export function createScriptService(deps: ScriptDeps): ScriptService {
     if (wanted === 'selection' && !scope.fromSelection) return MSG.needsSelection(label);
 
     const useSelection = wanted !== 'document' && scope.fromSelection;
+    // P4e: a selection in a channel pane that runs over another channel's lines is not what the
+    // script would read (the lines between), so a script that takes the selection does not run.
+    if (useSelection && scope.crossesJunction === true) return { ...SELECTION_CROSSES };
     const startLine = useSelection ? scope.startLine : 1;
     const endLine = useSelection ? scope.endLine : lineCount;
 

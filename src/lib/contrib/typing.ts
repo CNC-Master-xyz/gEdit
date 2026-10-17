@@ -19,6 +19,9 @@
 //     the neighbouring lines only at the edge where a join could happen, so a program saved as
 //     one 10 MB line costs nothing per key.
 //
+// The aligned compare view has two editors of its own; `hookTyping` hooks one of them for the
+// document it shows (the view's component calls it, `monaco/` does not import this file).
+//
 // The compare overlay recreates the editor instance. `ensureHook` hooks the instance the
 // service has at activation and again on every `editor.onDidAttach` (the service fires it
 // when an `attach()` has built and bound a new instance), so a new instance is hooked before
@@ -244,9 +247,10 @@ let hookedInstance: unknown;
 let hookDisposables: { dispose(): void }[] = [];
 let selectionCtor: (new (a: number, b: number, c: number, d: number) => unknown) | null = null;
 
-function realDeps(): TypingDeps {
+/** The deps of the real app; `docId` names the document the keys are for (the active one unless a pane says otherwise). */
+function realDeps(docId: () => DocId | null = () => docs.getActiveId()): TypingDeps {
   return {
-    activeDocId: () => docs.getActiveId(),
+    activeDocId: docId,
     readOnly: (id) => docs.get(id)?.readOnly === true,
     effective: (id) => {
       const eff = machines.effective(id);
@@ -270,15 +274,40 @@ function hook(instance: TypingEditor, deps: TypingDeps): { dispose(): void }[] {
   return out;
 }
 
+/**
+ * Hooks the FOCUSED group's editor (P4e, §6.7 rules 2 and 3): the keys go to the editor that has the
+ * focus, so the hook follows `onDidFocusGroup` as well as `onDidAttach` (a new or rebuilt editor).
+ */
 function ensureHook(): void {
   const instance = editor.editorInstance();
   if (!instance || instance === hookedInstance) return;
   hookedInstance = instance;
   for (const d of hookDisposables.splice(0)) d.dispose();
   hookDisposables = hook(instance as unknown as TypingEditor, realDeps());
+  loadSelection();
+}
+
+function loadSelection(): void {
   void getMonaco().then((monaco) => {
     selectionCtor = monaco.Selection as unknown as typeof selectionCtor;
   });
+}
+
+/**
+ * Hooks one pane of the aligned compare view (P4e FT). The pane shows a fixed document, so the
+ * keys follow `docId` — that document's dialect, its upper-case setting (and the session switch)
+ * and its line-join guard — not the active document, which is the compared one. `docId` returning
+ * `null` (or a read-only or non-NC document) leaves the key to the editor. Dispose when the view
+ * closes, the pane is locked or its model changes. The main editor's hook is not touched.
+ */
+export function hookTyping(instance: TypingEditor, docId: () => DocId | null): { dispose(): void } {
+  loadSelection();
+  const disposables = hook(instance, realDeps(docId));
+  return {
+    dispose() {
+      for (const d of disposables.splice(0)) d.dispose();
+    },
+  };
 }
 
 export default {
@@ -296,10 +325,12 @@ export default {
   ribbon: [{ tab: 'edit', group: 'typing.group', command: 'edit.toggleForceUppercase', order: 150 }],
   activate() {
     const attached = editor.onDidAttach(ensureHook);
+    const focused = editor.onDidFocusGroup(ensureHook);
     // An editor that was attached before this activation.
     ensureHook();
     return () => {
       attached();
+      focused();
       for (const d of hookDisposables.splice(0)) d.dispose();
       hookedInstance = undefined;
     };

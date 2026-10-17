@@ -24,7 +24,6 @@ const fake = vi.hoisted(() => ({
   cursor: 1,
   lines: [] as string[],
   selections: [] as unknown[],
-  revealed: [] as unknown[],
   messages: [] as string[],
   answer: undefined as Record<string, unknown> | undefined,
   choices: [] as { label: string; value: unknown }[],
@@ -59,12 +58,7 @@ vi.mock('$lib/monaco/editorService', () => ({
     cursor: () => ({ line: fake.cursor, column: 1 }),
     getLineCount: (): number => fake.lines.length,
     getLines: (_id: string, first: number, last: number): string[] => fake.lines.slice(first - 1, last),
-    editorInstance: () => ({
-      getModel: () => ({ getLineMaxColumn: (line: number): number => (fake.lines[line - 1] ?? '').length + 1 }),
-      setSelection: (range: unknown): number => fake.selections.push(range),
-      revealLinesInCenterIfOutsideViewport: (first: number, last: number): number => fake.revealed.push([first, last]),
-      focus: (): void => {},
-    }),
+    selectLines: (_id: string, first: number, last: number): number => fake.selections.push({ first, last }),
   },
 }));
 
@@ -131,7 +125,6 @@ describe('selecting', () => {
     fake.cursor = 1;
     fake.lines = Array.from({ length: 40 }, (_v, i) => (i >= 22 && i < 24 ? '' : `LINE${i + 1}`));
     fake.selections = [];
-    fake.revealed = [];
     fake.messages = [];
     fake.answer = undefined;
     fake.asked = 0;
@@ -146,7 +139,7 @@ describe('selecting', () => {
     await run();
     expect(fake.ready).toBe(1);
     // T2 is lines 15-24; 23 and 24 are blank and stay out.
-    expect(fake.selections).toEqual([{ startLineNumber: 15, startColumn: 1, endLineNumber: 22, endColumn: 'LINE22'.length + 1 }]);
+    expect(fake.selections).toEqual([{ first: 15, last: 22 }]);
     expect(fake.asked).toBe(0);
     expect(fake.messages[0]).toContain('15');
   });
@@ -158,8 +151,7 @@ describe('selecting', () => {
     fake.lines = [...Array.from({ length: 40 }, (_v, i) => (i === 39 ? '%' : `LINE${i + 1}`)), ''];
     fake.cursor = 30;
     await run();
-    expect(fake.selections).toEqual([{ startLineNumber: 25, startColumn: 1, endLineNumber: 40, endColumn: 2 }]);
-    expect(fake.revealed).toEqual([[25, 40]]);
+    expect(fake.selections).toEqual([{ first: 25, last: 40 }]);
     expect(fake.messages[0]).toContain('40');
   });
 
@@ -169,7 +161,7 @@ describe('selecting', () => {
     await run();
     expect(fake.asked).toBe(1);
     expect(fake.selections).toHaveLength(1);
-    expect((fake.selections[0] as { startLineNumber: number }).startLineNumber).toBe(15);
+    expect((fake.selections[0] as { first: number }).first).toBe(15);
   });
 
   it('lists a tool once however it is written', async () => {
@@ -191,7 +183,7 @@ describe('selecting', () => {
     fake.cursor = 10;
     await run({ tool: 1 });
     expect(fake.asked).toBe(0);
-    expect((fake.selections[0] as { startLineNumber: number; endLineNumber: number }).startLineNumber).toBe(25);
+    expect((fake.selections[0] as { first: number }).first).toBe(25);
     expect(fake.messages[0]).toContain('2');
   });
 
@@ -246,6 +238,6 @@ describe('against the real program map', () => {
     fake.selections = [];
     fake.cursor = 9;
     await (command.run as (c: unknown, a?: unknown) => unknown)({ activeDocId: 'd1' });
-    expect(fake.selections).toEqual([{ startLineNumber: 8, startColumn: 1, endLineNumber: 11, endColumn: 2 }]);
+    expect(fake.selections).toEqual([{ first: 8, last: 11 }]);
   });
 });

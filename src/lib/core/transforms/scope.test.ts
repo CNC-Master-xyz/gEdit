@@ -2,7 +2,7 @@
 // whole document without one, and a stale selection that can no longer be trusted.
 
 import { describe, expect, it } from 'vitest';
-import { transformScope } from './scope';
+import { SELECTION_CROSSES, transformScope } from './scope';
 
 describe('transformScope', () => {
   it('takes the whole document when there is no selection', () => {
@@ -70,5 +70,28 @@ describe('transformScope', () => {
       endLine: 4,
       fromSelection: true,
     });
+  });
+});
+
+// Phase 4, P4e (§6.7 rule 3): a selection in a channel pane that runs over another channel's lines.
+describe('transformScope and a selection across a junction', () => {
+  it('carries the flag of a selection that is not one run of document lines', () => {
+    expect(transformScope(120, { startLine: 20, endLine: 80, empty: false, crossesJunction: true })).toEqual({
+      startLine: 20,
+      endLine: 80,
+      fromSelection: true,
+      crossesJunction: true,
+    });
+  });
+
+  it('has no flag for a selection that is one run, and ignores it for a bare caret', () => {
+    expect(transformScope(120, { startLine: 20, endLine: 30, empty: false })).not.toHaveProperty('crossesJunction');
+    expect(transformScope(120, { startLine: 20, endLine: 80, empty: true, crossesJunction: true })).toEqual({ startLine: 1, endLine: 120, fromSelection: false });
+  });
+
+  it('names the refusal the commands say, in plain words', async () => {
+    expect(SELECTION_CROSSES).toEqual({ key: 'channelPanes.selectionCrosses' });
+    const { t } = await import('$lib/i18n');
+    expect(t(SELECTION_CROSSES.key)).toBe('The selection runs over the lines of another channel. Select within one section.');
   });
 });

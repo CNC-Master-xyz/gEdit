@@ -81,7 +81,7 @@ tests/runtime/suite.sh tests/runtime/suites/m0.txt   # run a suite and print the
 
 ## On a hosted runner
 
-`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a}.txt` on `macos-14`
+`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt` on `macos-14`
 (150 minute limit since P4a; it was 45: `p4-perf` runs five scripts on 300,000 lines, about 100 minutes for the job, see the comment in `harness.yml`), always uploads `$GEDIT_RH_DIR/out`, the app logs and the sync logs, and
 caches the build directory. What differs from the owner's Mac, and how the scenarios deal with it:
 
@@ -107,11 +107,11 @@ caches the build directory. What differs from the owner's Mac, and how the scena
 
 ## Suites
 
-One file per milestone, `suites/m0.txt` … `suites/m12.txt`, then `suites/rp.txt` (M12.5, "Real programs, second pass"), `suites/m13.txt` (M13 and the Phase 2 exit criteria), `suites/p3a.txt` (Phase 3, P3a "Understand a block"), `suites/p3b.txt` (Phase 3, P3b "Write with templates"), `suites/b1.txt` (the bug-fix round B1) and `suites/p4a.txt` (Phase 4, P4a "Move the path"): one scenario name per line, `#`
+One file per milestone, `suites/m0.txt` … `suites/m12.txt`, then `suites/rp.txt` (M12.5, "Real programs, second pass"), `suites/m13.txt` (M13 and the Phase 2 exit criteria), `suites/p3a.txt` (Phase 3, P3a "Understand a block"), `suites/p3b.txt` (Phase 3, P3b "Write with templates"), `suites/b1.txt` (the bug-fix round B1) `suites/p4a.txt` (Phase 4, P4a "Move the path") and `suites/p4e.txt` (Phase 4, P4e "Side by side"): one scenario name per line, `#`
 starts a comment. A cumulative run is all of them in order:
 
 ```sh
-tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a}.txt
+tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt
 ```
 
 The Phase 2 exit criteria (plan §2.2) and where each is proven; `suites/m13.txt` has the same table in its comments:
@@ -151,6 +151,15 @@ The Phase 4 criteria that the running app proves (`suites/p4a.txt`, plan `docs/p
 |---|---|
 | X19 to X22 Translate, Rotate and Mirror from the Tools tab's Built-in Scripts on the goldens of `tests/fixtures/scripts/{translate,rotate,mirror}`: the form, the golden's text, message and findings, one undo; a refused run that changes nothing and lists every refused block in Results | `p4-geometry` |
 | X34 (geometry) the three scripts on a 300,000-line program, and rotate and mirror at 30 degrees on an arc-heavy one, within the 900 s of their timeout (a target of 450 s on the development Mac), the result compared line by line, one undo; never retried | `p4-perf` |
+
+The Phase 4 criteria of P4e "Side by side" that the running app proves (`suites/p4e.txt`, plan `docs/planning/phase-4-implementation.md` §2.2 and §5 P4e):
+
+| Criterion | Scenario |
+|---|---|
+| X29 (split view) Split Editor, Split Editor Down and Close Split from the View tab; F6 and Shift+F6; one model with an own cursor and scroll per pane and one undo history; the typing options in the focused pane; the 2 px accent border; the splitter; a second editor that leaves the theme as it was, in the light and the dark theme; the comparison that detaches the panes and builds them again with the focus back | `p4-split` |
+| X29 (channel view) one program with two channel sections and one file per path (`tests/fixtures/p4e/`): the file dialog for the other files, the bar's data attributes, the filler zones and the panes level at the owner's wait codes (`M901P12`, `M910P123`), matched and unmatched marks and the hover of an unmatched one, panes that always scroll together without drift, one undo step from either pane (and one history over three files), the compare overlay, closing by the bar, Close Split and a pane's X; Go to the Matching Mark follows the `P` set | `p4-channels` |
+| X29 (merge back) Split into Channel Documents, an edit in each channel document, Merge Channels Back as one undo step (and again after the undo), and the refusal when the program changed in a channel's lines | `p4-channels` |
+| X30 word marks (`F1200` to `F1000` marks both whole words) in the raw view and review mode; the Aligned view: two panes with fillers that keep them level, the block arrow and the filler arrow (a real click) copy a block as one undo step of the target, "Word" copies the marked word, a review toggle takes a renumbered-only difference out, the editor and its focus come back | `p4-compare` |
 
 The bug-fix round B1 (`suites/b1.txt`) adds one scenario or pair for each behaviour only the running app can prove:
 
@@ -285,6 +294,7 @@ scenario('m1-example', { timeout: 90 }, async (h) => {
   form filled by the field ids of `tests/fixtures/scripts/README.md` (`runGeometry`, which tells the end of the run by a subscription
   to `scripts.running`, and fills every field so no remembered value leaks in) and the answer for the 300,000-line program worked out
   from its own text (`wantedLine`; for the arc-heavy program of the angled runs `arcProgram` and `wantedArcLine`, compared by `nearDifferences` to one last place). Expected text comes from `tests/fixtures/scripts/**`, never from what the app shows.
+  The P4e scenarios (`p4-split`, `p4-channels`, `p4-compare`) share `p4e-common.js`: the editor groups read from the DOM (`groupsOnScreen`, `waitGroups`, `hostLayout`, `hostGroups`) and from the service (`views`, `groupIds`, `focusedGroup`, `editorOf`), the keyboard of a group (`textFocusIn`, `waitFocus`, `placeCursor`; a group is given the keyboard with `ctx.editor.focusGroup`, never with `h.focusEditor()`, which takes the first textarea of the host), the keys (`nextPane`, `previousPane`, `undoKey`, `redoKey`, `pressKey`), a ribbon button clicked on its tab (`clickRibbon`, `ribbonEnabled`, `ribbonDisabled`) and the theme of every Monaco root (`editorLooks`). Expected text comes from the programs (`tests/fixtures/p4e/`, the pair written in `p4-compare`) and from `ctx.t(...)`. While a comparison is open `editorInstance()` is undefined (the groups are detached): read the editor only after `waitGroups` or after waiting for `editorInstance()`, never as `editorInstance()?.… ?? 0`.
   The B1 scenarios (`b1-*`) share `b1-common.js`: the seven ribbon tabs (`TABS`), a symbolic link made outside the app (`symlink`), the
   visible hover as a rectangle (`hoverBox`) and whether a row is inside its scrolling panel (`rowVisible`); a folder made read-only
   with `osOp(h, 'chmod', …)` is made writable again in a `finally`.

@@ -58,6 +58,7 @@ These are design notes. The manual for the program as it stands is [docs/user](.
 | [dialect-profiles.md](dialect-profiles.md) | Profile model and JSON schema with Fanuc and Heidenhain examples |
 | [scripting.md](scripting.md) | Script contract, metadata header, parameters, output modes, bundled library (with the status of each script); external commands (cut) and script packages (not built) are kept as design records |
 | [settings-ui.md](settings-ui.md) | Preferences, storage layout, themes, shortcuts, UI layout |
+| [GLOSSARY.md](../../GLOSSARY.md) | The words gEdit uses for its own things (channel, section, wait, channel view, change, aligned view, ...) and the words it avoids; the interface text and the docs use these terms |
 | [roadmap.md](roadmap.md) | Phases 0 to 4, the Phase 2 milestones and planned releases, backlog and not-planned list |
 | [phase-1-implementation.md](phase-1-implementation.md) | The executed plan for Phase 0 cleanup and Phase 1: architecture, milestones M0–M5, the binding contracts (§7) and where the implementation deviated from them (§7.12), owner decisions, deferred items (§10) |
 | [phase-2-implementation.md](phase-2-implementation.md) | The plan Phase 2 was built from: the scope decision per roadmap row (§2), milestones M6–M13 (§6), the contracts they add (§7), with the test ids (§7.12) and where the implementation deviated (§7.16), the dialect and machine-parameter data they ship (§8), fixtures (§9), the owner decisions behind them (§10) and what was deferred or cut (§11) |

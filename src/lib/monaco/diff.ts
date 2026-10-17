@@ -32,6 +32,20 @@
 //     locks that side and hides the arrows; it follows the lock while the comparison is
 //     open, because the status bar can lock or unlock the document underneath it.
 //
+// Word marks (P4.24, AD-52, plan §6.7 rule 17): whenever Monaco has computed a diff, the lines
+// of each change are paired in order and `core/compare/wordDiff` says which whole NC words
+// differ, as each side's own profile reads the line (the profile is the language id of the
+// side's model: a document's, a file's detected one, or the profile review mode normalized
+// the side with). They are drawn as an inline decoration `gedit-word-changed` on each
+// editor, on the text the pane shows (so, in review mode, the normalized one). A pair that
+// has marks also gets `gedit-word-line` over the whole line, and `wordMarks.css` hides
+// Monaco's own character marks (`char-insert`, `char-delete`) wherever that class is, so
+// the two kinds never stack; a pair without marks keeps Monaco's. The pairs are computed in
+// slices of `MARK_SLICE_MS` between timers, so the diff of a 100,000-line program never
+// blocks typing, and a run ends when the text changes again or a new diff arrives. In the
+// inline view the deleted lines are Monaco's view zone and cannot be decorated: only the
+// modified side shows marks there.
+//
 // IMPORTANT: Monaco is reached through `$lib/monaco/setup`, which imports
 // `$lib/monaco/core` *dynamically*. Nothing in this module may import `core` for a value,
 // or Monaco would land in the initial bundle and be evaluated during prerender
@@ -42,9 +56,13 @@ import { getMonaco } from '$lib/monaco/setup';
 import { editor as editorService } from '$lib/monaco/editorService';
 import { SHARED_EDITOR_OPTIONS } from '$lib/monaco/instanceOptions';
 import { docs } from '$lib/stores/documents';
+import { profiles } from '$lib/stores/profiles';
+import { wordMarkPairs, type PairSide } from '$lib/core/compare/wordDiff';
+import type { CompiledProfile } from '$lib/core/profiles/types';
 import { t } from '$lib/i18n';
 import type { Disposable, DocId } from '$lib/app/types';
 import type { EditableModel } from '$lib/monaco/applyLines';
+import './wordMarks.css';
 
 /**
  * Monaco stops syncing a model to the editor worker above this many UTF-16 code units
@@ -53,6 +71,22 @@ import type { EditableModel } from '$lib/monaco/applyLines';
  * never show a change, so Compare refuses it instead (F8).
  */
 export const MODEL_SYNC_LIMIT_CHARS = 50 * 1024 * 1024;
+
+/** The longest a slice of word-mark work runs before it yields to the browser. */
+const MARK_SLICE_MS = 12;
+
+/** The class on a marked word, and on a whole line that has marks (`wordMarks.css`). */
+export const WORD_CHANGED_CLASS = 'gedit-word-changed';
+export const WORD_LINE_CLASS = 'gedit-word-line';
+
+/** A profile's compiled form by language id; undefined for an id the registry does not know. */
+function compiledProfile(languageId: string): CompiledProfile | undefined {
+  try {
+    return profiles.compiled(languageId);
+  } catch {
+    return undefined;
+  }
+}
 
 /** The two panes of a diff editor. */
 export type DiffSide = 'original' | 'modified';
@@ -228,10 +262,22 @@ export function scratchModelCount(): number {
 export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
   const monaco = await getMonaco();
   let diffEditor: MonacoApi.editor.IStandaloneDiffEditor | undefined;
+  // Word marks: the run in progress (a new number cancels it), its timer and its decorations.
+  let marksRun = 0;
+  let marksTimer: ReturnType<typeof setTimeout> | undefined;
+  let marksOn: MonacoApi.editor.IEditorDecorationsCollection[] = [];
+  const stopMarks = (): void => {
+    marksRun++;
+    clearTimeout(marksTimer);
+    for (const collection of marksOn) collection.clear();
+    marksOn = [];
+  };
   /** The view model on screen, created and disposed by this module (see `scratch`). */
   let viewModel: MonacoApi.editor.IDiffEditorViewModel | null = null;
   const detach = (): void => {
     if (!diffEditor || !viewModel) return;
+    // The marks go first: their decorations are on the models about to be refilled.
+    stopMarks();
     diffEditor.setModel(null);
     // Synchronously, not in Monaco's `setTimeout(0)`: this sets the cancellation token of a
     // diff that is still being computed, before anyone changes the text it was asked about.
@@ -314,6 +360,72 @@ export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
   const markStale = (): void => {
     fresh = false;
   };
+
+  /** Draws the word marks of the diff Monaco has just computed (see the header). */
+  const startMarks = (): void => {
+    stopMarks();
+    if (disposed) return;
+    const blocks = instance.getLineChanges();
+    const originalEditor = instance.getOriginalEditor();
+    const modifiedEditor = instance.getModifiedEditor();
+    const originalText = originalEditor.getModel();
+    const modifiedText = modifiedEditor.getModel();
+    if (!blocks || blocks.length === 0 || !originalText || !modifiedText) return;
+    const sideOf = (model: MonacoApi.editor.ITextModel): PairSide | undefined => {
+      const cp = compiledProfile(model.getLanguageId());
+      return cp && { cp, line: (n) => (n >= 1 && n <= model.getLineCount() ? model.getLineContent(n) : '') };
+    };
+    const original = sideOf(originalText);
+    const modified = sideOf(modifiedText);
+    if (!original || !modified) return;
+
+    const run = marksRun;
+    const collections = [originalEditor.createDecorationsCollection(), modifiedEditor.createDecorationsCollection()];
+    marksOn = collections;
+    const pairs = wordMarkPairs(blocks, original, modified);
+    const decorationsOf = (
+      model: MonacoApi.editor.ITextModel,
+      line: number,
+      spans: { start: number; end: number }[],
+      into: MonacoApi.editor.IModelDeltaDecoration[],
+    ): void => {
+      const lineEnd = model.getLineMaxColumn(line);
+      if (lineEnd > 1) {
+        into.push({
+          range: new monaco.Range(line, 1, line, lineEnd),
+          options: { inlineClassName: WORD_LINE_CLASS },
+        });
+      }
+      for (const span of spans) {
+        into.push({
+          range: new monaco.Range(line, span.start + 1, line, span.end + 1),
+          options: { inlineClassName: WORD_CHANGED_CLASS },
+        });
+      }
+    };
+    const slice = (): void => {
+      // The text changed or a newer diff arrived: this run's line numbers are not to be trusted.
+      if (run !== marksRun || disposed || !fresh) return;
+      const forOriginal: MonacoApi.editor.IModelDeltaDecoration[] = [];
+      const forModified: MonacoApi.editor.IModelDeltaDecoration[] = [];
+      const until = performance.now() + MARK_SLICE_MS;
+      let finished = false;
+      do {
+        const next = pairs.next();
+        if (next.done) {
+          finished = true;
+          break;
+        }
+        const { originalLine, modifiedLine, marks } = next.value;
+        decorationsOf(originalText, originalLine, marks.original, forOriginal);
+        decorationsOf(modifiedText, modifiedLine, marks.modified, forModified);
+      } while (performance.now() < until);
+      if (forOriginal.length > 0) collections[0].append(forOriginal);
+      if (forModified.length > 0) collections[1].append(forModified);
+      if (!finished) marksTimer = setTimeout(slice, 0);
+    };
+    slice();
+  };
   const trackFresh = [
     instance.getOriginalEditor().onDidChangeModelContent(markStale),
     instance.getModifiedEditor().onDidChangeModelContent(markStale),
@@ -321,6 +433,7 @@ export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
     instance.getModifiedEditor().onDidChangeModel(markStale),
     instance.onDidUpdateDiff(() => {
       fresh = true;
+      startMarks();
     }),
   ];
 
@@ -421,6 +534,7 @@ export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
       stopFollowingLock();
       for (const listener of trackFocus) listener.dispose();
       for (const listener of trackFresh) listener.dispose();
+      stopMarks();
       // Detach first: the document models outlive this view, the view model is disposed
       // (its pending diff cancelled) before the scratch models are blanked, and they are
       // blanked, not disposed, so the worker is never asked about one that has gone.
@@ -462,7 +576,7 @@ export function currentDiff(): DiffHandle | null {
 }
 
 // ---------------------------------------------------------------------------
-// Sizes and the editor's view state
+// Sizes
 // ---------------------------------------------------------------------------
 
 /**
@@ -472,54 +586,4 @@ export function currentDiff(): DiffHandle | null {
 export function modelCharCount(docId: DocId): number {
   const model = editorService.model(docId);
   return model ? model.getValueLength() : editorService.getText(docId).length;
-}
-
-/** The scroll position, cursor and folding of the code editor, tied to the instance it came from. */
-export interface EditorViewSnapshot {
-  readonly state: MonacoApi.editor.ICodeEditorViewState;
-  /** The editor the state was taken from; `restore` waits for its replacement. */
-  readonly instance: unknown;
-}
-
-/** The editor's view state right now, or null when there is no editor yet. */
-export function captureEditorViewState(): EditorViewSnapshot | null {
-  const instance = editorService.editorInstance();
-  const state = instance?.saveViewState();
-  return instance && state ? { state, instance } : null;
-}
-
-function nextFrame(run: () => void): void {
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
-  else setTimeout(run, 16);
-}
-
-/**
- * Puts `snapshot` back once the editor is on screen again.
- *
- * Opening the comparison takes the editor's place in the shell (AD-6), so `EditorHost` is
- * unmounted and, on close, mounted again — which makes `editorService.attach()` build a
- * *new* `IStandaloneCodeEditor`. Restoring straight away would write the state into the
- * old instance microseconds before it is disposed, so this waits for an instance that is
- * not the one the snapshot came from, and gives up after `frames` tries (nothing was
- * remounted, e.g. because the overlay never replaced the editor) by restoring into
- * whatever is there.
- */
-export function restoreEditorViewState(
-  snapshot: EditorViewSnapshot | null,
-  o: { frames?: number } = {},
-): void {
-  if (!snapshot) return;
-  let left = o.frames ?? 30;
-  const tick = (): void => {
-    const instance = editorService.editorInstance();
-    const replaced = instance !== undefined && instance !== snapshot.instance && instance.getModel() !== null;
-    if (replaced || left <= 0) {
-      instance?.restoreViewState(snapshot.state);
-      instance?.focus();
-      return;
-    }
-    left--;
-    nextFrame(tick);
-  };
-  nextFrame(tick);
 }

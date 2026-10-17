@@ -7,10 +7,11 @@
 // the model back instead of remembering a list of its own, which is what makes a
 // bookmark survive an edit above it.
 
+import { readable } from 'svelte/store';
 import { describe, expect, it } from 'vitest';
 import type * as MonacoApi from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { createBookmarks, type BookmarkMonaco } from './bookmarks';
-import type { Disposable, DocId, DocumentStore, EditorService } from '$lib/app/types';
+import type { Disposable, DocId, DocumentStore, EditorService, GroupView, PaneSource } from '$lib/app/types';
 
 /** The two enum members `install()` needs; the numbers are Monaco's own. */
 const MONACO = {
@@ -84,6 +85,9 @@ function setup(o: { activeId?: DocId | null; cursorLine?: number | null } = {}) 
   const revealed: { id: DocId; line: number }[] = [];
   const created: ((id: DocId) => void)[] = [];
   const optionUpdates: Record<string, unknown>[] = [];
+  const groupViews: GroupView[] = [];
+  const contentListeners: (() => void)[] = [];
+  const attachListeners: (() => void)[] = [];
   const state = {
     activeId: o.activeId === undefined ? ('d1' as DocId | null) : o.activeId,
     cursorLine: o.cursorLine === undefined ? 1 : o.cursorLine,
@@ -97,6 +101,16 @@ function setup(o: { activeId?: DocId | null; cursorLine?: number | null } = {}) 
         : { line: state.cursorLine, column: 1, selectedChars: 0, selections: 1 },
     reveal: (id: DocId, line: number) => revealed.push({ id, line }),
     updateOptions: (o: Record<string, unknown>) => optionUpdates.push(o),
+    groupViews: () => groupViews,
+    groups: readable({ layout: 'single', groups: [], focused: 'g1' }),
+    onDidAttach: (cb: () => void): Disposable => {
+      attachListeners.push(cb);
+      return () => void attachListeners.splice(attachListeners.indexOf(cb), 1);
+    },
+    onDidChangeContent: (cb: () => void): Disposable => {
+      contentListeners.push(cb);
+      return () => void contentListeners.splice(contentListeners.indexOf(cb), 1);
+    },
     onDidCreateModel: (cb: (id: DocId) => void): Disposable => {
       created.push(cb);
       return () => {
@@ -125,6 +139,10 @@ function setup(o: { activeId?: DocId | null; cursorLine?: number | null } = {}) 
     state,
     revealed,
     optionUpdates,
+    groupViews,
+    /** An edit of a document, as the editor service reports it. */
+    fireContent: () => contentListeners.forEach((cb) => cb()),
+    fireAttach: () => attachListeners.forEach((cb) => cb()),
     /** Gives a document a (new) model, the way `createModel` does. */
     addModel(id: DocId): FakeModel {
       const model = fakeModel();
@@ -419,5 +437,124 @@ describe('set', () => {
     h.bookmarks.install(MONACO);
     expect(() => h.bookmarks.set('d9', [1, 2])).not.toThrow();
     expect(h.bookmarks.lines('d9')).toEqual([]);
+  });
+});
+
+// P4e (Phase 4 plan §6.7 rule 6): a channel pane has a model of its own, so the bookmarks of its
+// document are mirrored onto it at the pane's lines.
+describe('the mirror on a channel pane', () => {
+  /** A pane over document `d1`: `docLines[i]` is the document line of pane line `i + 1`. */
+  function paneOver(docLines: number[]) {
+    const model = fakeModel();
+    const pane: PaneSource = {
+      docId: 'd1',
+      channelId: 'ch1',
+      model: () => model as unknown as MonacoApi.editor.ITextModel,
+      docLine: (n) => docLines[n - 1],
+      paneLine: (line) => {
+        const at = docLines.indexOf(line);
+        return at < 0 ? null : at + 1;
+      },
+    };
+    const view = { id: 'g2', editor: {} as never, docId: 'd1', pane, focused: false } satisfies GroupView;
+    return { model, pane, view };
+  }
+  const tick = () => new Promise<void>((resolve) => queueMicrotask(resolve));
+
+  it('sets a decoration at the pane line of every bookmark the pane shows, and none for the others', async () => {
+    const h = setup();
+    h.addModel('d1');
+    h.bookmarks.install(MONACO);
+    const { model, view } = paneOver([1, 2, 10, 11, 12]);
+    h.groupViews.push(view);
+
+    h.bookmarks.toggle('d1', 11); // in the pane
+    h.bookmarks.toggle('d1', 30); // in another channel
+    h.bookmarks.toggle('d1', 2); // in the header, which every pane shows
+    await tick();
+
+    expect(model.calls.at(-1)?.lines).toEqual([2, 4]);
+    expect(model.optionsOf(model.ids()[0])?.glyphMarginClassName).toBe('gedit-bookmark-glyph codicon-bookmark');
+    // The document's own decorations are untouched by the mirror.
+    expect(h.bookmarks.lines('d1')).toEqual([2, 11, 30]);
+  });
+
+  it('sets the decorations in one call after any number of changes in one turn, and sets nothing when they are in place', async () => {
+    const h = setup();
+    h.addModel('d1');
+    h.bookmarks.install(MONACO);
+    const { model, view } = paneOver([1, 2, 10, 11, 12]);
+    h.groupViews.push(view);
+    for (const line of [10, 11, 12]) h.bookmarks.toggle('d1', line);
+    await tick();
+    expect(model.calls).toHaveLength(1);
+    expect(model.calls[0].lines).toEqual([3, 4, 5]);
+
+    h.fireContent(); // an edit: the decorations are where they should be
+    await tick();
+    expect(model.calls).toHaveLength(1);
+
+    // A re-projection that replaced the lines took a decoration with it: the mirror is set again.
+    model.moveTo(model.ids()[1], null);
+    h.fireContent();
+    await tick();
+    expect(model.calls).toHaveLength(2);
+    expect(model.calls[1].lines).toEqual([3, 4, 5]);
+  });
+
+  it('follows the projection: bookmarks move to the pane lines the pane has now', async () => {
+    const h = setup();
+    h.addModel('d1');
+    h.bookmarks.install(MONACO);
+    let docLines = [1, 2, 10, 11, 12];
+    const { model, view } = paneOver(docLines);
+    h.groupViews.push(view);
+    h.bookmarks.toggle('d1', 12);
+    await tick();
+    expect(model.calls.at(-1)?.lines).toEqual([5]);
+
+    // Two lines of the header were deleted: the pane is shorter and the bookmark is on pane line 3.
+    docLines = [1, 10, 11, 12];
+    (view.pane as { paneLine(l: number): number | null }).paneLine = (line) => {
+      const at = docLines.indexOf(line);
+      return at < 0 ? null : at + 1;
+    };
+    h.fireContent();
+    await tick();
+    expect(model.calls.at(-1)?.lines).toEqual([4]);
+  });
+
+  it('removes the mirror when the pane goes, and costs nothing while no pane is open', async () => {
+    const h = setup();
+    h.addModel('d1');
+    const uninstall = h.bookmarks.install(MONACO);
+    h.bookmarks.toggle('d1', 11);
+    await tick();
+    const { model, view } = paneOver([10, 11]);
+    h.groupViews.push(view);
+    h.fireAttach();
+    await tick();
+    expect(model.calls).toHaveLength(1);
+
+    h.groupViews.length = 0; // the channel view was closed
+    h.fireAttach();
+    await tick();
+    expect(model.calls.at(-1)?.lines).toEqual([]);
+    expect(model.calls.at(-1)?.old).toHaveLength(1);
+    // With no pane open an edit schedules nothing.
+    h.fireContent();
+    await tick();
+    expect(model.calls).toHaveLength(2);
+    uninstall();
+  });
+
+  it('toggles the document bookmark at the cursor\'s document line when the cursor is in a pane', () => {
+    // `EditorService.cursor()` answers document lines in a pane (the coordinate rule), so a toggle
+    // needs no pane knowledge of its own.
+    const h = setup({ cursorLine: 11 });
+    h.addModel('d1');
+    h.bookmarks.install(MONACO);
+    h.bookmarks.toggle();
+    expect(h.bookmarks.lines('d1')).toEqual([11]);
   });
 });
