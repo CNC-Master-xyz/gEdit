@@ -223,7 +223,8 @@ class TestGeometryCases(unittest.TestCase):
             # `RUN_REASONS` (rotate and mirror: `selection-start`), and the two every geometry
             # script writes before it walks (no code database; a selection whose lines above
             # were not sent).
-            own = set(getattr(importlib.import_module(script), "RUN_REASONS", {}))
+            module = importlib.import_module(script)
+            own = set(getattr(module, "RUN_REASONS", {})) | set(getattr(module, "OWN_INFO", {}))
             vocabulary = known | own | {"no-database", "selection-unprimed"}
             for case in helpers.geometry_cases(script):
                 for finding in case.envelope()["findings"]:

@@ -31,9 +31,10 @@ const OUT = join(root, "src/lib/data/licenses.json");
 const CARGO_MANIFEST = join(root, "src-tauri/Cargo.toml");
 
 // Dev dependencies whose code still ships: the SvelteKit client runtime, the Svelte
-// runtime and Tailwind's base CSS. To re-verify, run `npx vite build --sourcemap` and
+// runtime, Tailwind's base CSS and the bundled Space Grotesk font files (OFL-1.1; the
+// package carries the licence text with the copyright line). To re-verify, run `npx vite build --sourcemap` and
 // list the node_modules packages named in the `sources` of .svelte-kit/output/client/**/*.map.
-const BUNDLED_DEV_PACKAGES = ["@sveltejs/kit", "svelte", "tailwindcss"];
+const BUNDLED_DEV_PACKAGES = ["@sveltejs/kit", "svelte", "tailwindcss", "@fontsource-variable/space-grotesk"];
 
 // Files that carry license text inside a package directory (matched on the base name)
 const LICENSE_FILE = /^(licen[cs]e|copying|notice|third[-_]?party[-_]?notices)([-_.].*)?$/i;

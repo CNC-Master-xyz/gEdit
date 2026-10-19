@@ -71,6 +71,10 @@ def negated(params: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def as_dict(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def refused(result: Dict[str, Any]) -> bool:
     return any(f.get("severity") == "error" for f in result.get("findings", []))
 
@@ -202,7 +206,14 @@ class IdentityAndRoundTripTest(unittest.TestCase):
                 result = out.json()
                 self.assertFalse(refused(result), result.get("findings"))
                 profile = context["profile"]
-                self.assertEqual(values_of(result["text"], profile), values_of(case.input_text(), profile))
+                back = values_of(result["text"], profile)
+                # v1.2.0 (D4): a word the forward run added to a selection's first move comes
+                # back as the unmoved value of the lines above; the input never wrote it.
+                first = as_dict(context.get("input")).get("startLine") or 1
+                added = {f["line"] - first + 1 for f in case.envelope()["findings"] if f.get("reason") == "word-added"}
+                written = values_of(case.input_text(), profile)
+                back = [v for v in back if not (v[0] in added and v[1] == "word" and v not in written)]
+                self.assertEqual(back, written)
                 checked += 1
         self.assertGreaterEqual(checked, 10)
 
@@ -540,9 +551,11 @@ class ModuleGapTest(unittest.TestCase):
         )
         result = run_inline(text, "fanuc-gcode", {"dx": 1, "dz": 1})
         self.assertFalse(refused(result), result["findings"])
-        # …and still is for an axis it does move from a start nobody knows
-        unknown = run_inline(text.replace("G91 X10.", "G91 Z-1."), "fanuc-gcode", {"dx": 1, "dz": 1})
-        self.assertEqual(self.reasons(unknown), [(5, "axis-unwritten")])
+        # …and still is for an axis it does move from a start nobody knows (v1.2.0, T011: the
+        # cycle started from a machine position; from Z50. it would leave Z at a level the
+        # program wrote, which the shift moves too).
+        unknown = text.replace("G91 X10.", "G91 Z-1.").replace("G0 X0. Y0. Z50.\n", "G0 X0. Y0. Z50.\nG28 G91 Z0.\nG90\n")
+        self.assertEqual(self.reasons(run_inline(unknown, "fanuc-gcode", {"dx": 1, "dz": 1})), [(7, "axis-unwritten")])
 
     def test_the_cancel_form_of_a_sinumerik_frame_refuses_nothing(self) -> None:
         # SINUMERIK 840D sl programming manual, frame instructions: TRANS, ROT, SCALE and MIRROR
@@ -646,6 +659,9 @@ class Wave1IntegrationTest(unittest.TestCase):
         self.assertEqual([k for k in need if k not in module.REASON_TEXT], [])
         info = [k for k, (applies, _) in _nc_geom.INFO.items() if "translate" in applies]
         self.assertEqual([k for k in info if k not in module.INFO_TEXT], [])
+        # v1.2.0 (D4): the run's own refusals and information rows have their words and texts too.
+        self.assertEqual([k for k in module.RUN_REASONS if k not in module.REASON_TEXT], [])
+        self.assertEqual([k for k, (words, text) in module.OWN_INFO.items() if not (words[0] and words[1] and text)], [])
 
     def test_the_message_words_a_jump_and_an_unknown_pole(self) -> None:
         jump = "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)\nG90 G17 G21\nG0 X0. Y0. Z5.\nGOTO 10\nG91\nN10 G1 X5. F100.\nM30"
@@ -657,6 +673,327 @@ class Wave1IntegrationTest(unittest.TestCase):
         self.assertIn((4, "pole-unknown"), [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"])
         self.assertIn("1 move around a pole that is not known", result["message"])
 
+
+
+class V12FixTest(unittest.TestCase):
+    """v1.2.0 NC fix round, batch NCF-B: one regression test per triage row, each failing
+    without its fix."""
+
+    HEAD = "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)\nG90 G17 G21\n"
+
+    def errors(self, result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def test_t011_nc18_an_incremental_cycle_after_a_g98_cycle_is_moved(self) -> None:
+        text = self.HEAD + (
+            "G0 X0. Y0. Z50.\nG98 G81 X10. Y10. Z-5. R2. F100.\nG80\n"
+            "G91 G99 G81 X10. Y10. Z-5. R-48. F100.\nG80\nG0 Z10.\nG90 G0 Z50.\nM30"
+        )
+        result = run_inline(text, "fanuc-gcode", {"dx": 1, "dy": 2, "dz": 3})
+        self.assertEqual(self.errors(result), [])
+        lines = result["text"].split("\n")
+        self.assertEqual(lines[3:10], [
+            "G98 G81 X11. Y12. Z-2. R5. F100.",
+            "G80",
+            "G91 G99 G81 X10. Y10. Z-5. R-48. F100.",  # increments stay
+            "G80",
+            "G0 Z10.",
+            "G90 G0 Z53.",
+            "M30",
+        ])
+        self.assertEqual(lines[2], "G0 X1. Y2. Z53.")
+        # The modal cycle's next hole and a G99 cycle leave the same kind of level.
+        g99 = text.replace("G98 G81", "G99 G81").replace("G80\nG91 G99", "X20.\nG80\nG91 G99")
+        self.assertEqual(self.errors(run_inline(g99, "fanuc-gcode", {"dz": 3})), [])
+
+    def test_t011_still_refused_where_the_level_is_truly_not_known(self) -> None:
+        cycle = "G98 G81 X10. Y10. Z-5. R2. F100.\nG80\nG91 G99 G81 X10. Y10. Z-5. R-48. F100.\nG80\nM30"
+        # Z never written before the first cycle.
+        never = self.HEAD + "G0 X0. Y0.\n" + cycle
+        self.assertEqual(self.errors(run_inline(never, "fanuc-gcode", {"dz": 3})), [(6, "axis-unwritten")])
+        # The first cycle started from a machine position.
+        machine = self.HEAD + "G0 X0. Y0. Z50.\nG28 G91 Z0.\nG90 " + cycle
+        self.assertEqual(self.errors(run_inline(machine, "fanuc-gcode", {"dz": 3})), [(7, "axis-unwritten")])
+        # A jump may reach the cycle from the machine position.
+        jump = self.HEAD + "G0 X0. Y0. Z50.\nG28 G91 Z0.\nG90\nGOTO 100\nG0 Z50.\nG98 G81 X10. Y10. Z-5. R2. F100.\nG80\nN100 G91 G99 G81 X10. Y10. Z-5. R-48. F100.\nG80\nM30"
+        self.assertIn((10, "axis-unwritten"), self.errors(run_inline(jump, "fanuc-gcode", {"dz": 3})))
+        # X never written while Z stands at a level: still refused, for X.
+        x_never = self.HEAD + "G0 Y0. Z50.\nG98 G81 Y10. Z-5. R2. F100.\nG80\nG91 G99 G81 X10. Y10. Z-5. R-48. F100.\nG80\nM30"
+        self.assertIn((6, "axis-unwritten"), self.errors(run_inline(x_never, "fanuc-gcode", {"dx": 1, "dz": 3})))
+
+
+class D2FixTest(unittest.TestCase):
+    """v1.2.0 NC fix round, batch D2 (path and geometry): NCR-3, NCR-9b/NCR-9 and NCR-10 under
+    translate. Each test fails without its fix, except those marked as guards."""
+
+    TOP = ["%", "O1000"]  # the line numbers of the review
+    PASSES = ["G0 X60. Z2.", "G90 X50. Z-20. F0.2", "X48.", "X46.", "G0 X100. Z50.", "M30", "%"]
+    SIN = ["N10 G17 G90 G0 X0 Y0 Z50", "N20 X10 Y10", "N30 %s", "N40 G91 G0 Z10", "N50 G90 G0 X0", "N60 M30"]
+
+    def errors(self, result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def select(self, lines: List[str], start: int, end: int, params: Dict[str, Any], profile: str = "fanuc-lathe") -> Dict[str, Any]:
+        program = self.TOP + list(lines)
+        return run_inline("\n".join(program[start - 1 : end]), profile, params, preceding=program[: start - 1])
+
+    # -- NCR-3: a selection among single passes, and its join -----------------------------------
+
+    def test_ncr3_a_selection_that_starts_among_the_passes_is_refused(self) -> None:
+        dz = {"dz": 5}
+        self.assertIn((5, "selection-start"), self.errors(self.select(self.PASSES, 5, 6, dz)))
+        self.assertIn((4, "selection-start"), self.errors(self.select(self.PASSES, 4, 6, dz)))
+        facing = ["G0 X60. Z2.", "G94 X20. Z-5. F0.2", "Z-6.", "Z-7.", "G0 X100. Z50.", "M30", "%"]
+        self.assertIn((5, "selection-start"), self.errors(self.select(facing, 5, 6, {"dz": 3})))
+
+    def test_ncr3_the_join_writes_every_shifted_axis(self) -> None:
+        # v1.2.0 D4 (the owner's decision of 2026-10-19): the join gets the shifted Z of the
+        # lines above added where they wrote it (D4FixTest); one not known is still refused.
+        lines = ["G0 X100. Z2.", "M98 P1000", "G0 X60.", "G90 X50. Z-20. F0.2", "X48.", "G0 X100. Z50.", "M30", "%"]
+        self.assertIn((5, "selection-start"), self.errors(self.select(lines, 5, 8, {"dz": 5})))
+        # A mill: a cut along X at a Z not known (after a cycle); a shift in X alone joins at its first X.
+        mill = ["G90 G17 G0 X0 Y0 Z20.", "G81 X0 Y0 Z-5. R2. F100", "G80", "X10.", "Y10.", "G0 Z50.", "M30", "%"]
+        self.assertEqual(self.errors(self.select(mill, 6, 7, {"dz": 5}, "fanuc-gcode")), [(6, "selection-start")])
+        mill = ["G90 G17 G0 X0 Y0 Z20.", "G1 Z-5. F100", "X10.", "Y10.", "G0 Z50.", "M30", "%"]
+        written = self.select(mill, 5, 6, {"dx": 5}, "fanuc-gcode")
+        self.assertEqual((self.errors(written), written["text"]), ([], "X15.\nY10."))
+
+    def test_ncr3_guard_a_first_move_at_a_machine_position_need_not_write_it(self) -> None:
+        # After a return to the reference point Z stands where the whole run leaves it too.
+        mill = ["G90 G17 G0 X0 Y0 Z50.", "G91 G28 Z0.", "G90", "G0 X10. Y10.", "G43 H1 Z5.", "G1 Z-1. F100", "M30", "%"]
+        result = self.select(mill, 6, 8, {"dz": 5}, "fanuc-gcode")
+        self.assertEqual((self.errors(result), result["text"]), ([], "G0 X10. Y10.\nG43 H1 Z10.\nG1 Z4. F100"))
+
+    def test_ncr3_a_pass_that_takes_its_end_point_from_above_the_selection(self) -> None:
+        lines = ["G0 X60. Z2.", "G90 X50. Z-20. F0.2", "G0 X60. Z2.", "G90 X48.", "G0 X100. Z50.", "M30", "%"]
+        self.assertEqual(self.errors(self.select(lines, 5, 7, {"dz": 5})), [(6, "selection-start")])
+
+    def test_ncr3_a_selection_that_ends_while_the_passes_are_in_force(self) -> None:
+        self.assertEqual(self.errors(self.select(self.PASSES, 3, 5, {"dz": 5})), [(5, "selection-inside")])
+        # Guard (n3e): with the rapids on both sides it is written.
+        result = self.select(self.PASSES, 3, 7, {"dz": 5})
+        self.assertEqual(self.errors(result), [])
+        self.assertEqual(result["text"], "G0 X60. Z7.\nG90 X50. Z-15. F0.2\nX48.\nX46.\nG0 X100. Z55.")
+
+    # -- NCR-9b and NCR-9: an empty level of a cycle on the tool axis --------------------------------
+
+    def test_ncr9b_an_empty_level_on_the_tool_axis_refuses_a_z_shift(self) -> None:
+        for cycle in ("CYCLE81(10,,2,-10)", "CYCLE81(,0,2,-10)", "CYCLE81(10,0,2)", "CYCLE83(10,0,2,-20,,,,2,1,1,1,0)"):
+            with self.subTest(cycle=cycle):
+                text = "\n".join(self.SIN).replace("N40 G91 G0 Z10", "N40 G0 X0") % cycle
+                result = run_inline(text, "sinumerik-mill", {"dz": 5})
+                self.assertEqual(self.errors(result), [(3, "cycle-level-empty")])
+                self.assertEqual(result["text"], text)
+        # The twin written: the depth comes from DPR.
+        text = "\n".join(self.SIN).replace("N40 G91 G0 Z10", "N40 G0 X0") % "CYCLE81(10,0,2,,5)"
+        result = run_inline(text, "sinumerik-mill", {"dz": 5})
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N30 CYCLE81(15,5,2,,5)", result["text"])
+        # Guard: a shift in X only does not move the levels.
+        result = run_inline("\n".join(self.SIN) % "CYCLE81(,0,2,-10)", "sinumerik-mill", {"dx": 5})
+        self.assertEqual(self.errors(result), [])
+
+    def test_ncr9_the_review_repro_is_refused(self) -> None:
+        result = run_inline("\n".join(self.SIN) % "CYCLE81(,0,2,-10)", "sinumerik-mill", {"dz": 5})
+        self.assertEqual(self.errors(result), [(3, "cycle-level-empty"), (4, "axis-unwritten")])
+        mcall = ["N10 G17 G90 G0 X0 Y0 Z50", "N20 MCALL CYCLE81(,0,2,-10)", "N25 X10 Y10", "N27 MCALL", "N40 G91 G0 Z10", "N60 M30"]
+        result = run_inline("\n".join(mcall), "sinumerik-mill", {"dz": 5})
+        self.assertEqual(self.errors(result), [(2, "cycle-level-empty"), (5, "axis-unwritten")])
+
+    def test_ncr9_written_levels_are_moved_with_the_increment_after(self) -> None:
+        mcall = ["N10 G17 G90 G0 X0 Y0 Z50", "N20 MCALL CYCLE81(10,0,2,-10)", "N25 X10 Y10", "N26 X20", "N27 MCALL", "N40 G91 G0 Z10", "N50 G90 G0 X0", "N60 M30"]
+        result = run_inline("\n".join(mcall), "sinumerik-mill", {"dz": 5})
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N20 MCALL CYCLE81(15,5,2,-5)", result["text"])
+        klartext = [
+            "0 BEGIN PGM T MM", "1 TOOL CALL 1 Z S3000", "2 L X+0 Y+0 Z+50 R0 FMAX", "3 CYCL DEF 200 DRILLING ~",
+            "  Q200=+2 ;SET-UP CLEARANCE ~", "  Q201=-20 ;DEPTH ~", "  Q206=+150 ;FEED RATE FOR PLNGNG ~",
+            "  Q202=+5 ;PLUNGING DEPTH ~", "  Q210=+0 ;DWELL TIME AT TOP ~", "  Q203=+0 ;SURFACE COORDINATE ~",
+            "  Q204=+50 ;2ND SET-UP CLEARANCE ~", "  Q211=+0 ;DWELL TIME AT DEPTH ~", "  Q395=+0 ;DEPTH REFERENCE",
+            "4 L X+10 Y+10 R0 FMAX M99", "5 L IZ+10 FMAX", "6 END PGM T MM",
+        ]
+        result = run_inline("\n".join(klartext), "heidenhain-klartext", {"dz": 5})
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("  Q203=+5 ;SURFACE COORDINATE ~", result["text"])
+        # Without its Q203 the definition gives no level: the increment after it is refused.
+        without = [line for line in klartext if "Q203" not in line]
+        self.assertIn((14, "axis-unwritten"), self.errors(run_inline("\n".join(without), "heidenhain-klartext", {"dz": 5})))
+
+    # -- NCR-10: a tool offset write keeps the positions ---------------------------------------
+
+    def test_ncr10_a_tool_offset_write_is_no_coordinate_setting(self) -> None:
+        text = "%\nO1\nG90 G17 G0 X0. Y0. Z50.\n{}\nG91 G1 X10. F100\nG90 G0 Z100.\nM30\n%"
+        result = run_inline(text.format("G10 L11 P1 R0.1"), "fanuc-gcode", {"dx": 1})
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("G90 G17 G0 X1. Y0. Z50.", result["text"])
+        for setting in ("G10 L2 P1 X10. Y0 Z0", "G10 L20 P1 X10.", "G10 L3 P1 R0.1", "G10 L50"):
+            with self.subTest(setting=setting):
+                self.assertIn((5, "axis-unwritten"), self.errors(run_inline(text.format(setting), "fanuc-gcode", {"dx": 1})))
+
+
+class D4FixTest(unittest.TestCase):
+    """v1.2.0 NC fix round, batch D4. The owner's decision of 2026-10-19: the first move of a
+    selection that does not write a shifted axis gets that axis added, shifted, where the lines
+    above wrote its position as a number (absolute mode only). A cycle that starts the selection
+    while the tool axis stands at the level of the lines above is refused. Each test fails
+    without its fix, except those marked as guards."""
+
+    TOP = ["%", "O1000"]
+    CAM = ["G21 G17 G90 G54", "G0 X0. Y0.", "G43 H1 Z50.", "G1 Z-1. F200.", "G0 Z50.", "G0 X10. Y10.", "G1 Z-2. F100.", "G0 Z50.", "M30", "%"]
+    DRILL = ["G21 G17 G90 G54", "G0 X0. Y0. Z50.", "%s G81 X10. Y10. Z-5. R2. F100.", "X20.", "G80", "G0 Z50.", "M30", "%"]
+
+    def findings(self, result: Dict[str, Any]) -> List[Tuple[int, str, str]]:
+        return [(f["line"], f["severity"], f["reason"]) for f in result["findings"]]
+
+    def select(self, lines: List[str], start: int, end: int, params: Dict[str, Any], profile: str = "fanuc-gcode") -> Dict[str, Any]:
+        program = self.TOP + list(lines)
+        return run_inline("\n".join(program[start - 1 : end]), profile, params, preceding=program[: start - 1])
+
+    # -- item 1: the missing word is added ---------------------------------------------------------
+
+    def test_the_cam_start_of_a_tool_section_gets_the_shifted_z(self) -> None:
+        result = self.select(self.CAM, 8, 10, {"dz": 5})
+        self.assertEqual(result["text"], "G0 X10. Y10. Z55.\nG1 Z3. F100.\nG0 Z55.")
+        self.assertEqual(result["findings"], [
+            {"line": 8, "severity": "info", "message": "Z55. added: the move started at the unmoved Z of the lines above.", "reason": "word-added"},
+        ])
+        self.assertTrue(result["message"].startswith("Moved by Z5: 3 words on 3 blocks, 1 word added to the first move of the selection."), result["message"])
+
+    def test_the_cut_of_the_d2_review_gets_the_shifted_z(self) -> None:
+        mill = ["G90 G17 G0 X0 Y0 Z20.", "G1 Z-5. F100", "X10.", "Y10.", "G0 Z50.", "M30", "%"]
+        result = self.select(mill, 5, 6, {"dz": 5})
+        self.assertEqual((self.findings(result), result["text"]), ([(5, "info", "word-added")], "X10. Z0.\nY10."))
+
+    def test_the_x_only_lathe_join_gets_the_shifted_z_and_the_pass_after_it_runs_from_there(self) -> None:
+        lathe = ["G0 X100. Z2.", "G0 X60.", "G90 X50. Z-20. F0.2", "X48.", "G0 X100. Z50.", "M30", "%"]
+        result = self.select(lathe, 4, 7, {"dz": 5}, "fanuc-lathe")
+        self.assertEqual(self.findings(result), [(4, "info", "word-added")])
+        self.assertEqual(result["text"], "G0 X60. Z7.\nG90 X50. Z-15. F0.2\nX48.\nG0 X100. Z55.")
+
+    def test_each_missing_axis_in_the_written_form_of_its_dialect(self) -> None:
+        klartext = ["0 BEGIN PGM T MM", "1 TOOL CALL 1 Z S3000", "2 L X+0 Y+0 Z+50 R0 FMAX", "3 L X+10 Y+10 R0 FMAX", "4 L Z-2 F100", "5 END PGM T MM"]
+        result = run_inline("\n".join(klartext[3:5]), "heidenhain-klartext", {"dz": 5}, preceding=klartext[:3])
+        self.assertEqual(result["text"], "3 L X+10 Y+10 Z+55 R0 FMAX\n4 L Z+3 F100")
+        sinumerik = ["N10 G17 G90 G0 X0 Y0 Z50", "N20 X10 Y10", "N30 G1 Z-2 F100", "N40 M30"]
+        result = run_inline("\n".join(sinumerik[1:]), "sinumerik-mill", {"dx": 1, "dz": 5}, preceding=sinumerik[:1])
+        self.assertEqual(result["text"], "N20 X11 Y10 Z55\nN30 G1 Z3 F100\nN40 M30")
+        # A packed block stays packed; X goes in front of the word it is missing beside.
+        packed = ["G21 G17 G90", "G0 X0. Y0. Z50.", "G0Z10.", "G1Z-1.F100", "M30"]
+        result = self.select(packed, 5, 6, {"dx": 1, "dy": 2, "dz": 3})
+        self.assertEqual(result["text"], "G0X1.Y2.Z13.\nG1Z2.F100")
+        self.assertEqual(result["findings"][0]["message"], "X1. Y2. added: the move started at the unmoved X and Y of the lines above.")
+
+    def test_a_round_trip_gives_every_value_back_and_the_added_word_the_unmoved_level(self) -> None:
+        forward = self.select(self.CAM, 8, 10, {"dz": 5})
+        program = self.TOP + self.CAM
+        back = run_inline(forward["text"], "fanuc-gcode", {"dz": -5}, preceding=program[:7])
+        self.assertEqual(back["text"], "G0 X10. Y10. Z50.\nG1 Z-2. F100.\nG0 Z50.")
+
+    # -- item 1: what is still refused ---------------------------------------------------------------
+
+    def test_a_z_that_is_not_known_is_still_refused(self) -> None:
+        after_cycle = ["G21 G17 G90", "G0 X0. Y0. Z50.", "G81 X10. Y10. Z-5. R2. F100.", "G80", "G0 X30. Y30.", "G1 Z-1. F100", "M30"]
+        result = self.select(after_cycle, 7, 8, {"dz": 1})
+        self.assertEqual((self.findings(result), result["text"]), ([(7, "error", "selection-start")], "G0 X30. Y30.\nG1 Z-1. F100"))
+        # A subprogram call above the selection may leave the tool anywhere, although the
+        # tracker still holds the Z before it.
+        after_call = ["G21 G17 G90", "G0 X0. Y0. Z50.", "M98 P1000", "G0 X30. Y30.", "M30"]
+        self.assertEqual(self.findings(self.select(after_call, 6, 7, {"dz": 1})), [(6, "error", "selection-start")])
+        klartext = ["0 BEGIN PGM T MM", "1 L X+0 Y+0 Z+50 R0 FMAX", "2 CALL LBL 1", "3 L X+10 Y+10 R0 FMAX", "4 END PGM T MM"]
+        result = run_inline("\n".join(klartext[3:]), "heidenhain-klartext", {"dz": 5}, preceding=klartext[:3])
+        self.assertEqual(self.findings(result), [(4, "error", "selection-start")])
+        sinumerik = ["N10 G17 G90 G0 X0 Y0 Z50", "N20 L100", "N30 X10 Y10"]
+        result = run_inline(sinumerik[2], "sinumerik-mill", {"dz": 5}, preceding=sinumerik[:2])
+        self.assertEqual(self.findings(result), [(3, "error", "selection-start")])
+        # Guard: a Z written again after the call is known.
+        again = ["G21 G17 G90", "G0 X0. Y0. Z50.", "M98 P1000", "G0 Z20.", "G0 X30. Y30.", "M30"]
+        self.assertEqual(self.select(again, 7, 8, {"dz": 1})["text"], "G0 X30. Y30. Z21.\nM30")
+
+    def test_a_tool_change_or_an_offset_since_the_z_was_written_makes_it_not_known(self) -> None:
+        # The change position is the machine's, and a work offset or a tool offset picked since
+        # puts the same point at other coordinates: no word is added, as before D4. Above the
+        # selection and in it before its first move alike.
+        for between in ("T2 M6", "M6", "G55", "G49", "G43 H2", "H2"):
+            with self.subTest(between=between):
+                above = ["G21 G17 G90 G54", "G0 X0. Y0. Z50.", between, "G0 X10. Y10.", "M30"]
+                self.assertEqual(self.findings(self.select(above, 6, 7, {"dz": 5})), [(6, "error", "selection-start")])
+                inside = self.select(above, 5, 7, {"dz": 5})
+                self.assertIn((6, "error", "selection-start"), self.findings(inside))
+                self.assertNotIn("Z55.", inside["text"])
+        sinumerik = ["N10 G17 G90 G54 G0 X0 Y0 Z50", "N20 T2 D1", "N30 M6", "N40 D2", "N50 X10 Y10"]
+        for start in (2, 4, 5):
+            with self.subTest(sinumerik=start):
+                result = run_inline("\n".join(sinumerik[start - 1 :]), "sinumerik-mill", {"dz": 5}, preceding=sinumerik[: start - 1])
+                self.assertEqual([r for r in self.findings(result) if r[2] == "selection-start"], [(5, "error", "selection-start")])
+        klartext = ["0 BEGIN PGM T MM", "1 L X+0 Y+0 Z+50 R0 FMAX", "2 TOOL CALL 2 Z S3000", "3 L X+10 Y+10 R0 FMAX", "4 END PGM T MM"]
+        result = run_inline("\n".join(klartext[3:]), "heidenhain-klartext", {"dz": 5}, preceding=klartext[:3])
+        self.assertEqual(self.findings(result), [(4, "error", "selection-start")])
+        lathe = ["G0 X100. Z50.", "T0202", "G0 X60.", "G1 Z-10. F0.2", "M30"]
+        self.assertEqual(self.findings(self.select(lathe, 5, 7, {"dz": 5}, "fanuc-lathe")), [(5, "error", "selection-start")])
+        # The tool change in the first move's own block.
+        same = ["G21 G17 G90 G54", "G0 X0. Y0. Z50.", "G55 G0 X10. Y10.", "M30"]
+        self.assertEqual(self.findings(self.select(same, 5, 6, {"dz": 5})), [(5, "error", "selection-start")])
+
+    def test_guard_a_z_written_with_its_offset_or_a_radius_register_keeps_it_known(self) -> None:
+        # `G43 H2 Z60.` writes Z under the new offset; `D1` of `G41` is a radius register.
+        length = ["G21 G17 G90 G54", "G0 X0. Y0. Z50.", "G43 H2 Z60.", "G0 X10. Y10.", "M30"]
+        self.assertEqual(self.select(length, 6, 7, {"dz": 5})["text"], "G0 X10. Y10. Z65.\nM30")
+        radius = ["G21 G17 G90 G54", "G0 X0. Y0. Z50.", "G41 D1 G1 X5. F100", "G1 X10. Y10.", "M30"]
+        self.assertEqual(self.select(radius, 6, 7, {"dz": 5})["text"], "G1 X10. Y10. Z55.\nM30")
+
+    def test_guard_an_incremental_mode_is_still_refused(self) -> None:
+        inc = ["G21 G17 G90 G54", "G0 X0. Y0. Z50.", "G91 G0 X10. Y10.", "G90 G1 Z-1. F100", "M30"]
+        self.assertEqual(self.findings(self.select(inc, 5, 6, {"dz": 1})), [(5, "error", "selection-start")])
+        # Absolute words in an incremental mode: an added Z would be an increment.
+        sinumerik = ["N10 G17 G90 G0 X0 Y0 Z50", "N20 G91 X=AC(10) Y=AC(10)", "N30 G90 G1 Z-2 F100"]
+        result = run_inline("\n".join(sinumerik[1:]), "sinumerik-mill", {"dz": 5}, preceding=sinumerik[:1])
+        self.assertEqual(self.findings(result), [(2, "error", "selection-start")])
+
+    def test_guard_a_diameter_word_is_not_added(self) -> None:
+        lathe = ["G0 X100. Z2.", "G0 Z1.", "G1 X40. F0.2", "M30"]
+        self.assertEqual(self.findings(self.select(lathe, 4, 5, {"dx": 1}, "fanuc-lathe")), [(4, "error", "selection-start")])
+
+    def test_guard_the_other_refusals_of_d2_still_hold(self) -> None:
+        arc = ["G21 G17 G90", "G0 X0. Y0. Z5.", "G1 Z-1. F100", "G2 X10. Y10. R10.", "M30"]
+        self.assertEqual(self.findings(self.select(arc, 6, 7, {"dz": 1})), [(6, "error", "selection-start")])
+        passes = ["G0 X60. Z2.", "G90 X50. Z-20. F0.2", "X48.", "X46.", "G0 X100. Z50.", "M30", "%"]
+        self.assertIn((5, "error", "selection-start"), self.findings(self.select(passes, 5, 6, {"dz": 5}, "fanuc-lathe")))
+        from_above = ["G0 X60. Z2.", "G90 X50. Z-20. F0.2", "G0 X60. Z2.", "G90 X48.", "G0 X100. Z50.", "M30", "%"]
+        self.assertEqual(self.findings(self.select(from_above, 5, 7, {"dz": 5}, "fanuc-lathe")), [(6, "error", "selection-start")])
+
+    def test_guard_no_word_is_added_in_a_run_that_refuses(self) -> None:
+        cam = list(self.CAM)
+        cam[6] = "G1 Z-2. F100. M98 P1000"
+        result = self.select(cam, 8, 10, {"dz": 5})
+        self.assertEqual([r for r in self.findings(result) if r[1] != "error"], [])
+        self.assertEqual(result["text"], "G0 X10. Y10.\nG1 Z-2. F100. M98 P1000\nG0 Z50.")
+
+    def test_a_move_to_a_machine_position_in_the_selection_needs_no_added_word(self) -> None:
+        mill = ["G21 G17 G90", "G0 X0. Y0. Z50.", "G91 G28 Z0.", "G90", "G0 X10. Y10.", "G43 H1 Z5.", "M30"]
+        result = self.select(mill, 5, 8, {"dz": 5})
+        self.assertEqual((self.findings(result), result["text"]), ([(5, "info", "machine-position")], "G91 G28 Z0.\nG90\nG0 X10. Y10.\nG43 H1 Z10."))
+
+    # -- item 2: a cycle at the start of a selection --------------------------------------------------
+
+    def test_a_cycle_that_starts_at_the_level_of_the_lines_above_is_refused(self) -> None:
+        for mode in ("G98", "G99", ""):
+            with self.subTest(mode=mode):
+                drill = [line % mode if "%s" in line else line for line in self.DRILL]
+                result = self.select(drill, 5, 8, {"dz": 0.5})
+                self.assertEqual(self.findings(result), [(5, "error", "selection-start")])
+                self.assertIn("a drilling cycle (which moves to its hole at that level and, with G98, returns to it)", result["findings"][0]["message"])
+
+    def test_a_cycle_after_a_move_that_got_its_z_added_starts_at_the_moved_level(self) -> None:
+        drill = [line % "G98" if "%s" in line else line for line in self.DRILL]
+        drill.insert(2, "G0 X10. Y10.")
+        result = self.select(drill, 5, 9, {"dz": 0.5})
+        self.assertEqual(self.findings(result), [(5, "info", "word-added")])
+        self.assertEqual(result["text"], "G0 X10. Y10. Z50.5\nG98 G81 X10. Y10. Z-4.5 R2.5 F100.\nX20.\nG80\nG0 Z50.5")
+
+    def test_guard_a_cycle_first_is_written_when_the_tool_axis_does_not_move(self) -> None:
+        drill = [line % "G98" if "%s" in line else line for line in self.DRILL]
+        result = self.select(drill, 5, 8, {"dy": 5})
+        self.assertEqual((self.findings(result), result["text"].split("\n")[0]), ([], "G98 G81 X10. Y15. Z-5. R2. F100."))
 
 
 class RefusedBlocksAreNotMovedTest(unittest.TestCase):

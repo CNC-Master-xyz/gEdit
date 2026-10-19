@@ -122,7 +122,7 @@
     justify-content: center;
     inset: 0;
     padding-top: 12vh;
-    background: rgb(0 0 0 / 35%);
+    background: var(--scrim);
   }
 
   /* `modals.open(..., { wide: true })`: a list and an editor side by side. */
@@ -140,10 +140,10 @@
     width: min(620px, 90vw);
     max-height: 70vh;
     padding: 10px;
-    border: 1px solid var(--border-color, #3e3e42);
+    border: 1px solid var(--border-color);
     border-radius: 4px;
-    background: var(--bg-panel, #252526);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+    background: var(--bg-panel);
+    box-shadow: var(--shadow-modal);
     overflow: hidden;
   }
 </style>

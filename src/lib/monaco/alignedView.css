@@ -70,12 +70,12 @@
 }
 
 .monaco-editor .gedit-aligned-arrow-right::before {
-  border-left: 7px solid var(--accent-hover);
+  border-left: 7px solid var(--accent-text);
 }
 
 .monaco-editor .gedit-aligned-arrow-left::before {
   margin-left: 2px;
-  border-right: 7px solid var(--accent-hover);
+  border-right: 7px solid var(--accent-text);
 }
 
 /* The arrow of a side that has no line in the block: inside its filler, at the top. */
@@ -97,15 +97,15 @@
      view zone is as wide as the scroll width, so its own right edge can lie far outside the
      pane), clear of the scrollbar and the overview ruler, and moves it with the horizontal scroll. */
   right: 6px;
-  border-left: 7px solid var(--accent-hover);
+  border-left: 7px solid var(--accent-text);
 }
 
 .gedit-aligned-filler .gedit-aligned-filler-arrow[data-side='modified'] {
   left: 6px;
-  border-right: 7px solid var(--accent-hover);
+  border-right: 7px solid var(--accent-text);
 }
 
 .gedit-aligned-filler .gedit-aligned-filler-arrow:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-text);
   outline-offset: 2px;
 }

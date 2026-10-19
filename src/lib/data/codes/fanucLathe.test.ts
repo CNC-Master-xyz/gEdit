@@ -79,7 +79,8 @@ function tableUnit(dialect: string, code: string, address: string): Unit | undef
   // F is not a lead (`G84`, `G74`, `G63`): it follows the feed unit in force.
   if (address === 'F' && ['G32', 'G33', 'G34'].includes(code)) return 'feedPerRev';
   if (address === 'F' && dialect !== MILL && code === 'G76') return 'feedPerRev';
-  if (address === 'F' && ((dialect === A && code === 'G92') || (dialect === B && code === 'G78'))) return 'feedPerRev';
+  // v1.2.0 (NCR-4): system A reads G78 as system B's threading pass, lead and all.
+  if (address === 'F' && ((dialect === A && (code === 'G92' || code === 'G78')) || (dialect === B && code === 'G78'))) return 'feedPerRev';
   // M9 (WP9.2), the 5-axis entries, wherever they are defined: a tool direction, a scale factor
   // and a rotation axis direction are plain numbers that no reading touches, and a rotation
   // or tilt is an angle.
@@ -346,7 +347,20 @@ describe('the lathe database of G-code system A (§8.2)', () => {
     // carries no S word, so this costs nothing in system A — and it is what keeps a
     // system-B program opened with a system-A machine from having its `G92 S3000` top
     // speed multiplied by a speed scaling run.
-    expect(entry(A, 'G92')?.sets).toEqual({ speedLimit: true, motion: 'feed' });
+    // v1.2.0 (NCF-C): a whole pass too, which the path tracker returns to its start.
+    expect(entry(A, 'G92')?.sets).toEqual({ speedLimit: true, motion: 'feed', path: 'cycle' });
+    expect(entry(B, 'G78')?.sets).toEqual({ motion: 'feed', path: 'cycle' });
+  });
+
+  it('v1.2.0 (NCF-C): reads the arc radius R as a length in the plane, on the mill and both lathe systems', () => {
+    // Owner decision 2026-10-18: a multiply of a plane axis leaves an arc written with R unless
+    // R is chosen, as the Klartext CR and the Sinumerik CR= do.
+    for (const dialect of FANUC_DIALECTS) {
+      for (const code of ['G2', 'G3']) {
+        expect(entry(dialect, code)?.params, `${dialect} ${code}`).toEqual([expect.objectContaining({ address: 'R', lengthAlong: 'plane' })]);
+        expect((entry(dialect, code) as (CodeEntry & { review?: string }) | undefined)?.review, `${dialect} ${code}`).toBe('pending');
+      }
+    }
   });
 
   it('protects a system-B thread lead even while the program is read as system A', () => {
@@ -355,16 +369,63 @@ describe('the lathe database of G-code system A (§8.2)', () => {
     // miss the variant margin and be read as A — and system A has no G77/G78/G79 at all,
     // so the lead used to be scaled as an ordinary feed with nothing said. The three
     // entries below make that refusal independent of which system detection picked.
+    // v1.2.0 (NCR-4, owner decision 2026-10-18): system A describes them the way system B
+    // does, so `G78` is a thread outright (`pitchFeed`) — which is what the lathe Z mirror's
+    // thread check reads — and no longer only an ambiguous feed.
     for (const code of ['G77', 'G78', 'G79']) expect(entry(A, code), code).toBeDefined();
-    expect(entry(A, 'G78')?.pitchFeedAmbiguous).toBe(true);
-    expect(entry(A, 'G78')?.pitchFeed).toBeUndefined();
-    expect(entry(A, 'G77')?.pitchFeedAmbiguous).toBeUndefined();
-    expect(entry(A, 'G79')?.pitchFeedAmbiguous).toBeUndefined();
-    // They describe a system this database is not, so they stay out of hover.
-    for (const code of ['G77', 'G78', 'G79']) expect(entry(A, code)?.verify, code).toBe(true);
+    expect(entry(A, 'G78')?.pitchFeed).toBe(true);
+    for (const code of ['G77', 'G78', 'G79']) expect(entry(A, code)?.pitchFeedAmbiguous, code).toBeUndefined();
+    expect(entry(A, 'G77')?.pitchFeed).toBeUndefined();
+    expect(entry(A, 'G79')?.pitchFeed).toBeUndefined();
+    // They describe a system this database is not, so they stay out of hover, and they say so.
+    for (const code of ['G77', 'G78', 'G79']) {
+      expect(entry(A, code)?.verify, code).toBe(true);
+      expect(entry(A, code)?.label, code).toMatch(/\(G-code system B\)$/);
+      expect(entry(A, code)?.description, code).toMatch(/^G-code system A does not use this number; in system B/);
+    }
     // In system B they are the real thing, and B says so without the hedge.
     expect(entry(B, 'G78')?.pitchFeed).toBe(true);
     expect(entry(B, 'G78')?.pitchFeedAmbiguous).toBeUndefined();
+    for (const code of ['G77', 'G78', 'G79']) expect(entry(B, code)?.verify, code).toBeUndefined();
+  });
+
+  it('v1.2.0 (NCR-4): reads every single pass of both lathe systems as a whole pass with its taper', () => {
+    // The single passes: system A's own G90/G92/G94 and system B's G77/G78/G79, which system A
+    // reads the same way. A pass without `path: 'cycle'` is read as a straight move (its start
+    // point and its taper start are lost to the extents, the mirror and the shifts), and a taper
+    // `R` without `lengthAlong` is scaled or mirrored as if it were a position.
+    const passes: Record<string, Record<string, string>> = {
+      [A]: { G90: 'X', G92: 'X', G94: 'Z', G77: 'X', G78: 'X', G79: 'Z' },
+      [B]: { G77: 'X', G78: 'X', G79: 'Z' },
+    };
+    for (const [dialect, codes] of Object.entries(passes)) {
+      for (const [code, along] of Object.entries(codes)) {
+        const e = entry(dialect, code);
+        expect(e?.group, `${dialect} ${code}`).toBe('motion');
+        expect(e?.modal, `${dialect} ${code}`).toBe(true);
+        expect(e?.sets?.path, `${dialect} ${code}`).toBe('cycle');
+        expect(e?.sets?.motion, `${dialect} ${code}`).toBe('feed');
+        expect(e?.params?.map((p) => p.address), `${dialect} ${code}`).toEqual(['X', 'Z', 'R', 'F']);
+        expect(e?.params?.find((p) => p.address === 'R')?.lengthAlong, `${dialect} ${code}`).toBe(along);
+        expect((e as (CodeEntry & { review?: string }) | undefined)?.review, `${dialect} ${code}`).toBe('pending');
+      }
+      // And nothing else in a lathe database is a whole pass.
+      const cycles = entriesOf(dialect).filter((e) => e.sets?.path === 'cycle').map((e) => e.code).sort();
+      expect(cycles, dialect).toEqual(Object.keys(codes).sort());
+    }
+    // The threading passes carry the lead: the feed scalings leave it and the mirror refuses them.
+    for (const [dialect, code] of [[A, 'G92'], [A, 'G78'], [B, 'G78']]) {
+      expect(entry(dialect, code)?.pitchFeed, `${dialect} ${code}`).toBe(true);
+      expect(entry(dialect, code)?.params?.find((p) => p.address === 'F')?.unit, `${dialect} ${code}`).toBe('feedPerRev');
+    }
+    // System A's G77-G79 are system B's, apart from the words that say which system they belong to.
+    for (const code of ['G77', 'G78', 'G79']) {
+      const strip = (e: CodeEntry | undefined) => {
+        const { label: _label, description: _description, verify: _verify, ...rest } = (e ?? {}) as CodeEntry;
+        return rest;
+      };
+      expect(strip(entry(A, code)), code).toEqual(strip(entry(B, code)));
+    }
   });
 
   it('does not call the face pecking cycle a tapping cycle', () => {
@@ -403,7 +464,7 @@ describe('the lathe database of G-code system A (§8.2)', () => {
         .filter((e) => e.pitchFeed === true)
         .map((e) => e.code)
         .sort(),
-    ).toEqual(['G32', 'G33', 'G34', 'G63', 'G76', 'G84', 'G84.2', 'G88', 'G92']);
+    ).toEqual(['G32', 'G33', 'G34', 'G63', 'G76', 'G78', 'G84', 'G84.2', 'G88', 'G92']);
     // The left-hand older-format tap is a mill code only.
     expect(entry(A, 'G84.3')).toBeUndefined();
   });

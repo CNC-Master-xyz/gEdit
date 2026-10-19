@@ -398,6 +398,96 @@ class Wave1IntegrationTest(unittest.TestCase):
                 self.assertEqual([f["line"] for f in result["findings"] if f["reason"] == "blank"], [3])
 
 
+class D2FixTest(unittest.TestCase):
+    """v1.2.0 NC fix round, batch D2 (path and geometry): NCR-2 and NCR-3 under the lathe Z
+    mirror. Each test fails without its fix, except those marked as guards."""
+
+    Z = {"about": "z", "z0": 0}
+    TOP = ["%", "O1000"]  # the line numbers of the review
+    #: The review's repro: a facing pass with a taper, a second one under it in force.
+    FACING = ["G0 X60. Z2.", "G94 X20. Z-5. R-1. F0.2", "G0 X60. Z2.", "G94 X10. Z-6.", "G0 X100. Z50.", "M30", "%"]
+    #: Turning passes without a taper.
+    PASSES = ["G0 X60. Z2.", "G90 X50. Z-20. F0.2", "X48.", "X46.", "G0 X100. Z50.", "M30", "%"]
+
+    def select(self, lines, start, end, params=None, variant=None):
+        """Lines ``start`` to ``end`` (1-based, counting TOP) of TOP + ``lines``, as a selection."""
+        program = self.TOP + list(lines)
+        context = helpers.effective_context("fanuc-lathe", variant=variant) if variant else helpers.effective_context("fanuc-lathe")
+        context["params"] = dict(params or self.Z)
+        context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": program[: start - 1]}
+        out = helpers.run_script(SCRIPT, stdin="\n".join(program[start - 1 : end]), context=context)
+        self.assertTrue(out.ok, out.stderr)
+        return out.json()
+
+    # -- NCR-2: a taper in force along Z -------------------------------------------------------
+
+    def test_ncr2_a_facing_taper_in_force_from_above_refuses_the_selection(self) -> None:
+        self.assertEqual(errors_of(self.select(self.FACING, 5, 7)), [(6, "single-pass-taper")])
+
+    def test_ncr2_a_taper_in_force_with_no_rapid_between(self) -> None:
+        lines = ["G0 X60. Z2.", "G94 X20. Z-5. R-1. F0.2", "X10. Z-6.", "G0 X100. Z50.", "M30", "%"]
+        self.assertIn((5, "single-pass-taper"), errors_of(self.select(lines, 5, 5)))
+
+    def test_ncr2_g79_in_system_b(self) -> None:
+        lines = ["G90 G0 X60. Z2.", "G79 X20. Z-5. R-1. F0.2", "G0 X60. Z2.", "G79 X10. Z-6.", "G0 X100. Z50.", "M30", "%"]
+        result = self.select(lines, 5, 7, variant=("gcodeSystem", "B"))
+        self.assertEqual(errors_of(result), [(6, "single-pass-taper")])
+
+    def test_ncr2_ncr4_g79_of_system_a(self) -> None:
+        # The A file reads G79 as a facing pass with its taper along Z since D3 (NCR-4).
+        lines = [line.replace("G94", "G79") for line in self.FACING]
+        self.assertEqual(errors_of(self.select(lines, 5, 7)), [(6, "single-pass-taper")])
+
+    def test_ncr2_after_a_subprogram_call_the_taper_is_not_known(self) -> None:
+        lines = ["G0 X60. Z2.", "G94 X20. Z-5. F0.2", "M98 P100", "G0 X60. Z2.", "G94 X10. Z-6.", "G0 X100. Z50.", "M30", "%"]
+        self.assertEqual(errors_of(self.select(lines, 6, 8)), [(7, "single-pass-taper")])
+        # The same after a macro call (G65), which the tracker forgets everything at.
+        lines[2] = "G65 P9010 A1."
+        self.assertEqual(errors_of(self.select(lines, 6, 8)), [(7, "single-pass-taper")])
+
+    def test_ncr2_r0_is_no_taper(self) -> None:
+        lines = ["G18 G21", "G0 X60. Z2.", "G94 X20. Z-5. R0. F0.2", "G0 X60. Z2.", "G94 X10. Z-6.", "G0 X100. Z50.", "M30", "%"]
+        result = run_text(SCRIPT, "fanuc-lathe", self.Z, "\n".join(self.TOP + lines))
+        self.assertFalse(refused(result), result["findings"])
+        self.assertIn("G94 X20. Z5. R0. F0.2\nG0 X60. Z-2.\nG94 X10. Z6.", result["text"])
+
+    def test_ncr2_a_taper_along_x_or_cleared_is_mirrored_and_a_dwell_keeps_it(self) -> None:
+        # A G90 taper lies along X, which the Z mirror keeps; a plane code clears a taper (guards); a
+        # dwell does not.
+        lines = ["G0 X60. Z2.", "G90 X50. Z-20. R-2. F0.2", "G0 X60. Z2.", "G90 X48. Z-20.", "G0 X100. Z50.", "M30", "%"]
+        result = self.select(lines, 5, 7)
+        self.assertFalse(refused(result), result["findings"])
+        self.assertEqual(result["text"], "G0 X60. Z-2.\nG90 X48. Z20.\nG0 X100. Z-50.")
+        cleared = self.FACING[:2] + ["G18"] + self.FACING[2:]
+        self.assertFalse(refused(self.select(cleared, 6, 8)))
+        dwell = self.FACING[:2] + ["G04 X1."] + self.FACING[2:]
+        self.assertEqual(errors_of(self.select(dwell, 6, 8)), [(7, "single-pass-taper")])
+
+    # -- NCR-3: a selection among single passes -------------------------------------------------
+
+    def test_ncr3_a_selection_that_starts_at_a_pass_is_refused(self) -> None:
+        self.assertIn((4, "selection-start"), errors_of(self.select(self.PASSES, 4, 6)))
+        self.assertIn((5, "selection-start"), errors_of(self.select(self.PASSES, 5, 6)))
+
+    def test_ncr3_a_selection_that_ends_while_the_passes_are_in_force(self) -> None:
+        self.assertEqual(errors_of(self.select(self.PASSES, 3, 5)), [(5, "selection-inside")])
+        # Guard (n3e): the passes and the rapids on both sides are written.
+        result = self.select(self.PASSES, 3, 7)
+        self.assertFalse(refused(result), result["findings"])
+        self.assertEqual(result["text"], "G0 X60. Z-2.\nG90 X50. Z20. F0.2\nX48.\nX46.\nG0 X100. Z-50.")
+
+    def test_ncr3_a_pass_that_takes_its_z_from_above_the_selection(self) -> None:
+        # Mirror Z2: the start Z2 does not move, but the end Z-20 of the passes, written above
+        # the selection, would have to become Z24.
+        lines = ["G0 X60. Z2.", "G90 X50. Z-20. F0.2", "G0 X60. Z2.", "G90 X48.", "G0 X100. Z50.", "M30", "%"]
+        result = self.select(lines, 5, 7, {"about": "z", "z0": 2})
+        self.assertEqual(errors_of(result), [(6, "selection-start")])
+
+    def test_ncr3_an_unknown_start_in_z_refuses_the_first_move(self) -> None:
+        lines = ["G0 X60. Z#1", "G0 X50.", "G1 Z-10. F0.2", "M30", "%"]
+        self.assertEqual(errors_of(self.select(lines, 4, 5)), [(4, "selection-start")])
+
+
 class OwnerPublicTest(unittest.TestCase):
     """X21 over the owner-public programs: mirroring twice gives every value back on every
     program the mirror does not refuse; the refusals are printed per reason, not asserted."""

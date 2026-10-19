@@ -37,6 +37,6 @@
 .gedit-align-zone {
   box-sizing: border-box;
   height: 100%;
-  background-image: repeating-linear-gradient(135deg, transparent 0 5px, var(--border-color, #444) 5px 6px);
+  background-image: repeating-linear-gradient(135deg, transparent 0 5px, var(--border-color) 5px 6px);
   opacity: 0.5;
 }

@@ -145,7 +145,7 @@
         { "address": "Z", "label": "End point along Z" },
         { "address": "I", "label": "Centre across the turning axis, from the start point" },
         { "address": "K", "label": "Centre along Z, from the start point" },
-        { "address": "L", "label": "Radius, written instead of I and K", "min": 0, "unit": "length" }
+        { "address": "L", "label": "Radius, written instead of I and K", "min": 0, "unit": "length", "lengthAlong": "plane" }
       ]
     },
     {
@@ -161,7 +161,7 @@
         { "address": "Z", "label": "End point along Z" },
         { "address": "I", "label": "Centre across the turning axis, from the start point" },
         { "address": "K", "label": "Centre along Z, from the start point" },
-        { "address": "L", "label": "Radius, written instead of I and K", "min": 0, "unit": "length" }
+        { "address": "L", "label": "Radius, written instead of I and K", "min": 0, "unit": "length", "lengthAlong": "plane" }
       ]
     },
     {
@@ -252,15 +252,16 @@
       "modal": true,
       "pitchFeed": true,
       "sets": { "motion": "feed" },
+      "review": "pending",
       "label": "Thread pass along Z",
       "description": "Cuts one threading pass to the diameter in X, written the same way as G33. A following block with only a new X cuts the next pass. F is the lead of the thread, never a feed rate.",
       "params": [
         { "address": "X", "label": "Thread diameter of this pass" },
         { "address": "Z", "label": "Thread end along Z" },
         { "address": "F", "label": "Thread lead", "required": true, "min": 0, "unit": "feedPerRev" },
-        { "address": "I", "label": "Taper, as the difference in radius from start to end" },
+        { "address": "I", "label": "Taper, as the difference in radius from start to end", "lengthAlong": "X" },
         { "address": "A", "label": "Taper angle, written instead of I", "unit": "angle" },
-        { "address": "L", "label": "Chamfer at the end of the thread, with M23", "min": 0, "unit": "length" },
+        { "address": "L", "label": "Chamfer at the end of the thread, with M23", "min": 0, "unit": "length", "lengthAlong": "plane" },
         { "address": "J", "label": "Threads within the lead", "min": 1, "unit": "count" }
       ]
     },
@@ -270,15 +271,16 @@
       "modal": true,
       "pitchFeed": true,
       "sets": { "motion": "feed" },
+      "review": "pending",
       "label": "Face thread pass",
       "description": "Cuts one threading pass across the face to the X in the block, at the Z of the pass; the lead runs along X. F is the lead of the thread, never a feed rate.",
       "params": [
         { "address": "X", "label": "Thread end across the face" },
         { "address": "Z", "label": "Z of this pass" },
         { "address": "F", "label": "Thread lead", "required": true, "min": 0, "unit": "feedPerRev" },
-        { "address": "K", "label": "Taper, as the difference from start to end" },
+        { "address": "K", "label": "Taper, as the difference from start to end", "lengthAlong": "Z" },
         { "address": "A", "label": "Taper angle, written instead of K", "unit": "angle" },
-        { "address": "L", "label": "Chamfer at the end of the thread, with M23", "min": 0, "unit": "length" },
+        { "address": "L", "label": "Chamfer at the end of the thread, with M23", "min": 0, "unit": "length", "lengthAlong": "plane" },
         { "address": "J", "label": "Threads within the lead", "min": 1, "unit": "count" }
       ]
     },
@@ -288,15 +290,16 @@
       "modal": true,
       "pitchFeed": true,
       "sets": { "motion": "feed" },
+      "review": "pending",
       "label": "Thread pass along Z",
       "description": "Cuts one threading pass to the diameter in X and ends at Z. A following block with only a new X cuts the next pass, which is how a post writes a list of passes. F is the lead of the thread, never a feed rate.",
       "params": [
         { "address": "X", "label": "Thread diameter of this pass" },
         { "address": "Z", "label": "Thread end along Z" },
         { "address": "F", "label": "Thread lead", "required": true, "min": 0, "unit": "feedPerRev" },
-        { "address": "I", "label": "Taper, as the difference in radius from start to end" },
+        { "address": "I", "label": "Taper, as the difference in radius from start to end", "lengthAlong": "X" },
         { "address": "A", "label": "Taper angle, written instead of I", "unit": "angle" },
-        { "address": "L", "label": "Chamfer at the end of the thread, with M23", "min": 0, "unit": "length" },
+        { "address": "L", "label": "Chamfer at the end of the thread, with M23", "min": 0, "unit": "length", "lengthAlong": "plane" },
         { "address": "J", "label": "Threads within the lead", "min": 1, "unit": "count" }
       ]
     },
@@ -495,7 +498,7 @@
       "review": "pending",
       "label": "Chamfer at the end of a G01 move",
       "description": "Adds a chamfer of size L at the end of the G01 move in the same block, which may carry only one of X and Z. It is not a grooving cycle as on other controls.",
-      "params": [{ "address": "L", "label": "Chamfer size", "unit": "length", "signOf": "next-move" }]
+      "params": [{ "address": "L", "label": "Chamfer size", "unit": "length", "signOf": "next-move", "lengthAlong": "plane" }]
     },
     {
       "code": "G76",
@@ -504,7 +507,7 @@
       "pitchFeedAmbiguous": true,
       "label": "Corner round at the end of a G01 move",
       "description": "Adds a round of radius L at the end of the G01 move in the same block, which may carry only one of X and Z. It is not a threading cycle here, but the same number cuts a thread on other lathe controls, so gEdit will not scale the F of such a block: a feed left alone costs one edit by hand, a scaled thread lead scraps the part.",
-      "params": [{ "address": "L", "label": "Radius of the round", "unit": "length", "signOf": "next-move" }]
+      "params": [{ "address": "L", "label": "Radius of the round", "unit": "length", "signOf": "next-move", "lengthAlong": "plane" }]
     },
     {
       "code": "G77",
@@ -717,12 +720,13 @@
       "group": "motion",
       "modal": true,
       "sets": { "motion": "feed", "path": "arc" },
+      "review": "pending",
       "label": "Contour arc with the C axis, clockwise",
       "description": "Driven-tool contouring: cuts a clockwise arc on the face with X and the C axis together. The arc is given by its radius L and is always the one under 180 degrees, so a longer arc is split into blocks; Z may not move. F is a feed per minute here, whatever feed mode is in force.",
       "params": [
         { "address": "X", "label": "End point, as a diameter" },
         { "address": "C", "label": "End point, as a C-axis angle" },
-        { "address": "L", "label": "Arc radius", "required": true, "min": 0, "unit": "length" },
+        { "address": "L", "label": "Arc radius", "required": true, "min": 0, "unit": "length", "lengthAlong": "plane" },
         { "address": "F", "label": "Feed per minute", "unit": "feedPerMin" }
       ]
     },
@@ -731,12 +735,13 @@
       "group": "motion",
       "modal": true,
       "sets": { "motion": "feed", "path": "arc" },
+      "review": "pending",
       "label": "Contour arc with the C axis, counter-clockwise",
       "description": "Driven-tool contouring: cuts a counter-clockwise arc on the face with X and the C axis together. The arc is given by its radius L and is always the one under 180 degrees, so a longer arc is split into blocks; Z may not move. F is a feed per minute here, whatever feed mode is in force.",
       "params": [
         { "address": "X", "label": "End point, as a diameter" },
         { "address": "C", "label": "End point, as a C-axis angle" },
-        { "address": "L", "label": "Arc radius", "required": true, "min": 0, "unit": "length" },
+        { "address": "L", "label": "Arc radius", "required": true, "min": 0, "unit": "length", "lengthAlong": "plane" },
         { "address": "F", "label": "Feed per minute", "unit": "feedPerMin" }
       ]
     },
@@ -817,7 +822,7 @@
       "params": [
         { "address": "Z", "label": "End point along Z" },
         { "address": "C", "label": "End point, as a C-axis angle" },
-        { "address": "L", "label": "Arc radius on the side surface", "required": true, "min": 0, "unit": "length" },
+        { "address": "L", "label": "Arc radius on the side surface", "required": true, "min": 0, "unit": "length", "lengthAlong": "plane" },
         { "address": "F", "label": "Feed per minute", "unit": "feedPerMin" }
       ]
     },
@@ -832,7 +837,7 @@
       "params": [
         { "address": "Z", "label": "End point along Z" },
         { "address": "C", "label": "End point, as a C-axis angle" },
-        { "address": "L", "label": "Arc radius on the side surface", "required": true, "min": 0, "unit": "length" },
+        { "address": "L", "label": "Arc radius on the side surface", "required": true, "min": 0, "unit": "length", "lengthAlong": "plane" },
         { "address": "F", "label": "Feed per minute", "unit": "feedPerMin" }
       ]
     },

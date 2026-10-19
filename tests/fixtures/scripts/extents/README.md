@@ -145,6 +145,18 @@ finding per code.
   whose positions are its parameters is `cycle`. After a block that runs a cycle, the tool
   axis (`Z` in `XY`; in another plane every axis the block wrote and the plane's) is in an
   unknown place.
+- A **single-pass cycle** (`sets.path: 'cycle'`: the lathe `G90`, `G92` and `G94`, system B
+  `G77` to `G79`; v1.2.0, T111 and NCF-C): each block cuts to the point it writes, which is in
+  the ranges, and goes back to where it started, which is where the tool stands after it. An
+  increment of the next pass (`W-4.`) counts from that start (golden `lathe-box-cycle`).
+- **The taper of a single pass** (v1.2.0, NCF-C; golden `lathe-taper-pass`): the first move of
+  a pass with a taper `R` (`CodeParam.lengthAlong`) goes to the end coordinate plus `R` along
+  that axis: X for `G90`/`G92` (`R` is a radius, so twice it in the diameter column), Z for
+  `G94`. That point is in the range. `R` stays in force for the passes until a block writes it
+  again, a one-shot code other than a dwell or a plane code clears it (the control keeps `X`,
+  `Z` and `R`); a block with only `R` runs the pass again. A taper that cannot be read (no
+  machine, a variable) is `machine-dependent` or `expression`; an end along the taper's axis
+  that a move outside the passes has written since is `cycle`.
 
 ## The geometry vocabulary (the one place the script names codes)
 

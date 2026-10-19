@@ -152,13 +152,15 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    color: var(--text-main, #cccccc);
+    color: var(--text-main);
     font-size: 13px;
   }
 
   .tagline {
     margin: 0 0 8px;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
+    font-family: var(--font-display);
+    font-size: 14px;
   }
 
   dl {
@@ -169,7 +171,7 @@
   }
 
   dt {
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
   }
 
   dd {
@@ -185,19 +187,20 @@
 
   .hint {
     margin: 8px 0 0;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 12px;
   }
 
   .error {
     margin: 8px 0 0;
-    color: var(--danger-text, #f38ba8);
+    color: var(--danger-text);
     font-size: 12px;
   }
 
   h3 {
     margin: 14px 0 6px;
-    color: var(--text-active, #ffffff);
+    color: var(--text-active);
+    font-family: var(--font-display);
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -208,7 +211,7 @@
     padding: 0;
     border: 0;
     background: transparent;
-    color: var(--accent-hover, #2b88d8);
+    color: var(--accent-text);
     font: inherit;
     font-size: 13px;
     text-decoration: underline;
@@ -217,13 +220,13 @@
 
   .notices {
     max-height: 34vh;
-    border: 1px solid var(--border-color, #3e3e42);
+    border: 1px solid var(--border-color);
     border-radius: 3px;
     overflow-y: auto;
   }
 
   .notice + .notice {
-    border-top: 1px solid var(--border-color, #3e3e42);
+    border-top: 1px solid var(--border-color);
   }
 
   .notice-head {
@@ -234,7 +237,7 @@
     padding: 4px 8px;
     border: 0;
     background: transparent;
-    color: var(--text-main, #cccccc);
+    color: var(--text-main);
     font: inherit;
     font-size: 12px;
     text-align: left;
@@ -242,7 +245,7 @@
   }
 
   .notice-head:hover {
-    background: var(--surface-hover, rgb(255 255 255 / 8%));
+    background: var(--surface-hover);
   }
 
   .name {
@@ -256,15 +259,15 @@
   .source,
   .spdx {
     flex: 0 0 auto;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
   }
 
   pre {
     max-height: 30vh;
     margin: 0;
     padding: 6px 8px;
-    background: var(--bg-app, #1e1e1e);
-    color: var(--text-main, #cccccc);
+    background: var(--bg-app);
+    color: var(--text-main);
     font-family: var(--font-mono, monospace);
     font-size: 11px;
     white-space: pre-wrap;

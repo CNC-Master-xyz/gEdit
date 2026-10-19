@@ -4,7 +4,7 @@
     {
       "line": 7,
       "severity": "error",
-      "message": "G1 X20. F0.2: this first move of the selection starts where the lines above the selection leave the tool, and that point is not moved with the selection, so an arc, an incremental move or (on a lathe) a move without Z, or without Y away from the turning axis, from there would miss the moved path. Start the selection at a block that moves to an absolute position, with Z on a lathe (and Y where Y is not 0).",
+      "message": "G1 X20. F0.2: this first move of the selection starts where the lines above the selection leave the tool, and that point is not moved with the selection, so an arc, an incremental move or (on a lathe) a move without Z, or without Y away from the turning axis, or a turning or facing pass (which goes back to that point) from there would miss the moved path, and so would a pass that takes its Z from a block above the selection. Start the selection at a block that moves to an absolute position, with Z on a lathe (and Y where Y is not 0), and give its first pass every value.",
       "reason": "selection-start"
     }
   ]

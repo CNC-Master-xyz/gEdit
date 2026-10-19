@@ -151,10 +151,10 @@
     box-sizing: border-box;
     width: 100%;
     padding: 8px 10px;
-    border: 1px solid var(--accent, #0078d4);
+    border: 1px solid var(--accent-text);
     border-radius: 3px;
-    background: var(--bg-app, #1e1e1e);
-    color: var(--text-main, #cccccc);
+    background: var(--bg-app);
+    color: var(--text-main);
     font: inherit;
     font-size: 13px;
     outline: none;
@@ -174,7 +174,7 @@
     padding: 5px 10px;
     border: 0;
     background: transparent;
-    color: var(--text-main, #cccccc);
+    color: var(--text-main);
     font: inherit;
     font-size: 13px;
     text-align: left;
@@ -182,12 +182,14 @@
   }
 
   .quick-pick-item:hover {
-    background: color-mix(in srgb, var(--accent, #0078d4) 25%, transparent);
+    background: var(--surface-hover);
   }
 
   .quick-pick-item.selected {
-    background: var(--accent, #0078d4);
-    color: var(--text-active, #ffffff);
+    /* A tint and a bar, not a solid orange row: text on solid #F25C19 is under AA. */
+    background: var(--accent-soft);
+    box-shadow: inset 2px 0 0 var(--accent);
+    color: var(--text-active);
   }
 
   .quick-pick-item .label {
@@ -201,7 +203,7 @@
   .quick-pick-item .detail {
     flex: 1 1 auto;
     overflow: hidden;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 12px;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -209,13 +211,13 @@
 
   .quick-pick-item.selected .description,
   .quick-pick-item.selected .detail {
-    color: var(--text-active, #ffffff);
+    color: var(--text-active);
   }
 
   .quick-pick-empty {
     margin: 0;
     padding: 8px 10px;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 13px;
   }
 </style>

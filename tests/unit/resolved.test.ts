@@ -30,6 +30,7 @@ import { validateProfile } from '$lib/core/profiles/validate';
 import { applyMachine, effectiveMachine, noMachine } from '$lib/core/machines/effective';
 import { fnv1a32 } from '$lib/core/text/hash';
 import { compileProfile } from '$lib/core/profiles/compile';
+import { detectProfile, detectVariants } from '$lib/core/profiles/detect';
 import { channelsOf } from '$lib/core/scripting/context';
 import { channelBlock } from '$lib/core/machines/validate';
 import { decodeFile } from '$lib/core/text';
@@ -236,8 +237,91 @@ function buildAll(): Map<string, string> {
     index[path] = name;
   }
   emit('effective/index.json', index);
+  emitExit2();
   emitChannels();
   return new Map(produced);
+}
+
+// ---------------------------------------------------------------------------
+// The exit-criteria programs (`tests/fixtures/exit2/`): `effective/exit2.json`
+// ---------------------------------------------------------------------------
+
+/** The programs of `tests/fixtures/exit2/` that the bundled and the user scripts run on. */
+const EXIT2_PROGRAMS = [
+  'checks-lathe.nc',
+  'checks-mill.nc',
+  'checks-okuma.MIN',
+  'checks-sinumerik.MPF',
+  'decimal-lathe.nc',
+  'fanuc-lathe-a.nc',
+  'fanuc-lathe-b.nc',
+  'okuma-lathe.MIN',
+  'sinumerik-lathe.MPF',
+];
+
+/**
+ * The effective view of every exit-criteria program under every machine its goldens name, as the
+ * app gives it to a script: the profile the program is detected as, the machine of the golden's
+ * `machine` member (`{ name, profile, params }`, chosen for the document) or no machine, in which
+ * case the variants detected in the program apply. `effective/exit2.json` maps `<program>|none`
+ * and `<program>|<machine name>` to the file, which is what `tests/python/test_exit2_goldens.py`
+ * reads. Python merges nothing: the machines come from the goldens, not from a second table.
+ */
+function emitExit2(): void {
+  const dir = join(FIXTURES_DIR, 'exit2');
+  const goldens = join(dir, 'expected');
+  const machines = new Map<string, { name: string; profile: string; params: MachineConfig['params'] }>();
+  let names: string[] = [];
+  try {
+    names = readdirSync(goldens).filter((n) => n.endsWith('.json')).sort();
+  } catch {
+    return;
+  }
+  for (const file of names) {
+    const raw = JSON.parse(readFileSync(join(goldens, file), 'utf8')) as Record<string, unknown>;
+    const m = raw?.machine as { name?: unknown; profile?: unknown; params?: unknown } | null | undefined;
+    if (typeof m !== 'object' || m === null || typeof m.name !== 'string' || typeof m.profile !== 'string') continue;
+    if (typeof m.params !== 'object' || m.params === null) continue;
+    const spec = { name: m.name, profile: m.profile, params: m.params as MachineConfig['params'] };
+    const seen = machines.get(spec.name);
+    if (seen !== undefined && text(seen) !== text(spec)) {
+      throw new Error(`exit2/expected/${file}: the machine "${spec.name}" is written differently in another golden`);
+    }
+    machines.set(spec.name, spec);
+  }
+
+  const registry = [...PROFILES.values()].map((p) => compileProfile(applyMachine(p, noMachine(p)).profile));
+  const index: Record<string, string> = {};
+  const put = (profile: Profile, machine: EffectiveMachine, run: string): void => {
+    const key = keyOf({ name: machine.name, params: machine.params, choice: machine.choice, source: machine.source });
+    const name = `effective/exit2/${profile.id}/${key}.json`;
+    if (produced.has(name) && produced.get(name) !== text(effectiveOf(profile, machine))) {
+      throw new Error(`${run}: two different effective views share the file ${name}`);
+    }
+    emit(name, effectiveOf(profile, machine));
+    index[run] = name;
+  };
+  for (const program of EXIT2_PROGRAMS) {
+    const path = join(dir, program);
+    const body = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+    const profileId = detectProfile(registry, path, body, 'fanuc-gcode');
+    const profile = PROFILES.get(profileId);
+    if (!profile) throw new Error(`exit2/${program}: unknown profile "${profileId}"`);
+    const cp = registry.find((c) => c.profile.id === profileId) as (typeof registry)[number];
+    const detected = detectVariants(cp, body);
+    put(profile, effectiveMachine(profile, null, 'none', detected), `${program}|none`);
+    for (const spec of machines.values()) {
+      if (spec.profile !== profileId) continue;
+      const config: MachineConfig = {
+        id: spec.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        name: spec.name,
+        profile: spec.profile,
+        params: spec.params,
+      };
+      put(profile, effectiveMachine(profile, config, 'document', detected), `${program}|${spec.name}`);
+    }
+  }
+  emit('effective/exit2.json', index);
 }
 
 // ---------------------------------------------------------------------------

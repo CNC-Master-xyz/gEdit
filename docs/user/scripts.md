@@ -587,7 +587,9 @@ findings under the table say which and why, once per kind:
   nobody knows, with tool centre point control off: it is a position of the machine's axes
   (see [the rotary rule](#rotary-axes-and-tool-centre-point-control)).
 - An **incremental move from an unknown start**: the first one of a run, or one after a
-  machine position, a cycle, a shift or a value that was not resolved.
+  machine position, a cycle, a shift or a value that was not resolved. A Fanuc `G10 L1`,
+  `L10` to `L13` writes a tool offset and no coordinate system, so the positions stay known
+  after it; any other `G10` (a work offset `L2`, `L20`, or one without `L`) is a setting.
 - **Cycle depths** of Klartext and Sinumerik cycles: the depth is a distance from another
   parameter, and where both are written the control takes one of them, so a depth would
   show a place the cycle never reaches.
@@ -601,6 +603,20 @@ Klartext polar moves are worked out from the pole `CC`; with no pole, or no radi
 to start from, they are not resolved. Blocks whose words are values and not positions
 (`G92`, `G52`, the `X` of a dwell, `CYCL DEF 7`, `BLK FORM`) are left out of the ranges and
 listed once per code.
+
+**A single pass of a lathe cycle** (`G90`, `G92`, `G94`; system B `G77`, `G78`, `G79`)
+cuts to the point it writes and goes back to where it started, so the tool stands at the
+start afterwards and an incremental move of the next pass counts from there. With a taper
+`R` the first move of the pass goes to the end plus `R` along the axis `R` lies along: X for
+`G90` and `G92` (`R` is a radius, so twice it in the diameter column), Z for `G94`. That
+taper start is in the ranges. `X`, `Z` and `R` stay for the passes that follow until a
+block writes them again, a block with only `R` runs the pass again, and a one-shot code
+other than a dwell or a plane code ends them. A taper that cannot be read (no machine
+chosen, a variable) is counted as not resolved, and so is the taper start of a pass that
+does not write `R` after a subprogram call (`M98`), a macro call (`G65`) or the start of a
+second program in the file: the called program may have written a taper. Whether a `G00` or
+`G01` ends them on your control is not known yet; the extents keep `R` and do not trust the
+end point.
 
 A subprogram call is not followed: the called blocks are read where they stand in the
 file. A selection is read with the lines above it, as in the program checks.
@@ -616,7 +632,7 @@ what it left, so read the message.
 |---|---|
 | **Operation** | Add, Subtract, Multiply, Divide |
 | **Value** | For add and subtract, in the program's units (millimetres or inches; degrees for a rotary axis). For multiply and divide, a plain factor. A factor of 0 is refused |
-| **Addresses** | The words to change: `X Y Z U V W A B C I J K R`. `G`, `M`, `N`, `O` and `T` are never offered. Default `Z`. When multiplying, add `R` if your arcs are written with a radius |
+| **Addresses** | The words to change: `X Y Z U V W A B C I J K R`. `G`, `M`, `N`, `O` and `T` are never offered. Default `Z`. When multiplying both axes of the plane, add `R` if your arcs are written with a radius: then the radius is scaled with the positions. Without `R`, a block with an arc radius is left as written and listed. A shift never changes an arc radius |
 | **Arc centres** | Also change the centre words of the chosen axes: `I` with `X`, `J` with `Y`, `K` with `Z`. *Automatically* means no for add and subtract, where a centre is a distance from the start point on most controls, and yes for multiply and divide |
 | **The X value is** | On a turning dialect only: whether the value is a diameter or a radius. Each `X` word is converted by the mode it is written in, so a Sinumerik program that switches `DIAMON` and `DIAMOF` moves right. On a milling dialect the value is a plain coordinate: a radius word moves by it, a word read as a diameter by twice it |
 | **Decimal places** | *As written* keeps the decimals each value had and adds what the result needs, at most four; or 0 to 4 |
@@ -642,7 +658,66 @@ writes a length parameter of its own (a peck depth `Q`, Klartext `Q201`, Sinumer
 A Fanuc lathe cycle `G71` to `G76` is never scaled in part, on any axis: a multiply or
 divide of a linear axis refuses (*not scaled*) a block of it that writes a length of the
 cycle other than zero, and a block that scales its end point. Its blocks are left as written
-and listed. The radius `R` of an arc is scaled only when you choose `R`.
+and listed.
+
+**Arcs need both axes of their plane.** Scaling one axis of the plane and not the other
+would turn an arc into an ellipse, which no arc code can write: the centre or the radius no
+longer fits the end points. So a multiply or divide that scales `X` but not `Y` (in the XY
+plane; on a lathe `X` but not `Z`) leaves every arc block as written and lists it (*not
+scaled*), and so does a block that writes a centre word `I`, `J` or `K` (the lathe chamfer
+`G1 Z-10. I2.` too). While the plane is not known, all three axes count. Scaling `Z` alone
+under `G17` leaves the arcs in the XY plane alone (a helix keeps its circle), and one factor
+on both axes of the plane is fine, a lathe's diameter `X` included.
+
+**The radius of an arc** (`G2 X… Y… R…`, Klartext `CR … R`) is scaled only when you choose
+`R` **and** both axes of its plane are scaled. Without `R`, a multiply or divide of an axis
+of the plane leaves such a block as written and lists it, because scaling the end point
+alone would change the arc. With `R` chosen and neither axis of the plane scaled (only `Z`,
+a helix), the radius is left and listed as a value of the arc; with only one of them scaled,
+the block is left (above). A shift (add or subtract) never changes a radius: with `R` chosen
+it is left and listed. A Sinumerik radius `CR=` and an Okuma radius `L` are always left and
+listed under a multiply or divide of the plane.
+
+**What else is left under a multiply or divide.** A size is not a position, so a multiply
+or divide of its axis leaves what carries it as written and lists it (*not scaled*), as long
+as the size is written and not 0:
+
+- **The sizes of a cycle:** the side lengths, diameters, corner radii and stock sizes of the
+  Klartext cycles 208, 240, 251 to 257 and 262, the sizes of the Sinumerik `CYCLE61`,
+  `POCKET3`, `POCKET4`, `SLOT1`, `SLOT2`, `CYCLE72` and `CYCLE93`, and the taper and chamfer
+  of the Okuma thread passes `G31` to `G33`. The cycle is left with every call of it. They
+  would be right only for one factor on both axes of the plane, and gEdit does not decide
+  that for you.
+- **The taper of a lathe pass:** the taper `R` of `G90`, `G92`, `G94` (system B `G77`, `G78`,
+  `G79`) lies along X (turning, threading) or Z (facing). The control keeps `X`, `Z` and `R`
+  for the passes that follow, so the passes from the code until the next move are left
+  together, as one series. A taper written in an earlier pass still counts for a later
+  straight pass.
+- **Corner and arc words:** Klartext `CHF`, `RND` and `CR`, Sinumerik `CHF=`, `CHR=`, `RND=`
+  and `CR=`, the Fanuc arc radius `R`, and Okuma's `L` radius, chamfer and round. Choosing
+  `R` scales a corner `R` (`RND R2`) as asked, and an arc radius as above.
+- **Fanuc corner words:** the optional chamfer and rounding at the end of a move (`,C`, `,R`,
+  and the angle `,A`), and on a lathe the chamfer and the rounding of a straight move
+  (`G1 Z-10. R2.`, `G1 Z-10. C2.`). A block that writes one is left and listed when an axis
+  of the plane is scaled. On a lathe a `C` word counts too, since a setting of the control
+  decides whether `C2.` is a chamfer or a move of the C axis. A shift keeps them and moves
+  the block.
+- **`RNDM=`:** a Sinumerik `RNDM=2` rounds every following corner until `RNDM=0`, so every
+  block that moves in between is left.
+
+**The approach and the departure** (Klartext `APPR` and `DEP`) are not the contour: their
+length `LEN` and their radius `R` say how the tool gets onto the contour and off it. A
+multiply or divide of the plane scales their end points and keeps `LEN` and `R`, with a
+warning row: *LEN15: a size of APPR LN, kept; check the approach fits the scaled contour.*
+The summary counts them (*approach or departure sizes*). An approach on an arc (`APPR CT`,
+`APPR LCT`) is an arc too: with only one axis of the plane scaled it is left (above).
+
+A shift never changes any of them. Words that are feeds, smoothing distances or counts
+(`ADIS=`, `ADISPOS=`, `FRC=`, `FRCM=`) are kept by every script.
+
+**A tool offset is no shift.** A Fanuc `G10 L1` and `L10` to `L13` write a tool offset and
+set no coordinate system, so they do not stop Translate, Rotate and Mirror. `G10 L2` and
+`L20` (work offsets), a variable for `L`, and on a lathe a `G10` without `L` still do.
 
 #### What a Z shift moves in a cycle
 
@@ -663,12 +738,29 @@ A call argument and a Klartext `Q` are absolute positions and move under `G91` a
 The other parameters of those cycles are reviewed and left. A shift of `X` or `Y` does not
 touch them: they are `Z` coordinates.
 
+An **empty** Sinumerik argument counts as 0 on the control (`CYCLE81(10,,2,-10)` has its
+reference plane at 0). A shift of `Z` cannot move it without writing a number there, so such
+a call is left as written and listed (*cycle with an empty position on the tool axis*).
+Where the depth can be given two ways, the one you wrote counts: `CYCLE81(10,0,2,,5)` leaves
+the absolute depth `DP` empty and gives the depth `DPR` from the reference plane, which
+follows the moved reference plane, so the call is moved. The same holds for `FDEP` and
+`FDPR` of `CYCLE83`.
+
+The `R` of a Fanuc drilling cycle is its `R` plane even when the last move before the cycle
+was an arc (`G2 … R10.`, then `G81 … R2.`): it moves with `Z`. A block that writes a
+drilling cycle and an arc code together is left as written.
+
 A cycle and the blocks that run it are **moved in one piece, or not at all**: a modal cycle
 and its positions, a Klartext definition and every call of it, an `MCALL` and its
 positions. If one member cannot be moved, every member is left, and the row names the line
 of the first refused one ("part of the same cycle as line 12"). A cycle that starts above
 your selection cannot be moved from a selection, so its blocks inside the selection are
 left and the row says why.
+
+On a selection, an add or subtract of the tool axis leaves a word cycle that **starts before
+any edited tool-axis word of the selection** unchanged, with a warning (`cycle-level-outside`):
+its level comes from the lines above, which are not moved. Multiply and divide are not
+affected.
 
 #### What it refuses, and lists
 
@@ -705,7 +797,9 @@ per refused block, with the block as written and the reason in plain words.
   position acts as a second datum shift on top of `Q203`, so moving both would move the hole
   twice) and `CYCL CALL PAT` (the points stand outside the block), and the points of
   `CYCLE800`. The definition is refused together with its call.
-- **A mode argument** other than empty or 0 (`_AMODE`, `_DMODE`, `_GMODE`, `_AXN`).
+- **A mode argument** other than empty or 0 (`_AMODE`, `_DMODE`, `_GMODE`, `_AXN`), and a
+  block that writes a drilling cycle and an arc code together (`G2 G81 …`).
+- **An empty Sinumerik position on the tool axis** under a shift of `Z`, see above.
 - **Another plane than XY**, or one that is not known: the tool axis is then not `Z` for
   sure.
 - **A variable or an expression** where the shift would move a cycle position, or an axis
@@ -787,7 +881,8 @@ Klartext cycle 254 are refused as a whole because their positions in the plane h
 the database (a Z shift would otherwise move the depth and leave the positions). `CYCLE72` is
 refused for the same reason: the contour it mills is named by its first argument and lies in a
 subprogram or another part of the program, where the call cannot judge it. Klartext cycles
-251 to 253, 256 and 257 move together with their call like cycles 200 to 209. A Klartext cycle the
+251 to 253, 256 and 257 move together with their call like cycles 200 to 209 under a shift (a
+multiply or divide leaves them because of their sizes, see above). A Klartext cycle the
 database still lacks does not replace the earlier definition in the modal state, so address
 arithmetic refuses it with its calls; the same goes for cycle 20 and the pattern cycles 220 and
 221. The fix for these is database content, not the script.
@@ -823,7 +918,24 @@ cycle's own parameters.
 arc centres (`I`, `J`, `K` on most controls), radii, and Klartext polar radii and angles. A
 shift does not change a distance, an angle or a length, so none of them is touched. A
 cycle moves **in one piece** with the blocks that run it. A tool offset number (Sinumerik
-`D`) is never changed by any of the three.
+`D`) is never changed by any of the three, and neither is the value of a Fanuc `G10 L1` or
+`L10` to `L13`, which writes a tool offset and no coordinate system.
+
+**An increment after a drilling cycle.** After `G98` the tool leaves a drilling cycle at its
+start level, after `G99` at the `R` plane. An incremental move along the tool axis that
+follows (`G91 G99 G81 …`) is moved when the program wrote the level the cycle started from:
+the shift moves both the level and the move, so the increment stays as written and ends in
+the right place. From a level nobody wrote it is refused (`axis-unwritten`). A Sinumerik
+cycle (also behind `MCALL`) and a Klartext cycle definition give their levels in their
+parameters (`RTP`, `RFP`; `Q203`): the increment after them is moved only when those are
+written as numbers.
+
+**An empty level of a cycle.** A Sinumerik cycle reads a parameter left empty, or left out at
+the end, as 0. A Z shift cannot move a value that is not written, so a cycle call with an
+empty retract plane, reference plane or depth (`CYCLE81(10,,2,-10)`, `CYCLE81(,0,2,-10)`)
+refuses a Z shift (`cycle-level-empty`). Write the level as a number. An empty depth whose
+relative depth is written is fine: `CYCLE81(10,0,2,,5)` takes its depth from `DPR` (the same
+for `FDEP` and `FDPR` of `CYCLE83`). A shift in X and Y alone does not touch the levels.
 
 A program in inches, or a block that switches units, gets the shift converted
 (25.4 mm to the inch) in the units the block states.
@@ -883,7 +995,10 @@ of a cycle in the plane. The polar angle `PA` turns by the angle; `IPA` is a ste
 
 **What stays.** `G2` and `G3` (a rotation does not change the way round), radii with their
 sign, the Sinumerik opening angle `AR=` and `TURN=`, the axes outside the plane (the `Z` of
-a helix), and every cycle parameter on the tool axis.
+a helix), and every cycle parameter on the tool axis. Also the corner and approach words
+that are sizes: Klartext `CHF`, `RND` and the `LEN`, `R` and `CCA` of `APPR`/`DEP`
+(`LT`, `LN`, `CT`, `LCT`), Sinumerik `CHF=`, `CHR=`, `RND=`, `RNDM=`, and the feeds `FRC=`
+and `FRCM=`, and the smoothing distances `ADIS=` and `ADISPOS=`, and a Fanuc `H1` written without `G43`, which is the length offset number.
 
 **`X` and `Y` are both written on every block that now moves in both.** A block that wrote
 only `X` has to write a `Y` afterwards. gEdit takes it from where the tool is, in the
@@ -895,8 +1010,8 @@ written yet) refuses the run.
 **A rotary axis.** A rotary word that leaves its axis at 0 is accepted. A rotary axis that
 moves to another angle, or stands at one, refuses the move. After a block that tilts the
 plane (`PLANE … TURN`, `MOVE`, `G53.1`, `CYCLE800`) the rotary axes count as not known until
-the program writes them. This is cautious: a `PLANE SPATIAL … TURN` with every angle at 0
-that no rotary move follows is refused as well.
+the program writes them. A `PLANE` with every angle at 0, and `PLANE RESET`, turns no
+axis and leaves them as they were.
 
 **The workpiece blank.** A Klartext `BLK FORM` is left as written, with one information row
 per run. Check the blank in the control's graphics.
@@ -964,7 +1079,9 @@ The Z mirror never reads `X`, so a diameter or a radius makes no difference to i
 Sinumerik `DIAMON`, `DIAMOF` and `DIAM90` refuse nothing. A C axis word that leaves its axis
 at 0 is accepted. A C word that moves the axis to another angle is refused: seen from the
 counter spindle it turns the other way. In a selection, a first move that writes no Z, or
-no Y while the tool stands away from Y0, is refused (`selection-start`).
+no Y while the tool stands away from Y0, is refused (`selection-start`), and so are a single
+pass while the tool still stands where the lines above left it and a pass that takes its Z
+from a block above the selection (see [Selections](#selections)).
 
 Example, Z0: `G1 Z-10.` becomes `G1 Z10.`, `G2 X30. Z-15. R5.` becomes `G3 X30. Z15. R5.`,
 `G3 X40. W-5. K-5. I0.` becomes `G2 X40. W5. K5. I0.`, and `G41` becomes `G42`.
@@ -977,8 +1094,9 @@ offset on the control, not in the program, so gEdit cannot change it. Set it by 
 **What it refuses, and why.** The result of these cycles is not just points, so mirroring
 the numbers would make the cycle cut the wrong way:
 
-- **Threads** — thread cutting moves and cycles (`G32`, `G33`, `G76` and their
-  relatives in each dialect). The hand of a thread follows from the travel along Z
+- **Threads** — thread cutting moves and cycles (`G32`, `G33`, `G76`, the single threading
+  pass `G92` or, in system B, `G78`, with or without a taper, and their relatives in each
+  dialect). The hand of a thread follows from the travel along Z
   together with the direction the spindle turns. The mirror reverses the travel, and
   whether the counter spindle turns the same way seen from the part is a fact of the
   machine that the program does not state. Write the threads for the counter spindle by hand.
@@ -992,7 +1110,14 @@ the numbers would make the cycle cut the wrong way:
   mirror reverses. Write it for the counter spindle by hand.
 - **A single turning or facing pass with a taper** (`G90`, `G94`, `G77`, `G79` with `R`):
   the taper of one changes sign and the taper of another does not, and the database does not
-  say which is which. The same pass without a taper is points and is mirrored.
+  say which is which. The passes keep `R` until a block writes it again, so a facing pass
+  (`G94`, `G79`, taper along Z) is refused too while a taper written above it is still in
+  force, also when that block is above the selection. A taper that is not known counts as a
+  taper: one that cannot be read, and any after a subprogram or macro call. A one-shot code
+  other than a dwell (`G04`), or a plane code, ends the taper. `R0` is no taper, and a
+  turning taper (`G90`, `G77`, along X) in force does not change sign under the Z mirror. The
+  same pass without a taper is points and is mirrored. A tapered threading pass (`G92`,
+  `G78`) is not listed here: it is refused as a thread above, with that one reason.
 
 The Z mirror is for turning programs only. A milling program is mirrored about a line in the
 XY plane, and a turning program is not mirrored in X: both are refused with a row that says so.
@@ -1081,6 +1206,7 @@ words some of them in its own terms, for example for a cycle call with a positio
 | All three | `cycle-position` | A cycle with positions of its own (a pattern, a pocket, a contour elsewhere) that gEdit does not move. |
 | Rotate and mirror | `cycle-angle` | A cycle that turns or places what it cuts by an angle or a corner of its own (a pocket's angle, the corner the tool stands at); gEdit does not turn or mirror those values, so the cycle would cut in the old direction. |
 | All three | `cycle-plane` | A cycle with a position on the tool axis while the working plane is not XY; the tool axis is not certain. |
+| Translate | `cycle-level-empty` | A level of this cycle on the tool axis (its retract plane, reference plane or depth) is left empty, which the control reads as 0; a shift cannot move a value that is not written. Write the level as a number. |
 | All three | `fk-contour` | A free contour (FK): its points depend on each other and on the elements around them; gEdit does not move them. |
 
 **Arcs and numbers**
@@ -1110,7 +1236,7 @@ words some of them in its own terms, for example for a cycle call with a positio
 | Mirror, Z for the counter spindle | `thread` | A thread or tapping move or cycle: mirrored in Z it would cut the other hand of thread unless the counter spindle turns the other way, which the program does not say. Write the threads for the counter spindle by hand. |
 | Mirror, Z for the counter spindle | `roughing-cycle` | A roughing cycle that works from a contour (its finishing allowance along Z has a direction); gEdit does not mirror it yet. |
 | Mirror, Z for the counter spindle | `lathe-cycle` | A turning, grooving or drilling cycle; its parameters are not mirrored, so the cycle would work on the wrong side. |
-| Mirror, Z for the counter spindle | `single-pass-taper` | A turning or facing pass with a taper (R): whether the taper changes sign depends on the cycle; write the taper for the counter spindle by hand. |
+| Mirror, Z for the counter spindle | `single-pass-taper` | A turning or facing pass with a taper (R): whether the taper changes sign depends on the cycle; write the taper for the counter spindle by hand. Also a facing pass under a taper written above it and still in force, or one that is not known. A tapered threading pass is a `thread` instead. |
 | Mirror, Z for the counter spindle | `chamfer-sign` | A chamfer or a corner round whose sign gives the direction of the next move along the other axis; gEdit does not mirror it yet. Write it for the counter spindle by hand. |
 
 **A run can also be refused as a whole.** These reasons belong to the run, not to a block:
@@ -1119,7 +1245,8 @@ words some of them in its own terms, for example for a cycle call with a positio
 |---|---|---|
 | All three | `no-database` | This run had no code database for this control, so gEdit cannot tell a machine position, a frame or a cycle from a move. Nothing is moved. |
 | All three | `selection-unprimed` | The lines above the selection were not sent, so the distance mode, the units, a frame and a cycle in force there are not known. Run it on the whole program. Rotate and mirror add the arc direction and the compensation side to that list. |
-| Rotate and mirror | `selection-start` | The first move of the selection starts where the lines above leave the tool, and that point is not moved with the selection. An arc, an incremental move or (on a lathe) a move without Z, or without Y away from the turning axis, from there would miss the moved path. Start the selection at a block that moves to an absolute position, with Z on a lathe (and Y where Y is not 0). |
+| Rotate and mirror | `selection-start` | The first move of the selection starts where the lines above leave the tool, and that point is not moved with the selection. An arc, an incremental move or (on a lathe) a move without Z, or without Y away from the turning axis, from there would miss the moved path. Start the selection at a block that moves to an absolute position, with Z on a lathe (and Y where Y is not 0). The Z mirror adds a single pass from there, and a pass that takes its Z from a block above the selection. |
+| Translate | `selection-start` | The selection starts where the lines above it leave the tool, and that point is not moved with the selection. A move from there that does not go to a written position on every shifted axis, an arc, an incremental move, or a turning or facing pass (which goes back to that point) would miss the moved path, and so would a pass that takes its end point from a block above the selection. Start the selection at a block that moves to a position on every shifted axis, and give its first pass every value. |
 
 **Information rows** do not stop a run. They list what is left as written:
 
@@ -1147,7 +1274,11 @@ known, and only the selected lines change. A selection is refused when:
 - it starts or ends **inside a cycle** (a block of a cycle started or defined above it, a
   modal cycle still in force at its end, a definition in it that is called below it) or
   **inside a block written over several lines** (Klartext `~`, Okuma `$`). Select the whole
-  of it;
+  of it. The single passes of a lathe (`G90`, `G92`, `G94`; system B `G77` to `G79`) count
+  as such a cycle at the end: a selection that ends while they are in force, and in which the
+  run changed something, is refused (`selection-inside`), because a pass below it would run
+  from a moved start point or to a moved end point. End the selection after the block that
+  ends the passes (a `G00` or `G01`);
 - for a mirror, a block of the selection **runs under an arc direction or a compensation
   side set above it**, which would have to be swapped outside the selection. Start the
   selection at the block that sets it.
@@ -1164,6 +1295,31 @@ from Y0). A move to an absolute position is allowed. It writes both plane axes, 
 axis mirror, where the first block of the selection would otherwise write only the axis it
 had. If you rotate the middle of a program, start the selection at such a block. The lines
 before and after stay where they were.
+
+Translate refuses the same way: the first block that moves the tool must go to a written
+position on **every shifted axis** (with a Z shift, `G0 X10. Y10.` alone runs at the old
+height), and an arc, an incremental move or a polar move from there is refused. An axis the
+program has not written above the selection, or not since a return to the reference point
+or another machine position, stands where the whole run leaves it too, so it need not be
+written. Start the selection at a block that writes every shifted axis, or at the retract
+before it.
+
+When the first move does not write a shifted axis but the lines above wrote it as a number
+(absolute mode), translate **adds the word**, shifted, as they wrote it, and an information
+row says so ("Z55. added: the move started at the unmoved Z of the lines above"). It never
+adds a diameter word. After a subprogram call, a cycle, a tool change (also a lone `T`), a
+work offset, a tool length compensation or a lone `D`/`H`, the position is not known as a
+number and the block is refused as before. A **cycle that runs while the tool axis still
+stands at the level of the lines above** is refused too (`G98` and `G99` alike): start the
+selection at the move that goes to the level, or include it.
+
+**Single passes in a selection** (translate and the Z mirror). A single pass (`G90`, `G92`,
+`G94`; system B `G77` to `G79`) goes back to the point it started from. While the tool still
+stands where the lines above left it, a pass would go back to a point that is not moved, so
+it is refused (`selection-start`), also when it writes nothing but `X`. A pass also takes the
+end point it does not write from the pass before; one that takes a shifted (or, for the Z
+mirror, its Z) end point from a block above the selection is refused. Start the selection at
+the rapid before the passes, and end it after the block that ends them.
 
 #### Undo
 

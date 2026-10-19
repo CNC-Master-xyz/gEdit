@@ -881,6 +881,25 @@ describe('P4e NC-4: Siemens WAITM lists pair channel by channel; the owner’s s
     );
     expect(all.groups).toEqual([{ marks: [{ pane: 0, line: 2 }, { pane: 1, line: 3 }, { pane: 2, line: 4 }] }]);
   });
+  it('v1.2.0: pairs a P-word rule without samePartners as Check Wait Codes does (asksSamePartners)', () => {
+    // The rule the machine page builds: partners are a `P` word, `samePartners` not written.
+    // Check Wait Codes asks for the same partners by default (T044); the view has to agree.
+    const rules: SyncRule[] = [{ id: 'w', label: 'Waits', match: { kind: 'codes', codes: 'M900-M999' }, partners: { kind: 'word', address: 'P', decode: 'digits' } }];
+    const [c1, c2] = TOY_CHANNELS;
+    const two = (one: SyncHit, other: SyncHit) =>
+      alignPanes([{ channel: c1, lineCount: 10, marks: [one] }, { channel: c2, lineCount: 10, marks: [other] }], rules).states;
+    // A wait written without P (it waits for every path) never meets one with P12.
+    const bare = { ...wait('1', 3, 'M901', '12'), absent: true as const };
+    expect(waitKey(bare, rules[0])).not.toBe(waitKey(wait('2', 3, 'M901', '12'), rules[0]));
+    expect(two(bare, wait('2', 3, 'M901', '12'))).toEqual([['unmatched'], ['unmatched']]);
+    // P12 against P123: different partners.
+    expect(two(wait('1', 3, 'M901', '12'), wait('2', 3, 'M901', '123'))).toEqual([['unmatched'], ['unmatched']]);
+    // The same P, and two P-less waits, meet.
+    expect(two(wait('1', 3, 'M901', '12'), wait('2', 5, 'M901', '12'))).toEqual([['matched'], ['matched']]);
+    expect(two(bare, { ...wait('2', 5, 'M901', '12'), absent: true })).toEqual([['matched'], ['matched']]);
+    // A rule that says samePartners: false keys them alike again.
+    expect(waitKey(bare, { ...rules[0], samePartners: false })).toBe(waitKey(wait('2', 3, 'M901', '12'), { ...rules[0], samePartners: false }));
+  });
 });
 
 describe('P4e NC-5: one misplaced wait costs only itself', () => {

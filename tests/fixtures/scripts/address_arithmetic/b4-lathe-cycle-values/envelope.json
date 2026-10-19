@@ -1,5 +1,5 @@
 {
-  "message": "Added 1 to X (as a diameter) and R in 9 words on 8 blocks. Left 8 words as written: 8 data words. No machine chosen: words whose reading depends on the machine are left alone.",
+  "message": "Added 1 to X (as a diameter) and R in 8 words on 8 blocks. Left 9 words as written: 9 data words. No machine chosen: words whose reading depends on the machine are left alone.",
   "findings": [
     {
       "line": 7,
@@ -47,6 +47,12 @@
       "line": 16,
       "severity": "info",
       "message": "U0.4: a value of G71, not a position of this program.",
+      "reason": "data"
+    },
+    {
+      "line": 20,
+      "severity": "info",
+      "message": "R5.: the radius of the arc of G2; a shift does not change a radius, so it is left as written.",
       "reason": "data"
     }
   ]

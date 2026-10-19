@@ -62,6 +62,10 @@ REQUIRED_CASES = [
     # SLOT2 and CYCLE72 (2026-10-12): calls the database describes leave their depth
     # unresolved and say so; without an entry they were silent and the Z range looked complete.
     "sinumerik-milling-cycles",
+    # v1.2.0 (T111): a single-pass lathe cycle goes back to where it started.
+    "lathe-box-cycle",
+    # v1.2.0 (NCF-C): the taper of a single pass starts the cut beyond its end point.
+    "lathe-taper-pass",
 ]
 
 gedit_nc = helpers.import_gedit_nc()
@@ -247,6 +251,62 @@ class TestRules(unittest.TestCase):
         w = walk("G00 X40. Z2.\nU10. W-3.\nM30", "fanuc-lathe")
         self.assertEqual(extent(w, "X"), ("40", "50", 0))
         self.assertEqual(extent(w, "Z"), ("-1", "2", 0))
+
+    def test_a_single_pass_lathe_cycle_goes_back_to_its_start(self):
+        # v1.2.0 (T111): the end point is reached; the tool stands at the start point after it.
+        w = walk("G21 G99\nG00 X52. Z2.\nG90 X46. Z-30. F0.25\nG00 U-30. W-1.\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "X"), ("22", "52", 0))
+        self.assertEqual(extent(w, "Z"), ("-30", "2", 0))
+        w = walk("G21 G99\nG00 X54. Z1.\nG94 X20. Z-1. F0.2\nW-4.\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "Z"), ("-3", "1", 0))
+
+    def test_a_taper_pass_starts_at_its_end_plus_the_taper(self):
+        # v1.2.0 (NCF-C): the first move of a taper pass goes from the start point to the end
+        # coordinate plus the taper R, a radius: along X for G90/G92 (twice R in the diameter
+        # column), along Z for G94. The threading pass G92 is a whole pass too.
+        for code in ("G90", "G92"):
+            with self.subTest(code=code):
+                w = walk("G21 G99\nG00 X62. Z2.\n%s X56. Z-30. R-4. F0.25\nX52.\nG00 X100.\nM30" % code, "fanuc-lathe")
+                self.assertEqual(extent(w, "X"), ("44", "100", 0))
+                self.assertEqual(extent(w, "Z"), ("-30", "2", 0))
+        w = walk("G21 G99\nG00 X64. Z3.\nG94 X20. Z-1. R-5. F0.2\nZ-2.\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "Z"), ("-7", "3", 0))
+        # An inside taper (R > 0) reaches beyond the end diameter.
+        w = walk("G21 G99\nG00 X20. Z2.\nG90 X30. Z-20. R2. F0.2\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "X"), ("20", "34", 0))
+        # No taper, or R0: the end point only.
+        w = walk("G21 G99\nG00 X62. Z2.\nG90 X56. Z-30. R0. F0.25\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "X"), ("56", "62", 0))
+
+    def test_the_taper_stays_in_force_for_the_passes(self):
+        # A block with only R runs the pass again; R stays in force through a rapid move and
+        # counts for the next pass block that does not write it (the control keeps X, Z and R).
+        w = walk("G21 G99\nG00 X62. Z2.\nG90 X56. Z-30. R-4. F0.25\nR-6.\nG00 X70.\nG90 X58. Z-30.\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "X"), ("44", "70", 0))
+        # A one-shot code (not a dwell) and a plane code clear it.
+        for clear, low in (("G04 X1.", "50"), ("G01 X62.", "50"), ("G50 S2000", "52"), ("G18", "52")):
+            with self.subTest(clear=clear):
+                w = walk("G21 G99\nG00 X62. Z2.\nG90 X60. Z-30. R-1. F0.25\n%s\nG90 X52. Z-30.\nM30" % clear, "fanuc-lathe")
+                self.assertEqual(extent(w, "X"), (low, "62", 0))
+
+    def test_a_taper_or_an_end_that_is_not_known_is_not_resolved(self):
+        # R without a point and no machine: its value depends on the machine.
+        w = walk("G21 G99\nG00 X62. Z2.\nG90 X56. Z-30. R-4 F0.25\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "X"), ("56", "62", 1))
+        w = walk("G21 G99\nG00 X62. Z2.\nG90 X56. Z-30. R-4 F0.25\nM30", "fanuc-lathe", machine_leaf="calculator")
+        self.assertEqual(extent(w, "X"), ("48", "62", 0))
+        w = walk("G21 G99\nG00 X62. Z2.\nG90 X56. Z-30. R#1 F0.25\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "X"), ("56", "62", 1))
+        # The end along X was written by a move outside the passes: the pass that does not
+        # write X starts from a point that is not known.
+        w = walk("G21 G99\nG00 X62. Z2.\nG90 X56. Z-30. R-4. F0.25\nG00 X64.\nG90 Z-20.\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "X"), ("48", "64", 1))
+
+    def test_a_drilling_cycle_after_an_arc_is_no_arc(self):
+        # v1.2.0 (FZ-4): the R of G81 is the retract plane, not the radius of a G3 still in force.
+        w = walk("G21 G17 G90\nG0 X0. Y0. Z10.\nG3 X20. Y0. I10. J0. F100.\nG81 X20. Y10. Z-5. R5. F100.\nG80\nM30")
+        self.assertEqual(extent(w, "X"), ("0", "20", 0))
+        self.assertEqual(extent(w, "Y"), ("-10", "10", 0))
 
     def test_an_incremental_word_from_an_unknown_start_is_not_resolved(self):
         w = walk("G91 G0 X5.\nM30")
@@ -543,3 +603,24 @@ class TestM13Review(unittest.TestCase):
         self.assertEqual(list(self.tool_scopes(sinumerik)), ['ROUGH (T="ROUGH", line 2)'])
         mill = walk("T5 M6\nG90 G0 X1 Y1 Z1\n", "fanuc-gcode")
         self.assertEqual(list(self.tool_scopes(mill)), ["T5 (line 1)"])
+
+
+class D2FixTest(unittest.TestCase):
+    """v1.2.0 NC fix round, batch D2 (path and geometry): what the tracker's fixes change in the
+    extents. Each test fails without its fix."""
+
+    def test_ncr10_a_tool_offset_write_leaves_the_positions_known(self):
+        w = walk("G90 G17 G21\nG0 X0. Y0. Z50.\nG10 L11 P1 R0.1\nG91 G1 X10. F100\nG90 G0 Z100.\nM30")
+        self.assertEqual(extent(w, "X"), ("0", "10", 0))
+        # A work offset written with G10 L2 is a coordinate setting: the increment after it is
+        # from a start nobody knows.
+        w = walk("G90 G17 G21\nG0 X0. Y0. Z50.\nG10 L2 P1 X10. Y0 Z0\nG91 G1 X10. F100\nG90 G0 Z100.\nM30")
+        self.assertEqual(extent(w, "X"), ("0", "0", 1))
+
+    def test_ncr2_the_taper_start_of_a_pass_after_a_call_is_not_resolved(self):
+        # The subprogram may have written the taper R the passes share, so where the cut of the
+        # next G90 starts along X is not known.
+        w = walk("G18 G21\nG0 X62. Z2.\nM98 P100\nG0 X62. Z2.\nG90 X56. Z-30. F0.25\nG0 X80. Z50.\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "X")[2], 1)
+        w = walk("G18 G21\nG0 X62. Z2.\nM98 P100\nG0 X62. Z2.\nG90 X56. Z-30. R0. F0.25\nG0 X80. Z50.\nM30", "fanuc-lathe")
+        self.assertEqual(extent(w, "X"), ("56", "80", 0))

@@ -15,7 +15,7 @@
    therefore win a specificity tie. */
 
 .monaco-editor .glyph-margin-widgets .cgmr.gedit-bookmark-glyph {
-  color: var(--accent-hover);
+  color: var(--accent-text);
 }
 
 /* A whole-line tint, kept at the strength of a hover so that it reads as "marked" without

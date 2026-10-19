@@ -83,7 +83,15 @@ tests/runtime/suite.sh tests/runtime/suites/m0.txt   # run a suite and print the
 
 `harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt` on `macos-14`
 (150 minute limit since P4a; it was 45: `p4-perf` runs five scripts on 300,000 lines, about 100 minutes for the job, see the comment in `harness.yml`), always uploads `$GEDIT_RH_DIR/out`, the app logs and the sync logs, and
-caches the build directory. What differs from the owner's Mac, and how the scenarios deal with it:
+caches the build directory. A run started by hand can be limited to some scenarios or suites (the
+`scenarios` input: space-separated names, scenario names and/or suite names such as `p4e`, letters, digits, `.`, `_`, `-` only;
+empty runs the whole list as a push to `main` does), for the answer on one change without the whole 100 minutes:
+
+```sh
+gh workflow run harness.yml --ref <branch> -f scenarios="p4-compare"
+```
+
+What differs from the owner's Mac, and how the scenarios deal with it:
 
 - The runner has a live, unlocked session with Accessibility already granted, so no setup
   step is needed. The harness is unchanged.

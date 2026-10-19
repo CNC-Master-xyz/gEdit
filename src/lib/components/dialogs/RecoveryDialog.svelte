@@ -216,14 +216,14 @@
     flex-direction: column;
     max-height: inherit;
     min-height: 0;
-    color: var(--text-main, #cccccc);
+    color: var(--text-main);
     font-size: 13px;
     outline: none;
   }
 
   .title {
     margin: 0 0 8px;
-    color: var(--text-active, #ffffff);
+    color: var(--text-active);
     font-size: 15px;
     font-weight: 600;
   }
@@ -234,7 +234,7 @@
 
   .promise {
     margin: 0 0 10px;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 12px;
   }
 
@@ -251,7 +251,7 @@
     gap: 6px;
     align-items: center;
     margin-bottom: 6px;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 12px;
     cursor: pointer;
   }
@@ -259,7 +259,7 @@
   .list {
     flex: 1 1 auto;
     min-height: 0;
-    border: 1px solid var(--border-color, #3e3e42);
+    border: 1px solid var(--border-color);
     border-radius: 3px;
     overflow-y: auto;
   }
@@ -273,11 +273,11 @@
   }
 
   .row + .row {
-    border-top: 1px solid var(--border-color, #3e3e42);
+    border-top: 1px solid var(--border-color);
   }
 
   .row:hover {
-    background: var(--surface-hover, rgb(255 255 255 / 8%));
+    background: var(--surface-hover);
   }
 
   .text {
@@ -290,25 +290,25 @@
 
   .name {
     overflow: hidden;
-    color: var(--text-active, #ffffff);
+    color: var(--text-active);
     white-space: nowrap;
     text-overflow: ellipsis;
   }
 
   .taken {
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 11px;
   }
 
   .where {
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 12px;
   }
 
   /* The one row state that has to be visible without reading: the file on disk is not
      the file this text came from. */
   .row.warn .where {
-    color: var(--danger-text, #f38ba8);
+    color: var(--danger-text);
   }
 
   .actions {
@@ -318,7 +318,7 @@
     align-items: center;
     margin-top: 12px;
     padding-top: 10px;
-    border-top: 1px solid var(--border-color, #3e3e42);
+    border-top: 1px solid var(--border-color);
   }
 
   /* Discard sits away from Restore: the two are one click apart and one of them cannot
@@ -329,31 +329,31 @@
 
   .action {
     padding: 5px 14px;
-    border: 1px solid var(--border-color, #3e3e42);
+    border: 1px solid var(--border-color);
     border-radius: 3px;
-    background: var(--bg-ribbon, #2d2d30);
-    color: var(--text-main, #cccccc);
+    background: var(--bg-ribbon);
+    color: var(--text-main);
     font: inherit;
     font-size: 13px;
     cursor: pointer;
   }
 
   .action:hover:not(:disabled) {
-    background: var(--surface-hover, rgb(255 255 255 / 8%));
+    background: var(--surface-hover);
   }
 
   .action:disabled {
-    color: var(--text-disabled, #6d6d6d);
+    color: var(--text-disabled);
     cursor: default;
   }
 
   .action.primary:not(:disabled) {
-    border-color: var(--accent, #0e639c);
-    background: var(--accent, #0e639c);
-    color: var(--text-on-accent, #ffffff);
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--text-on-accent);
   }
 
   .action.primary:hover:not(:disabled) {
-    background: var(--accent-hover, #1177bb);
+    background: var(--accent-hover);
   }
 </style>

@@ -869,6 +869,8 @@ class ReasonsCases:
         ("cycle-not-reviewed", "sinumerik-mill", "G90 G17 G71\nG0 X0 Y0 Z5\nCYCLE81(10,0,2,-5,,,1)", 3, TRANSLATE),
         ("cycle-position", "sinumerik-mill", "G90 G17 G71\nG0 X0 Y0 Z5\nSLOT1(10,0,2,-5,,4,20,8,50,50,10,0,90)", 3, TRANSLATE),
         ("cycle-plane", "fanuc-gcode", "G90 G18 G21\nG0 X0. Y0. Z5.\nG81 X10. Z-5. R2. F100.", 3, TRANSLATE),
+        # v1.2.0 (NCR-9b): an empty retract plane is 0, which a Z shift cannot move.
+        ("cycle-level-empty", "sinumerik-mill", "G17 G90 G71\nG0 X0 Y0 Z50\nCYCLE81(,0,2,-10)", 3, TRANSLATE),
         ("arc-tangential", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 L X+0 Y+0 R0 FMAX\n2 CT X+10 Y+10\n3 END PGM P MM", 3, ROTATE),
         ("arc-unsupported", "okuma-osp", "G90 G18\nG0 X40 Z2 C0\nG102 X30 C90 L5 F100", 3, TRANSLATE),
         ("swap-unknown", "fanuc-gcode", "G90 G17 G21\nG0 X0. Y0.\nG41.2 D1 G1 X10. Y0. F100.", 3, MIRROR),
@@ -925,6 +927,14 @@ class ReasonsCases:
             ("sinumerik", "G18 G90 G71\nDIAMON\nG0 X40 Z2\nG1 Z-10 F0.2", 4, LATHE),
             # A single pass without a taper is points.
             ("fanuc-lathe", "G18 G21\nG0 X52. Z2.\nG90 X40. Z-20. F0.2", 3, LATHE),
+            # v1.2.0 (NCR-2): a taper written as 0 is none; one along X keeps its sign under the
+            # Z mirror; a plane code clears the taper in force.
+            ("fanuc-lathe", "G18 G21\nG0 X52. Z2.\nG94 X20. Z-2. R0. F0.2", 3, LATHE),
+            ("fanuc-lathe", "G18 G21\nG0 X52. Z2.\nG90 X40. Z-20. R-2. F0.2\nG0 X52. Z2.\nG90 X38. Z-20.", 5, LATHE),
+            ("fanuc-lathe", "G18 G21\nG0 X52. Z2.\nG94 X20. Z-2. R-3. F0.2\nG18\nG0 X52. Z2.\nG94 X20. Z-4.", 6, LATHE),
+            # v1.2.0 (NCR-9b): the depth left empty with its twin written; a shift that keeps Z.
+            ("sinumerik-mill", "G17 G90 G71\nG0 X0 Y0 Z50\nCYCLE81(10,0,2,,5)", 3, TRANSLATE),
+            ("sinumerik-mill", "G17 G90 G71\nG0 X0 Y0 Z50\nCYCLE81(,0,2,-10)", 3, _nc_geom.Translate({"X": D(1), "Y": D(0), "Z": D(0)})),
             # An incremental zero return is information, not a refusal (Q4-6).
             ("fanuc-gcode", "G90 G17 G21\nG0 X0. Y0. Z5.\nG91 G28 Z0.", 3, TRANSLATE),
             # P4.2: the cases of the prelude's goldens and the rules around them.
@@ -957,17 +967,16 @@ class ReasonsCases:
         self.assertEqual([r.reason for r in self.refusals("okuma-osp", text, 3, LATHE, preset="okuma-1um")], [])
 
     def test_a_klartext_approach_on_a_tangential_arc_is_mirrored(self) -> None:
-        # The prelude's case list: R and CCA keep their values, RL becomes RR. CCA (and LEN) are
-        # not described in the database yet (an open point of P4.2 for the data): until they
-        # are, the approach is refused rather than guessed; with the parameters declared, it
-        # is mirrored.
+        # The prelude's case list: R and CCA keep their values, RL becomes RR. v1.2 NC fix round
+        # (FZ-6): the database describes CCA, R and LEN of the approach and departure codes, so
+        # the shipped data mirrors it; an entry without them still refuses rather than guesses.
         text = "0 BEGIN PGM P MM\n1 TOOL CALL 1 Z S3000\n2 L X+40 Y+10 R0 FMAX\n3 APPR CT X+10 Y+20 CCA180 R+10 RR F100\n4 END PGM P MM"
-        self.assertEqual([r.reason for r in self.refusals("heidenhain-klartext", text, 4, MIRROR)], ["word-unknown"])
+        self.assertEqual([r.reason for r in self.refusals("heidenhain-klartext", text, 4, MIRROR)], [])
         codes = [dict(e) for e in helpers.resolved_codes("heidenhain")]
         for entry in codes:
             if entry.get("code") == "APPR CT":
-                entry["params"] = [{"address": "R", "label": "Radius"}, {"address": "CCA", "label": "Centre angle", "unit": "angle"}]
-        self.assertEqual([r.reason for r in self.refusals("heidenhain-klartext", text, 4, MIRROR, codes=codes)], [])
+                entry.pop("params", None)
+        self.assertEqual([r.reason for r in self.refusals("heidenhain-klartext", text, 4, MIRROR, codes=codes)], ["word-unknown"])
 
     def test_the_information_rows(self) -> None:
         notes = self.notes("fanuc-gcode", "G90 G17 G21\nG0 X0. Y0. Z5.\nG91 G28 Z0.", 3, TRANSLATE)
@@ -1000,6 +1009,23 @@ class HandReasonsTest(ReasonsCases, unittest.TestCase):
     TRACKER = HandTracker
     #: The stand-in walks the lines straight; the flow of a program is the real tracker's.
     NEEDS_FLOW = ("jump",)
+
+
+class D2ReasonsTest(unittest.TestCase):
+    """v1.2.0 NC fix round, batch D2 (NCR-2): the taper in force is the real tracker's
+    (``PathTracker.pass_taper``); the stand-in keeps no pass values."""
+
+    def refusals(self, text, line):
+        context, tracker, steps = walk(text, "fanuc-lathe", upto=line)
+        step = steps[line - 1]
+        return [r.reason for r in _nc_geom.refusals_of(step, _nc_geom.roles_of(step, tracker), tracker, LATHE, context)]
+
+    def test_ncr2_a_facing_taper_in_force_refuses_the_pass(self) -> None:
+        above = "G18 G21\nG0 X52. Z2.\nG94 X20. Z-2. R-3. F0.2\n%sG0 X52. Z2.\nG94 X20. Z-4."
+        self.assertEqual(self.refusals(above % "", 5), ["single-pass-taper"])
+        self.assertEqual(self.refusals(above % "G04 X1.\n", 6), ["single-pass-taper"])
+        self.assertEqual(self.refusals(above % "M98 P100\n", 6), ["single-pass-taper"])
+        self.assertEqual(self.refusals(above % "G18\n", 6), [])
 
 
 class WriteBackCases:
@@ -1411,6 +1437,27 @@ class FixB1Test(unittest.TestCase):
         again = preceding + ["L B+0 C+0 R0 FMAX"]
         self.assertEqual(errors(run_geo("translate", text, "heidenhain-klartext", {"dx": 1, "dy": 2}, again)), [])
 
+    def test_t010_a_plane_at_zero_angles_with_turn_refuses_nothing(self) -> None:
+        # v1.2.0 (T010): the angles at zero turn no rotary axis, whatever word ends the PLANE.
+        text = "L X+10 Y+10 Z+5 R0 FMAX\nL Z-1 F100\nL X+50"
+        for plane in ("PLANE SPATIAL SPA+0 SPB+0 SPC+0 TURN MB MAX FMAX", "PLANE SPATIAL SPA+0 SPB+0 SPC+0 MOVE DIST50 F2000", "PLANE RESET TURN FMAX"):
+            preceding = ["BEGIN PGM P MM", "TOOL CALL 1 Z S5000", "L B+0 C+0 R0 FMAX", plane]
+            for script, params in (("translate", {"dx": 1, "dy": 2}), ROTATE90, MIRROR_X):
+                with self.subTest(plane=plane, script=script):
+                    self.assertEqual(errors(run_geo(script, text, "heidenhain-klartext", params, preceding)), [])
+        # Not at zero, it still turns them.
+        preceding = ["BEGIN PGM P MM", "TOOL CALL 1 Z S5000", "L B+0 C+0 R0 FMAX", "PLANE SPATIAL SPA+0 SPB+Q5 SPC+0 TURN MB MAX FMAX", "PLANE RESET STAY"]
+        self.assertIn((6, "rotary-word"), errors(run_geo("rotate", text, "heidenhain-klartext", {"cx": 0, "cy": 0, "angle": 90}, preceding)))
+
+    def test_fz4_a_drilling_cycle_after_an_arc_is_no_arc_for_the_transforms(self) -> None:
+        # v1.2.0 (FZ-4): no helix warning for the cycle block, and its R moves with a Z shift.
+        text = "G21 G17 G90\nG0 X0. Y0. Z10.\nG3 X20. Y0. I10. J0. F100.\nG81 X20. Y10. Z-5. R5. F100.\nG80\nM30"
+        result = run_geo(*MIRROR_X[:1], text, "fanuc-gcode", MIRROR_X[1])
+        self.assertEqual([(f["line"], f["reason"]) for f in result["findings"]], [(3, "climb-milling")])
+        result = run_geo("translate", text, "fanuc-gcode", {"dx": 1, "dy": 2, "dz": 3})
+        self.assertEqual(errors(result), [])
+        self.assertEqual(result["text"].split("\n")[3], "G81 X21. Y12. Z-2. R8. F100.")
+
     def test_nc11_cycle800_turns_the_axes_unless_its_direction_is_0(self) -> None:
         swivel = 'CYCLE800(1,"TABLE",200000,57,0,0,0,0,45,0,0,0,0,%s,100,1)'
         text = "G90 G17 G71\nG0 B0 C0\n%s\nCYCLE800()\nG0 X10 Y10 Z5\nG1 Z-1 F100\nX50\nM30"
@@ -1641,11 +1688,13 @@ class FindingTextTest(unittest.TestCase):
     """P4a fix batch B6: two refusal texts that said less (position-unknown) or more (coordinate-shift)
     than the refusals that use them."""
 
-    def test_a_tool_offset_write_is_not_called_a_coordinate_shift(self) -> None:
-        result = run_geo("translate", "G90 G21 G17\nG0 X0. Y0.\nG10 L10 P1 R12.5\nG1 X1. Y1. F100.", "fanuc-gcode", {"dx": 1})
+    def test_a_work_offset_write_is_not_called_a_coordinate_shift_only(self) -> None:
+        # v1.2 T013: a tool offset (`G10 L10`) is no longer refused at all (`ToolOffsetWriteTest`);
+        # the text still covers the data settings that write a work offset.
+        result = run_geo("translate", "G90 G21 G17\nG0 X0. Y0.\nG10 L2 P1 X-200. Y-100.\nG1 X1. Y1. F100.", "fanuc-gcode", {"dx": 1})
         self.assertEqual(errors(result), [(3, "coordinate-shift")])
         message = result["findings"][0]["message"]
-        self.assertTrue(message.startswith("G10 L10 P1 R12.5: this sets or shifts the coordinate system or writes offsets"), message)
+        self.assertTrue(message.startswith("G10 L2 P1 X-200. Y-100.: this sets or shifts the coordinate system or writes offsets"), message)
         self.assertNotIn("in another system", message)
 
     def test_a_start_that_is_not_known_names_the_jump_and_the_loop(self) -> None:
@@ -1657,3 +1706,134 @@ class FindingTextTest(unittest.TestCase):
         result = run_geo("rotate", text, "sinumerik-mill", {"cx": 0, "cy": 0, "angle": 90})
         row = next(f for f in result["findings"] if f["reason"] == "position-unknown")
         self.assertIn("a jump or a loop that brings the tool here from another place or runs this block again", row["message"])
+
+
+class ToolOffsetWriteTest(unittest.TestCase):
+    """v1.2 NC fix round (T013): `G10 L1`, `L10`-`L13` write a tool offset (`CodeParam.
+    toolOffsetValues` on `L` of Fanuc `G10`), no coordinate system, so the geometry transforms
+    pass them; a work offset (`L2`, `L20`), a variable or a missing `L` still refuses."""
+
+    HEAD = "G90 G21 G17\nG0 X0. Y0.\n"
+    TAIL = "\nG1 X10. Y0. F100.\nM30"
+
+    def check(self, profile, block, refused):
+        for script, params in (("translate", {"dx": 1}), ROTATE90, MIRROR_X):
+            with self.subTest(profile=profile, block=block, script=script):
+                result = run_geo(script, self.HEAD + block + self.TAIL, profile, params)
+                self.assertEqual(errors(result), [(3, "coordinate-shift")] if refused else [])
+                lines = result["text"].split("\n")
+                self.assertEqual(lines[2], block)  # the data setting itself is never changed
+
+    def test_a_tool_length_or_radius_offset_passes(self) -> None:
+        for block in ("G10 L10 P1 R12.5", "G10 L11 P1 R-0.02", "G10 L12 P1 R5.", "G10 L13 P1 R0.01", "G10 L1 P1 R12.5", "G10 L01 P1 R12.5"):
+            self.check("fanuc-gcode", block, refused=False)
+
+    def test_a_work_offset_or_an_unknown_table_still_refuses(self) -> None:
+        for block in ("G10 L2 P1 X-200. Y-100.", "G10 L20 P1 X-200. Y-100.", "G10 L#1 P1 R12.5", "G10 P1 R12.5", "G10 L3 P1"):
+            self.check("fanuc-gcode", block, refused=True)
+
+    def test_the_tool_offset_is_read_on_the_lathe_too(self) -> None:
+        # The lathe inherits G10 from the mill database. Its own form without L (`G10 P1 X… Z…`,
+        # P0 being the workpiece shift) is not told apart and stays refused.
+        head, tail = "G18 G21 G99\nG0 X50. Z5.\n", "\nG1 X40. Z-10. F0.2\nM30"
+        for block, refused in (("G10 L11 P1 R0.4", False), ("G10 P1 X0.1 Z0.05", True), ("G10 P0 X0. Z-0.5", True)):
+            with self.subTest(block=block):
+                result = run_geo("translate", head + block + tail, "fanuc-lathe", {"dz": -1})
+                self.assertEqual(errors(result), [(3, "coordinate-shift")] if refused else [])
+
+
+class NcfcThreadPassTest(unittest.TestCase):
+    """v1.2.0 NC fix round, NCF-C: the threading passes G92 (system A) and G78 (system B) are
+    whole passes (`path: 'cycle'`). Under the lathe Z mirror a taper thread is refused as a
+    thread alone; its taper R is part of the thread, not a second reason."""
+
+    @staticmethod
+    def reasons(text, line, variant=None):
+        context = helpers.effective_context("fanuc-lathe", variant=variant) if variant else helpers.effective_context("fanuc-lathe")
+        tracker = _nc_path.PathTracker(context, gedit_nc.compile_profile(context["profile"]))
+        state = None
+        for number, written in enumerate(text.split("\n")[:line], 1):
+            state, step = tracker.line(written, number, state, True)
+        return [r.reason for r in _nc_geom.refusals_of(step, _nc_geom.roles_of(step, tracker), tracker, LATHE, context)]
+
+    def test_a_taper_thread_pass_is_refused_as_a_thread(self) -> None:
+        for variant, code in ((None, "G92"), (("gcodeSystem", "B"), "G78")):
+            text = "G18 G21\nG0 X44. Z6.\n%s X39.2 Z-20. R-2.5 F1.5\nX38.6 R-2.\nM30" % code
+            with self.subTest(code=code):
+                self.assertEqual([r for r in self.reasons(text, 3, variant) if r != "distance-assumed"], ["thread"])
+                self.assertEqual([r for r in self.reasons(text, 4, variant) if r != "distance-assumed"], ["thread"])
+        # A turning pass with a taper keeps its own reason.
+        self.assertEqual(
+            [r for r in self.reasons("G18 G21\nG0 X52. Z2.\nG90 X40. Z-20. R-2. F0.2\nM30", 3) if r != "distance-assumed"],
+            ["single-pass-taper"],
+        )
+
+
+class FuzzOverRefusalTest(unittest.TestCase):
+    """v1.2 NC fix round, NCF-A (the fuzz review's FZ-6, FZ-7, FZ-9): words the transforms refused
+    as `word-unknown` although they keep their value under every transform."""
+
+    def test_fz6_klartext_approach_and_departure_lengths_and_angles(self) -> None:
+        # LEN, the arc radius R and the centre angle CCA (measured along the arc, so it does not
+        # turn) of APPR/DEP LT, LN, CT, LCT keep their values.
+        text = "\n".join([
+            "0 BEGIN PGM A MM", "1 TOOL CALL 1 Z S3000", "2 L X+0 Y+0 Z+5 R0 FMAX",
+            "3 APPR LT X+10 Y+20 LEN15 RR F100", "4 L X+30 Y+20", "5 DEP LT LEN12.5 F100",
+            "6 APPR CT X+10 Y+20 CCA90 R+5 RL F100", "7 L X+30 Y+20", "8 DEP CT CCA180 R+8 F100",
+            "9 APPR LN X+10 Y+20 LEN15 RR F100", "10 L X+30 Y+20", "11 DEP LN LEN+20 F100", "12 END PGM A MM",
+        ])
+        for script, params in (ROTATE90, MIRROR_X, ("translate", {"dx": 1})):
+            with self.subTest(script=script):
+                result = run_geo(script, text, "heidenhain-klartext", params)
+                self.assertEqual(errors(result), [])
+                lines = result["text"].split("\n")
+                self.assertIn("LEN15", lines[3])
+                self.assertIn("CCA90 R+5", lines[6])
+                self.assertIn("LEN12.5", lines[5])
+
+    def test_fz7_sinumerik_corner_rounding_and_chamfer(self) -> None:
+        text = "N10 G17 G90 G71\nN20 G0 X0 Y0 Z5\nN30 G1 X10 Y0 RND=2 F200\nN40 G1 X10 Y10 CHR=1\nN50 G1 X0 Y10 CHF=1.5\nN60 G1 X0 Y0 RNDM=0.5\nN70 M30"
+        for script, params in (("translate", {"dx": 1}), ROTATE90, MIRROR_X):
+            with self.subTest(script=script):
+                result = run_geo(script, text, "sinumerik-mill", params)
+                self.assertEqual(errors(result), [])
+                lines = result["text"].split("\n")
+                for line, word in zip(lines[2:6], ("RND=2", "CHR=1", "CHF=1.5", "RNDM=0.5")):
+                    self.assertIn(" %s" % word, line)
+
+    def test_ncfc_sinumerik_chamfer_and_rounding_feeds(self) -> None:
+        # v1.2.0 (NCF-C): FRC= and FRCM= are feeds of the chamfer or rounding (no length): every
+        # transform keeps them as written instead of refusing them as unknown words.
+        text = "N10 G17 G90 G71\nN20 G0 X0 Y0 Z5\nN30 G1 X10 Y0 CHF=1 FRC=200 F500\nN40 G1 X10 Y10 RNDM=2 FRCM=50\nN50 G1 X0 Y10 RNDM=0 FRCM=0\nN60 M30"
+        for script, params in (("translate", {"dx": 1}), ROTATE90, MIRROR_X):
+            with self.subTest(script=script):
+                result = run_geo(script, text, "sinumerik-mill", params)
+                self.assertEqual(errors(result), [])
+                lines = result["text"].split("\n")
+                for line, word in zip(lines[2:5], ("FRC=200", "FRCM=50", "FRCM=0")):
+                    self.assertIn(" %s" % word, line)
+
+    def test_fz9_a_length_offset_number_without_its_code(self) -> None:
+        # `H1` without `G43` is the length offset number (§7 #304), as `D2` is the radius one;
+        # only the axis words of the group's codes (`Z` of `G43`) and every word of a code that
+        # takes positions (`G28`) stay unknown without their code (#320).
+        for block in ("Z37.7 H1", "G1 X5. D2 F100."):
+            text = "G21 G17 G90\nG0 X1. Y1. Z5.\n%s\nG1 X5. Y2. F100.\nM30" % block
+            for script, params in (ROTATE90, MIRROR_X):
+                with self.subTest(block=block, script=script):
+                    result = run_geo(script, text, "fanuc-gcode", params)
+                    self.assertEqual(errors(result), [])
+                    self.assertTrue(result["text"].split("\n")[2].endswith(block.split()[-1] if "H1" in block else "F100."))
+
+    def test_sinumerik_rounding_distances_and_arc_radius_keep_their_values(self) -> None:
+        # v1.2 NC fix round: ADIS= and ADISPOS= are path-smoothing distances (no size of the
+        # part) and CR= the radius of an arc: every transform keeps them as written.
+        text = "N10 G17 G90 G71\nN20 G0 X0 Y0 Z5 ADISPOS=1\nN30 G641 ADIS=0.5\nN40 G1 X10 Y0 F200\nN50 G2 X20 Y0 CR=5\nN60 M30"
+        for script, params in (("translate", {"dx": 1}), ROTATE90, MIRROR_X):
+            with self.subTest(script=script):
+                result = run_geo(script, text, "sinumerik-mill", params)
+                self.assertEqual(errors(result), [])
+                lines = result["text"].split("\n")
+                self.assertIn("ADISPOS=1", lines[1])
+                self.assertIn("ADIS=0.5", lines[2])
+                self.assertIn("CR=5", lines[4])

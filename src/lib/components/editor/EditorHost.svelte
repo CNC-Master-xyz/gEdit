@@ -182,7 +182,7 @@
     align-items: center;
     justify-content: center;
     padding: 24px;
-    color: #f38ba8;
+    color: var(--danger-text);
     font-size: 13px;
     text-align: center;
   }

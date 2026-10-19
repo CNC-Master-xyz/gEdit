@@ -6,7 +6,8 @@ The format is the geometry goldens' (`../README.md`, "The geometry goldens"): `i
 (the run writes) or `refused.json` (nothing is written, every refused block is listed).
 `tests/python/test_translate.py` runs them, and also runs each one with a shift of 0, 0, 0
 (the input back byte for byte) and each written one back by the negated shift (every value
-back). Every program is synthetic, written for gEdit, and says so in its first comment line.
+back; a word the run added to a selection's first move, `word-added`, comes back as the unmoved
+value of the lines above and is left out of that comparison). Every program is synthetic, written for gEdit, and says so in its first comment line.
 A case with a `machine` member has its effective profile in `tests/fixtures/resolved/`
 (`UPDATE_RESOLVED=1 npx vitest run tests/unit/resolved.test.ts` writes the index entry).
 
@@ -14,7 +15,7 @@ A case with a `machine` member has its effective profile in `tests/fixtures/reso
 |---|---|---|
 | `fanuc-mill-shift` | Fanuc mill | the prelude's example: points, `G81` with `R`, `I`/`J` and a `G91` move kept, `G91 G28 Z0.` as information |
 | `fanuc-mill-cycles-offsets` | Fanuc mill | `G83` with its peck `Q` kept, `G99`/`G98`, positions under the modal cycles, a `G91 G81` kept whole, `G43 H1 Z`, a work-offset change `G54` → `G55` inside the program, `G53` and `G91 G28` as information |
-| `fanuc-mill-selection` | Fanuc mill | a selection primed by the lines above it, holding a whole `G81` … `G80` |
+| `fanuc-mill-selection` | Fanuc mill | a selection primed by the lines above it, holding a whole `G81` … `G80`; its first move `G0 X10. Y10.` gets the shifted `Z` of the lines above added (`Z50.5`, an information row `word-added`; the owner's decision of 2026-10-19), so the cycle starts at the moved level (v1.2.0, D4) |
 | `fanuc-mill-is-b` | Fanuc mill, IS-B machine | point-less words moved in whole increments (`X0` → `X1250`), a leading-zero word (`Y.5` → `Y.498`) |
 | `lathe-a-shift` | Fanuc lathe, system A | X as a diameter, `U`/`W`, `R` and `I`/`K` kept, the single pass `G90` with and without its taper `R` |
 | `lathe-b-shift` | Fanuc lathe, system B machine | `G90`/`G91` as distance codes, the single pass `G77` |
@@ -34,6 +35,7 @@ A case with a `machine` member has its effective profile in `tests/fixtures/reso
 | `fanuc-mill-is-b-resolution` | Fanuc mill, IS-B machine | refused: a shift finer than one increment (`resolution`) |
 | `fanuc-mill-selection-cycle-above` | Fanuc mill | refused: the selection starts in a `G81` started above it (`selection-inside`) |
 | `fanuc-mill-selection-cycle-open` | Fanuc mill | refused: the selection ends with its `G81` still in force |
+| `fanuc-mill-selection-cycle-first` | Fanuc mill | refused: the selection starts with its `G81` while Z stands at the level of the lines above, which a Z shift does not move: the cycle would move to its holes there and, in `G98`, return there (`selection-start`; v1.2.0, D4: the input `fanuc-mill-selection` had before D4) |
 | `b3-fanuc-mill-selection-line-1` | Fanuc mill | refused: the same for a selection from line 1 (`selection-inside`, P4a review CODE-3) |
 | `lathe-a-refused` | Fanuc lathe, system A | refused: `G50 X Z` (`coordinate-shift`), `G28 X100.`; `G71`/`G70` move since their parameters carry roles (plan §7 #305) |
 | `klartext-refused` | Klartext | refused: cycle 7 (`coordinate-shift`), `FL` (`fk-contour`), `X+Q1`, `CALL LBL`, `PLANE SPATIAL`, cycle 10 at 30° (`frame`; its 10.0 line only names the cycle, plan §7 #299) |

@@ -73,10 +73,10 @@ export interface BookmarkMonaco {
  *
  * It is a literal and not a `var(--…)` token because Monaco paints the ruler on a canvas
  * from a JavaScript value: a CSS variable would arrive as the string "var(--accent)" and
- * be dropped. The value is `--accent-hover` of the dark theme, which also reads on the
- * light one — the ruler sits on the scrollbar, not on the editor background.
+ * be dropped. The value is the brand orange, `--accent` in both themes (3:1 or better on
+ * both editor backgrounds, held by `brand/tokens.test.ts`).
  */
-const RULER_COLOR = '#2b88d8';
+const RULER_COLOR = '#F25C19';
 
 /** What `lines()` and `setLines()` remember about one document. */
 interface Entry {

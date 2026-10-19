@@ -295,6 +295,7 @@
         {
           "address": "R",
           "label": "Arc radius",
+          "lengthAlong": "plane",
           "required": true
         },
         {
@@ -302,6 +303,7 @@
           "label": "Direction of rotation"
         }
       ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "arc"
@@ -326,6 +328,7 @@
         {
           "address": "R",
           "label": "Corner radius",
+          "lengthAlong": "plane",
           "min": 0,
           "required": true
         },
@@ -334,7 +337,8 @@
           "label": "Feed for the rounding",
           "min": 0
         }
-      ]
+      ],
+      "review": "pending"
     },
     {
       "code": "CHF",
@@ -343,11 +347,19 @@
       "label": "Chamfer",
       "params": [
         {
+          "address": "CHF",
+          "label": "Length of the chamfer, the number written behind CHF",
+          "lengthAlong": "plane",
+          "min": 0,
+          "unit": "length"
+        },
+        {
           "address": "F",
           "label": "Feed for the chamfer",
           "min": 0
         }
-      ]
+      ],
+      "review": "pending"
     },
     {
       "code": "LP",
@@ -395,6 +407,15 @@
       "description": "Moves onto the first contour point along a straight line that leaves the contour tangentially. LEN gives the length of that line.",
       "group": "motion",
       "label": "Approach on a tangential line",
+      "params": [
+        {
+          "address": "LEN",
+          "label": "Length of the approach or departure line, written without a sign",
+          "min": 0,
+          "unit": "length"
+        }
+      ],
+      "review": "pending",
       "sets": {
         "motion": "feed"
       }
@@ -404,6 +425,15 @@
       "description": "Moves onto the first contour point along a straight line at a right angle to the contour. LEN gives the length of that line.",
       "group": "motion",
       "label": "Approach on a normal line",
+      "params": [
+        {
+          "address": "LEN",
+          "label": "Length of the approach or departure line, written without a sign",
+          "min": 0,
+          "unit": "length"
+        }
+      ],
+      "review": "pending",
       "sets": {
         "motion": "feed"
       }
@@ -413,6 +443,20 @@
       "description": "Moves onto the first contour point along an arc that meets the contour tangentially, given by its radius R and the centre angle CCA.",
       "group": "motion",
       "label": "Approach on a tangential arc",
+      "params": [
+        {
+          "address": "CCA",
+          "label": "Centre angle of the arc, written without a sign; it is measured along the arc, so it does not turn with the path",
+          "min": 0,
+          "unit": "angle"
+        },
+        {
+          "address": "R",
+          "label": "Radius of the approach or departure arc; its sign says whether the arc comes in from outside the contour or from the workpiece side",
+          "unit": "length"
+        }
+      ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "arc"
@@ -423,6 +467,15 @@
       "description": "Moves onto the first contour point along a straight line followed by an arc that meets the contour tangentially.",
       "group": "motion",
       "label": "Approach on a line and a tangential arc",
+      "params": [
+        {
+          "address": "R",
+          "label": "Radius of the arc, written without a sign",
+          "min": 0,
+          "unit": "length"
+        }
+      ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "arc"
@@ -433,6 +486,15 @@
       "description": "Leaves the last contour point along a straight line that continues the contour tangentially, and cancels the radius compensation.",
       "group": "motion",
       "label": "Depart on a tangential line",
+      "params": [
+        {
+          "address": "LEN",
+          "label": "Length of the approach or departure line, written without a sign",
+          "min": 0,
+          "unit": "length"
+        }
+      ],
+      "review": "pending",
       "sets": {
         "motion": "feed"
       }
@@ -442,6 +504,15 @@
       "description": "Leaves the last contour point along a straight line at a right angle to the contour, and cancels the radius compensation.",
       "group": "motion",
       "label": "Depart on a normal line",
+      "params": [
+        {
+          "address": "LEN",
+          "label": "Length of the approach or departure line, written without a sign",
+          "min": 0,
+          "unit": "length"
+        }
+      ],
+      "review": "pending",
       "sets": {
         "motion": "feed"
       }
@@ -451,6 +522,20 @@
       "description": "Leaves the last contour point along an arc that continues the contour tangentially, and cancels the radius compensation.",
       "group": "motion",
       "label": "Depart on a tangential arc",
+      "params": [
+        {
+          "address": "CCA",
+          "label": "Centre angle of the arc, written without a sign; it is measured along the arc, so it does not turn with the path",
+          "min": 0,
+          "unit": "angle"
+        },
+        {
+          "address": "R",
+          "label": "Radius of the approach or departure arc; its sign says whether the arc comes in from outside the contour or from the workpiece side",
+          "unit": "length"
+        }
+      ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "arc"
@@ -461,6 +546,15 @@
       "description": "Leaves the last contour point along a tangential arc followed by a straight line, and cancels the radius compensation.",
       "group": "motion",
       "label": "Depart on an arc and a line",
+      "params": [
+        {
+          "address": "R",
+          "label": "Radius of the arc, written without a sign",
+          "min": 0,
+          "unit": "length"
+        }
+      ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "arc"
@@ -1412,12 +1506,14 @@
         {
           "address": "Q335",
           "label": "Diameter to mill",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
         {
           "address": "Q342",
           "label": "Diameter drilled before, 0 from solid",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
@@ -1428,6 +1524,7 @@
           "required": true
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "define"
       }
@@ -1528,6 +1625,7 @@
         {
           "address": "Q344",
           "label": "Centring diameter, negative into the material",
+          "lengthAlong": "plane",
           "max": 0,
           "position": "none",
           "required": true
@@ -1558,6 +1656,7 @@
           "required": true
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "define"
       }
@@ -1571,6 +1670,7 @@
         {
           "address": "Q335",
           "label": "Nominal diameter of the thread",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
@@ -1639,6 +1739,7 @@
           "required": true
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "define"
       }
@@ -1658,18 +1759,21 @@
         {
           "address": "Q218",
           "label": "First side length, parallel to the main axis of the plane",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
         {
           "address": "Q219",
           "label": "Second side length, parallel to the secondary axis of the plane",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
         {
           "address": "Q220",
           "label": "Corner radius, 0 the tool radius",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
@@ -1801,6 +1905,7 @@
         {
           "address": "Q223",
           "label": "Diameter of the finished pocket",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
@@ -1918,12 +2023,14 @@
         {
           "address": "Q218",
           "label": "Slot length, parallel to the main axis of the plane",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
         {
           "address": "Q219",
           "label": "Slot width, parallel to the secondary axis of the plane; equal to the tool diameter, the slot is roughed only",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
@@ -2049,6 +2156,7 @@
         {
           "address": "Q219",
           "label": "Slot width; equal to the tool diameter, the slot is roughed only",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
@@ -2061,6 +2169,7 @@
         {
           "address": "Q375",
           "label": "Diameter of the pitch circle",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
@@ -2203,30 +2312,35 @@
         {
           "address": "Q218",
           "label": "First side length of the stud, parallel to the main axis of the plane",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
         {
           "address": "Q424",
           "label": "Stock size on the first side, larger than Q218",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
         {
           "address": "Q219",
           "label": "Second side length of the stud, parallel to the secondary axis of the plane",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
         {
           "address": "Q425",
           "label": "Stock size on the second side, larger than Q219",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
         {
           "address": "Q220",
           "label": "Corner radius (positive) or chamfer length (negative)",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
@@ -2350,12 +2464,14 @@
         {
           "address": "Q223",
           "label": "Diameter of the finished stud",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },
         {
           "address": "Q222",
           "label": "Stock diameter, larger than Q223",
+          "lengthAlong": "plane",
           "position": "none",
           "required": true
         },

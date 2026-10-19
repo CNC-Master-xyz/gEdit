@@ -106,7 +106,9 @@ The contract (binding, plan §6.1)
    centre ``Q216``, ``_CPA``, a ``PATTERN DEF``) or one with no role refuses the cycle
    (``cycle-position``, ``cycle-not-reviewed``). A ``'tool-axis'`` parameter moves with a
    translate of the tool axis and stays under the XY transforms and the lathe Z mirror refuses
-   the cycle anyway (``lathe-cycle``).
+   the cycle anyway (``lathe-cycle``). v1.2.0 (NCR-9b): a cycle written as a call with such a
+   parameter left empty or left out (read as 0) refuses a translate of the tool axis
+   (``cycle-level-empty``), unless its ``CodeParam.twin`` is written.
 7. **The lathe Z mirror and cycles** (the prelude's case list, plan §5 P4a, all from data,
    first reason that applies): ``thread`` — the motion code in force or the cycle run has
    ``pitchFeed`` or ``tapping`` (``G32``/``G33``, ``G76``, system A ``G92``, system B ``G78``,
@@ -118,7 +120,11 @@ The contract (binding, plan §6.1)
    ``G73``, ``G74``, ``G181``–``G189``; Sinumerik ``CYCLE92``–``CYCLE99``, ``CYCLE930``,
    ``CYCLE940``–``CYCLE952`` and the drilling cycles); ``single-pass-taper`` — a block of a
    ``path: 'cycle'`` code (system A ``G90``, ``G94``; B ``G77``, ``G79``) that writes ``R``.
-   A single pass without a taper is points and is mirrored. Diameter programming (Sinumerik
+   The threading passes (system A ``G92``, B ``G78``) are ``path: 'cycle'`` too since v1.2.0
+   (NCF-C); a block of them is refused as a ``thread`` alone, its taper is part of the thread.
+   A single pass without a taper is points and is mirrored. v1.2.0 (NCR-2): ``R0`` is no taper,
+   and a pass whose taper lies along Z (``G94``, ``G79``) is refused while a taper written above
+   it is in force and not 0, or not known (``PathTracker.pass_taper``). Diameter programming (Sinumerik
    ``DIAMON``, ``DIAMOF``, ``DIAM90``) refuses nothing: the Z mirror reads no X.
 8. The **whole run** is judged before anything is written: every refused block is a finding
    (``severity: 'error'``, ``reason`` one id of :data:`REASONS`, ``message`` the block as
@@ -425,6 +431,12 @@ REASONS = {
         "a cycle that turns or places what it cuts by an angle or a corner of its own (a "
         "pocket's angle, the corner the tool stands at); gEdit does not turn or mirror those "
         "values, so the cycle would cut in the old direction",
+    ),
+    "cycle-level-empty": (
+        ("translate",),
+        "a level of this cycle on the tool axis (its retract plane, reference plane or depth) "
+        "is left empty, which the control reads as 0; a shift cannot move a value that is not "
+        "written. Write the level as a number",
     ),
     "cycle-plane": (
         ALL_OPS,
@@ -973,24 +985,32 @@ class _Data:
         #: group; plan §7 #304). An address of a motion or a cycle code, or of codes of several
         #: groups (`R`: a radius, an R plane, a rotation angle), is none of them.
         owners: Dict[str, Tuple[set, Optional[Dict[str, Any]]]] = {}
-        #: P4a fix B1 (NC-7, plan §7 #320): a group one of whose codes takes axis words (an
-        #: axis among its parameters, or `axisWords`: `G28`'s intermediate point, `G53`)
-        #: names positions, so a word of it written without its code is no offset number.
-        axis_groups = set()
-        for entry in codes:
-            if gedit_nc.axis_words_of(entry) is not None or any(self.axis_of(p["address"]) is not None for p in _params(entry)):
-                axis_groups.add(entry.get("group") if isinstance(entry.get("group"), str) else None)
+        #: P4a fix B1 (NC-7, plan §7 #320): a parameter that is an axis word (an axis of the
+        #: profile, or any parameter of a code with `axisWords`: `G28`'s intermediate point
+        #: with the lathe's `A`, `B`, `V`, `G53`) names a position, so written without its code
+        #: it is no offset number. v1.2 NC fix round (FZ-9): only those parameters, not the
+        #: whole group: `H1` without `G43` is still the length offset number, although `G43`
+        #: also takes `Z`.
         for entry in codes:
             group = entry.get("group")
+            positions = gedit_nc.axis_words_of(entry) is not None
             for param in _params(entry):
                 groups, first = owners.get(param["address"].upper(), (set(), None))
                 groups.add(group if isinstance(group, str) else None)
                 if group == "motion" or _sets(entry).get("cycle") is not None:
                     groups.add("motion or cycle")
-                if (group if isinstance(group, str) else None) in axis_groups:
+                if positions or self.axis_of(param["address"]) is not None:
                     groups.add("axis words")
                 owners[param["address"].upper()] = (groups, first if first is not None else entry)
         self.group_params = {address: entry for address, (groups, entry) in owners.items() if len(groups) == 1 and None not in groups and entry is not None}
+        #: v1.2 NC fix round (FZ-7): a word written with `=` that is a code of its own and
+        #: describes its own value by a parameter of the same address (Sinumerik `RND=2`,
+        #: `CHR=1`: a length that keeps its value), by address -> the entry.
+        self.own_params = {
+            str(entry.get("code")).upper(): entry
+            for entry in codes
+            if isinstance(entry.get("code"), str) and _param([entry], str(entry.get("code"))) is not None
+        }
         self.calls: List[Any] = []
         patterns = getattr(cp, "patterns", None) if cp is not None else None
         for kind, regex in (_dict(patterns).get("outline") or []):
@@ -1490,7 +1510,7 @@ def _classify(block: _Block, token: Any) -> Tuple[str, Optional[str], Optional[D
         return _kept_role(block.number_class(address)), None, found[0]
     if address in data.angular:
         return "untouched", None, None
-    owner = data.group_params.get(address)
+    owner = data.group_params.get(address) or (data.own_params.get(address) if assignment else None)
     if owner is not None:
         # A parameter of the codes of one group, written without its code (`G1 X10. D2`): a
         # number of that group (the offset register), no position.
@@ -1914,6 +1934,24 @@ def _writes_values(block: _Block, axes_only: bool) -> List[str]:
     return out
 
 
+def _writes_tool_offset(block: _Block, entry: Dict[str, Any]) -> bool:
+    """v1.2 NC fix round (T013): the block of a shift code writes a tool offset, no coordinate
+    system (``_nc_path.writes_tool_offset``, which the tracker asks too since NCR-10)."""
+    return _nc_path.writes_tool_offset(entry, block.tokens, block.codes)
+
+
+def _taper_word(block: _Block) -> Optional[str]:
+    """The taper ``R`` a pass block writes, unless it is written as a plain 0 (no taper)."""
+    for token in block.tokens:
+        if token.kind != "word" or (token.address or "").upper() != "R" or not (token.value_text or ""):
+            continue
+        literal, function = _nc_path.literal_of(token)
+        number = gedit_nc.decimal_of(literal) if literal is not None and function is None else None
+        if number is None or number != _ZERO:
+            return token.text.strip()
+    return None
+
+
 def _all_zero(block: _Block) -> bool:
     """Every axis value the block writes is a written zero (``X+0``, ``Y0.``, ``Z-0,000``):
     no variable, no expression, no other number."""
@@ -1977,8 +2015,12 @@ def _machine_change(block: _Block, roles: Sequence[WordRole], tracker: Any, op: 
     return "X" in absolute or "Y" in absolute
 
 
-def _lathe_reasons(block: _Block, moving: bool) -> List[Tuple[str, str]]:
-    """The case list of the prelude for the lathe Z mirror (contract item 7), from data."""
+def _lathe_reasons(block: _Block, moving: bool, tracker: Any = None) -> List[Tuple[str, str]]:
+    """The case list of the prelude for the lathe Z mirror (contract item 7), from data. v1.2.0
+    (NCR-2): a pass block also refuses while the taper the passes share, written above it, lies
+    along Z (`G94`, `G79`: `CodeParam.lengthAlong`) and is not 0 or not known; the passes keep it
+    until a block writes it again or a one-shot code other than a dwell, or a plane code, clears
+    it (`_nc_path.PathTracker.pass_taper`). A taper along X (`G90`, `G77`) keeps its sign."""
     out: List[Tuple[str, str]] = []
     written = list(block.entries)
     running = [e for e in block.cycles if e not in written]
@@ -1998,9 +2040,24 @@ def _lathe_reasons(block: _Block, moving: bool) -> List[Tuple[str, str]]:
             out.append(("lathe-cycle", str(entry.get("code"))))
             break
     motion = block.motion
-    if _sets(motion).get("path") == "cycle" and (moving or block.motion_written):
-        if any(t.kind == "word" and (t.address or "").upper() == "R" and (t.value_text or "") for t in block.tokens):
-            out.append(("single-pass-taper", str(_dict(motion).get("code"))))
+    threaded = any(reason == "thread" for reason, _ in out)
+    if _sets(motion).get("path") == "cycle" and (moving or block.motion_written) and not threaded:
+        # v1.2.0 (NCF-C): the threading passes `G92`/`G78` are whole passes too; their taper
+        # is part of the thread, which refuses the block on its own.
+        code = str(_dict(motion).get("code"))
+        if _taper_word(block) is not None:
+            out.append(("single-pass-taper", code))
+        elif hasattr(tracker, "pass_taper"):
+            for address, along in tracker.pass_lengths_of(motion).items():
+                if along != "Z":
+                    continue
+                found = tracker.pass_taper(address)
+                if found is None:
+                    continue
+                value, word, _, _ = found
+                if value is None or value != _ZERO:
+                    out.append(("single-pass-taper", "%s, %s in force: %s" % (code, address, word)))
+                    break
     return out
 
 
@@ -2338,6 +2395,8 @@ def refusals_of(
         setting = entry.get("shift") is True or (gedit_nc.axis_words_of(entry) == "data" and entry.get("group") == "offset")
         if not setting:
             continue
+        if _writes_tool_offset(block, entry):
+            continue  # a tool offset (`G10 L10`-`L13`), no coordinate system (T013)
         values = _writes_values(block, axes_only=not (entry.get("wordsAreData") is True))
         if values and entry.get("shiftZeroIsNone") is True and _all_zero(block):
             continue  # the reset of the shift, or an addition of nothing (§7 #299)
@@ -2391,6 +2450,18 @@ def refusals_of(
         for axis in shifted:
             if axis in moved and before.get(axis) is None:
                 add("axis-unwritten", axis)
+        if block.tool_axis in shifted:
+            # v1.2.0 (NCR-9b): a cycle called with a level on the tool axis left empty (or left
+            # out) reads it as 0, which the shift cannot move; its twin written (`DPR` for `DP`)
+            # gives the depth instead.
+            for token in block.tokens:
+                code_of = block.codes.get(id(token)) if token.kind == "call" else None
+                if code_of is None:
+                    continue
+                empty = _nc_path.empty_levels(token, code_of[0])
+                if empty:
+                    add("cycle-level-empty", "%s %s" % (code_of[1], ", ".join(empty)))
+                    break
     if isinstance(op, Rotate) or (isinstance(op, Mirror) and _quarter(op.degrees) is None):
         written_axes = {r.axis for r in roles if r.role in ("point", "cycle-position") and r.axis in ("X", "Y")}
         if len(written_axes) == 1:
@@ -2434,7 +2505,7 @@ def refusals_of(
 
     # Cycles (contract item 6); under the lathe Z mirror the case list of item 7 instead.
     if lathe_z:
-        for reason, detail in _lathe_reasons(block, moving):
+        for reason, detail in _lathe_reasons(block, moving, tracker):
             add(reason, detail)
         # P4a fix B1 (NC-8, plan §7 #316): a value whose sign is the direction of the next
         # move (Okuma `G75 L-2.`) would have to change in some blocks and not in others.

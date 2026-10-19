@@ -12,7 +12,7 @@ How to use a page:
 | Page | What it covers | Rows |
 |---|---|---|
 | [templates.md](templates.md) | The built-in templates, by set: read the inserted text against your control | 49 |
-| [code-data.md](code-data.md) | Code entries filled in from the manuals in bug-fix round 1, marked for your review | 151 |
+| [code-data.md](code-data.md) | Code entries filled in from the manuals in bug-fix round 1 and the v1.2.0 NC fix round, marked for your review | 184 |
 | [machine-facts.md](machine-facts.md) | What only your machines can say, per control, and where each fact is set in gEdit | 31 |
 | [manual-checks.md](manual-checks.md) | Checks on a real machine: macOS, Windows and Linux bundles, then features | 66 |
 

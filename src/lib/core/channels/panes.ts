@@ -47,6 +47,7 @@
 //     Go to the Matching Mark (`contrib/channels.ts`, `findPartner`) from two channels to N.
 //     See the function's comment.
 
+import { asksSamePartners } from '$lib/core/channels/check';
 import type { ChannelRef, ChannelSet, SyncHit, SyncRule } from '$lib/core/channels/types';
 
 /** The most channels the channel view shows at once (AD-50, the owner, 2026-10-17). */
@@ -871,14 +872,17 @@ export function answersWait(hit: SyncHit, rule: SyncRule | undefined): boolean {
  * and a Siemens `WAITM(1,2)` in channel 1 the same key as `WAITM(1,1)` in channel 2. A piece the
  * machine does not declare stays in the set as written, so such a wait never completes.
  *
- * `rule` (optional) is the mark's own rule. For a `samePartners` rule (the Fanuc wait M-code)
- * the key also says whether the wait was written without its `P` word (`SyncHit.absent`), so a
- * `P`-less `M901` never meets an `M901 P3` (alarm 0160, P4e review NC-3). Without `rule` the key
- * is the one above. The waits of a rule that `pairsByList` are paired by `alignPanes` and
- * `findPartner` channel by channel, not by this key.
+ * `rule` (optional) is the mark's own rule. For a rule that asks for the same partners
+ * (`asksSamePartners`: `samePartners: true`, or a rule whose partners are a `P` word and that
+ * does not say `samePartners: false` — the Fanuc wait M-code) the key also says whether the wait
+ * was written without its `P` word (`SyncHit.absent`), so a `P`-less `M901` never meets an
+ * `M901 P3` (alarm 0160, P4e review NC-3). Check Wait Codes reads the same answer (v1.2.0, T044),
+ * so the view and the check never disagree. Without `rule` the key is the one above. The waits
+ * of a rule that `pairsByList` are paired by `alignPanes` and `findPartner` channel by channel,
+ * not by this key.
  */
 export function waitKey(hit: SyncHit, rule?: SyncRule): string {
-  const absent = rule?.samePartners === true ? (hit.absent === true ? '\u0001-' : '\u0001+') : '';
+  const absent = asksSamePartners(rule) ? (hit.absent === true ? '\u0001-' : '\u0001+') : '';
   return `${hit.ruleId}\u0001${codeByValue(hit.mark)}\u0001${takingPart(hit).join(',')}${absent}`;
 }
 

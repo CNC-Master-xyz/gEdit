@@ -364,7 +364,7 @@
     background-color: var(--surface-hover);
   }
   .row:focus-visible {
-    outline: 1px solid var(--accent);
+    outline: 1px solid var(--accent-text);
     outline-offset: -1px;
   }
   .row[data-editable='1'] .value {
@@ -416,7 +416,7 @@
 
   .link {
     padding: 0;
-    color: var(--accent);
+    color: var(--accent-text);
     font: inherit;
     font-size: 11px;
     text-decoration: underline;
@@ -472,7 +472,7 @@
     font-family: var(--font-mono, monospace);
   }
   .mark {
-    color: var(--accent);
+    color: var(--accent-text);
     font-size: 11px;
   }
 </style>

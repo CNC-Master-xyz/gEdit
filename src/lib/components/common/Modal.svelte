@@ -174,8 +174,10 @@
   .modal-title {
     margin: 0 0 10px;
     color: var(--text-active);
+    font-family: var(--font-display);
     font-size: 15px;
     font-weight: 600;
+    letter-spacing: -0.005em;
   }
 
   .modal-body {

@@ -76,8 +76,8 @@ export const THEME_BASE: Readonly<Record<'light' | 'dark', 'vs' | 'vs-dark'>> = 
  * contrast test measures every role against.
  */
 export const EDITOR_COLORS: Readonly<Record<'light' | 'dark', { background: string; foreground: string }>> = {
-  dark: { background: '#1e1e1e', foreground: '#cccccc' },
-  light: { background: '#ffffff', foreground: '#1f1f1f' },
+  dark: { background: '#0f1115', foreground: '#e6e7ea' },
+  light: { background: '#f9f9fb', foreground: '#1a1c1d' },
 };
 
 /**
@@ -100,8 +100,8 @@ export const ROLE_COLORS: { dark: Record<Role, string>; light: Record<Role, stri
     mcode: '#4ec9b0',
     axis: '#9cdcfe',
     arcCenter: '#56cfe1',
-    feed: '#f0a071',
-    spindle: '#dcdcaa',
+    feed: '#bb50f1', // violet, never the brand orange (see roles.test.ts, tokens.test.ts)
+    spindle: '#e6dc78',
     tool: '#dcb67a', // --nc-tool
     variable: '#b3a0ff',
     keyword: '#d69bdb',
@@ -110,7 +110,7 @@ export const ROLE_COLORS: { dark: Record<Role, string>; light: Record<Role, stri
     programMarker: '#e06c75',
     number: '#b5cea8',
     string: '#d9a0bd',
-    operator: '#cccccc',
+    operator: '#e6e7ea', // the editor foreground
     invalid: '#f14c4c',
   },
   light: {
@@ -120,7 +120,7 @@ export const ROLE_COLORS: { dark: Record<Role, string>; light: Record<Role, stri
     mcode: '#0e6b5c',
     axis: '#0a5f8f',
     arcCenter: '#0a6a75',
-    feed: '#a04100',
+    feed: '#9513ec', // violet, never the brand orange
     spindle: '#6b6100',
     tool: '#8a5300', // --nc-tool
     variable: '#5b3fd3',
@@ -130,7 +130,7 @@ export const ROLE_COLORS: { dark: Record<Role, string>; light: Record<Role, stri
     programMarker: '#a01b2b',
     number: '#2b6a17',
     string: '#8c3f5f',
-    operator: '#1f1f1f',
+    operator: '#1a1c1d', // the editor foreground
     invalid: '#c21807',
   },
 };

@@ -642,6 +642,7 @@
       "code": "CYCLE81",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Drilling or centring cycle",
       "description": "Drills to depth in one pass and retracts. The plane, the depth and the safety distance come in the order below.",
       "params": [
@@ -663,12 +664,14 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "DTB",
@@ -700,6 +703,7 @@
       "code": "CYCLE82",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Drilling cycle with a dwell",
       "description": "Drills to depth, waits there and retracts, which is what a counterbore needs.",
       "params": [
@@ -721,12 +725,14 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "DTB",
@@ -758,6 +764,7 @@
       "code": "CYCLE83",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Deep-hole drilling cycle",
       "description": "Drills in pecks, so the chips break or leave the hole. VARI decides between breaking the chip and pulling the drill out.",
       "params": [
@@ -779,22 +786,26 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "FDEP",
           "label": "Depth of the first peck, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "FDPR"
         },
         {
           "address": "FDPR",
           "label": "Depth of the first peck, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "FDEP"
         },
         {
           "address": "_DAM",
@@ -876,6 +887,7 @@
       "group": "cycle",
       "tapping": true,
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Rigid tapping cycle",
       "description": "Cuts the thread with the spindle under position control, so no compensating chuck is needed. The lead (MPIT or PIT) and the tapping speed (SST) are its own arguments: it does not take its lead from the feed in force.",
       "params": [
@@ -897,12 +909,14 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "DTB",
@@ -1014,6 +1028,7 @@
       "code": "CYCLE840",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "pitchFeed": true,
       "tapping": true,
       "label": "Tapping cycle with a compensating chuck",
@@ -1037,12 +1052,14 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "DTB",
@@ -1135,6 +1152,7 @@
       "code": "CYCLE85",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Reaming cycle, feed in and feed out",
       "description": "Feeds in and feeds back out, so the bore keeps its finish. The two feeds are given separately.",
       "params": [
@@ -1156,12 +1174,14 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "DTB",
@@ -1203,6 +1223,7 @@
       "code": "CYCLE86",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Boring cycle with an oriented stop",
       "description": "Stops the spindle at an angle at depth, lifts the tool off the wall and pulls it out at rapid.",
       "params": [
@@ -1224,12 +1245,14 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "DTB",
@@ -1287,6 +1310,7 @@
       "code": "CYCLE87",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Boring cycle with a stop at depth",
       "description": "Bores to depth, then stops the spindle without orienting it and stops the program. On the next NC start the cycle pulls the tool out to the retraction plane at rapid by itself.",
       "params": [
@@ -1308,12 +1332,14 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "SDIR",
@@ -1327,6 +1353,7 @@
       "code": "CYCLE88",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Boring cycle with a dwell and a stop at depth",
       "description": "Like CYCLE87 with a dwell at depth: waits, stops the spindle and the program, and pulls out at rapid on the next NC start.",
       "params": [
@@ -1348,12 +1375,14 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "DTB",
@@ -1373,6 +1402,7 @@
       "code": "CYCLE89",
       "group": "cycle",
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Boring cycle with a dwell, feed out",
       "description": "Waits at depth and feeds back out at the cutting feed, then leaves at rapid.",
       "params": [
@@ -1394,12 +1424,14 @@
         {
           "address": "DP",
           "label": "Final depth, as an absolute position",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "DPR"
         },
         {
           "address": "DPR",
           "label": "Final depth, measured from the reference plane",
-          "position": "none"
+          "position": "none",
+          "twin": "DP"
         },
         {
           "address": "DTB",
@@ -1450,12 +1482,14 @@
         {
           "address": "_LENG",
           "label": "Corner 2 on the first axis: measured from corner 1, or an absolute position when the thousands digit of _AMODE is 1",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_WID",
           "label": "Corner 2 on the second axis: measured from corner 1, or an absolute position when the ten-thousands digit of _AMODE is 1",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_MID",
@@ -1534,17 +1568,20 @@
         {
           "address": "_LENG",
           "label": "Pocket length, with a sign when the pocket is dimensioned from a corner",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_WID",
           "label": "Pocket width, with a sign when the pocket is dimensioned from a corner",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_CRAD",
           "label": "Corner radius of the pocket",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_PA",
@@ -1606,12 +1643,14 @@
         {
           "address": "_AP1",
           "label": "Length of the pocket made before (incremental)",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_AP2",
           "label": "Width of the pocket made before (incremental)",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_AD",
@@ -1637,7 +1676,8 @@
         {
           "address": "_FS",
           "label": "Chamfer width",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_ZFS",
@@ -1695,7 +1735,8 @@
         {
           "address": "_CDIAM",
           "label": "Pocket radius, or its diameter when the hundreds digit of _DMODE is 1",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_PA",
@@ -1752,7 +1793,8 @@
         {
           "address": "_AP1",
           "label": "Radius of the pocket made before, or its diameter when the hundreds digit of _DMODE is 1 (incremental)",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_AD",
@@ -1778,7 +1820,8 @@
         {
           "address": "_FS",
           "label": "Chamfer width",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_ZFS",
@@ -1831,12 +1874,14 @@
         {
           "address": "_DP",
           "label": "Slot depth: an absolute position, or a depth from the reference point when the ones digit of _AMODE is 1",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "_DPR"
         },
         {
           "address": "_DPR",
           "label": "Slot depth measured from the reference point, written without a sign",
-          "position": "none"
+          "position": "none",
+          "twin": "_DP"
         },
         {
           "address": "NUM",
@@ -1847,12 +1892,14 @@
         {
           "address": "LENG",
           "label": "Slot length",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "WID",
           "label": "Slot width",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_CPA",
@@ -1867,7 +1914,8 @@
         {
           "address": "RAD",
           "label": "Reserved in the current version; the radius of the circle in older ones",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "STA1",
@@ -1950,7 +1998,8 @@
         {
           "address": "_FS",
           "label": "Chamfer width",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_ZFS",
@@ -2003,12 +2052,14 @@
         {
           "address": "_DP",
           "label": "Slot depth: an absolute position, or a depth from the reference point when the ones digit of _AMODE is 1",
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "twin": "_DPR"
         },
         {
           "address": "_DPR",
           "label": "Slot depth measured from the reference point, written without a sign",
-          "position": "none"
+          "position": "none",
+          "twin": "_DP"
         },
         {
           "address": "NUM",
@@ -2024,7 +2075,8 @@
         {
           "address": "WID",
           "label": "Slot width",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_CPA",
@@ -2039,7 +2091,8 @@
         {
           "address": "RAD",
           "label": "Radius of the circle, written without a sign",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "STA1",
@@ -2112,7 +2165,8 @@
         {
           "address": "_FS",
           "label": "Chamfer width",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_ZFS",
@@ -2245,7 +2299,8 @@
         {
           "address": "_FS",
           "label": "Chamfer width",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "_ZFS",
@@ -2293,12 +2348,14 @@
         {
           "address": "WIDG",
           "label": "Groove width, written without a sign",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "DIAG",
           "label": "Groove depth, written without a sign",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "STA1",
@@ -2318,22 +2375,26 @@
         {
           "address": "RCO1",
           "label": "Radius (positive) or chamfer (negative) at the groove edge, on the side of the start point",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "RCO2",
           "label": "Radius (positive) or chamfer (negative) at the groove edge, on the other side",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "RCI1",
           "label": "Radius (positive) or chamfer (negative) at the groove bottom, on the side of the start point",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "RCI2",
           "label": "Radius (positive) or chamfer (negative) at the groove bottom, on the other side",
-          "position": "none"
+          "position": "none",
+          "lengthAlong": "plane"
         },
         {
           "address": "FAL1",
@@ -3224,13 +3285,64 @@
       "code": "ADIS",
       "review": "pending",
       "label": "Rounding distance",
-      "description": "ADIS=0.5 sets how far before and after the end of a block G641 may round the corner between G1, G2, G3 and the other path moves, until the next ADIS=. Without it the distance is 0 and G641 rounds nothing, like G64; on short moves the control shortens it. It is a length written without a sign, not a feed or a tolerance. A machine can be set up so that G644 keeps to it as well."
+      "description": "ADIS=0.5 sets how far before and after the end of a block G641 may round the corner between G1, G2, G3 and the other path moves, until the next ADIS=. Without it the distance is 0 and G641 rounds nothing, like G64; on short moves the control shortens it. It is a length written without a sign, not a feed or a tolerance. A machine can be set up so that G644 keeps to it as well.",
+      "params": [{ "address": "ADIS", "label": "Rounding distance before and after the end of a block, written without a sign", "min": 0, "unit": "length" }]
     },
     {
       "code": "ADISPOS",
       "review": "pending",
       "label": "Rounding distance for rapid moves",
-      "description": "ADISPOS=1 is the ADIS= of G0 moves: how far before and after the end of a block G641 may round the corner between rapid moves, until the next ADISPOS=. Without it the distance is 0, so G641 does not round G0 corners. Between a G0 and a path move the smaller of ADIS and ADISPOS counts. It is a length written without a sign, not a feed."
+      "description": "ADISPOS=1 is the ADIS= of G0 moves: how far before and after the end of a block G641 may round the corner between rapid moves, until the next ADISPOS=. Without it the distance is 0, so G641 does not round G0 corners. Between a G0 and a path move the smaller of ADIS and ADISPOS counts. It is a length written without a sign, not a feed.",
+      "params": [{ "address": "ADISPOS", "label": "Rounding distance of rapid moves, written without a sign", "min": 0, "unit": "length" }]
+    },
+    {
+      "code": "CHF",
+      "review": "pending",
+      "label": "Chamfer at the corner",
+      "description": "CHF=2 on a move inserts a chamfer into the corner at the end of the block; the value is the length of the chamfer itself, in the unit of the program. It is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
+      "params": [{ "address": "CHF", "label": "Length of the chamfer", "min": 0, "unit": "length", "lengthAlong": "plane" }]
+    },
+    {
+      "code": "CHR",
+      "review": "pending",
+      "label": "Chamfer at the corner, by its leg",
+      "description": "CHR=2 on a move inserts a chamfer into the corner at the end of the block; the value is the width of the chamfer measured along the direction of the move, in the unit of the program. It is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
+      "params": [{ "address": "CHR", "label": "Width of the chamfer along the move", "min": 0, "unit": "length", "lengthAlong": "plane" }]
+    },
+    {
+      "code": "RND",
+      "review": "pending",
+      "label": "Rounding at the corner",
+      "description": "RND=2 on a move rounds the corner at the end of the block with an arc of this radius, in the unit of the program. It is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
+      "params": [{ "address": "RND", "label": "Radius of the rounding", "min": 0, "unit": "length", "lengthAlong": "plane" }]
+    },
+    {
+      "code": "RNDM",
+      "review": "pending",
+      "label": "Rounding at every corner",
+      "description": "RNDM=2 rounds every following corner between path moves with this radius, until RNDM=0 switches it off. It is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
+      "params": [{ "address": "RNDM", "label": "Radius of the roundings, 0 off", "min": 0, "unit": "length", "lengthAlong": "plane", "lengthInForce": true }]
+    },
+    {
+      "code": "CR",
+      "review": "pending",
+      "label": "Arc radius",
+      "description": "CR=20 on G2 or G3 gives the radius of the arc instead of its centre: a positive value takes the arc up to half a circle, a negative one the longer arc. It is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
+      "params": [{ "address": "CR", "label": "Radius of the arc, negative for the longer arc", "unit": "length", "lengthAlong": "plane" }]
+    },
+    {
+      "code": "FRC",
+      "review": "pending",
+      "label": "Feed of the chamfer or rounding",
+      "description": "FRC=200 gives the chamfer or rounding of this block (CHF=, CHR=, RND=) a feed of its own, for this block only; without it the path feed F applies. It is a feed in the unit in force, mm/min under G94 and mm per revolution under G95, not a length: a move, a turn or a mirror keeps it.",
+      "params": [{ "address": "FRC", "label": "Feed of the chamfer or rounding of this block, above 0", "min": 0 }]
+    },
+    {
+      "code": "FRCM",
+      "review": "pending",
+      "label": "Feed of the chamfers and roundings",
+      "description": "FRCM=50 gives every following chamfer and rounding a feed of its own until the next FRCM=; FRCM=0 goes back to the path feed F. It is a feed in the unit in force, mm/min under G94 and mm per revolution under G95, not a length: a move, a turn or a mirror keeps it.",
+      "params": [{ "address": "FRCM", "label": "Feed of the following chamfers and roundings, 0 for the path feed", "min": 0 }]
     },
     {
       "code": "SETMS",

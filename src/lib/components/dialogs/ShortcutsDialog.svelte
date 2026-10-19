@@ -211,7 +211,7 @@
 
   .filter {
     margin-bottom: 4px;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 12px;
   }
 
@@ -219,16 +219,16 @@
     box-sizing: border-box;
     width: 100%;
     padding: 6px 8px;
-    border: 1px solid var(--border-color, #3e3e42);
+    border: 1px solid var(--border-color);
     border-radius: 3px;
-    background: var(--bg-app, #1e1e1e);
-    color: var(--text-main, #cccccc);
+    background: var(--bg-app);
+    color: var(--text-main);
     font: inherit;
     font-size: 13px;
   }
 
   .filter-input:focus {
-    border-color: var(--accent, #0078d4);
+    border-color: var(--accent-text);
     outline: none;
   }
 
@@ -243,7 +243,7 @@
 
   .hint {
     margin: 6px 0;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 12px;
   }
 
@@ -257,8 +257,9 @@
     top: 0;
     margin: 0;
     padding: 6px 0 4px;
-    background: var(--bg-panel, #252526);
-    color: var(--text-active, #ffffff);
+    background: var(--bg-panel);
+    color: var(--text-active);
+    font-family: var(--font-display);
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -272,7 +273,7 @@
 
   th {
     padding: 2px 6px;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-weight: 400;
     font-size: 11px;
     text-align: left;
@@ -280,8 +281,8 @@
 
   td {
     padding: 3px 6px;
-    border-top: 1px solid var(--border-color, #3e3e42);
-    color: var(--text-main, #cccccc);
+    border-top: 1px solid var(--border-color);
+    color: var(--text-main);
   }
 
   .keys {
@@ -291,22 +292,22 @@
 
   kbd {
     padding: 1px 5px;
-    border: 1px solid var(--border-color, #3e3e42);
+    border: 1px solid var(--border-color);
     border-radius: 3px;
-    background: var(--bg-app, #1e1e1e);
+    background: var(--bg-app);
     font-family: var(--font-mono, monospace);
     font-size: 12px;
     white-space: nowrap;
   }
 
   .none {
-    color: var(--text-disabled, #5a5a5a);
+    color: var(--text-disabled);
   }
 
   .empty {
     margin: 0;
     padding: 12px 6px;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted);
     font-size: 13px;
   }
 </style>

@@ -31,7 +31,7 @@
 # id = "addresses"
 # type = "address-list"
 # label = "Addresses"
-# help = "The words to change. A shift of Z also moves the cycle positions on the tool axis (the R plane of a drilling cycle, Q203, RTP, RFP, DP). When multiplying, add R if arcs are written with a radius."
+# help = "The words to change. A shift of Z also moves the cycle positions on the tool axis (the R plane of a drilling cycle, Q203, RTP, RFP, DP). When multiplying, add R if arcs are written with a radius; without it, a block with an arc radius is left as written."
 # default = ["Z"]
 # choices = [
 #   { label = "X", value = "X" },
@@ -127,6 +127,31 @@ depth `Q`, Klartext `Q201`, Sinumerik `SDIS`). A cycle with axis values of its o
 position on the tool axis (the Fanuc lathe's `G71`-`G76`) is judged so for every linear
 axis the run scales, and a block of it that scales an end point is refused whenever the
 cycle has such a length at all, written there or not (P4a review, NC-16).
+
+**Lengths along an axis** (v1.2 NC fix round, T009 and T012; `CodeParam.lengthAlong`). A
+length that lies along one axis or in the working plane is never scaled, so a multiply or
+divide of its axis refuses (`not-scaled`) a cycle that writes it (the sizes of the Klartext
+pockets, slots and studs 251-257, with every call of the definition) and every block that runs
+a single pass of the lathe (`G90`, `G92`, `G94`; system B `G77`-`G79`) while its taper `R` is in
+force and not zero. The control keeps `X`, `Z` and `R` of the passes until a block writes them
+again; the passes are one series, refused together. A shift lists the taper as a value of the
+pass (`data`), like the values of a cycle below. A length a code writes in its own block (the
+radius `L` of an Okuma arc, the radius `R` of a Fanuc `G2`/`G3` while `R` is not chosen, the
+chamfer and round of Okuma `G75`/`G76`) refuses that block alone.
+
+**Arcs, corners and approaches** (v1.2.0 NC review). A multiply or divide that scales one axis
+of the plane but not the other refuses every arc block and every block with an arc centre word
+no code describes (NCR-8). A chosen arc radius is scaled with both axes of its plane, left and
+listed with neither or under a shift, and refuses its block with one (NCR-5). A corner word no
+code describes (`,R`, `,C`, `,A`; the lathe `G1 Z-10. R2.` and `C2.`) refuses its block under a
+multiply or divide of the plane (NCR-6, interim). The Klartext `APPR`/`DEP` `LEN` and `R` are
+kept with a warning (NCR-7). A block that runs a cycle written as a word reads no length of the
+motion code or the single pass in force (NCR-1). Under a shift of the tool axis, a call with an
+empty tool-axis argument and no written twin is refused (`cycle-empty`, NCR-9b). A cycle
+written as a word that starts a selection's holes while the tool still stands at the level of
+the lines above (no tool-axis word of the selection moved it) is refused under a shift of the
+tool axis (`cycle-level-outside`, v1.2.0 D4): it moves to its holes at that unmoved level and,
+in `G98`, returns to it.
 
 **The values of a cycle** (P4a review, NC-16). A word of a chosen address that is a reviewed
 parameter of the cycle in its block with no position (`position: 'none'`) and that may be a
@@ -263,11 +288,13 @@ BLOCK_REASONS = (
     "cycle-plane",
     "cycle-expression",
     "cycle-unresolved",
+    "cycle-empty",
+    "cycle-level-outside",
     "pole",
     "arc-geometry",
     "not-scaled",
 )
-WORD_REASONS = ("unreadable", "data", "incremental", "expression", "machine-dependent", "count", "fk-point")
+WORD_REASONS = ("unreadable", "data", "incremental", "expression", "machine-dependent", "count", "fk-point", "process-value")
 
 #: B1 fix NC (NC-03): the absolute points of a Klartext FK contour, by the axis they are a
 #: coordinate of: the auxiliary points ``P1X`` … ``P3Y`` the line or arc passes through and the
@@ -294,6 +321,8 @@ REASON_TEXT = {
     "cycle-plane": ("cycle outside the XY plane", "cycles outside the XY plane"),
     "cycle-expression": ("cycle with a variable position", "cycles with a variable position"),
     "cycle-unresolved": ("cycle whose position depends on the machine", "cycles whose position depends on the machine"),
+    "cycle-empty": ("cycle with an empty position on the tool axis", "cycles with an empty position on the tool axis"),
+    "cycle-level-outside": ("cycle that starts at the level of the lines above the selection", "cycles that start at the level of the lines above the selection"),
     "pole": ("block around a pole that cannot be moved", "blocks around a pole that cannot be moved"),
     "arc-geometry": ("arc whose centre or intermediate point cannot be moved", "arcs whose centre or intermediate point cannot be moved"),
     "not-scaled": ("block a multiply or divide does not scale", "blocks a multiply or divide does not scale"),
@@ -304,6 +333,7 @@ REASON_TEXT = {
     "machine-dependent": ("word whose reading depends on the machine", "words whose reading depends on the machine"),
     "count": ("count", "counts"),
     "fk-point": ("FK contour point", "FK contour points"),
+    "process-value": ("approach or departure size", "approach or departure sizes"),
 }
 
 
@@ -599,6 +629,13 @@ class Setup:
         self.touches_positions = bool(chosen & (self.axes | frozenset(self.twins)))
         self.moves_tool_axis = TOOL_AXIS in chosen
         self.chosen_linear = chosen & self.linear
+        #: v1.2 NC fix round (T009, T012): the linear axes a multiply or divide scales, chosen
+        #: or through a chosen incremental twin; none for a shift.
+        self.scaled_axes = (
+            frozenset()
+            if params.additive
+            else frozenset(a for a in self.linear if a in chosen or any(t in chosen for t, axis in self.twins.items() if axis == a))
+        )
 
         self.letters = motion_letters(self.codes)
         self.machine = gedit_nc.machine_params(context)
@@ -678,6 +715,21 @@ def is_cycle_value(param: Optional[Dict[str, Any]]) -> bool:
     """A reviewed cycle parameter that is no position and may be a length (NC-16): role
     `'none'` and no `unit` of `dwell`, `count` or `angle`."""
     return gedit_nc.position_of(param) == "none" and isinstance(param, dict) and param.get("unit") not in NOT_A_LENGTH
+
+
+def length_along(param: Optional[Dict[str, Any]]) -> Optional[str]:
+    """v1.2 NC fix round (T009, T012): the axis a length parameter lies along (`CodeParam.
+    lengthAlong`, an axis letter), ``'plane'`` for one in the working plane, or ``None``."""
+    value = param.get("lengthAlong") if isinstance(param, dict) else None
+    if value == "plane":
+        return value
+    return value.upper() if isinstance(value, str) and len(value) == 1 and value.isalpha() else None
+
+
+def is_zero(literal: Optional[gedit_nc.NumericLiteral]) -> bool:
+    """A value written as a plain number that is zero; a variable or an expression is not."""
+    number = gedit_nc.decimal_of(literal) if literal is not None else None
+    return number is not None and number == 0
 
 
 def code_of(entry: Optional[Dict[str, Any]], fallback: str = "the cycle") -> str:
@@ -782,6 +834,18 @@ class Block:
         self.tilt_tool: Tuple[frozenset, frozenset] = (frozenset(), frozenset())
         #: Whether the block sets the pole (`CodeEntry.pole: 'set'`).
         self.pole_set = False
+        #: The number a keyword is written with, when its entry describes it by a parameter of
+        #: its own address (Klartext `CHF 2`): (entry, the token that holds the number).
+        self.keyword_values: List[Tuple[Dict[str, Any], gedit_nc.Token]] = []
+        #: The modal lengths in force when the block starts (Sinumerik `RNDM=2`; `track_modal`).
+        self.modal_before: Dict[str, Tuple[Optional[gedit_nc.NumericLiteral], str, int, str, str]] = {}
+        #: NCR-1 (v1.2.0): whether the block runs a cycle written as a word (`G81`, a lathe
+        #: `G74`), written there or in force (`Run.word_cycle_runs`). Its axis words are the
+        #: cycle's position and its `R` the cycle's, whatever arc code the motion group holds.
+        self.word_cycle = False
+        #: Words the run leaves as written for a reason of their own, by token: (reason,
+        #: message). An arc radius under a shift (NCR-5), an approach size (NCR-7).
+        self.kept: Dict[int, Tuple[str, str]] = {}
 
     @property
     def number(self) -> int:
@@ -888,6 +952,9 @@ def read_block(block: Block, entry_of: Any, letters: frozenset) -> None:
                 entry = entry_of(joined) if joined is not None else entry_of(name)
                 if entry is not None:
                     block.entries.append((entry, "keyword", token))
+                    if joined is None and number is not None and param_named(entry, name) is not None:
+                        # The keyword's own number (`CHF 2`), behind it or in its token.
+                        block.keyword_values.append((entry, tokens[behind] if behind >= 0 else token))
                     if entry.get("group") == "cycle":
                         if joined is None and behind >= 0:
                             block.generic_cycle = "%s %s" % (name, number)
@@ -975,6 +1042,27 @@ class Run:
         #: Codes the database lacks, met in blocks the run had nothing to change in (NC-5):
         #: code -> [first line, blocks].
         self.unknown_seen: Dict[str, List[int]] = {}
+        #: v1.2 NC fix round (T009): the single pass in force (a motion code with a length of
+        #: its own, `CodeParam.lengthAlong`: the lathe's `G90`, `G92`, `G94`), the last value
+        #: written for each such length (address -> literal, as written, line) and the series
+        #: of passes a multiply or divide scales in one piece. The values are shared by the
+        #: passes and stay in force until a block writes them again (the safe reading of the
+        #: control, which clears them only on some one-shot codes).
+        self.pass_entry: Optional[Dict[str, Any]] = None
+        self.pass_values: Dict[str, Tuple[Optional[gedit_nc.NumericLiteral], str, int]] = {}
+        self.pass_group: Optional[Group] = None
+        #: The motion code in force after the block being judged (`track_pass`).
+        self.motion_entry: Optional[Dict[str, Any]] = None
+        #: Lengths written with `=` that stay in force (`CodeParam.lengthInForce`: Sinumerik
+        #: `RNDM=2`), until written as 0: address -> (literal,
+        #: as written, line, axis, code).
+        self.modal_lengths: Dict[str, Tuple[Optional[gedit_nc.NumericLiteral], str, int, str, str]] = {}
+        #: v1.2.0 (D4): where the tool axis stands for a cycle that starts in a selection. Whether
+        #: the lines above the selection wrote a tool-axis position (since the last machine
+        #: position), and whether a block of the selection has moved it with the run (an absolute
+        #: tool-axis word the run changed): until then a cycle starts at the unmoved level.
+        self.level_above = False
+        self.level_inside = False
 
     def entry(self, code: str) -> Optional[Dict[str, Any]]:
         """The database entry of a written code, remembered per spelling."""
@@ -1008,9 +1096,15 @@ class Run:
         block = Block(lines)
         read_block(block, self.entry, self.setup.letters)
         self.track_rotary(block)
+        self.track_pass(block)
+        self.track_modal(block)
         group = self.place(block)
+        block.word_cycle = self.word_cycle_runs(block, group)
+        self.record_pass(block)
         frame = self.interp.frame
         block.opens_frame = frame is not None and any(line.number == frame["line"] for line in lines)
+        if not block.inside:
+            self.note_level_above(block)
         if not self.relevant(block, group):
             if block.unknown is not None and block.inside:
                 seen = self.unknown_seen.setdefault(block.unknown, [block.number, 0])
@@ -1020,7 +1114,47 @@ class Run:
         if group is not None:
             group.members.append(block)
             block.group = group
+        elif block.inside and block.refusal is None and not self.level_inside:
+            self.level_inside = self.moves_level(block)
         self.blocks.append(block)
+
+    def note_level_above(self, block: Block) -> None:
+        """v1.2.0 (D4): whether the lines above the selection leave the tool axis at a level
+        they wrote: a tool-axis word with a value; a machine position forgets it (the whole
+        run leaves the tool there too)."""
+        if not any((t.address or "").upper() == TOOL_AXIS and (t.value_text or "") != "" for t, _ in block.words):
+            return
+        self.level_above = not any(gedit_nc.axis_words_of(entry) == "machine" for entry in block.codes())
+
+    def moves_level(self, block: Block) -> bool:
+        """v1.2.0 (D4): whether this block of the selection moves the tool axis to a level the
+        run changed (a tool-axis word it edits; an incremental one, left as written, keeps the
+        tool at the unmoved level plus the increment)."""
+        for token, line in block.words:
+            if (token.address or "").upper() != TOOL_AXIS:
+                continue
+            if any(at is line and token.start <= start < token.end for at, start, _, _ in block.edits):
+                return True
+        return False
+
+    def start_level(self, block: Block, group: Group, state: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+        """v1.2.0 (D4): a cycle written as a word (`G81`) that starts in a selection while the tool
+        axis still stands at the level the lines above left it: the cycle moves to its holes at
+        that level and, in `G98`, returns to it after every hole, and a shift of the selection's
+        words does not move it. Whether `G98` or `G99` is in force is no data, so both refuse;
+        a tool-axis word of the selection before the cycle that the run moves (`G0 Z50.`) gives
+        the cycle a moved level."""
+        if group.kind != "modal" or group.line != block.number or not block.inside:
+            return None
+        if not self.params.additive or not self.setup.moves_tool_axis or state.get("plane") != "XY":
+            return None
+        if self.level_inside or not self.level_above:
+            return None
+        return (
+            "cycle-level-outside",
+            "starts at the %s level the lines above the selection left the tool at, which this run does not change: the cycle moves to its holes at that level and, with G98, returns to it after every hole. Start the selection at the block that moves %s to the level"
+            % (TOOL_AXIS, TOOL_AXIS),
+        )
 
     def linear_of(self, address: str, codes: List[Dict[str, Any]]) -> Optional[str]:
         """The linear axis a chosen word is a position or a distance of, or ``None``."""
@@ -1098,6 +1232,70 @@ class Run:
         block.tilt_words = moved
         block.tilt_turned = frozenset(turned)
         block.tilt_pending = frozenset(pending)
+
+    def pass_lengths(self, entry: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """T009: the length parameters of a code and the axis each lies along (`lengthAlong`)."""
+        out: Dict[str, str] = {}
+        for param in params_of(entry):
+            along = length_along(param)
+            address = param.get("address")
+            if along is not None and isinstance(address, str) and address != "":
+                out.setdefault(address.upper(), along)
+        return out
+
+    def track_pass(self, block: Block) -> None:
+        """T009: the single pass in force after this block. An arc whose radius is such a length
+        (Okuma `G2 … L`) is no pass: its length is read in its own block only (`judge_lengths`).
+        The lengths the block writes for it are recorded after `place` (`record_pass`)."""
+        code = as_dict(as_dict(self.interp.state.get("groups")).get("motion")).get("code")
+        entry = self.entry(code) if isinstance(code, str) and code != "" else None
+        self.motion_entry = entry
+        lengths = self.pass_lengths(entry)
+        if not lengths or sets_of(entry).get("path") == "arc":
+            self.pass_entry = None
+            self.pass_group = None
+            return
+        self.pass_entry = entry
+
+    def record_pass(self, block: Block) -> None:
+        """T009: the lengths of the single pass in force that this block writes. A block that
+        runs a cycle written as a word (NCR-1) writes the cycle's values, not the pass's: the
+        relief `R` of a lathe `G74` under `G90` is no taper."""
+        if self.pass_entry is None or block.word_cycle:
+            return
+        lengths = self.pass_lengths(self.pass_entry)
+        for token, line in block.words:
+            address = (token.address or "").upper()
+            if address in lengths and (token.value_text or "") != "" and not is_assignment(token):
+                self.pass_values[address] = (token.value, quote(token.text), line.number)
+
+    def track_modal(self, block: Block) -> None:
+        """The modal lengths in force when this block starts, and after it (Sinumerik `RNDM=`,
+        which rounds every following corner until `RNDM=0`)."""
+        block.modal_before = dict(self.modal_lengths)
+        for token, line in block.words:
+            address = (token.address or "").upper()
+            if not is_assignment(token) or (token.value_text or "") == "":
+                continue
+            entry = self.entry(address)
+            param = param_named(entry, address)
+            if not isinstance(param, dict) or param.get("lengthInForce") is not True:
+                continue
+            along = length_along(param)
+            if along is None:
+                continue
+            if is_zero(token.value):
+                self.modal_lengths.pop(address, None)
+            else:
+                self.modal_lengths[address] = (token.value, quote(token.text), line.number, along, code_of(entry))
+
+    def along_axes(self, along: str, state: Dict[str, Any]) -> frozenset:
+        """T009, T012: the axes a length lies along; for ``'plane'`` the two axes of the plane in
+        force, or every axis of a plane while the plane is not known."""
+        if along != "plane":
+            return frozenset((along,))
+        pair = PLANE_AXES.get(state.get("plane") or "")
+        return frozenset(pair) if pair is not None else frozenset(("X", "Y", "Z"))
 
     # -- cycles -----------------------------------------------------------------
 
@@ -1192,6 +1390,24 @@ class Run:
                 return self.iso_group
             self.iso_group = None
             return self.new_group("single", word_starts[-1], block.number)
+        runs_pass = self.pass_entry is not None and (
+            positions
+            or any(
+                (t.address or "").upper() in self.pass_lengths(self.pass_entry) and (t.value_text or "") != ""
+                for t, _ in block.words
+            )
+        )
+        if active is None and runs_pass and not self.params.additive:
+            # T009: the single passes are scaled in one piece or not at all, like a cycle; a
+            # shift moves every pass on its own. A block that writes neither a position nor a
+            # length of the pass (`M8`) stays out of the series. On the control it runs the
+            # pass again (lathe manual: a block without a move in the pass mode repeats it), at
+            # the X, Z and R in force; the run changes nothing in it, so it repeats the pass
+            # the series ends with, scaled with it or left with it (NCR-11).
+            if self.pass_group is None:
+                self.pass_group = self.new_group("pass", self.pass_entry, block.number)
+            self.pass_group.entry = self.pass_entry
+            return self.pass_group
         if active is None:
             self.iso_group = None
             return None
@@ -1200,6 +1416,34 @@ class Run:
             group.entry = self.entry(active) or group.entry
             return group
         return None
+
+    def word_cycle_runs(self, block: Block, group: Optional[Group]) -> bool:
+        """NCR-1 (v1.2.0): whether the block runs a cycle written as a word (`sets.cycle:
+        'start'`: the ISO drilling cycles `G81`-`G89`, the lathe `G74`), written in it or in
+        force: `place` put it into a modal or one-shot word cycle, or the interpreter runs one
+        in it. Then its axis words are the cycle's position and its `R` the cycle's R plane or
+        relief, never the radius of the arc code the motion group still holds (`G2 … R10.`
+        before `G81 … R2.`), and never the taper of a single pass in force. A cycle called
+        with its parameters (`MCALL CYCLE81(…)`, Klartext `M99`) runs where an ordinary move
+        takes the tool and is no such cycle (`_nc_path.PathTracker.word_cycle`)."""
+        if group is not None and group.kind in ("modal", "single"):
+            return True
+        interp = self.interp
+        if interp.modal_call is not None:
+            return False
+        running = as_dict(interp.state.get("block")).get("cycle")
+        if not running and self.positions(block):
+            running = interp.active_cycle
+        if not isinstance(running, str) or len(running) < 2 or not running[0].isalpha() or not running[1].isdigit():
+            return False
+        return sets_of(self.entry(running)).get("cycle") == "start"
+
+    def motion_lengths(self, block: Block) -> List[Dict[str, Any]]:
+        """The motion code in force, as a code whose lengths the block may write (`R` of a modal
+        `G2`), unless the block runs a cycle written as a word (NCR-1)."""
+        if block.word_cycle or not isinstance(self.motion_entry, dict):
+            return []
+        return [self.motion_entry]
 
     def pole_touched(self) -> bool:
         """Whether the run changes an axis of the plane in force (any axis, when the plane is
@@ -1238,9 +1482,35 @@ class Run:
             # B1 fix NC (NC-03): an FK point on a chosen axis is reported (`judge`).
             elif FK_POINT_AXES.get((token.address or "").upper()) in setup.chosen and (token.value_text or "") != "":
                 return True
+        if setup.scaled_axes and self.writes_length(block):
+            # A length a multiply or divide does not scale (`judge_lengths`): `RND R2`, `CHF 3`.
+            return True
+        if setup.scaled_axes:
+            # An arc scaled along one axis of its plane only (NCR-8), a corner word of the path
+            # (NCR-6), an approach size (NCR-7): listed even where no chosen word is written.
+            state = self.interp.state
+            if self.arc_refusal(block, state) or self.corner_refusal(block, state):
+                return True
+            if self.plane_scaled(state) and self.process_values(block):
+                return True
         if not setup.touches_positions:
             return False
         return group is not None or block.opens_frame
+
+    def writes_length(self, block: Block) -> bool:
+        """Whether the block writes a length of one of its codes (`CodeParam.lengthAlong`)."""
+        if block.keyword_values:
+            return True
+        lengths: set = set()
+        for entry in block.codes() + self.motion_lengths(block):
+            lengths |= set(self.pass_lengths(entry))
+        for token, _ in block.words:
+            address = (token.address or "").upper()
+            if (token.value_text or "") == "":
+                continue
+            if address in lengths or (is_assignment(token) and address in self.pass_lengths(self.entry(address))):
+                return True
+        return False
 
     # -- judging ----------------------------------------------------------------
 
@@ -1255,6 +1525,20 @@ class Run:
         if refusal is not None:
             block.refusal = refusal
             return
+        if block.word_cycle:
+            # NCR-1: a cycle and an arc code in one block (`G2 G81 … R2.`): whether R is the
+            # cycle's R plane or the arc's radius, and which of the two runs, is not certain.
+            arc = next((code_of(e) for e in codes if sets_of(e).get("path") == "arc"), None)
+            if arc is not None:
+                cycle = next((code_of(e) for e in codes if sets_of(e).get("cycle") == "start"), None) or code_of(
+                    group.entry if group is not None else None
+                )
+                block.refusal = (
+                    "cycle-mode",
+                    "writes the cycle %s and the arc %s in one block, so whether its words are the cycle's position and R plane or the arc's end point and radius is not certain"
+                    % (cycle, arc),
+                )
+                return
 
         # Which values the run changes: the words of the chosen addresses, and (R8) the
         # cycle positions on the tool axis.
@@ -1267,11 +1551,23 @@ class Run:
         if group is not None:
             if group.kind == "pole":
                 refusal = self.judge_pole(block, state, pole_words)
+            elif group.kind == "pass":
+                refusal = None  # judged by `judge_pass` below, with or without a group
             else:
                 refusal = self.judge_cycle(block, group, state, cycle_words, cycle_args, cycle_data)
             if refusal is not None:
                 block.refusal = refusal
                 return
+        refusal = (
+            (None if block.word_cycle else self.judge_pass(block, state, cycle_data))
+            or self.judge_lengths(block, state, cycle_data)
+            or self.arc_refusal(block, state)
+            or self.corner_refusal(block, state)
+        )
+        if refusal is not None:
+            block.refusal = refusal
+            return
+        self.judge_process_values(block, state)
         if (cycle_words or cycle_args) and interp.tcp is None:
             # NC-4: a cycle's tool-axis positions (the R plane, Q203, RFP) are Z coordinates
             # too, turned by the same rotary axes.
@@ -1304,6 +1600,10 @@ class Run:
                 if unreadable is not None:
                     written, why = unreadable
                     outcomes.append(("skip", line, "unreadable", "%s: %s; left as written" % (written, why), written))
+                continue
+            kept = block.kept.get(id(token))
+            if kept is not None:
+                outcomes.append(("skip", line, kept[0], kept[1], quote(token.text)))
                 continue
             is_cycle = id(token) in cycle_words
             # NC-3: an absolute arc centre (`I=AC(50)`) or a `CIP` intermediate point is a
@@ -1497,6 +1797,320 @@ class Run:
                 pole_words.add(id(token))
         return None
 
+    def judge_pass(self, block: Block, state: Dict[str, Any], cycle_data: Dict[int, str]) -> Optional[Tuple[str, str]]:
+        """T009: a block that runs a single pass (the lathe's `G90`, `G92`, `G94`). Its lengths
+        (the taper `R`, `CodeParam.lengthAlong`) are values of the pass: left and listed when
+        their address is chosen, as NC-16 does for `G76`. A multiply or divide of the axis a
+        length lies along refuses every block that runs while that length is in force and not
+        zero; the series of passes is then left as written (`settle_groups`)."""
+        entry = self.pass_entry
+        lengths = self.pass_lengths(entry)
+        if not lengths:
+            return None
+        name = code_of(entry)
+        for token, _ in block.words:
+            address = (token.address or "").upper()
+            if address in lengths and (token.value_text or "") != "" and not is_assignment(token):
+                cycle_data[id(token)] = name
+        scaled = self.setup.scaled_axes
+        if not scaled:
+            return None
+        for address, along in lengths.items():
+            hit = sorted(self.along_axes(along, state) & scaled)
+            found = self.pass_values.get(address)
+            if not hit or found is None or is_zero(found[0]):
+                continue
+            literal, written, line = found
+            where = "in the working plane" if along == "plane" else "along %s" % along
+            if line == block.number or any(line == l.number for l in block.lines):
+                return (
+                    "not-scaled",
+                    "%s writes %s, a length %s that is not scaled with %s, so the pass cannot be scaled in one piece"
+                    % (name, written, where, and_list(hit)),
+                )
+            return (
+                "not-scaled",
+                "%s of line %d is still in force for %s, a length %s that is not scaled with %s, so the pass cannot be scaled in one piece"
+                % (written, line, name, where, and_list(hit)),
+            )
+        return None
+
+    def judge_lengths(self, block: Block, state: Dict[str, Any], cycle_data: Dict[int, str]) -> Optional[Tuple[str, str]]:
+        """NCF-A follow-up: a length written in this block for a code that is neither a cycle nor
+        a single pass (`CodeParam.lengthAlong`): the radius `L` of an Okuma arc, the chamfer and
+        the round of Okuma `G75`/`G76`, the Sinumerik corner words `RND=`, `RNDM=`, `CHF=`,
+        `CHR=` and the arc radius `CR=`, the Klartext corner and arc words `CHF 2`, `RND R2` and
+        the `R` of `CR`. A multiply or divide of an axis it lies along refuses the block while it
+        is not written as 0, and so does a modal one in force (`RNDM=2` up to `RNDM=0`) on every
+        block that moves. A corner word of a chosen address (`RND R2` with R chosen) is changed
+        as asked, never refused. NCF-C (owner decision 2026-10-18): the Fanuc arc radius `R` of
+        `G2`/`G3` (mill and both lathe systems) is such a length too.
+
+        NCR-5 (owner decision 2026-10-18): the radius of an arc (a length of a code with `sets.path:
+        'arc'`: Fanuc `G2`/`G3` `R`, Klartext `CR … R`, Okuma `L`) of a chosen address is scaled
+        only with both axes of its plane (`chosen_radius`)."""
+        entries: List[Dict[str, Any]] = []
+        for entry in block.codes() + self.motion_lengths(block):
+            if entry is self.pass_entry or sets_of(entry).get("cycle") is not None or any(entry is e for e in entries):
+                continue
+            entries.append(entry)
+        scaled = self.setup.scaled_axes
+        chosen = self.setup.words
+        found: List[Tuple[Dict[str, Any], gedit_nc.Token, str]] = []
+        for entry in entries:
+            lengths = self.pass_lengths(entry)
+            for token, _ in block.words:
+                address = (token.address or "").upper()
+                if address in lengths and (token.value_text or "") != "" and not is_assignment(token):
+                    if address in chosen:
+                        if sets_of(entry).get("path") == "arc":
+                            refusal = self.chosen_radius(block, entry, token, lengths[address], state)
+                            if refusal is not None:
+                                return refusal
+                        continue  # a corner word of a chosen address: changed as asked
+                    found.append((entry, token, lengths[address]))
+        for entry, token in block.keyword_values:
+            along = self.pass_lengths(entry).get(code_of(entry).upper())
+            if along is not None and token.value_text:
+                found.append((entry, token, along))
+        for token, _ in block.words:
+            # A word written with `=` that is a code of its own and describes its value (Sinumerik
+            # `RND=2`, `CHR=1`: the code's parameter has the code's own address).
+            address = (token.address or "").upper()
+            if not is_assignment(token) or (token.value_text or "") == "":
+                continue
+            entry = self.entry(address)
+            along = self.pass_lengths(entry).get(address) if entry is not None else None
+            if along is not None:
+                found.append((entry, token, along))  # type: ignore[arg-type]
+        for entry, token, along in found:
+            name = code_of(entry)
+            cycle_data[id(token)] = name
+            hit = sorted(self.along_axes(along, state) & scaled)
+            if not hit or is_zero(token.value):
+                continue
+            where = "in the working plane" if along == "plane" else "along %s" % along
+            if name == (token.address or "").upper():
+                who = "%s is" % quote(token.text)
+            elif token.address is None:
+                who = "%s writes %s," % (name, quote("%s %s" % (name, token.text.strip())))
+            else:
+                who = "%s writes %s," % (name, quote(token.text))
+            return (
+                "not-scaled",
+                "%s a length %s that is not scaled with %s, so the block cannot be scaled in one piece" % (who, where, and_list(hit)),
+            )
+        if block.modal_before and self.positions(block):
+            for address, (literal, written, line, along, name) in block.modal_before.items():
+                hit = sorted(self.along_axes(along, state) & scaled)
+                if not hit:
+                    continue
+                where = "in the working plane" if along == "plane" else "along %s" % along
+                return (
+                    "not-scaled",
+                    "%s of line %d is still in force and rounds this block's corner, a length %s that is not scaled with %s, so the block cannot be scaled in one piece"
+                    % (written, line, where, and_list(hit)),
+                )
+        return None
+
+    def plane_of(self, state: Dict[str, Any]) -> Tuple[frozenset, str]:
+        """The axes of the plane in force and how a finding names it; every axis of a plane while
+        the plane is not known."""
+        plane = state.get("plane") or ""
+        pair = PLANE_AXES.get(plane)
+        if pair is None:
+            return frozenset(("X", "Y", "Z")), "a plane that is not known here"
+        return frozenset(pair), "the %s plane" % plane
+
+    def plane_scaled(self, state: Dict[str, Any]) -> frozenset:
+        """The axes of the plane in force a multiply or divide scales."""
+        return self.plane_of(state)[0] & self.setup.scaled_axes
+
+    def chosen_radius(
+        self, block: Block, entry: Dict[str, Any], token: gedit_nc.Token, along: str, state: Dict[str, Any]
+    ) -> Optional[Tuple[str, str]]:
+        """NCR-5 (owner decision 2026-10-18): the radius of an arc, written with a chosen address.
+        A multiply or divide scales it with both axes of its plane, leaves it (and lists it) when
+        it scales neither, and refuses the block when it scales one of them only: the arc would
+        no longer fit its end points. A shift leaves it and lists it: moving an arc does not
+        change its radius."""
+        name = code_of(entry)
+        written = quote(token.text)
+        if self.params.additive:
+            block.kept[id(token)] = (
+                "data",
+                "%s: the radius of the arc of %s; a shift does not change a radius, so it is left as written" % (written, name),
+            )
+            return None
+        axes = self.along_axes(along, state)
+        hit = axes & self.setup.scaled_axes
+        if hit == axes:
+            return None
+        where = self.plane_of(state)[1] if along == "plane" else "along %s" % along
+        if not hit:
+            block.kept[id(token)] = (
+                "data",
+                "%s: the radius of the arc of %s in %s, which this run does not scale, so it is left as written" % (written, name, where),
+            )
+            return None
+        return (
+            "not-scaled",
+            "%s writes %s, the radius of an arc in %s, which this run scales along %s but not along %s, so the arc cannot be scaled in one piece"
+            % (name, written, where, and_list(sorted(hit)), and_list(sorted(axes - hit))),
+        )
+
+    def described(self, block: Block) -> frozenset:
+        """The addresses the codes of the block, the motion code and the single pass in force
+        describe."""
+        out = set()
+        for entry in block.codes() + self.motion_lengths(block) + ([self.pass_entry] if isinstance(self.pass_entry, dict) else []):
+            for param in params_of(entry):
+                address = param.get("address")
+                if isinstance(address, str) and address != "":
+                    out.add(address.upper())
+        return frozenset(out)
+
+    def arc_refusal(self, block: Block, state: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+        """NCR-8: a multiply or divide that scales one axis of the plane but not the other turns
+        an arc into an ellipse, which no arc code can write: the centre (`I`, `J`, `K`) or the
+        radius no longer fits the end points, and the control stops with an alarm or cuts
+        another arc. A block that runs an arc (a code with `sets.path: 'arc'`, written or in
+        force, unless the block runs a cycle written as a word, NCR-1) or writes an arc centre
+        word no code describes (the lathe chamfer `G1 Z-10. I2.`) is refused then. Every axis
+        counts while the plane is not known; one factor on both axes of the plane (a lathe's
+        diameter X too) keeps the arc an arc."""
+        scaled = self.setup.scaled_axes
+        if not scaled or block.word_cycle:
+            return None
+        axes, where = self.plane_of(state)
+        hit = axes & scaled
+        if not hit or hit == axes:
+            return None
+        codes = block.codes()
+        if any(gedit_nc.axis_words_of(e) == "data" or e.get("call") is True for e in codes):
+            return None
+        arc = next((e for e in codes if sets_of(e).get("path") == "arc"), None)
+        if arc is None and sets_of(self.motion_entry).get("path") == "arc" and self.positions(block):
+            arc = self.motion_entry
+        if arc is not None:
+            what = "runs the arc of %s" % code_of(arc)
+        else:
+            described = self.described(block)
+            centre = next(
+                (
+                    t
+                    for t, _ in block.words
+                    if (t.address or "").upper() in self.setup.arc_addresses
+                    and (t.value_text or "") != ""
+                    and not is_assignment(t)
+                    and (t.address or "").upper() not in described
+                ),
+                None,
+            )
+            if centre is None:
+                return None
+            what = "writes %s, an arc centre or a chamfer of the path," % quote(centre.text)
+        return (
+            "not-scaled",
+            "%s in %s, which this run scales along %s but not along %s, so the arc cannot be scaled in one piece"
+            % (what, where, and_list(sorted(hit)), and_list(sorted(axes - hit))),
+        )
+
+    def corner_refusal(self, block: Block, state: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+        """NCR-6 (interim, owner decision 2026-10-18; these words get their description with the
+        rotate and mirror rules in a later wave): a chamfer, a rounding or an angle the path
+        writes with a word no code describes keeps its size under a multiply or divide of an
+        axis of the plane. Refused then: a comma word (`,R`, `,C`, `,A`; the Fanuc mill's
+        optional corner words), and in a cutting move that is no arc an `R`, or a `C` that is no axis
+        of the profile (the lathe's `G1 Z-10. R2.` and `G1 Z-10. C2.`). On a turning profile `C`
+        is read so too: whether `C2.` is a chamfer or a move of the C axis is a setting of the
+        control. A word of a chosen address is changed as asked; a shift keeps them all."""
+        setup = self.setup
+        hit = self.plane_scaled(state)
+        if not hit:
+            return None
+        found: Optional[gedit_nc.Token] = None
+        for token, _ in block.words:
+            if (token.address or "").startswith(",") and (token.value_text or "") != "":
+                found = token
+                break
+        codes = block.codes()
+        motion = self.motion_entry if not block.word_cycle else None
+        if (
+            found is None
+            and isinstance(motion, dict)
+            and sets_of(motion).get("path") != "arc"
+            and sets_of(motion).get("motion") != "rapid"
+            and not any(gedit_nc.axis_words_of(e) == "data" or e.get("call") is True for e in codes)
+            and (self.positions(block) or any(e.get("group") == "motion" for e in codes))
+        ):
+            described = self.described(block)
+            for token, _ in block.words:
+                address = (token.address or "").upper()
+                if address == "C":
+                    if address in setup.axes and not setup.lathe:
+                        continue
+                elif address != "R":
+                    continue
+                if (token.value_text or "") == "" or is_assignment(token) or is_zero(token.value):
+                    continue
+                if address in described or address in setup.words:
+                    continue
+                found = token
+                break
+        if found is None:
+            return None
+        written = quote(found.text)
+        if (found.address or "").upper() == "C" and "C" in setup.axes:
+            what = "%s may be a chamfer of the path (or a move of the C axis, by a setting of the control)" % written
+        else:
+            what = "%s is a chamfer, a rounding or an angle of the path" % written
+        return (
+            "not-scaled",
+            "%s, which is not scaled with %s, so the block cannot be scaled in one piece" % (what, and_list(sorted(hit))),
+        )
+
+    def process_values(self, block: Block) -> List[Tuple[gedit_nc.Token, Dict[str, Any]]]:
+        """NCR-7: the lengths of a move code written in its block that say how the tool reaches
+        or leaves the contour, not the contour (`unit: 'length'` and no `lengthAlong`,
+        `position` or `axis`: the Klartext `APPR`/`DEP` `LEN` and `R`). Process values: kept."""
+        out: List[Tuple[gedit_nc.Token, Dict[str, Any]]] = []
+        for entry in block.codes():
+            if entry.get("group") != "motion" or sets_of(entry).get("cycle") is not None:
+                continue
+            for param in params_of(entry):
+                address = param.get("address")
+                if (
+                    not isinstance(address, str)
+                    or param.get("unit") != "length"
+                    or length_along(param) is not None
+                    or gedit_nc.position_of(param) is not None
+                    or param.get("axis")
+                ):
+                    continue
+                for token, _ in block.words:
+                    if (token.address or "").upper() != address.upper() or (token.value_text or "") == "" or is_assignment(token):
+                        continue
+                    if not is_zero(token.value) and all(token is not t for t, _ in out):
+                        out.append((token, entry))
+        return out
+
+    def judge_process_values(self, block: Block, state: Dict[str, Any]) -> None:
+        """NCR-7 (owner decision 2026-10-18): a multiply or divide of the plane scales the end
+        point of an approach or a departure and keeps its length and radius, with a warning:
+        the approach may no longer fit the scaled contour. A chosen address is kept too, and
+        listed as a value of the move."""
+        scaled = bool(self.plane_scaled(state))
+        for token, entry in self.process_values(block):
+            written = quote(token.text)
+            if scaled:
+                block.kept[id(token)] = (
+                    "process-value",
+                    "%s: a size of %s, kept; check the approach fits the scaled contour" % (written, code_of(entry)),
+                )
+            elif (token.address or "").upper() in self.setup.words:
+                block.kept[id(token)] = ("data", "%s: a value of %s, not a position of this program" % (written, code_of(entry)))
+
     def geometry_of(self, token: gedit_nc.Token, address: str, codes: List[Dict[str, Any]]) -> Optional[Tuple[str, str]]:
         """NC-3: ``(mode, axis)`` for a word that is a coordinate of an arc other than its end
         point — a `CIP` intermediate point (`CodeParam.axis`; ``'follows'`` the distance mode,
@@ -1626,6 +2240,28 @@ class Run:
             if arg.kind == "call":
                 arg.name = self.shown(entry, arg)
             cycle_args.append((arg, cls))
+        refusal = self.empty_tool_axis(block, group, entry, args) or self.start_level(block, group, state)
+        if refusal is not None:
+            return refusal
+        # T012: a length of the cycle that lies along an axis or in the working plane (the side
+        # lengths, diameters, corner radii and stock sizes of the Klartext pockets, slots and
+        # studs, `CodeParam.lengthAlong`). A multiply or divide of one of its axes refuses the
+        # cycle and its calls: scaling such a length is right only for one factor on both axes
+        # of the plane, and gEdit does not decide that for the user.
+        if setup.scaled_axes:
+            for arg in args:
+                along = length_along(self.param_of(entry, arg))
+                if along is None or arg.text.strip() == "":
+                    continue
+                hit = sorted(self.along_axes(along, state) & setup.scaled_axes)
+                if not hit or is_zero(arg.literal):
+                    continue
+                where = "in the working plane" if along == "plane" else "along %s" % along
+                return (
+                    "not-scaled",
+                    "%s writes %s, a length %s that is not scaled with %s, so the cycle cannot be scaled in one piece"
+                    % (name, quote("%s=%s" % (self.shown(entry, arg), arg.text) if arg.kind != "word" else arg.text), where, and_list(hit)),
+                )
         # NC-16: a cycle with axis values of its own and no position on the tool axis (the
         # Fanuc lathe's `G71`-`G76`): its other lengths may lie along any axis (the step `P`
         # of `G74` along X, its peck `Q` along Z, the taper `R` of `G76`), so a multiply or
@@ -1680,6 +2316,40 @@ class Run:
                         "%s has depths or distances of its own (%s) that a multiply or divide does not scale, so the cycle cannot be scaled in one piece"
                         % (name, and_list(lengths)),
                     )
+        return None
+
+    def empty_tool_axis(self, block: Block, group: Group, entry: Dict[str, Any], args: List[Arg]) -> Optional[Tuple[str, str]]:
+        """NCR-9b (v1.2.0): a cycle called with its arguments (Sinumerik `CYCLE81(10,,2,-10)`) reads
+        an empty or left-out argument as 0. A shift of the tool axis cannot move such a position
+        without writing a number into it, so a call with an empty `'tool-axis'` argument is left
+        as written, unless the argument's twin is written (`CodeParam.twin`: the depth `DP` and
+        the depth `DPR` measured from the reference plane; with `DPR` written, the depth follows
+        the moved reference plane). A multiply or divide keeps a 0 at 0 and is not concerned."""
+        setup = self.setup
+        if group.kind != "call" or not self.params.additive or not setup.moves_tool_axis:
+            return None
+        if not any(call_entry is entry for call_entry, _, _ in block.calls):
+            return None  # a position under `MCALL`: the call's block is judged
+        params = params_of(entry)
+        written = {arg.position for arg in args if arg.kind == "call" and arg.text.strip() != ""}
+        name = code_of(entry)
+        for index, param in enumerate(params, 1):
+            if gedit_nc.position_of(param) != "tool-axis" or index in written:
+                continue
+            address = str(param.get("address") or "argument %d" % index)
+            twin = param.get("twin")
+            twin_at = next(
+                (i for i, p in enumerate(params, 1) if isinstance(twin, str) and str(p.get("address") or "").upper() == twin.upper()),
+                None,
+            )
+            if twin_at is not None and twin_at in written:
+                continue
+            also = ", and %s, which would give it instead, is empty too" % twin if twin_at is not None else ""
+            return (
+                "cycle-empty",
+                "%s of %s (argument %d) is empty, which the control reads as 0%s; a shift of %s cannot move it without writing a number there, so the cycle is left as written"
+                % (address, name, index, also, TOOL_AXIS),
+            )
         return None
 
     def has_axis_values(self, entry: Optional[Dict[str, Any]]) -> bool:
@@ -2021,10 +2691,12 @@ class Run:
             if not members:
                 continue
             first = next((m for m in members if m.refusal is not None), None)
-            outside = next((m for m in members if not m.inside and m.edits), None)
+            # T009: a series of passes is one piece for its refusals only; every pass runs on
+            # its own, so a selection may start among them.
+            outside = None if group.kind == "pass" else next((m for m in members if not m.inside and m.edits), None)
             if first is None and outside is None:
                 continue
-            what = "the same contour around the pole" if group.kind == "pole" else "the same cycle"
+            what = {"pole": "the same contour around the pole", "pass": "the same series of passes"}.get(group.kind, "the same cycle")
             for member in members:
                 if member.refusal is None:
                     changed = changed or bool(member.edits)
@@ -2057,6 +2729,8 @@ SHORT = {
     "cycle-plane": "outside the XY plane",
     "cycle-expression": "a variable position",
     "cycle-unresolved": "a position whose reading depends on the machine",
+    "cycle-empty": "an empty position on the tool axis",
+    "cycle-level-outside": "it starts at the level of the lines above the selection",
     "pole": "a pole that cannot be moved",
     "arc-geometry": "an arc that cannot be moved in one piece",
     "not-scaled": "not scaled",
@@ -2215,7 +2889,9 @@ def collect_findings(run: Run, findings: Findings) -> None:
         for number, reason, text in block.word_findings:
             # NC-5: a word that cannot be read still goes to the old position: a warning.
             # B1 fix NC (NC-03): an FK point left behind changes the contour: a warning too.
-            rows.append((number, 1, "warning" if reason in ("unreadable", "fk-point") else "info", text + ".", reason))
+            # NCR-7: an approach size kept under a scale of the plane changes how the tool
+            # meets the contour: a warning too.
+            rows.append((number, 1, "warning" if reason in ("unreadable", "fk-point", "process-value") else "info", text + ".", reason))
         for number, text in block.notes:
             rows.append((number, 2, "info", text + ".", "rounded"))
     for code, (line, count) in run.unknown_seen.items():

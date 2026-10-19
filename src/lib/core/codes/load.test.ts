@@ -715,30 +715,41 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
         .filter((e) => e.review === 'pending')
         .map((e) => e.code);
     expect(marked('fanuc')).toEqual([
-      'G2', 'G3', 'G5.4', 'G6.2', 'G29', 'G30.1', 'G41', 'G42', 'G41.2', 'G41.3', 'G41.4', 'G41.5', 'G41.6', 'G42.2', 'G42.4', 'G42.5', 'G42.6', 'G43.1', 'G52', 'G53.1', 'G92.1',
+      'G2', 'G3', 'G5.4', 'G6.2', 'G10', 'G29', 'G30.1', 'G41', 'G42', 'G41.2', 'G41.3', 'G41.4', 'G41.5', 'G41.6', 'G42.2', 'G42.4', 'G42.5', 'G42.6', 'G43.1', 'G52', 'G53.1', 'G92.1',
       // P4a fix B1 (§7 #312): the flow codes.
       'GOTO', 'DO', 'END',
     ]);
-    expect(marked('fanuc-lathe')).toEqual(['G41', 'G42', 'G50.3', 'G68.1', 'G69.1', 'G70', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76']);
-    expect(marked('fanuc-lathe-b')).toEqual(['G92.1']);
+    // v1.2 NC fix round: G10's tool-offset tables (T013) and the single passes' taper (T009).
+    // v1.2.0 (NCR-4): system A's G77-G79 read as system B's single passes.
+    expect(marked('fanuc-lathe')).toEqual(['G41', 'G42', 'G50.3', 'G68.1', 'G69.1', 'G70', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76', 'G77', 'G78', 'G79', 'G90', 'G92', 'G94']);
+    expect(marked('fanuc-lathe-b')).toEqual(['G77', 'G78', 'G79', 'G92.1']);
     // The Okuma lathe codes (package A7-O).
     // P4a fix B1 (§7 #312, #316): the chamfer and corner round, and the jumps.
-    expect(marked('okuma')).toEqual(['G2', 'G3', 'G20', 'G21', 'G41', 'G42', 'G75', 'G76', 'G85', 'G86', 'G93', 'G119', 'G132', 'G133', 'G313', 'M85', 'GOTO', 'IF']);
+    // v1.2 NC fix round (NCF-A follow-up): the thread passes and the L-radius arcs (lengthAlong).
+    expect(marked('okuma')).toEqual(['G2', 'G3', 'G20', 'G21', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'M85', 'GOTO', 'IF']);
     // The Sinumerik and Klartext codes (package A7-S); SLOT2, CYCLE72, ADIS and ADISPOS were
     // added from the manuals afterwards (owner decision 2026-10-12) and carry the same mark,
     // as does CYCLE62, whose description now names CYCLE72 next to the turning cycles.
     expect(marked('sinumerik')).toEqual([
-      'G2', 'G3', 'CIP', 'G601', 'G602', 'G603', 'G643', 'G644', 'G645', 'G41', 'G42', 'CYCLE61', 'POCKET3', 'POCKET4', 'SLOT1', 'SLOT2', 'CYCLE72', 'CYCLE93',
-      'CYCLE95', 'CYCLE97', 'CYCLE62', 'CYCLE800', 'CTOL', 'OTOL', 'ADIS', 'ADISPOS', 'WAITM', 'WAITMC', 'WAITE', 'SETM', 'CLEARM', 'INIT', 'START', 'TRANS', 'ATRANS',
+      'G2', 'G3', 'CIP', 'G601', 'G602', 'G603', 'G643', 'G644', 'G645', 'G41', 'G42',
+      // v1.2.0 (NCR-9b): the drilling cycles' depth twins (DP and DPR, FDEP and FDPR).
+      'CYCLE81', 'CYCLE82', 'CYCLE83', 'CYCLE84', 'CYCLE840', 'CYCLE85', 'CYCLE86', 'CYCLE87', 'CYCLE88', 'CYCLE89',
+      'CYCLE61', 'POCKET3', 'POCKET4', 'SLOT1', 'SLOT2', 'CYCLE72', 'CYCLE93',
+      'CYCLE95', 'CYCLE97', 'CYCLE62', 'CYCLE800', 'CTOL', 'OTOL', 'ADIS', 'ADISPOS',
+      // v1.2 NC fix round (FZ-7): the corner words, a length each; (NCF-C) their feeds.
+      'CHF', 'CHR', 'RND', 'RNDM', 'CR', 'FRC', 'FRCM', 'WAITM', 'WAITMC', 'WAITE', 'SETM', 'CLEARM', 'INIT', 'START', 'TRANS', 'ATRANS',
       'COMPSURF', 'CUT3DCC', 'CUT3DCCD',
       // P4a fix B1 (§7 #312): the flow codes.
       'GOTOF', 'GOTOB', 'GOTO', 'GOTOC', 'IF', 'ELSE', 'ENDIF', 'WHILE', 'ENDWHILE', 'FOR', 'ENDFOR', 'REPEAT', 'REPEATB', 'UNTIL', 'LOOP', 'ENDLOOP',
     ]);
     // P4a fix B1 (§7 #311-#318): the blank, the labels and jumps, the system write, the scalings,
     // the datum shift's reset and the keywords that turn the rotary axes.
+    // v1.2 NC fix round (FZ-6): the approach and departure codes describe LEN, CCA and R.
     expect(marked('heidenhain')).toEqual([
-      'BLK FORM', 'RL', 'RR', 'VC', 'LBL', 'FN 9', 'FN 10', 'FN 11', 'FN 12', 'FN 17', 'CYCL DEF 7', 'CYCL DEF 8', 'CYCL DEF 10', 'CYCL DEF 11', 'CYCL DEF 19',
-      'CYCL DEF 26', 'PATTERN DEF', 'CYCL DEF 251', 'CYCL DEF 252', 'CYCL DEF 253', 'CYCL DEF 254', 'CYCL DEF 256',
+      // The corner and arc words of the contour (CR, RND, CHF), marked lengthAlong.
+      'BLK FORM', 'CR', 'RND', 'CHF', 'APPR LT', 'APPR LN', 'APPR CT', 'APPR LCT', 'DEP LT', 'DEP LN', 'DEP CT', 'DEP LCT', 'RL', 'RR', 'VC', 'LBL', 'FN 9', 'FN 10', 'FN 11', 'FN 12', 'FN 17', 'CYCL DEF 7', 'CYCL DEF 8', 'CYCL DEF 10', 'CYCL DEF 11', 'CYCL DEF 19',
+      // v1.2 NC fix round (NCF-A follow-up): the bore and thread milling diameters, the centring diameter.
+      'CYCL DEF 26', 'PATTERN DEF', 'CYCL DEF 208', 'CYCL DEF 240', 'CYCL DEF 262', 'CYCL DEF 251', 'CYCL DEF 252', 'CYCL DEF 253', 'CYCL DEF 254', 'CYCL DEF 256',
       'CYCL DEF 257', 'CYCL DEF 14', 'CYCL DEF 21', 'CYCL DEF 22', 'CYCL DEF 23', 'CYCL DEF 24', 'CYCL DEF 25',
       'PLANE SPATIAL', 'PLANE PROJECTED', 'PLANE EULER', 'PLANE VECTOR', 'PLANE POINTS', 'PLANE RELATIV',
       'PLANE AXIAL', 'PLANE RESET', 'TRANS DATUM', 'M128', 'M140', 'MOVE', 'TURN',
@@ -885,5 +896,153 @@ describe('P4a fix B1: the members the geometry fixes read (plan §7 #311-#318)',
       ['G1', null],
     ]);
     expect(problems.map((p) => p.path)).toEqual(['codes[2].shiftZeroIsNone', 'codes[3].shiftZeroIsNone']);
+  });
+
+  it('v1.2 T009/T012: keeps lengthAlong as an axis letter or "plane", never next to another role', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        { code: 'G90', label: 'Turning pass', params: [{ address: 'R', label: 'Taper', lengthAlong: 'x' }] },
+        { code: 'G94', label: 'Facing pass', params: [{ address: 'R', label: 'Taper', position: 'none', lengthAlong: 'Z' }] },
+        { code: 'CYCL DEF 251', label: 'Pocket', params: [{ address: 'Q218', label: 'Length', position: 'none', lengthAlong: 'plane' }] },
+        { code: 'CYCL DEF 200', label: 'Drilling', params: [{ address: 'Q203', label: 'Surface', position: 'tool-axis', lengthAlong: 'Z' }] },
+        { code: 'G1', label: 'Line', params: [{ address: 'Q1', label: 'Length', lengthAlong: 'XY' }] },
+      ],
+    });
+    expect(db.codes.map((e) => e.params?.[0].lengthAlong ?? null)).toEqual(['X', 'Z', 'plane', null, null]);
+    expect(db.codes[3].params?.[0].position).toBe('tool-axis');
+    expect(problems.map((p) => p.path)).toEqual(['codes[3].params[0].lengthAlong', 'codes[4].params[0].lengthAlong']);
+  });
+
+  it('v1.2: keeps lengthInForce only next to lengthAlong', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        { code: 'RNDM', label: 'Rounding', params: [{ address: 'RNDM', label: 'Radius', unit: 'length', lengthAlong: 'plane', lengthInForce: true }] },
+        { code: 'ADIS', label: 'Distance', params: [{ address: 'ADIS', label: 'Distance', unit: 'length', lengthInForce: true }] },
+      ],
+    });
+    expect(db.codes.map((e) => e.params?.[0].lengthInForce ?? null)).toEqual([true, null]);
+    expect(problems.map((p) => p.path)).toEqual(['codes[1].params[0].lengthInForce']);
+  });
+
+  it('v1.2 T013: keeps toolOffsetValues only as whole numbers on a shift code', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        { code: 'G10', label: 'Data setting', wordsAreData: true, shift: true, params: [{ address: 'L', label: 'Table', toolOffsetValues: ['1', '10', '11'] }] },
+        { code: 'G11', label: 'Data setting', shift: true, params: [{ address: 'L', label: 'Table', toolOffsetValues: ['L10'] }] },
+        { code: 'G12', label: 'Data setting', shift: true, params: [{ address: 'L', label: 'Table', toolOffsetValues: [] }] },
+        { code: 'G65', label: 'Macro call', wordsAreData: true, params: [{ address: 'L', label: 'Count', toolOffsetValues: ['10'] }] },
+      ],
+    });
+    expect(db.codes.map((e) => e.params?.[0].toolOffsetValues ?? null)).toEqual([['1', '10', '11'], null, null, null]);
+    expect(problems.map((p) => p.path)).toEqual([
+      'codes[1].params[0].toolOffsetValues',
+      'codes[2].params[0].toolOffsetValues',
+      'codes[3].params[0].toolOffsetValues',
+    ]);
+  });
+
+  it('v1.2.0 NCR-9b: keeps a twin only as a pair of a tool-axis position and its relative depth', () => {
+    const depth = (twin?: unknown, position = 'tool-axis') => ({ address: 'DP', label: 'Depth', position, ...(twin === undefined ? {} : { twin }) });
+    const relative = (twin?: unknown, position = 'none') => ({ address: 'DPR', label: 'Relative depth', position, ...(twin === undefined ? {} : { twin }) });
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        // 0: the pair, both sides naming each other; the address is read upper case.
+        { code: 'CYCLE81', label: 'Drilling', params: [depth('dpr'), relative('DP')] },
+        // 1: one side only.
+        { code: 'CYCLE82', label: 'Drilling', params: [depth('DPR'), relative()] },
+        // 2: a twin that is no parameter of the code, and one that names itself.
+        { code: 'CYCLE83', label: 'Drilling', params: [depth('FDPR'), { ...relative(), twin: 'DPR' }] },
+        // 3: two absolute positions are no pair.
+        { code: 'CYCLE84', label: 'Tapping', params: [depth('DPR'), relative('DP', 'tool-axis')] },
+        // 4: a position nobody reviewed is no pair either.
+        { code: 'CYCLE85', label: 'Boring', params: [{ address: 'DP', label: 'Depth', twin: 'DPR' }, relative('DP')] },
+        // 5: not an address.
+        { code: 'CYCLE86', label: 'Boring', params: [depth(7), relative()] },
+      ],
+    });
+    const twins = db.codes.map((e) => (e.params ?? []).map((p) => p.twin ?? null));
+    expect(twins).toEqual([
+      ['DPR', 'DP'],
+      [null, null],
+      [null, null],
+      [null, null],
+      [null, null],
+      [null, null],
+    ]);
+    expect(problems.map((p) => p.path)).toEqual([
+      'codes[1].params[0].twin',
+      'codes[2].params[0].twin',
+      'codes[2].params[1].twin',
+      'codes[3].params[0].twin',
+      'codes[3].params[1].twin',
+      'codes[4].params[0].twin',
+      'codes[4].params[1].twin',
+      'codes[5].params[0].twin',
+    ]);
+    // The rest of a parameter with a broken twin is kept as written.
+    expect(db.codes[3].params?.map((p) => p.position)).toEqual(['tool-axis', 'tool-axis']);
+  });
+
+  it('v1.2.0 NCR-9b: carries the Sinumerik depth twins through the loader, where the scripts read them', () => {
+    // The cycles manual: the depth is given either absolute (DP) or from the reference plane
+    // (DPR); with both, DPR counts; the first peck FDPR works like DPR; an empty parameter is 0.
+    const pairs = sinumerik.db.codes
+      .filter((e) => (e.params ?? []).some((p) => p.twin !== undefined))
+      .map((e) => [e.code, (e.params ?? []).filter((p) => p.twin !== undefined).map((p) => `${p.address}>${p.twin}`).join(' ')]);
+    expect(pairs).toEqual([
+      ['CYCLE81', 'DP>DPR DPR>DP'],
+      ['CYCLE82', 'DP>DPR DPR>DP'],
+      ['CYCLE83', 'DP>DPR DPR>DP FDEP>FDPR FDPR>FDEP'],
+      ['CYCLE84', 'DP>DPR DPR>DP'],
+      ['CYCLE840', 'DP>DPR DPR>DP'],
+      ['CYCLE85', 'DP>DPR DPR>DP'],
+      ['CYCLE86', 'DP>DPR DPR>DP'],
+      ['CYCLE87', 'DP>DPR DPR>DP'],
+      ['CYCLE88', 'DP>DPR DPR>DP'],
+      ['CYCLE89', 'DP>DPR DPR>DP'],
+      ['SLOT1', '_DP>_DPR _DPR>_DP'],
+      ['SLOT2', '_DP>_DPR _DPR>_DP'],
+    ]);
+    // Every Sinumerik code with a relative depth has its twin marked, and every marked entry is
+    // on the owner's review page.
+    const absoluteOf: Record<string, string> = { DPR: 'DP', _DPR: '_DP', FDPR: 'FDEP' };
+    for (const e of sinumerik.db.codes) {
+      for (const p of e.params ?? []) {
+        if (absoluteOf[p.address] !== undefined) expect(p.twin, `${e.code} ${p.address}`).toBe(absoluteOf[p.address]);
+      }
+    }
+    for (const [code] of pairs) expect(lookupCode(sinumerik.db, code)?.review, code).toBe('pending');
+    // No other dialect ships a twin.
+    for (const db of [fanuc.db, heidenhain.db, okuma.db]) {
+      expect(db.codes.some((e) => (e.params ?? []).some((p) => p.twin !== undefined))).toBe(false);
+    }
+  });
+
+  it('v1.2 T009: a two-block entry has to agree on lengthAlong in both blocks', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        {
+          code: 'G76',
+          label: 'Threading',
+          blocks: 2,
+          params: [
+            { address: 'R', label: 'Allowance', position: 'none', block: 1 },
+            { address: 'R', label: 'Taper', position: 'none', lengthAlong: 'X', block: 2 },
+          ],
+        },
+      ],
+    });
+    expect(db.codes[0].params?.map((p) => p.label)).toEqual(['Allowance']);
+    expect(problems.map((p) => p.path)).toEqual(['codes[0].params[1].lengthAlong']);
   });
 });

@@ -441,7 +441,7 @@
     font-size: 13px;
   }
   .control:focus {
-    border-color: var(--accent);
+    border-color: var(--accent-text);
     outline: none;
   }
   .narrow {
@@ -475,7 +475,7 @@
     padding: 0;
     border: 0;
     background: none;
-    color: var(--accent);
+    color: var(--accent-text);
     font: inherit;
     font-size: 12px;
     text-decoration: underline;

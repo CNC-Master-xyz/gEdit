@@ -625,7 +625,8 @@ describe('B1: the lathe codes added from the manuals', () => {
     // And the four the P4a prelude flagged for the mirror (plan §6.2): G2, G3, G41, G42.
     expect(codesWith((e) => reviewOf(e) !== undefined)).toEqual([
       // P4a fix B1 (§7 #312, #316): the chamfer and corner round (G75, G76) and the jumps.
-      'G2', 'G3', 'G20', 'G21', 'G41', 'G42', 'G75', 'G76', 'G85', 'G86', 'G93', 'G119', 'G132', 'G133', 'G313', 'GOTO', 'IF', 'M85',
+      // v1.2 NC fix round (NCF-A follow-up): the thread passes and the L-radius arcs (lengthAlong).
+      'G2', 'G3', 'G20', 'G21', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'GOTO', 'IF', 'M85',
     ]);
     for (const e of ENTRIES.filter((row) => reviewOf(row) !== undefined)) expect(reviewOf(e), e.code).toBe('pending');
   });

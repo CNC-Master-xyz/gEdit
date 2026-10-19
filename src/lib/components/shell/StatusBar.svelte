@@ -73,11 +73,14 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
+    box-sizing: border-box;
     height: 24px;
     padding: 0 12px;
     color: var(--status-text);
     font-size: 11px;
     background-color: var(--status-bg);
+    /* The one orange on the bar: a line along its top edge (the bar itself is slate). */
+    border-top: 2px solid var(--accent);
   }
 
   .side {
@@ -114,11 +117,12 @@
     cursor: pointer;
   }
   .message-action:hover {
-    background-color: rgb(255 255 255 / 15%);
+    background-color: var(--status-hover);
   }
   .message.error {
     padding: 0 6px;
-    background-color: var(--danger);
+    background-color: var(--danger-solid);
+    color: var(--text-on-danger);
     border-radius: 2px;
     opacity: 1;
   }

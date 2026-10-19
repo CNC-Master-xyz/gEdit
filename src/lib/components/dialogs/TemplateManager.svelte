@@ -761,10 +761,16 @@
     cursor: default;
   }
 
+  /* Inverted ink (peterbuilds' primary button), not orange: this dialog has several of
+     these in view at once, and the orange stays for the one main button of a dialog. */
   button.primary:not(:disabled) {
-    border-color: var(--accent);
-    background: var(--accent);
-    color: var(--text-on-accent);
+    border-color: var(--btn-ink-bg);
+    background: var(--btn-ink-bg);
+    color: var(--btn-ink-text);
+  }
+
+  button.primary:hover:not(:disabled) {
+    background: var(--btn-ink-hover);
   }
 
   button.small {

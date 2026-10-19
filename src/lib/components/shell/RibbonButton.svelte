@@ -100,7 +100,11 @@
     align-items: center;
     justify-content: center;
     height: 24px;
-    color: var(--accent-hover);
+    /* The icons are neutral and turn orange under the pointer; orange is not worn all over. */
+    color: var(--text-main);
+  }
+  .ribbon-btn:hover:not(:disabled) .btn-icon {
+    color: var(--accent-text);
   }
   .ribbon-btn:disabled .btn-icon {
     color: var(--text-disabled);

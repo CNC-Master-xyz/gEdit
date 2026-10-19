@@ -13,6 +13,7 @@
 // without the generator knowing anything about it.
 
 import type { Profile } from '$lib/core/profiles/types';
+import { EDITOR_CHROME } from './chrome';
 import { EDITOR_COLORS, ROLES, ROLE_COLORS, ROLE_FONT_STYLE, THEME_BASE, type Role } from './roles';
 
 /** One entry of `IStandaloneThemeData.rules`. */
@@ -72,6 +73,7 @@ function themeFor(mode: 'light' | 'dark', profiles: readonly Profile[]): Generat
     inherit: true,
     rules,
     colors: {
+      ...EDITOR_CHROME[mode],
       'editor.background': EDITOR_COLORS[mode].background,
       'editor.foreground': EDITOR_COLORS[mode].foreground,
     },

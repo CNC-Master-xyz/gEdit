@@ -324,9 +324,10 @@ the answer.
 On a Fanuc control the waits that meet must also be **written alike**: every path of one wait
 names the same paths, and either all of them have a `P` word or none has. `M901 P123` in
 path 1 against `M901 P12` in path 2 stops the control with an alarm, and so does `M901`
-without `P` against `M901 P3`, although both mean paths 1 and 2. The Fanuc presets check
-this (the finding *Different channels*, below). A Sinumerik `WAITM` need not list the same
-channels in every channel, so its preset does not.
+without `P` against `M901 P3`, although both mean paths 1 and 2. Check Wait Codes checks
+this (the finding *Different channels*, below) for every wait rule whose partners are a `P`
+word: the Fanuc presets and a rule you build on the machine page. A Sinumerik `WAITM` need
+not list the same channels in every channel, so its preset does not.
 
 A channel number is read by its value, as the control reads it: `WAITM(1,01,02)` names
 channels 1 and 2.
@@ -552,7 +553,7 @@ Say path 1 and path 2, with `M901 P3`-style waits.
 | **Count differs (rule)** — *Wait codes 1: Path 1 has 3, Path 2 has 2; both sides need the same number.* | For waits without a number: different totals | As above |
 | **Count differs (stops and ends)** — *Stops and ends: Path 1 has 2, Path 2 has 1; both sides need the same number.* | One channel has a stop or end more | Is the extra `M01` or `M30` meant? |
 | **Count not checked** — *M904: Path 1 has it 3 times for Path 2, Path 2 has 2, but it is inside a loop or a jump, so the count is not checked.* | The counts differ, but a wait of that number sits between a jump target and a backward jump (a loop) in its channel. How often it runs is not written anywhere | **Nothing is wrong that gEdit can see.** Count the passes of the loop by hand |
-| **Different channels** — *M901 in Path 1 waits for Path 1, Path 2, Path 3, but the M901 in Path 2 it meets (line 12) waits for Path 1, Path 2; both must name the same channels.* | Fanuc presets: the two waits that meet name different paths, or one has a `P` word and the other has none. The control stops with an alarm | Write the same `P` word in every path of that wait |
+| **Different channels** — *M901 in Path 1 waits for Path 1, Path 2, Path 3, but the M901 in Path 2 it meets (line 12) waits for Path 1, Path 2; both must name the same channels.* | A wait rule with a `P` word (the Fanuc presets, or a rule of your own): the two waits that meet name different paths, or one has a `P` word and the other has none. The control stops with an alarm | Write the same `P` word in every path of that wait |
 | **Other order** — *M902 (line 40) and M903 (line 52) are in the other order in Path 2 (lines 61 and 58). 2 more out of order.* | Both channels have the waits, but not in the same order. With the control, each would wait for the other | Swap them in one channel. The finding reports the first pair; the *more* (only there when there are more) says how many further pairs are the other way round |
 | **Order not checked** — *The order of M902 and M903 against Path 2 is not checked: a jump target or a backward jump lies between them.* | The order is not as written, but a jump target or a backward jump (`GOTO` back, `M99 P`, the end of a loop) lies between the two waits, so gEdit cannot say what runs first | **Nothing is wrong that gEdit can see.** Check the order by hand. With *Count not checked* these are the cases where the check refuses to judge |
 | **Not increasing** — *P20 comes after P30 (line 12) in Turret A; the numbers must increase.* | For order numbers: a number below the one before it | Correct the number, or the order |
@@ -668,7 +669,7 @@ Channel 1:  M910P123     Channel 2:  M910P123     Channel 3:  M910P123
 
 A different `P` is a different wait: `M901P12` does not meet `M901P123`. This is gEdit's rule,
 and it holds for **every wait written with a `P` word**, also for a wait rule you built yourself on
-the machine page. A wait with no `P` word meets only a wait with no `P` word (Fanuc presets): `M901`
+the machine page. A wait with no `P` word meets only a wait with no `P` word (every rule with a `P` word): `M901`
 against `M901 P3` is unmatched, as Check Wait Codes reports it. If a channel the `P`
 names **and that is shown** has no matching wait, the wait is **unmatched** in all the channels
 that have it. A channel the `P` names that is **not shown** (more than four channels) is

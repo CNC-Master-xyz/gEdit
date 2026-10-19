@@ -44,8 +44,9 @@
       "group": "motion",
       "modal": true,
       "sets": { "motion": "feed", "path": "cycle" },
+      "review": "pending",
       "label": "Turning pass",
-      "description": "Cuts one outside or inside turning pass, straight or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. G-code system A spells this G90.",
+      "description": "Cuts one outside or inside turning pass, straight or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. X, Z and R stay in force for the next pass blocks, shared by the three single passes, until a block writes them again. G-code system A spells this G90.",
       "params": [
         {
           "address": "X",
@@ -57,7 +58,8 @@
         },
         {
           "address": "R",
-          "label": "Taper: the difference in radius between the start and the end"
+          "label": "Taper: the difference in radius between the start and the end",
+          "lengthAlong": "X"
         },
         {
           "address": "F",
@@ -71,9 +73,10 @@
       "group": "motion",
       "modal": true,
       "pitchFeed": true,
-      "sets": { "motion": "feed" },
+      "sets": { "motion": "feed", "path": "cycle" },
+      "review": "pending",
       "label": "Threading pass as a cycle",
-      "description": "Cuts one threading pass, straight or tapered, and returns to the start point, so a thread is written as a list of X values. F is the thread lead per revolution, not a feed rate. G-code system A spells this G92.",
+      "description": "Cuts one threading pass, straight or tapered, and returns to the start point, so a thread is written as a list of X values. X, Z and R stay in force for the next pass blocks, shared by the three single passes, until a block writes them again. F is the thread lead per revolution, not a feed rate. G-code system A spells this G92.",
       "params": [
         {
           "address": "X",
@@ -85,7 +88,8 @@
         },
         {
           "address": "R",
-          "label": "Taper: the difference in radius between the start and the end"
+          "label": "Taper: the difference in radius between the start and the end",
+          "lengthAlong": "X"
         },
         {
           "address": "F",
@@ -101,8 +105,9 @@
       "group": "motion",
       "modal": true,
       "sets": { "motion": "feed", "path": "cycle" },
+      "review": "pending",
       "label": "Facing pass",
-      "description": "Cuts one facing pass, square or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. G-code system A spells this G94.",
+      "description": "Cuts one facing pass, square or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. X, Z and R stay in force for the next pass blocks, shared by the three single passes, until a block writes them again. G-code system A spells this G94.",
       "params": [
         {
           "address": "X",
@@ -114,7 +119,8 @@
         },
         {
           "address": "R",
-          "label": "Taper: the difference along Z between the start and the end"
+          "label": "Taper: the difference along Z between the start and the end",
+          "lengthAlong": "Z"
         },
         {
           "address": "F",

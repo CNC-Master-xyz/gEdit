@@ -113,7 +113,7 @@
     background-color: var(--accent);
   }
   .splitter:focus-visible {
-    outline: 1px solid var(--accent-hover);
+    outline: 1px solid var(--accent-text);
     outline-offset: 1px;
   }
 </style>

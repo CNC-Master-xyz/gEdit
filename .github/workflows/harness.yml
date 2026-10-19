@@ -7,7 +7,8 @@
 # macOS minutes are the scarce ones. It runs on every push to main (so a merge that breaks a
 # window, dialog or file behaviour shows up within the hour) and by hand from the Actions
 # tab (workflow_dispatch) when a pull request touches the window, dialogs, file handling or
-# keyboard handling and a maintainer wants the answer before merging.
+# keyboard handling and a maintainer wants the answer before merging. The manual run takes an optional `scenarios`
+# field (scenario or suite names, space-separated) to run part of the suite; empty runs it all, as a push does.
 #
 # What the runner is: macOS 14 on arm64 with a live, unlocked desktop session, Accessibility
 # already granted to the job's shell, and bash as the login shell. The harness needs nothing
@@ -21,6 +22,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      scenarios:
+        description: 'Run only these (space-separated scenario names and/or suite names, e.g. "p4-compare p4e"); empty runs the whole suite'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -96,9 +103,29 @@ jobs:
           tests/runtime/sync.sh 2>&1 | tee "$RUNNER_TEMP/logs/sync.log"
 
       # Exits non-zero on a FAIL or a BLOCKED; a pass on the retry is FLAKY and does not. p4-perf is never retried.
-      - name: Suite m0..m12, rp, m13, p3a, p3b, b1, p4a and p4e
+      # A push to main (and a manual run with the field empty) runs the whole list. A manual run can name scenarios
+      # and/or suites (`p4-compare p4e`): a name that is a suite file under tests/runtime/suites is that suite,
+      # anything else is passed to suite.sh as a scenario name (suite.sh refuses an unknown one).
+      - name: Suite m0..m12, rp, m13, p3a, p3b, b1, p4a and p4e (or the scenarios named on a manual run)
+        env:
+          SCENARIOS: ${{ github.event.inputs.scenarios }}
         run: |
-          tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"
+          if [ -z "${SCENARIOS// /}" ]; then
+            tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"
+            exit "${PIPESTATUS[0]}"
+          fi
+          # The text reaches the shell as an environment variable, never inside the script; it is still
+          # checked, because it becomes arguments.
+          if [[ ! "$SCENARIOS" =~ ^[A-Za-z0-9._\ -]+$ ]]; then
+            echo "scenarios may contain only letters, digits, . _ - and spaces: '$SCENARIOS'" >&2
+            exit 2
+          fi
+          args=()
+          for name in $SCENARIOS; do
+            case "$name" in -*) echo "a name must not start with '-': '$name'" >&2; exit 2 ;; esac
+            if [ -f "tests/runtime/suites/$name.txt" ]; then args+=("tests/runtime/suites/$name.txt"); else args+=("$name"); fi
+          done
+          tests/runtime/suite.sh "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"
           exit "${PIPESTATUS[0]}"
         shell: bash
 

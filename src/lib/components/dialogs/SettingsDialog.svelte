@@ -768,10 +768,11 @@
   }
 
   .tab.selected {
-    background: var(--accent);
-    /* On --accent, not on a surface: --text-active would be black here in the light
-       theme, which is under AA (G8 M2). */
-    color: var(--text-on-accent);
+    /* The selected category is marked by a tint and an orange bar, not a solid orange
+       block: the text keeps its normal colour on a surface. */
+    background: var(--accent-soft);
+    box-shadow: inset 2px 0 0 var(--accent);
+    color: var(--text-active);
   }
 
   .tab[data-invalid='1']::after {

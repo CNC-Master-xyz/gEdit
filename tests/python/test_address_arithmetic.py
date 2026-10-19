@@ -100,8 +100,10 @@ BLOCK_REASONS = {
     "cycle-plane",
     "cycle-expression",
     "cycle-unresolved",
+    "cycle-empty",
+    "cycle-level-outside",
 }
-WORD_REASONS = {"unreadable", "data", "incremental", "expression", "machine-dependent", "count", "fk-point"}
+WORD_REASONS = {"unreadable", "data", "incremental", "expression", "machine-dependent", "count", "fk-point", "process-value"}
 NOTE_REASONS = {"rounded"}
 RUN_REASONS = {"selection", "no-database", "unknown-code-note"}
 
@@ -402,8 +404,9 @@ class TestRules(unittest.TestCase):
         program = "G90 G17\nG2 X10. Y0. I5. J0.\n"
         self.assertEqual(lines_of(run(program, addresses=["X"]))[1], "G2 X10.5 Y0. I5. J0.")
         self.assertEqual(lines_of(run(program, addresses=["X"], arcCentres="yes"))[1], "G2 X10.5 Y0. I5.5 J0.")
-        self.assertEqual(lines_of(run(program, operation="multiply", operand=2, addresses=["X"]))[1], "G2 X20. Y0. I10. J0.")
-        self.assertEqual(lines_of(run(program, operation="multiply", operand=2, addresses=["X"], arcCentres="no"))[1], "G2 X20. Y0. I5. J0.")
+        # NCR-8 (v1.2.0): an arc is scaled only with both axes of its plane.
+        self.assertEqual(lines_of(run(program, operation="multiply", operand=2, addresses=["X", "Y"]))[1], "G2 X20. Y0. I10. J0.")
+        self.assertEqual(lines_of(run(program, operation="multiply", operand=2, addresses=["X", "Y"], arcCentres="no"))[1], "G2 X20. Y0. I5. J0.")
 
     def test_the_centre_word_of_a_diameter_axis_moves_as_a_radius(self):
         payload = run("G18 G90\nG2 X50. Z-10. I2. K0.\n", profile="fanuc-lathe", addresses=["X"], arcCentres="yes")
@@ -514,8 +517,10 @@ class TestRules(unittest.TestCase):
         self.assertEqual(reasons(payload), ["cycle-not-reviewed"])
 
     def test_klartext_r0_is_a_code_and_never_a_value(self):
-        payload = run("0 BEGIN PGM T MM\n1 L X+10 R0 FMAX\n2 CR X+20 Y+0 R+5 DR+\n3 END PGM T MM\n", profile="heidenhain-klartext", addresses=["R"])
-        self.assertEqual(lines_of(payload)[1:3], ["1 L X+10 R0 FMAX", "2 CR X+20 Y+0 R+5.5 DR+"])
+        # A corner rounding of a chosen R is changed as asked (an arc radius no longer is under a
+        # shift, NCR-5); the R0 of the move beside it is a code.
+        payload = run("0 BEGIN PGM T MM\n1 L X+10 R0 FMAX\n2 RND R5\n3 L X+20 Y+0\n4 END PGM T MM\n", profile="heidenhain-klartext", addresses=["R"])
+        self.assertEqual(lines_of(payload)[1:3], ["1 L X+10 R0 FMAX", "2 RND R5.5"])
 
     def test_sinumerik_cycle_positions_are_absolute_under_g91(self):
         payload = run("N10 G17 G91\nN20 CYCLE81(10,0,2,-30)\n", profile="sinumerik-mill")
@@ -960,9 +965,14 @@ class TestP4aReviewLatheCycleValues(unittest.TestCase):
         self.assertEqual(lines_of(payload)[2:4], ["G74 X21. Z-30. P3000 Q5000 R0.5 F0.1", "G76 X41. Z-20. R-2. P1000 Q300 F1.5"])
         self.assertEqual(reasons(payload), ["data", "data"])
 
-    def test_an_arc_radius_outside_a_cycle_is_still_changed(self):
+    def test_an_arc_radius_outside_a_cycle_is_left_by_a_shift(self):
+        # NCR-5 (owner decision 2026-10-18): moving an arc does not change its radius.
         payload = self.lathe("G2 X30. Z-15. R5.", operand=1, addresses=["R"])
-        self.assertEqual(lines_of(payload)[2], "G2 X30. Z-15. R6.")
+        self.assertEqual(lines_of(payload)[2], "G2 X30. Z-15. R5.")
+        self.assertEqual(
+            [(f["line"], f["reason"], f["severity"], f["message"]) for f in payload["findings"]],
+            [(3, "data", "info", "R5.: the radius of the arc of G2; a shift does not change a radius, so it is left as written.")],
+        )
 
     def test_a_multiply_of_x_never_scales_a_thread_or_a_pecking_cycle_in_part(self):
         program = "G74 R1.\nG74 X20. Z-30. P3000 Q5000 F0.1\nG76 P020060 Q100 R0.05\nG76 X40. Z-20. R-2. P1000 Q300 F1.5"
@@ -1040,3 +1050,845 @@ class TestP4aReviewLatheCycleValues(unittest.TestCase):
                 payload = run(program, profile="sinumerik", **params)
                 self.assertEqual(lines_of(payload)[2], program.split("\n")[2])
                 self.assertEqual(finding_at(payload, 3)["reason"], "cycle-position")
+
+
+def run_lathe(text, system="A", preceding=None, **params):
+    """A lathe program written inline, in G-code system A (`fanuc-lathe`) or B (its variant),
+    as a whole document or as a selection below ``preceding``."""
+    variant = ("gcodeSystem", "B") if system == "B" else None
+    context = helpers.effective_context("fanuc-lathe", variant=variant) if variant else helpers.effective_context("fanuc-lathe")
+    context["params"] = dict({"operation": "add", "operand": 0.5}, **params)
+    lines = text.split("\n")
+    if preceding is None:
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(lines)}
+    else:
+        start = len(preceding) + 1
+        context["input"] = {"scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding}
+    result = helpers.run_script(SCRIPT, stdin=text, context=context)
+    if not result.ok:
+        raise AssertionError(result.stderr)
+    return result.json()
+
+
+class TestNcFixSinglePassTaper(unittest.TestCase):
+    """v1.2 NC fix round (T009): the taper `R` of the lathe's single passes (`G90`, `G92`, `G94`;
+    system B `G77`, `G78`, `G79`) is a length along X (turning, threading) or Z (facing)
+    (`CodeParam.lengthAlong`). A shift leaves it and lists it; a multiply or divide of its axis
+    leaves the series of passes as written and says so, instead of scaling the end point and
+    keeping the taper."""
+
+    #: (G-code system, code, the axis its R lies along, the other axis, the feed or lead).
+    PASSES = [
+        ("A", "G90", "X", "Z", "F0.2"),
+        ("A", "G92", "X", "Z", "F1.5"),
+        ("A", "G94", "Z", "X", "F0.2"),
+        ("B", "G77", "X", "Z", "F0.2"),
+        ("B", "G78", "X", "Z", "F1.5"),
+        ("B", "G79", "Z", "X", "F0.2"),
+    ]
+    HEAD = {"A": "G21 G18 G99\nG0 X50. Z5.\n", "B": "G21 G18 G90 G95\nG0 X50. Z5.\n"}
+
+    def program(self, system, body):
+        return self.HEAD[system] + body + "\nG0 X50.\nM30"
+
+    def test_a_multiply_or_divide_of_the_taper_axis_leaves_the_pass(self):
+        for system, code, along, _other, feed in self.PASSES:
+            block = "%s X40. Z-20. R-2. %s" % (code, feed)
+            for operation in ("multiply", "divide"):
+                with self.subTest(code=code, operation=operation):
+                    payload = run_lathe(self.program(system, block), system, operation=operation, operand=2, addresses=[along])
+                    self.assertEqual(lines_of(payload)[2], block)
+                    self.assertEqual(
+                        finding_at(payload, 3)["message"],
+                        "%s: %s writes R-2., a length along %s that is not scaled with %s, so the pass cannot be scaled in one piece."
+                        % (block, code, along, along),
+                    )
+                    self.assertEqual(reasons(payload), ["not-scaled"])
+
+    def test_a_multiply_of_the_other_axis_scales_the_pass_and_keeps_the_taper(self):
+        for system, code, _along, other, feed in self.PASSES:
+            with self.subTest(code=code):
+                payload = run_lathe(self.program(system, "%s X40. Z-20. R-2. %s" % (code, feed)), system, operation="multiply", operand=2, addresses=[other])
+                want = "%s X%s Z%s R-2. %s" % (code, "80." if other == "X" else "40.", "-40." if other == "Z" else "-20.", feed)
+                self.assertEqual(lines_of(payload)[2], want)
+                self.assertEqual(payload["findings"], [])
+
+    def test_a_shift_of_r_leaves_the_taper_and_lists_it(self):
+        for system, code, along, _other, feed in self.PASSES:
+            with self.subTest(code=code):
+                block = "%s X40. Z-20. R-2. %s" % (code, feed)
+                payload = run_lathe(self.program(system, block + "\nR-1."), system, operand=1, addresses=[along, "R"])
+                shifted = block.replace("X40.", "X41.") if along == "X" else block.replace("Z-20.", "Z-19.")
+                self.assertEqual(lines_of(payload)[2:4], [shifted, "R-1."])
+                self.assertEqual(
+                    [(f["line"], f["reason"], f["severity"], f["message"]) for f in payload["findings"]],
+                    [
+                        (3, "data", "info", "R-2.: a value of %s, not a position of this program." % code),
+                        (4, "data", "info", "R-1.: a value of %s, not a position of this program." % code),
+                    ],
+                )
+
+    def test_the_taper_stays_in_force_for_the_next_passes(self):
+        # The control keeps X, Z and R of the single passes until a block writes them again.
+        payload = run_lathe(self.program("A", "G90 X40. Z-20. R-2. F0.2\nX38.\nX36."), operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[2:5], ["G90 X40. Z-20. R-2. F0.2", "X38.", "X36."])
+        self.assertEqual([finding_at(payload, line)["reason"] for line in (3, 4, 5)], ["not-scaled"] * 3)
+        self.assertEqual(
+            finding_at(payload, 4)["message"],
+            "X38.: R-2. of line 3 is still in force for G90, a length along X that is not scaled with X, so the pass cannot be scaled in one piece.",
+        )
+
+    def test_a_block_that_runs_no_pass_is_not_listed(self):
+        payload = run_lathe(self.program("A", "G90 X40. Z-20. R-2. F0.2\nM8\nX38."), operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "not-scaled"), (5, "not-scaled")])
+
+    def test_a_taper_further_down_leaves_the_whole_series(self):
+        payload = run_lathe(self.program("A", "G90 X40. Z-20. F0.2\nX38.\nX36. R-1."), operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[1:6], ["G0 X100. Z5.", "G90 X40. Z-20. F0.2", "X38.", "X36. R-1.", "G0 X100."])
+        self.assertEqual(
+            finding_at(payload, 3)["message"],
+            "G90 X40. Z-20. F0.2: part of the same series of passes as line 5, which is left as written (not scaled).",
+        )
+
+    def test_a_straight_series_is_scaled(self):
+        for body in ("G90 X40. Z-20. F0.2\nX38.\nX36.", "G90 X40. Z-20. R0 F0.2\nX38.\nX36."):
+            with self.subTest(body=body):
+                payload = run_lathe(self.program("A", body), operation="multiply", operand=2, addresses=["X"])
+                self.assertEqual([l.split(" Z")[0] for l in lines_of(payload)[2:5]], ["G90 X80.", "X76.", "X72."])
+                self.assertEqual(payload["findings"], [])
+
+    def test_an_arc_radius_is_no_taper(self):
+        # The R of an arc is its radius, not a value of the passes, and no pass is in force.
+        payload = run_lathe(self.program("A", "G1 X40. Z-20. F0.2\nG2 X50. Z-25. R5."), operation="multiply", operand=2, addresses=["X", "Z", "R"])
+        self.assertEqual(lines_of(payload)[2:4], ["G1 X80. Z-40. F0.2", "G2 X100. Z-50. R10."])
+        self.assertEqual(payload["findings"], [])
+
+    def test_a_selection_below_a_taper_is_left(self):
+        above = ["G21 G18 G99", "G0 X50. Z5.", "G90 X40. Z-20. R-2. F0.2"]
+        payload = run_lathe("X38.\nX36.", preceding=above, operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[:2], ["X38.", "X36."])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(4, "not-scaled"), (5, "not-scaled")])
+        # Below straight passes, the passes of the selection are scaled on their own.
+        payload = run_lathe("X38.\nX36.", preceding=above[:2] + ["G90 X40. Z-20. F0.2"], operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[:2], ["X76.", "X72."])
+        self.assertEqual(payload["findings"], [])
+
+
+class TestNcFixKlartextPlaneLengths(unittest.TestCase):
+    """v1.2 NC fix round (T012): the side lengths, diameters, corner radii and stock sizes of the
+    Klartext pockets, slots and studs (cycles 251-257) lie in the working plane
+    (`CodeParam.lengthAlong: 'plane'`). A multiply or divide of X or Y leaves the cycle and its
+    calls as written instead of scaling the calls and keeping the sizes; a shift still moves the
+    calls."""
+
+    CODES = {e["code"]: e for e in helpers.resolved_codes("heidenhain")}
+
+    def program(self, number, values=None):
+        entry = self.CODES["CYCL DEF %d" % number]
+        written = dict({p["address"]: "5" for p in entry["params"]}, Q203="+0", **(values or {}))
+        body = " ~\n".join("  %s=%s ;X" % (p["address"], written[p["address"]]) for p in entry["params"])
+        return "\n".join([
+            "0 BEGIN PGM P MM",
+            "1 TOOL CALL 1 Z S3000",
+            "2 L Z+100 R0 FMAX M3",
+            "3 CYCL DEF %d X ~" % number,
+            body,
+            "4 L X+50 Y+40 R0 FMAX M99",
+            "5 L X+80 Y+40 R0 FMAX M99",
+            "6 END PGM P MM",
+        ])
+
+    def calls(self, payload):
+        return [line for line in lines_of(payload) if line.endswith("M99")]
+
+    def test_a_multiply_or_divide_of_a_plane_axis_leaves_each_cycle_and_its_calls(self):
+        first = {251: "Q218", 252: "Q223", 253: "Q218", 256: "Q218", 257: "Q223"}
+        for number, length in first.items():
+            for operation, axes in (("multiply", ["X", "Y"]), ("divide", ["X", "Y"]), ("multiply", ["X"]), ("multiply", ["Y"])):
+                with self.subTest(cycle=number, operation=operation, axes=axes):
+                    payload = run(self.program(number), profile="heidenhain-klartext", operation=operation, operand=2, addresses=axes)
+                    self.assertEqual(self.calls(payload), ["4 L X+50 Y+40 R0 FMAX M99", "5 L X+80 Y+40 R0 FMAX M99"])
+                    self.assertEqual(set(reasons(payload)), {"not-scaled"})
+                    self.assertIn(
+                        "CYCL DEF %d writes %s=5, a length in the working plane that is not scaled with %s, so the cycle cannot be scaled in one piece."
+                        % (number, length, and_list(axes)),
+                        finding_at(payload, 4)["message"],
+                    )
+
+    def test_the_circular_slot_stays_refused_for_its_centre(self):
+        payload = run(self.program(254), profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(self.calls(payload), ["4 L X+50 Y+40 R0 FMAX M99", "5 L X+80 Y+40 R0 FMAX M99"])
+        self.assertEqual(set(reasons(payload)), {"cycle-position"})
+
+    def test_every_size_of_the_cycle_is_read(self):
+        # With the first size at zero, the next one still refuses: each plane length is read.
+        for number, zero, length in ((251, "Q218", "Q219"), (256, "Q218", "Q424"), (257, "Q223", "Q222"), (253, "Q218", "Q219")):
+            with self.subTest(cycle=number):
+                payload = run(self.program(number, {zero: "0"}), profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["X"])
+                self.assertIn("writes %s=5, a length in the working plane" % length, finding_at(payload, 4)["message"])
+
+    def test_a_shift_still_moves_the_calls(self):
+        for number in (251, 252, 253, 256, 257):
+            with self.subTest(cycle=number):
+                payload = run(self.program(number), profile="heidenhain-klartext", operand=2, addresses=["X", "Y"])
+                self.assertEqual(self.calls(payload), ["4 L X+52 Y+42 R0 FMAX M99", "5 L X+82 Y+42 R0 FMAX M99"])
+                self.assertEqual(payload["findings"], [])
+
+
+
+#: Every length along an axis or in the plane the shipped databases declare (`CodeParam.
+#: lengthAlong`, v1.2 NC fix round T009, T012 and the NCF-A follow-up), by database and code.
+#: A mark that goes missing would let a multiply or divide scale the position and keep the size.
+LENGTHS_ALONG = {
+    # NCF-C (owner decision 2026-10-18): the arc radius R, inherited by both lathe systems.
+    "fanuc": {"G2": {"R": "plane"}, "G3": {"R": "plane"}},
+    # v1.2.0 (NCR-4): system A reads G77-G79 as system B's single passes.
+    "fanuc-lathe": {"G77": {"R": "X"}, "G78": {"R": "X"}, "G79": {"R": "Z"}, "G90": {"R": "X"}, "G92": {"R": "X"}, "G94": {"R": "Z"}},
+    "fanuc-lathe-b": {"G77": {"R": "X"}, "G78": {"R": "X"}, "G79": {"R": "Z"}},
+    "heidenhain": {
+        # The corner and arc words of the contour (the last round of NCF-A): `CR … R`, `RND R`, `CHF 2`.
+        "CR": {"R": "plane"},
+        "RND": {"R": "plane"},
+        "CHF": {"CHF": "plane"},
+        "CYCL DEF 208": {"Q335": "plane", "Q342": "plane"},
+        "CYCL DEF 240": {"Q344": "plane"},
+        "CYCL DEF 262": {"Q335": "plane"},
+        "CYCL DEF 251": {"Q218": "plane", "Q219": "plane", "Q220": "plane"},
+        "CYCL DEF 252": {"Q223": "plane"},
+        "CYCL DEF 253": {"Q218": "plane", "Q219": "plane"},
+        "CYCL DEF 254": {"Q219": "plane", "Q375": "plane"},
+        "CYCL DEF 256": {"Q218": "plane", "Q424": "plane", "Q219": "plane", "Q425": "plane", "Q220": "plane"},
+        "CYCL DEF 257": {"Q223": "plane", "Q222": "plane"},
+    },
+    "sinumerik": {
+        "CYCLE61": {"_LENG": "plane", "_WID": "plane"},
+        "POCKET3": {"_LENG": "plane", "_WID": "plane", "_CRAD": "plane", "_AP1": "plane", "_AP2": "plane", "_FS": "plane"},
+        "POCKET4": {"_CDIAM": "plane", "_AP1": "plane", "_FS": "plane"},
+        "SLOT1": {"LENG": "plane", "WID": "plane", "RAD": "plane", "_FS": "plane"},
+        "SLOT2": {"WID": "plane", "RAD": "plane", "_FS": "plane"},
+        "CYCLE72": {"_FS": "plane"},
+        "CYCLE93": {"WIDG": "plane", "DIAG": "plane", "RCO1": "plane", "RCO2": "plane", "RCI1": "plane", "RCI2": "plane"},
+        # FZ-7: the corner words, codes of their own whose parameter is their own value.
+        "CHF": {"CHF": "plane"},
+        "CHR": {"CHR": "plane"},
+        "RND": {"RND": "plane"},
+        "RNDM": {"RNDM": "plane"},
+        "CR": {"CR": "plane"},
+    },
+    "okuma": {
+        "G2": {"L": "plane"},
+        "G3": {"L": "plane"},
+        "G31": {"I": "X", "L": "plane"},
+        "G32": {"K": "Z", "L": "plane"},
+        "G33": {"I": "X", "L": "plane"},
+        "G75": {"L": "plane"},
+        "G76": {"L": "plane"},
+        "G102": {"L": "plane"},
+        "G103": {"L": "plane"},
+        "G132": {"L": "plane"},
+        "G133": {"L": "plane"},
+    },
+}
+
+
+class TestNcFixLengthsAlongEveryDatabase(unittest.TestCase):
+    """v1.2 NC fix round, NCF-A follow-up: every size in the plane or along an axis of the shipped
+    databases is marked, and a multiply or divide of its axis leaves the block or the cycle as
+    written instead of scaling only its position."""
+
+    def test_the_databases_mark_exactly_the_listed_lengths(self):
+        for dialect in ("fanuc", "fanuc-lathe", "fanuc-lathe-b", "heidenhain", "okuma", "sinumerik"):
+            own = helpers.load_json(helpers.CODES_DIR / ("%s.json" % dialect))["codes"]
+            found = {
+                e["code"]: {p["address"]: p["lengthAlong"] for p in e.get("params") or [] if "lengthAlong" in p}
+                for e in own
+                if any("lengthAlong" in p for p in e.get("params") or [])
+            }
+            with self.subTest(dialect=dialect):
+                self.assertEqual(found, LENGTHS_ALONG.get(dialect, {}))
+                # And the loader keeps them, so the app hands them to the script.
+                loaded = {e["code"]: e for e in helpers.resolved_codes(dialect)}
+                for code, lengths in found.items():
+                    got = {p["address"]: p.get("lengthAlong") for p in loaded[code]["params"] if p.get("lengthAlong")}
+                    self.assertEqual(got, lengths, code)
+
+    def test_klartext_bore_and_thread_milling_and_centring_are_left_on_a_multiply(self):
+        for number, length in ((208, "Q335"), (262, "Q335"), (240, "Q344")):
+            program = TestNcFixKlartextPlaneLengths.program(TestNcFixKlartextPlaneLengths(), number)
+            for axes in (["X"], ["Y"], ["X", "Y"]):
+                with self.subTest(cycle=number, axes=axes):
+                    payload = run(program, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=axes)
+                    self.assertEqual([l for l in lines_of(payload) if l.endswith("M99")], ["4 L X+50 Y+40 R0 FMAX M99", "5 L X+80 Y+40 R0 FMAX M99"])
+                    self.assertIn("CYCL DEF %d writes %s=5, a length in the working plane" % (number, length), finding_at(payload, 4)["message"])
+            with self.subTest(cycle=number, operation="add"):
+                payload = run(program, profile="heidenhain-klartext", operand=2, addresses=["X", "Y"])
+                self.assertEqual([l for l in lines_of(payload) if l.endswith("M99")], ["4 L X+52 Y+42 R0 FMAX M99", "5 L X+82 Y+42 R0 FMAX M99"])
+
+    OKUMA = "G50 S2000\nG0 X50. Z5.\nG1 X40. Z-10. F0.2\n"
+
+    def okuma(self, body, **params):
+        return run(self.OKUMA + body + "\nG0 X80.\nM02", profile="okuma-osp", **params)
+
+    def test_okuma_radius_chamfer_and_round_lengths_leave_their_block(self):
+        body = "G2 X60. Z-20. L10.\nG1 X40. G75 L2.\nG1 Z-30. G76 L1.\nG1 X70.\nG102 X50. C90. L15.\nG132 Z-40. C45. L8."
+        payload = self.okuma(body, operation="multiply", operand=2, addresses=["X", "Z"])
+        lines = lines_of(payload)
+        self.assertEqual(lines[3:6], ["G2 X60. Z-20. L10.", "G1 X40. G75 L2.", "G1 Z-30. G76 L1."])
+        self.assertEqual(lines[6], "G1 X140.")
+        rows = [(f["line"], f["reason"]) for f in payload["findings"]]
+        self.assertEqual(rows, [(4, "not-scaled"), (5, "not-scaled"), (6, "not-scaled"), (8, "not-scaled"), (9, "not-scaled")])
+        self.assertEqual(
+            finding_at(payload, 5)["message"],
+            "G1 X40. G75 L2.: G75 writes L2., a length in the working plane that is not scaled with X and Z, so the block cannot be scaled in one piece.",
+        )
+        # A shift is no multiply: it refuses none of them (with no machine chosen the Okuma words
+        # are left for their reading, which is another finding).
+        payload = self.okuma(body, operand=1, addresses=["Z"])
+        self.assertNotIn("not-scaled", reasons(payload))
+
+    def test_okuma_thread_pass_taper_is_kept_for_the_next_passes(self):
+        for code, taper, along, other in (("G33", "I-2.", "X", "Z"), ("G31", "I-2.", "X", "Z"), ("G32", "K-1.", "Z", "X")):
+            body = "%s X40. Z-20. %s F1.5\nX39." % (code, taper) if along == "X" else "%s X0. Z-2. %s F1.5\nZ-2.5" % (code, taper)
+            with self.subTest(code=code):
+                payload = self.okuma(body, operation="multiply", operand=2, addresses=[along])
+                self.assertEqual(lines_of(payload)[3:5], body.split("\n"))
+                self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(4, "not-scaled"), (5, "not-scaled")])
+                payload = self.okuma(body, operation="multiply", operand=2, addresses=[other])
+                self.assertEqual(payload["findings"], [])
+
+    def test_sinumerik_corner_words_leave_their_block(self):
+        text = "N10 G17 G90 G71\nN20 G0 X0 Y0 Z5\nN30 G1 X10 Y0 RND=2 F200\nN40 G1 X10 Y10 CHR=1\nN50 G1 X0 Y10 RNDM=0\nN60 M30"
+        payload = run(text, profile="sinumerik-mill", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[2:5], ["N30 G1 X10 Y0 RND=2 F200", "N40 G1 X10 Y10 CHR=1", "N50 G1 X0 Y20 RNDM=0"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "not-scaled"), (4, "not-scaled")])
+        self.assertEqual(
+            finding_at(payload, 3)["message"],
+            "N30 G1 X10 Y0 RND=2 F200: RND=2 is a length in the working plane that is not scaled with X and Y, so the block cannot be scaled in one piece.",
+        )
+        payload = run(text, profile="sinumerik-mill", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[2], "N30 G1 X12 Y2 RND=2 F200")
+        self.assertEqual(payload["findings"], [])
+
+    SINUMERIK_RNDM = "\n".join([
+        "N10 G17 G90 G71", "N20 G0 X0 Y0 Z5", "N30 G1 X10 Y0 RNDM=2 F200", "N40 G1 X10 Y10", "N50 G1 X0 Y10",
+        "N60 G1 X0 Y0 RNDM=0", "N70 G1 X5 Y0", "N80 M30",
+    ])
+
+    def test_sinumerik_modal_rounding_leaves_every_block_it_rounds(self):
+        payload = run(self.SINUMERIK_RNDM, profile="sinumerik-mill", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[2:7], self.SINUMERIK_RNDM.split("\n")[2:6] + ["N70 G1 X10 Y0"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(line, "not-scaled") for line in (3, 4, 5, 6)])
+        self.assertEqual(
+            finding_at(payload, 4)["message"],
+            "N40 G1 X10 Y10: RNDM=2 of line 3 is still in force and rounds this block's corner, a length in the working plane that is not scaled with X and Y, so the block cannot be scaled in one piece.",
+        )
+        # From a selection below RNDM=2 too; a scale of the tool axis is not concerned.
+        lines = self.SINUMERIK_RNDM.split("\n")
+        context = helpers.effective_context("sinumerik-mill")
+        context["params"] = {"operation": "multiply", "operand": 2, "addresses": ["X"]}
+        context["input"] = {"scope": "selection", "startLine": 4, "endLine": 5, "precedingLines": lines[:3]}
+        part = helpers.run_script(SCRIPT, stdin="\n".join(lines[3:5]), context=context).json()
+        self.assertEqual([(f["line"], f["reason"]) for f in part["findings"]], [(4, "not-scaled"), (5, "not-scaled")])
+        payload = run(self.SINUMERIK_RNDM, profile="sinumerik-mill", operation="multiply", operand=2, addresses=["Z"])
+        self.assertEqual(payload["findings"], [])
+
+    def test_sinumerik_arc_radius(self):
+        text = "N10 G17 G90 G71\nN20 G0 X0 Y0 Z5\nN30 G2 X10 Y0 CR=5 F200\nN40 M30"
+        payload = run(text, profile="sinumerik-mill", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[2], "N30 G2 X10 Y0 CR=5 F200")
+        self.assertEqual(finding_at(payload, 3)["reason"], "not-scaled")
+
+    KLARTEXT_CORNERS = "\n".join([
+        "0 BEGIN PGM K MM", "1 TOOL CALL 1 Z S3000", "2 L X+0 Y+0 R0 FMAX", "3 L X+20 Y+0 RL F200", "4 RND R2",
+        "5 L X+20 Y+20", "6 CHF 3", "7 L X+0 Y+20", "8 CR X+0 Y+0 R+10 DR+", "9 END PGM K MM",
+    ])
+
+    def test_klartext_corner_and_arc_words_leave_their_block(self):
+        payload = run(self.KLARTEXT_CORNERS, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual([lines_of(payload)[i] for i in (4, 6, 8)], ["4 RND R2", "6 CHF 3", "8 CR X+0 Y+0 R+10 DR+"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(5, "not-scaled"), (7, "not-scaled"), (9, "not-scaled")])
+        self.assertEqual(
+            finding_at(payload, 7)["message"],
+            "6 CHF 3: CHF writes CHF 3, a length in the working plane that is not scaled with X and Y, so the block cannot be scaled in one piece.",
+        )
+        self.assertEqual(
+            finding_at(payload, 5)["message"],
+            "4 RND R2: RND writes R2, a length in the working plane that is not scaled with X and Y, so the block cannot be scaled in one piece.",
+        )
+
+    def test_klartext_with_r_chosen_keeps_the_add_r_rule(self):
+        # The form's rule: "When multiplying, add R if arcs are written with a radius" (NCF-C:
+        # without it such a block is left as written). With R
+        # chosen the radii are changed as before; the chamfer has no address and stays refused.
+        payload = run(self.KLARTEXT_CORNERS, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["X", "Y", "R"])
+        self.assertEqual([lines_of(payload)[i] for i in (4, 6, 8)], ["4 RND R4", "6 CHF 3", "8 CR X+0 Y+0 R+20 DR+"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(7, "not-scaled")])
+        # A shift changes the corner rounding as asked and leaves the arc radius (NCR-5).
+        payload = run(self.KLARTEXT_CORNERS, profile="heidenhain-klartext", operand=2, addresses=["X", "Y", "R"])
+        self.assertEqual([lines_of(payload)[i] for i in (4, 6, 8)], ["4 RND R4", "6 CHF 3", "8 CR X+2 Y+2 R+10 DR+"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(9, "data")])
+
+    def test_sinumerik_milling_cycles_stay_refused(self):
+        # Their positions in the plane (_PA, _PO, _CPA, _CPO) refuse them already; the marked
+        # sizes keep them refused should those positions ever be moved.
+        program = "G17 G90 G71\nT1 D1\nG0 X0 Y0 Z50\nPOCKET3(50,0,2,-10,40,30,5,60,40,0,5,0.2,0.1,500,100,0,11,6,,,,,,0,1,,1101,12,111)\nM30"
+        payload = run(program, profile="sinumerik-mill", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[3], program.split("\n")[3])
+        self.assertEqual(finding_at(payload, 4)["reason"], "cycle-position")
+
+def and_list(words):
+    return words[0] if len(words) == 1 else "%s and %s" % (", ".join(words[:-1]), words[-1])
+
+
+class TestNcfcFanucArcRadius(unittest.TestCase):
+    """v1.2.0 NC fix round, NCF-C (owner decision 2026-10-18): the radius R of a Fanuc arc is a
+    length in the plane. A multiply or divide of a plane axis leaves an arc written with R as
+    written and lists it, unless R is chosen; with R chosen the arc is scaled as before."""
+
+    MILL = "G90 G17 G21\nG0 X0. Y0. Z5.\nG1 X10. Y0. F100.\nG2 X20. Y10. R10.\nG3 X30. Y20. I10. J0.\nG1 X40.\nM30"
+
+    def test_a_mill_arc_with_r_is_left_when_r_is_not_chosen(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[3], "G2 X20. Y10. R10.")
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(4, "not-scaled")])
+        self.assertEqual(
+            finding_at(payload, 4)["message"],
+            "G2 X20. Y10. R10.: G2 writes R10., a length in the working plane that is not scaled with X and Y, so the block cannot be scaled in one piece.",
+        )
+        # One axis of the plane is enough; the modal G2 of a block without its code too.
+        payload = run("G90 G17 G21\nG0 X0. Y0.\nG2 X20. Y0. R10. F100.\nX40. R10.\nM30", operation="divide", operand=2, addresses=["X"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "not-scaled"), (4, "not-scaled")])
+
+    def test_with_r_chosen_the_arc_is_scaled_as_before(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["X", "Y", "R"])
+        self.assertEqual(lines_of(payload)[2:6], ["G1 X20. Y0. F100.", "G2 X40. Y20. R20.", "G3 X60. Y40. I20. J0.", "G1 X80."])
+        self.assertEqual(payload["findings"], [])
+
+    def test_the_tool_axis_and_a_shift_leave_the_radius_alone(self):
+        # The radius lies in the XY plane: scaling Z (a helix's depth) does not touch it.
+        payload = run("G90 G17 G21\nG0 X0. Y0. Z5.\nG2 X20. Y0. Z-2. R10. F100.\nM30", operation="multiply", operand=2, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[2], "G2 X20. Y0. Z-4. R10. F100.")
+        self.assertEqual(payload["findings"], [])
+        payload = run(self.MILL, operand=1, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[3], "G2 X21. Y11. R10.")
+        self.assertEqual(payload["findings"], [])
+        # A zero radius is no length to scale.
+        payload = run("G90 G17 G21\nG0 X0. Y0.\nG2 X20. Y0. R0. F100.\nM30", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(payload["findings"], [])
+
+    def test_the_lathe_arc_in_both_systems(self):
+        text = "G21 G18 G99\nG0 X40. Z2.\nG1 Z-10. F0.2\nG2 X60. Z-20. R10.\nG1 Z-30.\nM30"
+        for variant in (None, ("gcodeSystem", "B")):
+            with self.subTest(variant=variant):
+                context = helpers.effective_context("fanuc-lathe", variant=variant) if variant else helpers.effective_context("fanuc-lathe")
+                context["params"] = {"operation": "multiply", "operand": 2, "addresses": ["Z"]}
+                context["input"] = {"scope": "document", "startLine": 1, "endLine": 6}
+                payload = helpers.run_script(SCRIPT, stdin=text, context=context).json()
+                self.assertEqual(lines_of(payload)[3], "G2 X60. Z-20. R10.")
+                self.assertEqual(
+                    finding_at(payload, 4)["message"],
+                    "G2 X60. Z-20. R10.: G2 writes R10., a length in the working plane that is not scaled with Z, so the block cannot be scaled in one piece.",
+                )
+                context["params"]["addresses"] = ["X", "Z", "R"]
+                payload = helpers.run_script(SCRIPT, stdin=text, context=context).json()
+                self.assertEqual(lines_of(payload)[3], "G2 X120. Z-40. R20.")
+                self.assertEqual(payload["findings"], [])
+
+
+def run_selection(text, start, end, profile="fanuc-gcode", **params):
+    """A selection of an inline program (lines ``start`` to ``end``), primed with the lines above."""
+    lines = text.split("\n")
+    context = helpers.effective_context(profile)
+    context["params"] = dict({"operation": "add", "operand": 0.5}, **params)
+    context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+    result = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
+    if not result.ok:
+        raise AssertionError(result.stderr)
+    return result.json()
+
+
+class TestNcr1DrillingCycleAfterAnArc(unittest.TestCase):
+    """v1.2.0 NC review, NCR-1 (a regression of NCF-C): the motion group still holds `G2` while a
+    drilling cycle runs, but the cycle's `R` is its R plane, never the arc's radius. A block that
+    runs a cycle written as a word reads no length of the motion code in force."""
+
+    MILL = "\n".join([
+        "%", "O1", "G90 G17 G0 X0 Y0 Z5.", "G1 X10 Y0 F100", "G2 X20 Y10 R10.",
+        "G99 G81 X30 Y0 Z-5. R2. F100", "X40.", "G80", "M30", "%",
+    ])
+
+    def test_a_shift_of_z_moves_the_r_plane(self):
+        payload = run(self.MILL, operand=5, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[5], "G99 G81 X30 Y0 Z0. R7. F100")
+        self.assertEqual(payload["findings"], [])
+        # The same from a selection that holds the Z the cycle starts at, and the arc.
+        payload = run_selection(self.MILL, 3, 8, operand=5, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[3], "G99 G81 X30 Y0 Z0. R7. F100")
+        self.assertEqual(payload["findings"], [])
+        # v1.2.0 D4: a selection that starts at the cycle, with the arc and Z5. above it, starts
+        # the cycle at the unmoved level (TestD4CycleStartLevel); it is left for that, never
+        # for a value of G2.
+        payload = run_selection(self.MILL, 6, 8, operand=5, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[0], "G99 G81 X30 Y0 Z-5. R2. F100")
+        self.assertEqual({f["reason"] for f in payload["findings"]}, {"cycle-level-outside"})
+
+    def test_a_multiply_of_z_scales_the_r_plane(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[5], "G99 G81 X30 Y0 Z-10. R4. F100")
+        self.assertEqual(payload["findings"], [])
+
+    def test_a_peck_cycle_after_a_g3(self):
+        text = self.MILL.replace("G2 X20", "G3 X20").replace("G99 G81 X30 Y0 Z-5. R2. F100", "G98 G83 X30 Y0 Z-15. R2. Q3. F100")
+        payload = run(text, operand=5, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[5], "G98 G83 X30 Y0 Z-10. R7. Q3. F100")
+        self.assertEqual(payload["findings"], [])
+
+    def test_a_multiply_of_x_and_y_scales_the_cycle_and_leaves_only_the_arc(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[4:7], ["G2 X20 Y10 R10.", "G99 G81 X60 Y0 Z-5. R2. F100", "X80."])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(5, "not-scaled")])
+
+    def test_an_arc_written_in_cycle_mode_and_after_g80_is_still_an_arc(self):
+        # A G2 written under the cycle ends it; a block after G80 runs the modal G2 again.
+        text = "\n".join([
+            "%", "O1", "G90 G17 G0 X0 Y0 Z5.", "G1 X10 Y0 F100", "G2 X20 Y10 R10.",
+            "G99 G81 X30 Y0 Z-5. R2. F100", "G2 X40. Y10. R10.", "G80", "X50. Y0 R10.", "M30", "%",
+        ])
+        payload = run(text, operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(5, "not-scaled"), (7, "not-scaled"), (9, "not-scaled")])
+        self.assertEqual(lines_of(payload)[5], "G99 G81 X60 Y0 Z-5. R2. F100")
+
+    def test_a_cycle_and_an_arc_in_one_block_are_left(self):
+        for block in ("G2 G81 X10. Y0. Z-5. R2. F100.", "G81 G2 X10. Y0. Z-5. R2. F100."):
+            with self.subTest(block=block):
+                payload = run("G90 G17 G21\nG0 X0. Y0. Z5.\n%s\nG80\nM30" % block, operand=1, addresses=["Z"])
+                self.assertEqual(lines_of(payload)[2], block)
+                self.assertEqual(
+                    finding_at(payload, 3)["message"],
+                    "%s: writes the cycle G81 and the arc G2 in one block, so whether its words are the cycle's position and R plane or the arc's end point and radius is not certain." % block,
+                )
+                self.assertEqual(reasons(payload), ["cycle-mode"])
+
+    def test_a_lathe_cycle_under_a_single_pass_writes_no_taper(self):
+        # The relief R of G74 under the G90 mode is the cycle's, not a taper of the pass.
+        text = "G21 G18 G99\nG0 X50. Z5.\nG90 X40. Z-20. F0.2\nG74 R1.\nX38.\nG0 X100.\nM30"
+        payload = run(text, profile="fanuc-lathe", operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[2:5], ["G90 X80. Z-20. F0.2", "G74 R1.", "X76."])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(4, "not-scaled")])
+        payload = run(text, profile="fanuc-lathe", operand=1, addresses=["X", "R"])
+        self.assertEqual(finding_at(payload, 4)["message"], "R1.: a value of G74, not a position of this program.")
+
+
+class TestNcr8ArcsNeedBothAxes(unittest.TestCase):
+    """v1.2.0 NC review, NCR-8: a multiply or divide of one axis of the plane but not the other
+    would write an arc whose centre no longer fits its end points. Such an arc block is left."""
+
+    MILL = "G90 G17 G21\nG0 X0 Y0 Z5.\nG1 X10 Y0 F100\nG2 X20 Y10 I0 J10.\nG0 Z50.\nM30"
+    LATHE = "G21 G18 G99\nG0 X20. Z2.\nG1 Z-10. F0.2\nG2 X40. Z-20. I10. K0\nG0 X100.\nM30"
+
+    def test_a_mill_arc_scaled_along_x_alone_is_left(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[2:4], ["G1 X20 Y0 F100", "G2 X20 Y10 I0 J10."])
+        self.assertEqual(
+            finding_at(payload, 4)["message"],
+            "G2 X20 Y10 I0 J10.: runs the arc of G2 in the XY plane, which this run scales along X but not along Y, so the arc cannot be scaled in one piece.",
+        )
+        self.assertEqual(reasons(payload), ["not-scaled"])
+        # Also a block that writes no chosen word.
+        payload = run("G90 G17 G21\nG0 X10. Y0.\nG2 Y20. J10. F100.\nM30", operation="divide", operand=2, addresses=["X"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "not-scaled")])
+
+    def test_both_axes_of_the_plane_or_the_tool_axis_alone_are_scaled(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[3], "G2 X40 Y20 I0 J20.")
+        self.assertEqual(payload["findings"], [])
+        helix = "G90 G17 G21\nG0 X0 Y0 Z5.\nG1 X10 Y0 F100\nG2 X20 Y10 Z-2. I0 J10.\nM30"
+        payload = run(helix, operation="multiply", operand=2, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[3], "G2 X20 Y10 Z-4. I0 J10.")
+        self.assertEqual(payload["findings"], [])
+
+    def test_a_lathe_arc(self):
+        payload = run(self.LATHE, profile="fanuc-lathe", operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[3], "G2 X40. Z-20. I10. K0")
+        self.assertEqual(
+            finding_at(payload, 4)["message"],
+            "G2 X40. Z-20. I10. K0: runs the arc of G2 in the ZX plane, which this run scales along X but not along Z, so the arc cannot be scaled in one piece.",
+        )
+        payload = run(self.LATHE, profile="fanuc-lathe", operation="multiply", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[3], "G2 X80. Z-40. I20. K0")
+        self.assertEqual(payload["findings"], [])
+
+    def test_a_lathe_chamfer_written_with_i(self):
+        text = "G21 G18 G99\nG0 X20. Z2.\nG1 Z-10. I2. F0.2\nX40.\nM30"
+        payload = run(text, profile="fanuc-lathe", operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[2], "G1 Z-10. I2. F0.2")
+        self.assertEqual(
+            finding_at(payload, 3)["message"],
+            "G1 Z-10. I2. F0.2: writes I2., an arc centre or a chamfer of the path, in the ZX plane, which this run scales along X but not along Z, so the arc cannot be scaled in one piece.",
+        )
+        payload = run(text, profile="fanuc-lathe", operation="multiply", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[2], "G1 Z-20. I4. F0.2")
+        self.assertEqual(payload["findings"], [])
+
+    def test_a_sinumerik_arc(self):
+        text = "N10 G90 G17 G0 X0 Y0\nN20 G1 X10 Y0 F100\nN30 G2 X20 Y10 I0 J10\nN40 M30"
+        payload = run(text, profile="sinumerik-mill", operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[2], "N30 G2 X20 Y10 I0 J10")
+        self.assertEqual(reasons(payload), ["not-scaled"])
+
+    def test_an_unknown_plane_counts_every_axis(self):
+        payload = run("G90 G0 X0 Y0\nG1 X10 Y0 F100\nG2 X20 Y10 I0 J10.\nM30", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(
+            finding_at(payload, 3)["message"],
+            "G2 X20 Y10 I0 J10.: runs the arc of G2 in a plane that is not known here, which this run scales along X and Y but not along Z, so the arc cannot be scaled in one piece.",
+        )
+
+
+class TestNcr6CornerWords(unittest.TestCase):
+    """v1.2.0 NC review, NCR-6 (interim, owner decision 2026-10-18): a chamfer, a rounding or an
+    angle written with a word no code describes keeps its size, so a multiply or divide of an
+    axis of the plane leaves its block. A shift keeps them."""
+
+    MILL = "%\nO1\nG90 G17 G0 X0. Y0. Z5.\nG1 X10. ,R2. F100\nY10. ,C1.\nX20. ,A30.\nM30\n%"
+
+    def test_mill_comma_words_under_a_multiply_of_the_plane(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[3:6], ["G1 X10. ,R2. F100", "Y10. ,C1.", "X20. ,A30."])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(4, "not-scaled"), (5, "not-scaled"), (6, "not-scaled")])
+        self.assertEqual(
+            finding_at(payload, 4)["message"],
+            "G1 X10. ,R2. F100: ,R2. is a chamfer, a rounding or an angle of the path, which is not scaled with X and Y, so the block cannot be scaled in one piece.",
+        )
+
+    def test_a_shift_or_a_scale_of_the_tool_axis_keeps_them(self):
+        payload = run(self.MILL, operand=5, addresses=["X"])
+        self.assertEqual(lines_of(payload)[3:6], ["G1 X15. ,R2. F100", "Y10. ,C1.", "X25. ,A30."])
+        self.assertEqual(payload["findings"], [])
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[3:6], ["G1 X10. ,R2. F100", "Y10. ,C1.", "X20. ,A30."])
+        self.assertEqual(payload["findings"], [])
+
+    def test_lathe_corner_and_chamfer_of_a_straight_move(self):
+        for word, message in (
+            ("R2.", "R2. is a chamfer, a rounding or an angle of the path"),
+            ("C2.", "C2. may be a chamfer of the path (or a move of the C axis, by a setting of the control)"),
+            (",R2.", ",R2. is a chamfer, a rounding or an angle of the path"),
+        ):
+            with self.subTest(word=word):
+                block = "G1 Z-10. %s F0.2" % word
+                text = "%%\nO1\nG0 X20. Z2.\n%s\nX40.\nM30\n%%" % block
+                payload = run(text, profile="fanuc-lathe", operation="multiply", operand=2, addresses=["X", "Z"])
+                self.assertEqual(lines_of(payload)[3], block)
+                self.assertEqual(
+                    finding_at(payload, 4)["message"],
+                    "%s: %s, which is not scaled with X and Z, so the block cannot be scaled in one piece." % (block, message),
+                )
+                payload = run(text, profile="fanuc-lathe", operand=1, addresses=["Z"])
+                self.assertEqual(lines_of(payload)[3], block.replace("Z-10.", "Z-9."))
+                self.assertEqual(payload["findings"], [])
+
+    def test_a_rapid_c_axis_position_on_a_lathe_is_no_chamfer(self):
+        # Guard: a chamfer or a rounding is written on a cutting move only.
+        text = "G21 G18 G99\nG0 X20. Z2. C90.\nG1 Z-10. F0.2\nM30"
+        payload = run(text, profile="fanuc-lathe", operation="multiply", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[1], "G0 X40. Z4. C90.")
+        self.assertEqual(payload["findings"], [])
+
+    def test_a_c_axis_move_on_a_mill_is_no_chamfer(self):
+        # C is an axis of the milling profile: the block is judged as a rotary move, not a chamfer.
+        payload = run("G90 G17 G21\nG0 X0. Y0. C0.\nG1 X10. C30. F100\nM30", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(reasons(payload), ["rotary-without-tcp"])
+        payload = run("G90 G17 G21\nG0 X0. Y0. C0.\nG1 Z-1. C30. F100\nM30", operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(payload["findings"], [])
+
+
+class TestNcr9bEmptyToolAxisArgument(unittest.TestCase):
+    """v1.2.0 NC review, NCR-9b: a Sinumerik cycle reads an empty argument as 0. A shift of the
+    tool axis cannot move an empty position without writing a number into it, so the call is
+    left, unless the empty depth is given by its twin (`DPR` for `DP`, `FDPR` for `FDEP`)."""
+
+    HEAD = "N10 G90 G17 G0 X0 Y0 Z50\nN20 X10 Y10\n"
+
+    def test_an_empty_reference_plane_is_left(self):
+        payload = run(self.HEAD + "N30 CYCLE81(10,,2,-10)\nN40 M30", profile="sinumerik-mill", operand=5, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[2], "N30 CYCLE81(10,,2,-10)")
+        self.assertEqual(
+            finding_at(payload, 3)["message"],
+            "N30 CYCLE81(10,,2,-10): RFP of CYCLE81 (argument 2) is empty, which the control reads as 0; a shift of Z cannot move it without writing a number there, so the cycle is left as written.",
+        )
+        self.assertEqual(reasons(payload), ["cycle-empty"])
+        self.assertIn("1 cycle with an empty position on the tool axis", payload["message"])
+
+    def test_a_depth_given_by_its_twin_is_moved(self):
+        payload = run(self.HEAD + "N30 CYCLE81(10,0,2,,5)\nN40 CYCLE83(10,0,2,-30,,,5,1,0,0,1,0)\nN50 M30", profile="sinumerik-mill", operand=5, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[2:4], ["N30 CYCLE81(15,5,2,,5)", "N40 CYCLE83(15,5,2,-25,,,5,1,0,0,1,0)"])
+        self.assertEqual(payload["findings"], [])
+
+    def test_a_depth_left_out_with_its_twin_is_left(self):
+        payload = run(self.HEAD + "N30 CYCLE81(10,0,2)\nN40 M30", profile="sinumerik-mill", operand=5, addresses=["Z"])
+        self.assertEqual(
+            finding_at(payload, 3)["message"],
+            "N30 CYCLE81(10,0,2): DP of CYCLE81 (argument 4) is empty, which the control reads as 0, and DPR, which would give it instead, is empty too; a shift of Z cannot move it without writing a number there, so the cycle is left as written.",
+        )
+
+    def test_the_positions_under_mcall_are_left_with_their_call(self):
+        text = self.HEAD + "N30 MCALL CYCLE81(10,,2,-10)\nN40 X20 Y20\nN50 MCALL\nN60 M30"
+        payload = run(text, profile="sinumerik-mill", operand=5, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[2:4], ["N30 MCALL CYCLE81(10,,2,-10)", "N40 X20 Y20"])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "cycle-empty"), (4, "cycle-empty")])
+
+
+class TestEveryReasonHasItsWords(unittest.TestCase):
+    """v1.2.0 D4 (item 4): every reason id the script can write has its words. The app shows a
+    finding's message and severity and never maps the id to a label of its own, so the words of
+    an id are the script's: the summary's count (`REASON_TEXT`) and, for a block reason, what a
+    block of the same cycle says about the one that refused it (`SHORT`). The ids are the
+    README's vocabulary, which the findings of every golden keep to (above)."""
+
+    def test_every_block_and_word_reason_has_its_words(self):
+        import importlib
+
+        helpers.import_gedit_nc()  # puts the bundled scripts on sys.path
+        module = importlib.import_module("address_arithmetic")
+        self.assertEqual(set(module.BLOCK_REASONS), BLOCK_REASONS)
+        self.assertEqual(set(module.WORD_REASONS), WORD_REASONS)
+        self.assertEqual([r for r in list(module.BLOCK_REASONS) + list(module.WORD_REASONS) if not module.REASON_TEXT.get(r, (None,))[0]], [])
+        self.assertEqual([r for r in module.BLOCK_REASONS if not module.SHORT.get(r)], [])
+
+
+class TestD4CycleStartLevel(unittest.TestCase):
+    """v1.2.0 NC fix round, batch D4: a cycle written as a word that starts a selection's holes
+    while the tool axis still stands at the level of the lines above. A shift of the selection's
+    Z words does not move that level: the cycle would move to its holes there and, in `G98`,
+    return there. `G98` and `G99` are no data, so both refuse (`cycle-level-outside`), with the
+    blocks of the cycle; a Z word of the selection before the cycle that the run moves gives it a
+    moved level."""
+
+    PROGRAM = ["%", "O1", "G21 G17 G90 G54", "G0 X0. Y0. Z50.", "%s G81 X10. Y10. Z-5. R2. F100.", "X20.", "G80", "G0 Z50.", "M30", "%"]
+
+    def program(self, mode="G98"):
+        return "\n".join((line % mode).strip() if "%s" in line else line for line in self.PROGRAM)
+
+    def test_a_cycle_at_the_level_of_the_lines_above_is_left_with_its_blocks(self):
+        for mode in ("G98", "G99", ""):
+            with self.subTest(mode=mode):
+                payload = run_selection(self.program(mode), 5, 8, operand=5, addresses=["Z", "R"])
+                self.assertEqual(lines_of(payload)[:2], [("%s G81 X10. Y10. Z-5. R2. F100." % mode).strip(), "X20."])
+                self.assertEqual(lines_of(payload)[3], "G0 Z55.")
+                self.assertEqual([(f["line"], f["severity"], f["reason"]) for f in payload["findings"]], [(5, "warning", "cycle-level-outside"), (6, "warning", "cycle-level-outside")])
+                self.assertIn("starts at the Z level the lines above the selection left the tool at, which this run does not change", payload["findings"][0]["message"])
+                self.assertIn("2 cycles that start at the level of the lines above the selection", payload["message"])
+
+    def test_a_z_word_of_the_selection_before_the_cycle_gives_it_a_moved_level(self):
+        payload = run_selection(self.program(), 4, 8, operand=5, addresses=["Z", "R"])
+        self.assertEqual(lines_of(payload)[:2], ["G0 X0. Y0. Z55.", "G98 G81 X10. Y10. Z0. R7. F100."])
+        self.assertEqual(payload["findings"], [])
+
+    def test_an_incremental_z_before_the_cycle_keeps_the_level_of_the_lines_above(self):
+        text = "\n".join(["%", "O1", "G21 G17 G90 G54", "G0 X0. Y0. Z50.", "G91 G0 Z-10.", "G90 G98 G81 X10. Y10. Z-5. R2. F100.", "G80", "M30"])
+        payload = run_selection(text, 5, 7, operand=5, addresses=["Z", "R"])
+        self.assertIn((6, "cycle-level-outside"), [(f["line"], f["reason"]) for f in payload["findings"]])
+
+    def test_guard_what_does_not_move_the_level_is_written(self):
+        # A shift of X; a multiply (a level a scale would have to scale too, outside this rule);
+        # the whole program; no Z written above the selection.
+        payload = run_selection(self.program(), 5, 8, operand=5, addresses=["X"])
+        self.assertEqual((payload["findings"], lines_of(payload)[0]), ([], "G98 G81 X15. Y10. Z-5. R2. F100."))
+        payload = run_selection(self.program(), 5, 8, operation="multiply", operand=2, addresses=["Z", "R"])
+        self.assertEqual((payload["findings"], lines_of(payload)[0]), ([], "G98 G81 X10. Y10. Z-10. R4. F100."))
+        payload = run(self.program(), operand=5, addresses=["Z", "R"])
+        self.assertEqual(payload["findings"], [])
+        unwritten = "\n".join(["%", "O1", "G21 G17 G90 G54", "G0 X0. Y0.", "G98 G81 X10. Y10. Z-5. R2. F100.", "G80", "M30"])
+        self.assertEqual(run_selection(unwritten, 5, 6, operand=5, addresses=["Z", "R"])["findings"], [])
+
+
+class TestNcr5ArcRadius(unittest.TestCase):
+    """v1.2.0 NC review, NCR-5 (owner decision 2026-10-18): a chosen R that is the radius of an
+    arc is scaled with both axes of its plane, left and listed when neither is scaled or the run
+    shifts, and refuses its block when only one of them is scaled."""
+
+    MILL = "%\nO1\nG90 G17 G0 X0 Y0 Z5.\nG1 X10 Y0 F100\nG2 X20 Y10 Z-2. R10.\nG0 Z50.\nM30\n%"
+    KLARTEXT = "\n".join([
+        "0 BEGIN PGM T MM", "1 TOOL CALL 1 Z S3000", "2 L X+0 Y+0 Z+5 R0 FMAX", "3 L X+10 Y+0 RL F100",
+        "4 CR X+20 Y+10 Z-2 R+10 DR+", "5 L X+30 R0", "6 END PGM T MM",
+    ])
+
+    def test_one_axis_of_the_plane_refuses(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["X", "R"])
+        self.assertEqual(lines_of(payload)[4], "G2 X20 Y10 Z-2. R10.")
+        self.assertEqual(
+            finding_at(payload, 5)["message"],
+            "G2 X20 Y10 Z-2. R10.: G2 writes R10., the radius of an arc in the XY plane, which this run scales along X but not along Y, so the arc cannot be scaled in one piece.",
+        )
+
+    def test_neither_axis_of_the_plane_leaves_and_lists_it(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["Z", "R"])
+        self.assertEqual(lines_of(payload)[4], "G2 X20 Y10 Z-4. R10.")
+        self.assertEqual(
+            [(f["line"], f["reason"], f["severity"], f["message"]) for f in payload["findings"]],
+            [(5, "data", "info", "R10.: the radius of the arc of G2 in the XY plane, which this run does not scale, so it is left as written.")],
+        )
+
+    def test_a_shift_leaves_and_lists_it(self):
+        payload = run(self.MILL, operand=5, addresses=["Z", "R"])
+        self.assertEqual(lines_of(payload)[4], "G2 X20 Y10 Z3. R10.")
+        self.assertEqual(
+            [(f["line"], f["reason"], f["message"]) for f in payload["findings"]],
+            [(5, "data", "R10.: the radius of the arc of G2; a shift does not change a radius, so it is left as written.")],
+        )
+
+    def test_both_axes_of_the_plane_scale_it(self):
+        payload = run(self.MILL, operation="multiply", operand=2, addresses=["X", "Y", "R"])
+        self.assertEqual(lines_of(payload)[4], "G2 X40 Y20 Z-2. R20.")
+        self.assertEqual(payload["findings"], [])
+
+    def test_klartext_cr_the_same(self):
+        def cr(payload):
+            return lines_of(payload)[4]
+
+        payload = run(self.KLARTEXT, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["X", "R"])
+        self.assertEqual(cr(payload), "4 CR X+20 Y+10 Z-2 R+10 DR+")
+        self.assertEqual(finding_at(payload, 5)["reason"], "not-scaled")
+        payload = run(self.KLARTEXT, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["Z", "R"])
+        self.assertEqual(cr(payload), "4 CR X+20 Y+10 Z-4 R+10 DR+")
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(5, "data")])
+        payload = run(self.KLARTEXT, profile="heidenhain-klartext", operand=1, addresses=["Z", "R"])
+        self.assertEqual(cr(payload), "4 CR X+20 Y+10 Z-1 R+10 DR+")
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(5, "data")])
+        payload = run(self.KLARTEXT, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["X", "Y", "R"])
+        self.assertEqual(cr(payload), "4 CR X+40 Y+20 Z-2 R+20 DR+")
+        self.assertEqual(payload["findings"], [])
+
+
+class TestNcr7ApproachSizes(unittest.TestCase):
+    """v1.2.0 NC review, NCR-7 (owner decision 2026-10-18): the length and the radius of a Klartext
+    approach or departure are process values. A multiply or divide of the plane scales the end
+    points, keeps them and says so with a warning."""
+
+    PROGRAM = "\n".join([
+        "0 BEGIN PGM T MM", "1 TOOL CALL 1 Z S3000", "2 L X+0 Y+0 Z+5 R0 FMAX", "3 APPR LCT X+10 Y+0 R5 RL F100",
+        "4 L X+10 Y+10", "5 DEP LCT X+70 Y+40 R5", "6 APPR LN X+10 Y+0 LEN15 RL", "7 L X+30 Y+0", "8 DEP LN LEN10",
+        "9 END PGM T MM",
+    ])
+
+    def test_a_multiply_of_the_plane_keeps_them_with_a_warning(self):
+        for addresses in (["X", "Y"], ["X", "Y", "R"]):
+            with self.subTest(addresses=addresses):
+                payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=addresses)
+                self.assertEqual(
+                    lines_of(payload)[3:9],
+                    ["3 APPR LCT X+20 Y+0 R5 RL F100", "4 L X+20 Y+20", "5 DEP LCT X+140 Y+80 R5", "6 APPR LN X+20 Y+0 LEN15 RL", "7 L X+60 Y+0", "8 DEP LN LEN10"],
+                )
+                self.assertEqual(
+                    [(f["line"], f["reason"], f["severity"]) for f in payload["findings"]],
+                    [(4, "process-value", "warning"), (6, "process-value", "warning"), (7, "process-value", "warning"), (9, "process-value", "warning")],
+                )
+                self.assertEqual(finding_at(payload, 7)["message"], "LEN15: a size of APPR LN, kept; check the approach fits the scaled contour.")
+                self.assertIn("4 approach or departure sizes", payload["message"])
+
+    def test_a_shift_or_a_scale_of_z_lists_nothing(self):
+        payload = run(self.PROGRAM, profile="heidenhain-klartext", operand=5, addresses=["X"])
+        self.assertEqual(lines_of(payload)[6], "6 APPR LN X+15 Y+0 LEN15 RL")
+        self.assertEqual(payload["findings"], [])
+        payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["Z"])
+        self.assertEqual(payload["findings"], [])

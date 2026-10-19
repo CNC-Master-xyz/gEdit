@@ -64,6 +64,8 @@ The full test suite and the Rust and Python suites load every core for minutes, 
 
 ### Before you open a pull request
 
+Run `npm run hooks:install` once in your clone: it turns on the tracked `.githooks/pre-push`, which runs `npm run check` before every push and refuses the push unless it reports 0 errors and 0 warnings (`GEDIT_SKIP_PREPUSH=1 git push` skips it, for an emergency only).
+
 Run what CI runs: `npm run check`, `npm test`, `npm run build`, `npm run licenses:check`, `npm run versions:check`, and the three cargo commands above. `npm run check` must report **0 errors and 0 warnings**. If you touched `src-tauri/resources/scripts/` or `tests/python/`, run the Python tests too. If your change touches the window, dialogs, file handling or keyboard handling, also run the runtime harness on a Mac (see below), or push to a branch and start the Harness workflow by hand (Actions tab), or ask a maintainer to run it. Since M9 the runtime suite runs on GitHub on every push to `main`, so the owner's Mac is no longer needed for it.
 
 ## Continuous integration
@@ -79,7 +81,7 @@ The runtime harness has a workflow of its own, `.github/workflows/harness.yml`: 
 
 ### Trying a workflow on a branch
 
-`ci.yml`, `harness.yml` and `release.yml` can be started by hand (`workflow_dispatch`), and a run uses the workflow file of the branch it is started on. From the Actions tab pick the branch in *Run workflow*, or from a terminal: `gh workflow run ci.yml --ref <branch>`, `gh workflow run harness.yml --ref <branch>`, `gh workflow run release.yml --ref <branch>`. The release run is a dry run (below). The harness takes the macOS runner for about 40 minutes, so start it only for a change that needs it. The branch has to be pushed to GitHub first.
+`ci.yml`, `harness.yml` and `release.yml` can be started by hand (`workflow_dispatch`), and a run uses the workflow file of the branch it is started on. From the Actions tab pick the branch in *Run workflow*, or from a terminal: `gh workflow run ci.yml --ref <branch>`, `gh workflow run harness.yml --ref <branch>`, `gh workflow run release.yml --ref <branch>`. The release run is a dry run (below). The harness takes the macOS runner for about 40 minutes, so start it only for a change that needs it. A run of part of it takes the scenarios (or suite names) as a field: `gh workflow run harness.yml --ref <branch> -f scenarios="p4-compare"`, in the Actions tab the *scenarios* box; empty runs everything. The branch has to be pushed to GitHub first.
 
 ## Releases
 
@@ -160,6 +162,17 @@ docs/user/     The user guide. docs/planning/ is the design and roadmap notes.
 - `fetch()` of bundled files is blocked by the CSP. Load bundled data with a static import, `?raw`, or a dynamic `import()`.
 - New runtime dependencies need a good reason; open an issue first. After any dependency change, run `npm run licenses` and commit the result.
 
+### Upgrade watch
+
+Four pieces of gEdit stand on the inside of a dependency and can break on a version bump. Re-check them by hand on any `tauri`, `tao`, `muda`, `rfd` or Monaco upgrade, even when the tests pass:
+
+- the hand-built macOS menu (`src-tauri/src/menu.rs`, built against tauri 2.11.5);
+- the delegate patch in `src-tauri/src/quit.rs` (built against `tao`);
+- the labels of the file dialogs, which `rfd` provides;
+- the editor's undo grouping (`src/lib/monaco/applyLines.ts`), which imitates Monaco's own undo groups.
+
+The tests already fail on a breaking upgrade; this note is for the quieter changes.
+
 ### Content in your own words
 
 Completion texts, code descriptions, templates, help and documentation are written by contributors in their own words. Control manuals are a source of facts only; do not copy their text, tables or illustrations, and do not copy text from other editors' documentation.
@@ -193,6 +206,7 @@ The generated surfaces are not documentation to maintain by hand: the shortcut d
 
 - TypeScript is strict. Rust must be clean under `cargo fmt` and `clippy -D warnings`.
 - Comments are short and explain why, not what. Everything in the repository is in English.
+- A change to NC code data, marks or interpreter state follows [CODING_STANDARDS.md](CODING_STANDARDS.md) (list every reader of the same entries, a probe per reader, refuse rather than guess); review agents read it.
 
 ## Security rules
 
@@ -213,6 +227,7 @@ Scripts go through `src-tauri/src/scripts/`, whose module documentation states b
 - **Slow tests (vitest):** a test that times work over 100,000 lines or more, or simulates typing, against a wall clock goes into `<name>.slow.test.ts`, next to its `<name>.test.ts`. `npm test` runs these after the unit tests, alone and with two workers, so a busy run neither fails their budgets nor waits for them. CI runs them as a step of their own. Tests of correctness stay in the unit file, however long they take.
 - **Rust:** `cargo test` in `src-tauri/`.
 - **Python:** standard-library `unittest` under `tests/python/`, with the same golden files as the TypeScript side where both implement the same logic.
+  `tests/python/test_exit2_goldens.py` rebuilds every exit-criteria golden a script makes (`tests/fixtures/exit2/expected/`) and compares it byte for byte, so a script change that moves one fails in CI and not a day later in the Harness run. `GEDIT_UPDATE_EXIT2=1` rewrites the stale files; read the diff against the criterion in the README of that folder before committing it. The effective profile of each run is recorded by `tests/unit/resolved.test.ts` (`UPDATE_RESOLVED=1 npx vitest run --project unit resolved`).
 - **Runtime harness (macOS):** see the next section.
 
 ## Runtime harness (macOS)

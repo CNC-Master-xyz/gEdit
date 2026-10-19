@@ -86,7 +86,7 @@
     display: none;
   }
   .script-status:hover:enabled {
-    background-color: rgb(255 255 255 / 20%);
+    background-color: var(--status-hover);
   }
   .script-status:disabled {
     cursor: default;

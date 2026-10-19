@@ -1,0 +1,133 @@
+{
+  "title": "Extents",
+  "columns": [
+    {
+      "key": "where",
+      "label": "Where"
+    },
+    {
+      "key": "axis",
+      "label": "Axis"
+    },
+    {
+      "key": "min",
+      "label": "Min"
+    },
+    {
+      "key": "minLine",
+      "label": "At line"
+    },
+    {
+      "key": "max",
+      "label": "Max"
+    },
+    {
+      "key": "maxLine",
+      "label": "At line"
+    },
+    {
+      "key": "unresolved",
+      "label": "Not resolved"
+    }
+  ],
+  "rows": [
+    {
+      "where": "Program",
+      "scope": "program",
+      "axis": "X (diameter)",
+      "axisId": "X",
+      "min": "20",
+      "minLine": 15,
+      "max": "100",
+      "maxLine": 12,
+      "unresolved": 0,
+      "line": 12
+    },
+    {
+      "where": "Program",
+      "scope": "program",
+      "axis": "Z",
+      "axisId": "Z",
+      "min": "-30",
+      "minLine": 9,
+      "max": "100",
+      "maxLine": 12,
+      "unresolved": 0,
+      "line": 12
+    },
+    {
+      "where": "T1 (T0101, line 5)",
+      "scope": "tool",
+      "axis": "X (diameter)",
+      "axisId": "X",
+      "min": "40",
+      "minLine": 11,
+      "max": "100",
+      "maxLine": 12,
+      "unresolved": 0,
+      "line": 12
+    },
+    {
+      "where": "T1 (T0101, line 5)",
+      "scope": "tool",
+      "axis": "Z",
+      "axisId": "Z",
+      "min": "-30",
+      "minLine": 9,
+      "max": "100",
+      "maxLine": 12,
+      "unresolved": 0,
+      "line": 12
+    },
+    {
+      "where": "T3 (T0303, line 13)",
+      "scope": "tool",
+      "axis": "X (diameter)",
+      "axisId": "X",
+      "min": "20",
+      "minLine": 15,
+      "max": "100",
+      "maxLine": 17,
+      "unresolved": 0,
+      "line": 17
+    },
+    {
+      "where": "T3 (T0303, line 13)",
+      "scope": "tool",
+      "axis": "Z",
+      "axisId": "Z",
+      "min": "-7",
+      "minLine": 16,
+      "max": "100",
+      "maxLine": 17,
+      "unresolved": 0,
+      "line": 17
+    },
+    {
+      "where": "T5 (T0505, line 18)",
+      "scope": "tool",
+      "axis": "X (diameter)",
+      "axisId": "X",
+      "min": "33.6",
+      "minLine": 22,
+      "max": "100",
+      "maxLine": 23,
+      "unresolved": 0,
+      "line": 23
+    },
+    {
+      "where": "T5 (T0505, line 18)",
+      "scope": "tool",
+      "axis": "Z",
+      "axisId": "Z",
+      "min": "-20",
+      "minLine": 21,
+      "max": "100",
+      "maxLine": 23,
+      "unresolved": 0,
+      "line": 23
+    }
+  ],
+  "message": "No machine: readings assumed from the profile defaults, and a word whose reading depends on the machine is not resolved. X is a diameter: diameter programming is on (assumed from the profile).",
+  "findings": []
+}

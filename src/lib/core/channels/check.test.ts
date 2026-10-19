@@ -8,7 +8,7 @@ import type { CompiledProfile } from '$lib/core/profiles/types';
 import { cpOf, profileOf } from '../../../../tests/unit/helpers/profiles';
 import { expectWithin, fastest } from '../../../../tests/unit/helpers/budget';
 import { t } from '$lib/i18n';
-import { checkSyncMarks, checkSyncMarksReport, markKey } from './check';
+import { asksSamePartners, checkSyncMarks, checkSyncMarksReport, markKey } from './check';
 import { findMarks } from './marks';
 import { findSections } from './resolve';
 import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE, type ChannelParams, type SyncFinding, type SyncHit, type SyncRule } from './types';
@@ -810,6 +810,55 @@ describe('checkSyncMarks: findings', () => {
       '2': [],
     };
     expect(checkSyncMarks(perChannel, two)).toEqual([]);
+  });
+});
+
+// --- T044: a P-word rule built on the machine page asks for the same partners --------------
+
+describe('checkSyncMarks: a P-word rule asks for the same partners by default (T044, P4e NC-3 follow-up)', () => {
+  /** A rule as the machine page builds it: a code range and a `P` word, no `samePartners`. */
+  const built = (decode: 'digits' | 'bitmask', over: Partial<SyncRule> = {}): SyncRule => ({
+    id: 'w',
+    label: 'Waits',
+    match: { kind: 'codes', codes: 'M900-M999' },
+    partners: { kind: 'word', address: 'P', decode, whenAbsent: { kind: 'fixed', channels: ['1', '2'] } },
+    ...over,
+  });
+  const run = (r: SyncRule, ids: string[], program: Record<string, string[]>): SyncFinding[] => {
+    const p = machine(ids, [r]);
+    const cp = cpOf('fanuc-lathe');
+    const perChannel: Record<string, SyncHit[]> = {};
+    for (const [channel, lines] of Object.entries(program)) perChannel[channel] = findMarks(lines, cp, p, { channelOf: () => channel }).marks;
+    return checkSyncMarks(perChannel, p);
+  };
+
+  it('reports a P-less wait meeting one with P, as the built-in Fanuc presets do', () => {
+    const f = run(built('bitmask'), ['1', '2'], { '1': ['M901'], '2': ['M901 P3'] });
+    expect(brief(f)).toEqual([['partners-differ', '1', 1, 'M901', '2']]);
+    expect(f[0].message).toMatchObject({ key: 'channels.findings.partnersDifferAbsent', params: { without: 'Channel 1' } });
+    // The same program under the preset gives the same finding.
+    const preset = presetOf('fanuc-lathe', 'fanuc-2path');
+    const cp = cpOf('fanuc-lathe');
+    const per = { '1': findMarks(['M901'], cp, preset, { channelOf: () => '1' }).marks, '2': findMarks(['M901 P3'], cp, preset, { channelOf: () => '2' }).marks };
+    expect(checkSyncMarks(per, preset).map((x) => x.kind)).toEqual(['partners-differ']);
+  });
+
+  it('keeps the owner’s same-P rule: P12 against P123 differs, the same P in every channel is clean', () => {
+    const r = built('digits');
+    expect(brief(run(r, ['1', '2', '3'], { '1': ['M901 P12'], '2': ['M901 P123'], '3': [] })).map((x) => x[0])).toContain('partners-differ');
+    expect(run(r, ['1', '2', '3'], { '1': ['M910 P123'], '2': ['M910 P123'], '3': ['M910 P123'] })).toEqual([]);
+    expect(run(r, ['1', '2'], { '1': ['M901 P12', 'M902 P12'], '2': ['M901 P12', 'M902 P12'] })).toEqual([]);
+    expect(run(r, ['1', '2'], { '1': ['M901'], '2': ['M901'] })).toEqual([]);
+  });
+
+  it('is off when the rule says samePartners: false, and never on for a list rule unless it says so', () => {
+    expect(run(built('bitmask', { samePartners: false }), ['1', '2'], { '1': ['M901'], '2': ['M901 P3'] })).toEqual([]);
+    expect(asksSamePartners(built('digits'))).toBe(true);
+    expect(asksSamePartners(built('digits', { samePartners: false }))).toBe(false);
+    expect(asksSamePartners(rule('wait'))).toBe(false);
+    expect(asksSamePartners(rule('wait', { samePartners: true }))).toBe(true);
+    expect(asksSamePartners(presetOf('sinumerik', 'sinumerik-2channel').syncMarks[0])).toBe(false);
+    expect(asksSamePartners(undefined)).toBe(false);
   });
 });
 

@@ -550,6 +550,269 @@ class FlowTest(unittest.TestCase):
         self.assertEqual([s.after.get("X") for s in steps], [None, D(10), D(10), D(50), D(20), D(20), D(20)])
 
 
+class V12FixTest(unittest.TestCase):
+    """v1.2.0 NC fix round, batch NCF-B: one regression test per triage row, each failing
+    without its fix."""
+
+    KLARTEXT = "BEGIN PGM P MM\nTOOL CALL 1 Z S5000\nL B+0 C+0 R0 FMAX\n%s\nL X+10 Y+10 Z+5 R0 FMAX\nL X+20"
+
+    # -- T010: angles at zero turn no rotary axis ----------------------------------------------
+
+    def test_t010_a_plane_at_zero_angles_turns_no_rotary_axis(self) -> None:
+        for plane in (
+            "PLANE SPATIAL SPA+0 SPB+0 SPC+0 TURN MB MAX FMAX",
+            "PLANE SPATIAL SPA+0 SPB-0.000 SPC+0 MOVE DIST50 F2000",
+            "PLANE PROJECTED PROPR+0 PROMIN+0 ROT+0 TURN FMAX",
+            "PLANE EULER EULPR+0 EULNU+0 EULROT+0 TURN FMAX",
+            "PLANE RESET TURN FMAX",
+            "PLANE SPATIAL SPA+0 SPB+0 SPC+0 ~\n  TURN MB MAX FMAX",
+        ):
+            with self.subTest(plane=plane):
+                _, steps = walk(self.KLARTEXT % plane, "heidenhain-klartext")
+                self.assertEqual(steps[-2].unsure, frozenset())
+                self.assertEqual(steps[-2].before["B"], D(0))
+
+    def test_t010_angles_not_at_zero_still_turn_them_and_stay_never_does(self) -> None:
+        for plane, turned in (
+            ("PLANE SPATIAL SPA+0 SPB+45 SPC+0 TURN MB MAX FMAX", True),
+            ("PLANE SPATIAL SPA+0 SPB+Q5 SPC+0 TURN MB MAX FMAX", True),  # not a plain 0
+            ("PLANE SPATIAL SPA+0 SPB+30 SPC+0 ~\n  MOVE DIST50 F2000", True),
+            ("PLANE VECTOR BX1 BY0 BZ0 NX0 NY0 NZ1 TURN FMAX", True),  # no angles to read
+            ("PLANE SPATIAL SPA+0 SPB+45 SPC+0 STAY", False),
+        ):
+            with self.subTest(plane=plane):
+                _, steps = walk(self.KLARTEXT % plane, "heidenhain-klartext")
+                self.assertEqual({"B", "C"} <= steps[-2].unsure, turned)
+        # A zero plane after a real tilt does not make the turned axes known again.
+        text = self.KLARTEXT % "PLANE SPATIAL SPA+0 SPB+45 SPC+0 TURN MB MAX FMAX\nPLANE SPATIAL SPA+0 SPB+0 SPC+0 TURN MB MAX FMAX"
+        _, steps = walk(text, "heidenhain-klartext")
+        self.assertTrue({"B", "C"} <= steps[-2].unsure)
+
+    # -- T111: a single-pass lathe cycle goes back to its start ---------------------------------
+
+    def test_t111_a_single_pass_cycle_ends_where_it_started(self) -> None:
+        text = "G21 G40 G99\nG0 X50. Z2.\nG90 X40. Z-30. F0.2\nX36.\nG0 X100. Z50.\nM30"
+        _, steps = walk(text, "fanuc-lathe")
+        self.assertEqual((steps[2].after["X"], steps[2].after["Z"]), (D(50), D(2)))
+        self.assertEqual((steps[3].after["X"], steps[3].after["Z"]), (D(50), D(2)))
+        reached = [(e.axis, e.value) for e in steps[2].events if isinstance(e, _nc_path.Reach)]
+        self.assertEqual(reached, [("X", D(40)), ("Z", D(-30))])  # the end point is still reached
+        # An increment of the next pass counts from the start point (G94: W from Z2).
+        _, steps = walk("G21 G40 G99\nG0 X50. Z2.\nG94 X10. Z-1. F0.2\nW-3.\nG0 W5.\nM30", "fanuc-lathe")
+        self.assertEqual([e.value for e in steps[3].events if isinstance(e, _nc_path.Reach)], [D(-1)])
+        self.assertEqual(steps[4].after["Z"], D(7))
+        # System B writes them G77/G79.
+        context = helpers.effective_context("fanuc-lathe", variant=("gcodeSystem", "B"))
+        cp = gedit_nc.compile_profile(context["profile"])
+        tracker = _nc_path.PathTracker(context, cp)
+        state = None
+        after = []
+        for number, line in enumerate("G21 G40 G90 G95\nG0 X50. Z2.\nG77 X40. Z-30. F0.2\nG79 X10. Z-1.\nM30".split("\n"), 1):
+            state, step = tracker.line(line, number, state, True)
+            after.append((step.after["X"], step.after["Z"]))
+        self.assertEqual(after[2:4], [(D(50), D(2)), (D(50), D(2))])
+
+    def test_ncfc_the_threading_passes_end_where_they_started(self) -> None:
+        # v1.2.0 (NCF-C): G92 (system A) and G78 (system B) are whole passes too (`path: 'cycle'`).
+        _, steps = walk("G21 G40 G99\nG0 X44. Z6.\nG92 X39.2 Z-20. F1.5\nX38.6\nG0 U2.\nM30", "fanuc-lathe")
+        self.assertEqual([(s.after["X"], s.after["Z"]) for s in steps[2:5]], [(D(44), D(6)), (D(44), D(6)), (D(46), D(6))])
+        reached = [(e.axis, e.value) for e in steps[2].events if isinstance(e, _nc_path.Reach)]
+        self.assertEqual(reached, [("X", D("39.2")), ("Z", D(-20))])
+        context = helpers.effective_context("fanuc-lathe", variant=("gcodeSystem", "B"))
+        tracker = _nc_path.PathTracker(context, gedit_nc.compile_profile(context["profile"]))
+        state = None
+        after = []
+        for number, line in enumerate("G21 G40 G90 G95\nG0 X44. Z6.\nG78 X39.2 Z-20. F1.5\nX38.6\nM30".split("\n"), 1):
+            state, step = tracker.line(line, number, state, True)
+            after.append((step.after["X"], step.after["Z"]))
+        self.assertEqual(after[2:4], [(D(44), D(6)), (D(44), D(6))])
+
+    def test_ncfc_a_taper_pass_reaches_its_taper_start(self) -> None:
+        # The first move of a taper pass ends at the end coordinate plus R (a radius) along the
+        # axis R lies along (`lengthAlong`): X for G90/G92 (twice R in the diameter column), Z
+        # for G94. Reached after the end point; the tool still ends at the start point.
+        _, steps = walk("G21 G40 G99\nG0 X62. Z2.\nG90 X56. Z-30. R-4. F0.25\nR-6.\nM30", "fanuc-lathe")
+        self.assertEqual([(e.axis, e.value) for e in steps[2].events if isinstance(e, _nc_path.Reach)], [("X", D(56)), ("Z", D(-30)), ("X", D(48))])
+        self.assertEqual([(e.axis, e.value) for e in steps[3].events if isinstance(e, _nc_path.Reach)], [("X", D(44))])
+        self.assertEqual((steps[3].after["X"], steps[3].after["Z"]), (D(62), D(2)))
+        _, steps = walk("G21 G40 G99\nG0 X64. Z3.\nG94 X20. Z-1. R-5. F0.2\nM30", "fanuc-lathe")
+        self.assertEqual([(e.axis, e.value) for e in steps[2].events if isinstance(e, _nc_path.Reach)], [("X", D(20)), ("Z", D(-1)), ("Z", D(-6))])
+
+    def test_t111_any_other_feed_move_ends_at_its_end_point(self) -> None:
+        _, steps = walk("G21 G40 G99\nG0 X50. Z2.\nG1 X40. Z-30. F0.2\nG32 X40. Z-50. F1.5\nM30", "fanuc-lathe")
+        self.assertEqual((steps[2].after["X"], steps[2].after["Z"]), (D(40), D(-30)))
+        self.assertEqual(steps[3].after["Z"], D(-50))
+
+    # -- T011 (NC-18): the level a drilling cycle leaves the tool axis at -----------------------
+
+    def test_t011_a_cycle_leaves_z_at_a_level_the_program_wrote(self) -> None:
+        text = "G90 G17 G21\nG0 X0. Y0. Z50.\nG98 G81 X10. Y10. Z-5. R2. F100.\nX20.\nG80\nG91 G99 G81 X10. Y10. Z-5. R-48.\nG80\nG0 Z10.\nG90 G0 Z50.\nM30"
+        _, steps = walk(text)
+        self.assertEqual(steps[2].levels, frozenset())
+        self.assertIsNone(steps[3].before["Z"])
+        self.assertEqual([s.levels for s in steps[3:8]], [frozenset({"Z"})] * 5)  # an increment from it too
+        self.assertEqual(steps[8].levels, frozenset({"Z"}))
+        self.assertEqual(steps[9].levels, frozenset())  # written absolutely: known again
+
+    def test_t011_a_cycle_started_from_a_level_nobody_knows_leaves_none(self) -> None:
+        for above in ("G0 X0. Y0.", "G0 X0. Y0. Z50.\nG28 G91 Z0.\nG90"):
+            with self.subTest(above=above):
+                _, steps = walk("G90 G17 G21\n%s\nG98 G81 X10. Y10. Z-5. R2. F100.\nG80\nM30" % above)
+                self.assertEqual(steps[-1].levels, frozenset())
+
+    def test_t011_where_two_ways_meet_the_level_must_hold_on_both(self) -> None:
+        text = "G90 G17 G21\nG0 X0. Y0. Z50.\nGOTO 100\nG98 G81 X10. Y10. Z-5. R2. F100.\nG80\nN100 G0 X5.\nM30"
+        _, steps = walk(text, preset="is-b")
+        self.assertEqual(steps[4].levels, frozenset({"Z"}))
+        self.assertEqual(steps[5].levels, frozenset({"Z"}))  # the jump comes with Z at 50: known, so the level holds
+        text = "G90 G17 G21\nG0 X0. Y0. Z50.\nG28 G91 Z0.\nG90\nGOTO 100\nG0 Z50.\nG98 G81 X10. Y10. Z-5. R2. F100.\nG80\nN100 G0 X5.\nM30"
+        _, steps = walk(text, preset="is-b")
+        self.assertEqual(steps[7].levels, frozenset({"Z"}))
+        self.assertEqual(steps[8].levels, frozenset())  # the jump comes from a machine position
+
+
+class FuzzFixTest(unittest.TestCase):
+    """v1.2.0, the fuzz review (FZ-4): a drilling cycle written as a word is no arc."""
+
+    def test_fz4_a_drilling_cycle_after_an_arc_is_no_arc(self) -> None:
+        text = "G21 G17 G90\nG0 X0. Y0. Z10.\nG3 X20. Y0. I10. J0. F100.\nG81 X20. Y10. Z-5. R5. F100.\nX30. Y5.\nG80\nM30"
+        _, steps = walk(text)
+        self.assertIsNotNone(steps[2].arc)
+        self.assertEqual([steps[3].arc, steps[4].arc], [None, None])
+        self.assertEqual([e for e in steps[3].events if isinstance(e, _nc_path.Unknown) and e.kind == "arc"], [])
+        self.assertEqual((steps[3].after["X"], steps[3].after["Y"]), (D(20), D(10)))
+        # After G80 the motion code in force is an arc again.
+        _, steps = walk("G21 G17 G90\nG0 X0. Y0. Z10.\nG3 X20. Y0. I10. J0. F100.\nG81 X20. Y10. Z-5. R5. F100.\nG80\nG3 X40. Y10. I10. J0.\nM30")
+        self.assertIsNotNone(steps[5].arc)
+
+    def test_fz4_a_cycle_called_with_its_arguments_still_runs_after_an_arc(self) -> None:
+        # Sinumerik MCALL: the positioning block is an ordinary move, an arc too.
+        _, steps = walk("G71 G17 G90\nG0 X0 Y0 Z10\nMCALL CYCLE81(10,0,2,-5)\nG2 X20 Y0 I10 J0 F100\nMCALL\nM30", "sinumerik-mill")
+        self.assertIsNotNone(steps[3].arc)
+
+
+class D2FixTest(unittest.TestCase):
+    """v1.2.0 NC fix round, batch D2 (path and geometry): the tracker's part of NCR-2, NCR-9 and
+    NCR-10. Each test fails without its fix."""
+
+    def walk_b(self, text):
+        context = helpers.effective_context("fanuc-lathe", variant=("gcodeSystem", "B"))
+        tracker = _nc_path.PathTracker(context, gedit_nc.compile_profile(context["profile"]))
+        state = None
+        for number, line in enumerate(text.split("\n"), 1):
+            state, _ = tracker.line(line, number, state, True)
+        return tracker
+
+    # -- NCR-2: the taper the passes share, and when it is not known ------------------------------
+
+    def test_ncr2_the_taper_in_force_and_what_clears_it(self) -> None:
+        tracker, _ = walk("G18 G21\nG0 X60. Z2.\nG94 X20. Z-5. R-1. F0.2\nG0 X60. Z2.", "fanuc-lathe")
+        self.assertEqual(tracker.pass_taper("R")[0], D(-1))  # a G00 does not clear it
+        tracker, _ = walk("G18 G21\nG0 X60. Z2.\nG94 X20. Z-5. R-1. F0.2\nG04 X1.\nG0 X60. Z2.", "fanuc-lathe")
+        self.assertEqual(tracker.pass_taper("R")[0], D(-1))  # nor does a dwell
+        tracker, _ = walk("G18 G21\nG0 X60. Z2.\nG94 X20. Z-5. R-1. F0.2\nG18\nG0 X60. Z2.", "fanuc-lathe")
+        self.assertIsNone(tracker.pass_taper("R"))  # a plane code does
+        tracker, _ = walk("G18 G21\nG0 X60. Z2.\nG94 X20. Z-5. R0. F0.2", "fanuc-lathe")
+        self.assertEqual(tracker.pass_taper("R")[0], D(0))
+
+    def test_ncr2_forget_all_and_a_subprogram_call_leave_the_taper_not_known(self) -> None:
+        for between in ("M98 P100", "G65 P9010 A1.", "M30\nO2"):
+            with self.subTest(between=between):
+                tracker, _ = walk("O1\nG18 G21\nG0 X60. Z2.\nG94 X20. Z-5. F0.2\n%s\nG0 X60. Z2." % between, "fanuc-lathe")
+                found = tracker.pass_taper("R")
+                self.assertIsNotNone(found)  # not "no taper"
+                self.assertIsNone(found[0])
+                self.assertEqual(found[2], "unknown")
+        # A block that writes the taper makes it known again; a one-shot code clears it.
+        tracker, _ = walk("G18 G21\nM98 P100\nG0 X60. Z2.\nG94 X20. Z-5. R-2. F0.2", "fanuc-lathe")
+        self.assertEqual(tracker.pass_taper("R")[0], D(-2))
+        tracker, _ = walk("G18 G21\nM98 P100\nG50 S2000\nG0 X60. Z2.", "fanuc-lathe")
+        self.assertIsNone(tracker.pass_taper("R"))
+        # System B: the same in G79.
+        tracker = self.walk_b("G18 G21 G90\nG0 X60. Z2.\nG79 X20. Z-5. R-1. F0.2\nG0 X60. Z2.")
+        self.assertEqual(tracker.pass_taper("R")[0], D(-1))
+
+    def test_ncr2_a_pass_after_a_call_has_no_known_taper_start(self) -> None:
+        # The extents: the taper start of a G90 after M98 is not known (the subprogram may have
+        # written R), so X is not resolved there; the end point is still reached.
+        _, steps = walk("G18 G21\nG0 X62. Z2.\nM98 P100\nG0 X62. Z2.\nG90 X56. Z-30. F0.25\nM30", "fanuc-lathe")
+        self.assertEqual(events(steps[4]), [("reach", "X", D(56)), ("reach", "Z", D(-30)), ("cycle", ("X",))])
+        _, steps = walk("G18 G21\nG0 X62. Z2.\nG90 X56. Z-30. F0.25\nM30", "fanuc-lathe")
+        self.assertEqual(events(steps[2]), [("reach", "X", D(56)), ("reach", "Z", D(-30))])
+
+    # -- NCR-10: a tool offset write keeps the positions -----------------------------------------
+
+    def test_ncr10_a_tool_offset_write_keeps_the_positions(self) -> None:
+        text = "G90 G17 G21\nG0 X0. Y0. Z50.\n%s\nG91 G1 X10. F100"
+        _, steps = walk(text % "G10 L11 P1 R0.1")
+        self.assertEqual(steps[3].before["X"], D(0))
+        self.assertEqual(steps[3].after["X"], D(10))
+        for setting in ("G10 L2 P1 X10. Y0 Z0", "G10 L20 P1 X10.", "G10 L3 P1 R0.1", "G10 L50", "G10 P1 R0.1", "G10 L#1 P1 R0.1"):
+            with self.subTest(setting=setting):
+                _, steps = walk(text % setting)
+                self.assertIsNone(steps[3].before["X"])
+        # The lathe G10 has no L: it still clears them.
+        _, steps = walk("G18 G21\nG0 X50. Z2.\nG10 P1 X0.2 Z0.1\nG1 W-5. F0.2", "fanuc-lathe")
+        self.assertIsNone(steps[3].before["Z"])
+
+    def test_ncr10_the_two_modules_ask_the_same_predicate(self) -> None:
+        import _nc_geom
+
+        tracker, steps = walk("G90 G17 G21\nG10 L11 P1 R0.1")
+        block = _nc_geom._block_of(steps[1], tracker)
+        entry = block.entries[0]
+        self.assertTrue(_nc_geom._writes_tool_offset(block, entry))
+        self.assertTrue(_nc_path.writes_tool_offset(entry, block.tokens, block.codes))
+
+    # -- NCR-9: an empty level is no level the program wrote --------------------------------------
+
+    def test_ncr9_the_levels_of_a_cycle_come_from_its_parameters(self) -> None:
+        text = "G17 G90 G71\nG0 X0 Y0 Z50\nX10 Y10\n%s\nG91 G0 Z10\nM30"
+        for cycle, levels in (
+            ("CYCLE81(10,0,2,-10)", {"Z"}),
+            ("CYCLE81(,0,2,-10)", set()),  # an empty RTP is 0, which nobody wrote
+            ("CYCLE81(10,,2,-10)", set()),
+            ("CYCLE81(10,0,2,,5)", {"Z"}),  # DP empty, its twin DPR written
+            ("CYCLE81(10,0,2)", set()),  # DP and DPR left out
+        ):
+            with self.subTest(cycle=cycle):
+                _, steps = walk(text % cycle, "sinumerik-mill")
+                self.assertEqual(steps[4].levels, frozenset(levels))
+        # MCALL: the parameters of the line that made the cycle modal.
+        for call, levels in (("MCALL CYCLE81(10,0,2,-10)", {"Z"}), ("MCALL CYCLE81(,0,2,-10)", set())):
+            with self.subTest(call=call):
+                _, steps = walk("G17 G90 G71\nG0 X0 Y0 Z50\n%s\nX10 Y10\nMCALL\nG91 G0 Z10\nM30" % call, "sinumerik-mill")
+                self.assertEqual(steps[5].levels, frozenset(levels))
+
+    def test_ncr9_a_klartext_definition_gives_its_levels_on_its_own_lines(self) -> None:
+        define = "CYCL DEF 200 DRILLING ~\n  Q200=+2 ;SET-UP ~\n  Q201=-20 ;DEPTH ~\n%s  Q204=+50 ;2ND SET-UP"
+        text = "BEGIN PGM T MM\nTOOL CALL 1 Z S3000\nL X+0 Y+0 Z+50 R0 FMAX\n%s\nL X+10 Y+10 R0 FMAX M99\nL IZ+10 FMAX\nEND PGM T MM"
+        _, steps = walk(text % (define % "  Q203=+0 ;SURFACE ~\n"), "heidenhain-klartext")
+        self.assertEqual(steps[-2].levels, frozenset({"Z"}))
+        for missing in ("", "  Q203=+Q5 ;SURFACE ~\n"):
+            with self.subTest(missing=missing):
+                _, steps = walk(text % (define % missing), "heidenhain-klartext")
+                self.assertEqual(steps[-2].levels, frozenset())
+
+    def test_ncr9_empty_levels(self) -> None:
+        context = helpers.effective_context("sinumerik-mill")
+        cp = gedit_nc.compile_profile(context["profile"])
+        interp = gedit_nc.ModalInterpreter(cp, context["codes"])
+        entry = interp.entry("CYCLE83")
+        for call, empty in (
+            ("CYCLE83(10,0,2,-20,,-5,,2,1,1,1,0)", []),
+            ("CYCLE83(10,0,2,,20,,5,2,1,1,1,0)", []),  # DP and FDEP empty, their twins written
+            ("CYCLE83(,0,2,-20,,,5)", ["RTP"]),  # FDEP empty, FDPR written
+            ("CYCLE83(,0,2,-20,,,)", ["RTP", "FDEP"]),
+            ("CYCLE83(10,0,2,-20)", ["FDEP"]),
+            ("CYCLE83()", ["RTP", "RFP", "DP", "FDEP"]),
+        ):
+            with self.subTest(call=call):
+                tokens, _ = gedit_nc.tokenize_line(call, cp, None)
+                token = next(t for t in tokens if t.kind == "call")
+                self.assertEqual(_nc_path.empty_levels(token, entry), empty)
+
+
 class PerformanceTest(unittest.TestCase):
     """P4a fix batch B6 (CODE-1): what a long program asks the tracker again and again is worked
     out once for the kind of word, with the same answers as before."""

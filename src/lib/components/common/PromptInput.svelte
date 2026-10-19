@@ -76,7 +76,7 @@
   }
 
   .prompt-input:focus {
-    border-color: var(--accent);
+    border-color: var(--accent-text);
     outline: none;
   }
 

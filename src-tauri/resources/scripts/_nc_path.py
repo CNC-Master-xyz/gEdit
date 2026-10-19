@@ -77,6 +77,32 @@ golden and every owner-public extents run stays byte for byte the same (AD-48).
   out the :class:`Reach` events and the :class:`_Flow` bookkeeping for a walk that does not read
   them (the transforms; the walk over a written program that only checks its arcs).
 
+* **v1.2.0, the NC fix round (batch NCF-B).** A block of a single-pass cycle
+  (``sets.path: 'cycle'``: the lathe ``G90``, ``G94``, system B ``G77``, ``G79``) reaches the
+  point it writes and leaves the tool where it started (T111; the one change to the
+  positions, golden ``extents/lathe-box-cycle``). A ``PLANE`` whose angles are all 0, or
+  ``PLANE RESET``, with ``TURN`` or ``MOVE`` turns no rotary axis (T010). ``Step.levels``
+  names the axes not known that stand at a level the program wrote, where a drilling cycle
+  leaves the tool axis (T011, NC-18); translate reads it. A block that runs a cycle written
+  as a word (``G81``, written there or in force) is no arc, whatever arc code the motion group
+  still holds: its ``R`` is the retract plane (FZ-4, the fuzz review).
+
+* **v1.2.0, batch NCF-C.** The threading passes (system A ``G92``, B ``G78``) are whole passes
+  too (``path: 'cycle'``). A pass with a taper (``CodeParam.lengthAlong`` on its ``R``) reaches
+  its end coordinate plus the taper along that axis, the start of the cut (golden
+  ``extents/lathe-taper-pass``); the passes share ``R`` and their end point until a block
+  writes them again, a one-shot code other than a dwell or a plane code clears them.
+
+* **v1.2.0, batch D2.** After :meth:`PathTracker.forget_all` (a program after the first, a
+  macro or data block) and after a subprogram call, the values the passes share are **not
+  known** (:attr:`PathTracker.pass_unknown`, :meth:`PathTracker.pass_taper`), not "no taper":
+  the lathe Z mirror refuses a facing pass then, and the extents leave the taper start of a pass
+  that does not write ``R`` not resolved (NCR-2). A block that writes a tool offset
+  (:func:`writes_tool_offset`: ``G10 L11 P1 R0.1``) forgets no position (NCR-10). A cycle with
+  parameters leaves a level on the tool axis (``Step.levels``) only where its levels were written
+  as numbers where it was defined or called with them (:attr:`PathTracker.cycle_levels`,
+  :func:`empty_levels`: the ``MCALL`` line, a Klartext definition's ``Q203``; NCR-9).
+
 Standard library only, Python 3.9 and newer. A bundled script imports this module by name
 (``import _nc_path``); it imports ``gedit_nc`` and is never imported by it (plan §7 #292).
 """
@@ -274,6 +300,7 @@ class Step:
         "pole_line",
         "unsure",
         "unwritten",
+        "levels",
         "flow",
     )
 
@@ -326,6 +353,12 @@ class Step:
         #: line (since the program start or a move to a machine position). An axis a cycle
         #: left not known has been written.
         self.unwritten: FrozenSet[str] = _NO_AXES
+        #: v1.2.0 (T011, NC-18): the axes whose position at the start of this line is not known
+        #: (:attr:`before` is ``None``) but is a level the program wrote: where a cycle in the
+        #: XY plane leaves the tool axis (its start level or its retract plane, `G98`/`G99`),
+        #: when the level the cycle started from was known, and an increment from such a level.
+        #: The value is not computed; a translation moves the level with the program.
+        self.levels: FrozenSet[str] = _NO_AXES
         #: P4a fix B1 (NC-5): what the flow of the program does at this line (:class:`FlowEvent`).
         self.flow: Tuple["FlowEvent", ...] = ()
 
@@ -678,11 +711,13 @@ class PathAxes:
 class _Written:
     """The codes one line writes, as the interpreter reads them (§7.4)."""
 
-    __slots__ = ("entries", "words", "calls")
+    __slots__ = ("entries", "words", "calls", "ids")
 
     def __init__(self) -> None:
         #: (database entry, canonical code, token kind)
         self.entries: List[Tuple[Dict[str, Any], str, str]] = []
+        #: The ``id`` of every token that is one of ``entries`` (its code, not a value).
+        self.ids: Set[int] = set()
         #: unknown word codes under the database's motion letter (`G123`)
         self.words: List[str] = []
         self.calls: List[Any] = []
@@ -702,6 +737,8 @@ class _Snap(NamedTuple):
     fp: Any
     unsure: FrozenSet[str]
     unwritten: FrozenSet[str]
+    #: T011: the tracker's ``levels`` there.
+    levels: FrozenSet[str] = _NO_AXES
 
 
 def _split_args(text: str) -> List[str]:
@@ -723,6 +760,86 @@ def _split_args(text: str) -> List[str]:
             out.append(text[start:i].strip())
             start = i + 1
     out.append(text[start:].strip())
+    return out
+
+
+def empty_levels(token: Any, entry: Dict[str, Any]) -> List[str]:
+    """v1.2.0 (NCR-9b): the parameters on the tool axis (``CodeParam.position: 'tool-axis'``) of
+    a cycle written as a call (``CYCLE81(,0,2,-10)``) that are left empty or left out, upper case.
+    The control reads such a parameter as 0, a level nobody wrote. One whose twin
+    (``CodeParam.twin``, the same depth the other way: ``DP`` and ``DPR``) is written is not
+    empty: the cycle takes the depth from the twin."""
+    params = [p for p in (entry.get("params") or []) if isinstance(p, dict)]
+    if not any(gedit_nc.position_of(p) == "tool-axis" for p in params):
+        return []
+    text = getattr(token, "value_text", None) or ""
+    args = _split_args(text) if "(" in (getattr(token, "text", None) or "") else []
+    written: Dict[str, bool] = {}
+    for i, param in enumerate(params):
+        address = str(param.get("address") or "").upper()
+        if address:
+            written[address] = i < len(args) and args[i].strip() != ""
+    out: List[str] = []
+    for param in params:
+        if gedit_nc.position_of(param) != "tool-axis":
+            continue
+        address = str(param.get("address") or "").upper()
+        twin = param.get("twin")
+        if written.get(address) or (isinstance(twin, str) and written.get(twin.upper())):
+            continue
+        out.append(address)
+    return out
+
+
+def writes_tool_offset(entry: Dict[str, Any], tokens: Sequence[Any], codes: Any) -> bool:
+    """v1.2 NC fix round (T013, NCR-10): the block of a shift code writes a tool offset, no
+    coordinate system: a parameter with ``toolOffsetValues`` (Fanuc ``G10``'s ``L``) is written
+    there as a plain number equal to one of them (``G10 L11 P1 R0.1``). A variable, another value
+    or the parameter left out keeps the reading of ``shift``. ``codes``: the ``id`` of every token
+    of the block that is a code (they are no values). The tracker and ``_nc_geom`` both ask it."""
+    for param in entry.get("params") or []:
+        if not isinstance(param, dict):
+            continue
+        values = param.get("toolOffsetValues")
+        address = param.get("address")
+        if not isinstance(values, list) or not isinstance(address, str):
+            continue
+        wanted = {Decimal(v) for v in values if isinstance(v, str) and v.isdigit()}
+        written = [
+            t
+            for t in tokens
+            if t.kind == "word"
+            and id(t) not in codes
+            and (t.address or "").upper() == address.upper()
+            and (t.value_text or "")
+        ]
+        if len(written) != 1 or written[0].value is None:
+            return False
+        number = gedit_nc.decimal_of(written[0].value)
+        return number is not None and number in wanted
+    return False
+
+
+def _assigned_numbers(tokens: Sequence[Any], names: FrozenSet[str]) -> Set[str]:
+    """The parameters of ``names`` a line assigns a plain number (Klartext ``Q203=+0``)."""
+    out: Set[str] = set()
+    count = len(tokens)
+    for i, token in enumerate(tokens):
+        if token.kind != "variable" or token.text.strip().upper() not in names:
+            continue
+        j = i + 1
+        while j < count and tokens[j].kind == "whitespace":
+            j += 1
+        if j >= count or tokens[j].kind != "operator" or tokens[j].text.strip() != "=":
+            continue
+        values = []
+        for t in tokens[j + 1 :]:
+            if t.kind in ("comment", "continuation"):
+                break
+            if t.kind != "whitespace":
+                values.append(t)
+        if len(values) == 1 and values[0].kind == "word" and values[0].address is None and values[0].value is not None:
+            out.add(token.text.strip().upper())
     return out
 
 
@@ -809,6 +926,8 @@ class _Flow:
         self.recording = False
         self._events: List[FlowEvent] = []
         self._skip: Optional[_Snap] = None
+        #: T010: the entries of the earlier lines of a block that goes on (`~`).
+        self._carry: List[Tuple[Dict[str, Any], str, str]] = []
 
     # -- helpers ----------------------------------------------------------------
 
@@ -816,7 +935,7 @@ class _Flow:
         return self.t.interp.fingerprint()
 
     def snap(self, line: int, fp: Any, unsure: FrozenSet[str], unwritten: FrozenSet[str]) -> _Snap:
-        return _Snap(line, dict(self.t.pos), dict(self.t.pole), fp, unsure, unwritten)
+        return _Snap(line, dict(self.t.pos), dict(self.t.pole), fp, unsure, unwritten, self.t.levels)
 
     def differ(self, a: _Snap, pos: Dict[str, Optional[Decimal]], pole: Dict[str, Decimal], unsure: FrozenSet[str]) -> Set[str]:
         """The axes (and ``'pole'``) not known where two ways meet."""
@@ -827,6 +946,13 @@ class _Flow:
         if a.pole != pole:
             out.add("pole")
         return out
+
+    def merge_levels(self, a: _Snap) -> None:
+        """T011: where two ways meet, an axis stands at a level the program wrote only when it
+        does on both (or is known on the other)."""
+        t = self.t
+        if t.levels:
+            t.levels = frozenset(x for x in t.levels if a.pos.get(x) is not None or x in a.levels)
 
     def everything(self) -> Set[str]:
         return set(self.t.axes.order) | {"pole"}
@@ -933,11 +1059,22 @@ class _Flow:
                 return None
         return None
 
-    def turns_rotary(self, step: "Step") -> bool:
+    def turns_rotary(self, step: "Step", block: Sequence[Tuple[Dict[str, Any], str, str]] = ()) -> bool:
         """A code of the block turns the rotary axes (``positionsRotary``; a ``keepsRotary``
-        parameter written as 0, or a call without arguments, keeps them still)."""
+        parameter written as 0, or a call without arguments, keeps them still).
+
+        v1.2.0 (T010): nor does one whose block leaves the plane untilted. When the block
+        (``block``: the entries of its lines written so far, a Klartext ``~`` block over
+        several lines included) writes a frame code of the same group and no frame of that
+        group is open after it — ``PLANE RESET``, or a ``PLANE SPATIAL`` / ``PROJECTED`` /
+        ``EULER`` whose angles (``frameZeroWords``) are all written as 0 — the angles at zero
+        turn no rotary axis: they keep what the program wrote, and an axis already not known
+        stays so. An angle that is not a plain 0 (``SPB+Q5``) leaves the frame open and turns
+        them, as before; ``STAY`` never turns them."""
         for entry, code, kind in step.entries:
             if entry.get("positionsRotary") is not True:
+                continue
+            if self.untilted(entry, code, block or step.entries):
                 continue
             params = entry.get("params") if isinstance(entry.get("params"), list) else []
             keep = [i for i, p in enumerate(params) if isinstance(p, dict) and p.get("keepsRotary") is True]
@@ -953,6 +1090,21 @@ class _Flow:
                 continue
             return True
         return False
+
+    def untilted(self, entry: Dict[str, Any], code: str, block: Sequence[Tuple[Dict[str, Any], str, str]]) -> bool:
+        """T010: ``block`` writes a frame code of ``entry``'s group (other than ``code``) and no
+        frame of that group is open after it (the interpreter's reading, rule 13)."""
+        group = entry.get("group")
+        if not isinstance(group, str) or not group:
+            return False
+        if not any(c != code and e.get("group") == group and gedit_nc.frame_of(e) in ("open", "close") for e, c, _ in block):
+            return False
+        interp = self.t.interp
+        for frame in interp.open_frames:
+            opened = interp.entry(str(frame.get("code") or ""))
+            if opened is None or opened.get("group") == group:
+                return False
+        return True
 
     # -- one line ---------------------------------------------------------------
 
@@ -978,17 +1130,18 @@ class _Flow:
             for jump in self.pending.pop(name, []):
                 diff = self.differ(jump, t.pos, t.pole, unsure)
                 unsure = unsure | frozenset(diff)
+                self.merge_levels(jump)
                 unwritten = unwritten | jump.unwritten
                 if jump.fp != fp:
                     self._events.append(FlowEvent("modal", jump.line, (), name))
             if name in named:
-                self.labels[name] = _Snap(line, dict(t.pos), dict(t.pole), fp, unsure, unwritten)
+                self.labels[name] = _Snap(line, dict(t.pos), dict(t.pole), fp, unsure, unwritten, t.levels)
                 self.recording = True
             elif self.jumps:
                 self.numbers.append(int(name[1:]))
                 self.number_lines.append(line)
         if skip:
-            self._skip = _Snap(line, dict(t.pos), dict(t.pole), fp, unsure, unwritten)
+            self._skip = _Snap(line, dict(t.pos), dict(t.pole), fp, unsure, unwritten, t.levels)
         self.unsure = unsure
         self.unwritten = unwritten
 
@@ -1035,11 +1188,15 @@ class _Flow:
                 unsure.add("pole")
             else:
                 unsure.discard("pole")
-        if self.rotary_codes and self.rotary and self.turns_rotary(step):
+        block = self._carry + list(step.entries) if self._carry else step.entries
+        if self.rotary_codes and self.rotary and self.turns_rotary(step, block):
             unsure |= set(self.rotary)
+        # The entries of a block written over several lines (Klartext `~`), for its next line.
+        self._carry = list(block) if any(t.kind == "continuation" for t in tokens) else []
         if self._skip is not None:
             skipped = self._skip
             unsure |= self.differ(skipped, t.pos, t.pole, frozenset())
+            self.merge_levels(skipped)
             unwritten |= skipped.unwritten
             if skipped.fp != self.fp():
                 events.append(FlowEvent("modal", line, (), "/"))
@@ -1062,7 +1219,7 @@ class _Flow:
         fp = self.fp()
 
         def now() -> _Snap:
-            return _Snap(line, dict(t.pos), dict(t.pole), fp, frozenset(unsure), frozenset(unwritten))
+            return _Snap(line, dict(t.pos), dict(t.pole), fp, frozenset(unsure), frozenset(unwritten), t.levels)
 
         def back(to: _Snap, name: str, start: int) -> None:
             diff = self.differ(to, t.pos, t.pole, frozenset(unsure))
@@ -1070,6 +1227,7 @@ class _Flow:
             if to.fp != fp:
                 events.append(FlowEvent("modal", to.line, (), name))
             unsure.update(diff)
+            self.merge_levels(to)
 
         written = " ".join(tok.text.strip() for tok in self.significant(tokens))[:40]
         if "jump" in flows:
@@ -1091,6 +1249,7 @@ class _Flow:
                         if self.fp_before(at) != fp:
                             events.append(FlowEvent("modal", at, (), name))
                         unsure.update(everything)
+                        t.levels = _NO_AXES
             return
         for flow in flows:
             if flow == "branch":
@@ -1103,6 +1262,7 @@ class _Flow:
                 end = now()
                 unsure.update(self.differ(opened, t.pos, t.pole, frozenset(unsure)))
                 unwritten.update(opened.unwritten)
+                self.merge_levels(opened)
                 if opened.fp != fp:
                     events.append(FlowEvent("modal", opened.line, (), written))
                 self.stack.append(("else", end))
@@ -1113,6 +1273,7 @@ class _Flow:
                 _, opened = self.stack.pop()
                 unsure.update(self.differ(opened, t.pos, t.pole, frozenset(unsure)))
                 unwritten.update(opened.unwritten)
+                self.merge_levels(opened)
                 if opened.fp != fp:
                     events.append(FlowEvent("modal", opened.line, (), written))
             elif flow == "loop":
@@ -1202,6 +1363,31 @@ class PathTracker:
         #: P4a fix B1 (NC-4, NC-5): the first recorded line, where the scope starts (a
         #: selection's first line); ``None`` until one is walked.
         self.first_recorded: Optional[int] = None
+        #: T011 (NC-18): the axes not known that stand at a level the program wrote (`Step.levels`).
+        self.levels: FrozenSet[str] = _NO_AXES
+        #: v1.2.0 (NCF-C): the values the single passes share while they are in force (the
+        #: control keeps them until a block writes them again, a one-shot code other than a
+        #: dwell or a plane code clears them): the length written for each length parameter of a
+        #: pass (`CodeParam.lengthAlong`, the taper `R`) as ``(value, word, why not known,
+        #: readings)``, the value a coordinate in ``report_units`` or ``None`` with the kind of
+        #: :data:`UNKNOWN_KINDS` that says why; and the end point of the passes per axis, as a
+        #: column value, while no other move has written that axis since.
+        self.pass_lengths: Dict[str, Tuple[Optional[Decimal], str, Optional[str], Any]] = {}
+        self.pass_end: Dict[str, Decimal] = {}
+        #: v1.2.0 (NCR-2): why the values the single passes share are not known, or ``None``:
+        #: after :meth:`forget_all` (a program after the first, a macro or data block that may
+        #: set anything) and after a subprogram call, a taper the passes run with is not known
+        #: (an empty :attr:`pass_lengths` reads as "no taper"). A block that writes the taper,
+        #: or a code that clears the pass values, makes it known again (:meth:`pass_taper`).
+        self.pass_unknown: Optional[str] = None
+        #: v1.2.0 (NCR-9): whether the levels on the tool axis of a cycle with parameters were
+        #: written as numbers where it was defined or called with them, by the cycle's code
+        #: (:func:`empty_levels`; a Klartext definition's Q parameters on the lines of its
+        #: block). Read by the T011 levels: an empty level is 0, no level the program wrote.
+        self.cycle_levels: Dict[str, bool] = {}
+        #: The Klartext definition whose parameter lines are being read: (code, the tool-axis
+        #: parameters it has, the ones written as a plain number so far).
+        self._open_define: Optional[Tuple[str, FrozenSet[str], Set[str]]] = None
         #: P4a fix B1 (NC-5, NC-9, NC-11): what the straight walk does not see (:class:`_Flow`).
         self.flow = _Flow(self)
 
@@ -1224,7 +1410,7 @@ class PathTracker:
             # M13 review (NC-4): a program after the first (a subprogram behind `M30`) runs
             # with the tool and from the position its caller left, which the file does not
             # say: no axis is known until it states it.
-            self.forget_all()
+            self.forget_all("%s (line %d)" % (start, number))
             self.called = "%s (line %d)" % (start, number)
             self.unstated = set(self.axes.order)
             self.flow.reset()
@@ -1238,6 +1424,7 @@ class PathTracker:
         # program copies them only where they can change. (`pole` is replaced, never changed.)
         before = self._last if self._last is not None else dict(self.pos)
         step.before = before
+        step.levels = self.levels
         step.after = dict(self.pos) if self._block(step, tokens, number, record) else before
         step.pole = self.pole
         step.pole_line = self.pole_line
@@ -1278,6 +1465,7 @@ class PathTracker:
                 entry = interp.entry(code)
                 if entry is not None:
                     out.entries.append((entry, canonical(entry, code), kind))
+                    out.ids.add(id(token))
                 elif address in self.code_heads and token.value is not None:
                     out.words.append(token.text)
             elif kind == "call":
@@ -1285,6 +1473,7 @@ class PathTracker:
                 out.calls.append(token)
                 if entry is not None:
                     out.entries.append((entry, canonical(entry, token.address or ""), kind))
+                    out.ids.add(id(token))
             elif kind == "keyword":
                 name = token.address or token.text
                 number = token.value_text
@@ -1302,6 +1491,7 @@ class PathTracker:
                     entry = interp.entry(name)
                 if entry is not None:
                     out.entries.append((entry, canonical(entry, name), kind))
+                    out.ids.add(id(token))
         return out
 
     # -- one block --------------------------------------------------------------
@@ -1331,12 +1521,23 @@ class PathTracker:
                 moves.append((axis, token))
         step.moves = moves
         step.words = words
+        self._read_levels(written, tokens)
 
-        if not moves and not written.calls and not entries:
+        if not moves and not written.calls and not entries and not self.pass_written(words):
             return False
+        held = self.levels
+        if held and moves:
+            # A word written for an axis puts it somewhere else (an increment from the level
+            # keeps it on one, below).
+            self.levels = held - {axis for axis, _ in moves}
         state = interp.state
         units = state["units"]["value"]
         step.units = units if units in ("mm", "inch") else None
+        self.clear_passes(entries, moves)
+        call = next((c for e, c, _ in written.entries if e.get("call") is True or any(isinstance(p, dict) and p.get("programNumber") for p in e.get("params") or [])), None)
+        if call is not None:
+            # v1.2.0 (NCR-2): a subprogram may write the taper the passes share.
+            self.pass_unknown = "%s (line %d)" % (call, line)
         if units in ("mm", "inch") and self.report_units is None and record:
             self.report_units = units
         elif units in ("mm", "inch") and record and units != self.report_units:
@@ -1382,8 +1583,14 @@ class PathTracker:
             for axis, token in moves:
                 if token.address.upper() not in values:
                     self.pos[axis] = None
-            if any(e.get("wordsAreData") is True for e, _ in data):
-                self.forget_all()
+            # v1.2.0 (NCR-10): a block that writes a tool offset (`G10 L11 P1 R0.1`: its `L` one of
+            # the code's `toolOffsetValues`) sets no coordinate system and moves nothing.
+            forget = next(
+                (c for e, c in data if e.get("wordsAreData") is True and not writes_tool_offset(e, tokens, written.ids)),
+                None,
+            )
+            if forget is not None:
+                self.forget_all("%s (line %d)" % (forget, line))
             return True
 
         frame = interp.frame
@@ -1427,10 +1634,172 @@ class PathTracker:
             if value is not None:
                 self._reach(axis, value)
             self.pos[axis] = value
+        if held and moves:
+            # T011: an increment from a level the program wrote ends on one too.
+            kept = {r.axis for r in step.reads if r.unknown == "incremental-start" and r.axis in held}
+            if kept:
+                self.levels = self.levels | kept
         if moves or polar or arc:
             step.kind = "move"
+        if self.whole_pass(state, entries):
+            if targets or self.pass_written(words):
+                # v1.2.0 (NCF-C): the taper start of the pass.
+                self.single_pass(words, targets, entries, state, units, line)
+            # v1.2.0 (T111): a block of a single-pass cycle (`path: 'cycle'`: the lathe `G90`,
+            # `G92`, `G94`, system B `G77`-`G79`) cuts to the point it writes and goes back to
+            # where it started: the end point is reached, the start is where the tool stands after.
+            for axis in targets:
+                self.pos[axis] = start.get(axis)
         self.after_cycle(state, written, moves, line, plane)
         return True
+
+    # -- the single passes (v1.2.0, NCF-C) ----------------------------------------
+
+    def _read_levels(self, written: _Written, tokens: Sequence[Any]) -> None:
+        """v1.2.0 (NCR-9): whether a cycle with parameters writes its levels on the tool axis as
+        numbers (:attr:`cycle_levels`): a call with its arguments (`CYCLE81(10,0,2,-10)`, also
+        behind `MCALL`) on its line, a Klartext definition (`CYCL DEF 200`) on the lines of its
+        block (`Q203=+0`, up to the line that does not go on with `~`)."""
+        open_define = self._open_define
+        if open_define is not None:
+            open_define[2].update(_assigned_numbers(tokens, open_define[1]))
+        for token in written.calls:
+            entry = self.interp.entry(token.address or "")
+            if isinstance(entry, dict) and as_dict(entry.get("sets")).get("cycle") is not None:
+                self.cycle_levels[str(entry.get("code"))] = not empty_levels(token, entry)
+        for entry, _, kind in written.entries:
+            if kind != "keyword" or as_dict(entry.get("sets")).get("cycle") != "define":
+                continue
+            wanted = frozenset(
+                str(p.get("address")).upper()
+                for p in entry.get("params") or []
+                if isinstance(p, dict) and gedit_nc.position_of(p) == "tool-axis" and isinstance(p.get("address"), str)
+            )
+            open_define = (str(entry.get("code")), wanted, set(_assigned_numbers(tokens, wanted)))
+            self._open_define = open_define
+        if open_define is not None and not any(t.kind == "continuation" for t in tokens):
+            code, wanted, seen = open_define
+            self.cycle_levels[code] = wanted <= seen
+            self._open_define = None
+
+    def pass_motion(self, state: Dict[str, Any], entries: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """The motion code the block runs: one it writes, else the one in force."""
+        written = [e for e in entries if e.get("group") == "motion" and (as_dict(e.get("sets")).get("motion") or as_dict(e.get("sets")).get("path"))]
+        if written:
+            return written[-1]
+        code = as_dict(as_dict(state.get("groups")).get("motion")).get("code")
+        motion = self.interp.entry(code) if isinstance(code, str) and code != "" else None
+        return motion if isinstance(motion, dict) else None
+
+    def pass_lengths_of(self, motion: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """The length parameters of a single pass and the axis each lies along
+        (`CodeParam.lengthAlong`: the taper `R`, along X for `G90`/`G92`, along Z for `G94`)."""
+        out: Dict[str, str] = {}
+        if not isinstance(motion, dict) or as_dict(motion.get("sets")).get("path") != "cycle":
+            return out
+        for param in motion.get("params") or []:
+            if not isinstance(param, dict):
+                continue
+            address, along = param.get("address"), param.get("lengthAlong")
+            if isinstance(address, str) and address and isinstance(along, str) and along in self.axes.known:
+                out.setdefault(address.upper(), along)
+        return out
+
+    def pass_written(self, words: Dict[str, Any]) -> bool:
+        """A block that writes a length of the single pass in force (`R-1.` alone): the control
+        runs the pass again with it."""
+        if not words:
+            return False
+        lengths = self.pass_lengths_of(self.pass_motion(self.interp.state, ()))
+        return any((words[a].value_text or "") != "" for a in lengths if a in words)
+
+    def clear_passes(self, entries: Sequence[Dict[str, Any]], moves: Sequence[Any]) -> None:
+        """A one-shot code other than a dwell, or a plane code, clears the values the single
+        passes share (FANUC 30i lathe manual, the restrictions of the canned cycles). An axis
+        word forgets the end point the passes keep along its axis: a pass block that resolves it
+        writes it again (:meth:`single_pass`); after any other move (a rapid, a frame, a word
+        not resolved) the control may read that word as the pass's own, which is not certain."""
+        if not self.pass_lengths and not self.pass_end and self.pass_unknown is None:
+            return
+        for axis, _ in moves:
+            self.pass_end.pop(axis, None)
+        for entry in entries:
+            sets = as_dict(entry.get("sets"))
+            dwell = any(isinstance(p, dict) and p.get("unit") == "dwell" for p in entry.get("params") or [])
+            if (entry.get("group") == "nonmodal" and not dwell) or sets.get("plane") is not None:
+                self.pass_lengths = {}
+                self.pass_end = {}
+                self.pass_unknown = None
+                return
+
+    def single_pass(self, words, targets, entries, state, units, line: int) -> None:
+        """v1.2.0 (NCF-C): a block that runs a single pass with a taper starts the cut at its end
+        point plus the taper, along the axis the taper lies along (`lengthAlong`): `G90`/`G92`
+        add the radius `R` to X (twice it in a diameter column), `G94` adds `R` to Z (FANUC 30i
+        lathe manual: the first move goes at rapid from the start point to the end coordinate
+        of that axis plus the taper; R is a radius value). That point is reached; a taper or an
+        end point that is not known leaves it not resolved."""
+        motion = self.pass_motion(state, entries)
+        lengths = self.pass_lengths_of(motion)
+        code = str(as_dict(motion).get("code") or "")
+        for address in lengths:
+            token = words.get(address)
+            if token is None or (token.value_text or "") == "" or gedit_nc.is_assignment(token):
+                continue
+            word = "%s (line %d)" % (token.text, line)
+            literal, _ = literal_of(token)
+            if literal is None:
+                self.pass_lengths[address] = (None, word, "expression", None)
+                continue
+            value, readings = self.value(token, units, entries, "length")
+            self.pass_lengths[address] = (value, word, None if value is not None else "machine-dependent", readings)
+        for axis, value in targets.items():
+            if value is None:
+                self.pass_end.pop(axis, None)
+            else:
+                self.pass_end[axis] = value
+        for address, along in lengths.items():
+            found = self.pass_lengths.get(address)
+            if found is None:
+                if self.pass_unknown is not None:
+                    # NCR-2: the taper the passes share is not known (a program after the first, a
+                    # macro, a subprogram call above): nor is where the cut starts.
+                    self._miss([along], "cycle", "the taper start of %s (line %d)" % (code, line), key=code, names=self.axes.label(along))
+                continue
+            value, word, why, readings = found
+            if why == "machine-dependent":
+                self._miss([along], why, word, readings=readings, angle=False, units=units)
+                continue
+            if why is not None:
+                self._miss([along], why, word)
+                continue
+            if value is None or value == _ZERO:
+                continue
+            end = self.pass_end.get(along)
+            if end is None:
+                if along not in targets:
+                    # The end along the taper's axis was written by a move outside the passes.
+                    self._miss([along], "cycle", "the taper start of %s (line %d)" % (code, line), key=code, names=self.axes.label(along))
+                continue
+            self._reach(along, end + self.axes.col(along, value))
+
+    def pass_taper(self, address: str) -> Optional[Tuple[Optional[Decimal], str, Optional[str], Any]]:
+        """v1.2.0 (NCR-2): the length the passes share for ``address`` (the taper ``R``), as
+        :attr:`pass_lengths` holds it, ``(None, what made it not known, 'unknown', None)`` after
+        :meth:`forget_all` or a subprogram call, or ``None`` when no pass value is in force (no
+        taper; ``R`` written as 0 is a value of 0)."""
+        found = self.pass_lengths.get(address.upper())
+        if found is not None:
+            return found
+        if self.pass_unknown is not None:
+            return (None, self.pass_unknown, "unknown", None)
+        return None
+
+    def whole_pass(self, state: Dict[str, Any], entries: Sequence[Dict[str, Any]]) -> bool:
+        """T111: the block runs a code whose every block is a whole pass that returns to its
+        start (``sets.path: 'cycle'``): one it writes, else the motion code in force."""
+        motion = self.pass_motion(state, entries)
+        return isinstance(motion, dict) and as_dict(motion.get("sets")).get("path") == "cycle"
 
     # -- the kinds of block ---------------------------------------------------
 
@@ -1439,9 +1808,14 @@ class PathTracker:
         pair = PLANE_AXES.get(plane)
         return [axis for axis in (pair or ("X", "Y", "Z")) if axis in self.axes.known]
 
-    def forget_all(self) -> None:
-        """Every axis and the last polar point become not known."""
+    def forget_all(self, why: str = "") -> None:
+        """Every axis and the last polar point become not known, and so do the values the single
+        passes share (``why``: the block that made them so, for :meth:`pass_taper`)."""
         self._last = None
+        self.levels = _NO_AXES
+        self.pass_lengths = {}
+        self.pass_end = {}
+        self.pass_unknown = why or "a block above"
         for axis in self.pos:
             self.pos[axis] = None
         self.last_polar = None
@@ -1655,6 +2029,8 @@ class PathTracker:
     def arc(self, words, written, start, targets, line, units, entries, plane, state, moves) -> bool:
         """The arc of a block in the active plane, its extremes, or why it is not resolved;
         whether the block is an arc at all (a polar arc is ``polar_move``'s)."""
+        if self.word_cycle(state, moves):
+            return False
         direction: Optional[str] = None
         codes = [code for _, code, _ in written.entries]
         tangent = next((c for c in codes if c in UNRESOLVED_ARCS), None)
@@ -1763,6 +2139,23 @@ class PathTracker:
         self._step.arc = arc
         self._note_arc(arc)
         return True
+
+    def word_cycle(self, state: Dict[str, Any], moves: Sequence[Any]) -> bool:
+        """v1.2.0 (FZ-4): a cycle written as a word (``sets.cycle: 'start'``: the ISO drilling
+        cycles ``G81``–``G89``, the lathe ``G74``) runs in the block, written there or in force:
+        the block's axis words are the cycle's position, reached at rapid, whatever arc code
+        the motion group still holds. Its ``R`` is the retract plane, never a radius. A cycle
+        called with its parameters (Sinumerik ``MCALL CYCLE81(…)``, Klartext ``M99``/``M89``)
+        runs where an ordinary move, an arc too, takes the tool, so it is no such cycle."""
+        running = as_dict(state.get("block")).get("cycle")
+        if not running and moves:
+            running = self.interp.active_cycle
+        # An address letter and a number (`G81`), not a named call (`CYCLE81`, also letters
+        # and digits but written with its arguments).
+        if not isinstance(running, str) or not is_word_code(running) or len(head_of(running)) != 1:
+            return False
+        entry = self.interp.entry(running)
+        return entry is not None and as_dict(entry.get("sets")).get("cycle") == "start"
 
     def _arc_miss(self, pair, word: str) -> None:
         self._miss(list(pair or ("X", "Y")), "arc", word)
@@ -1881,7 +2274,6 @@ class PathTracker:
         for axis in forget:
             if axis in self.pos:
                 self.pos[axis] = None
-        self.last_polar = None
         # Where the cycle's positions are its parameters (a defined cycle, a call with
         # arguments), the depth it works to is in none of the block's axis words. A cycle
         # that a word in front of it made modal (`MCALL CYCLE83(…)`, rule 11b) runs in the
@@ -1892,7 +2284,25 @@ class PathTracker:
             and modal.get("code") == running
             and not any(c == running for _, c, _ in written.entries)
         )
-        if cycle == "define" or (entry is not None and (self._written_as_call(written, running) or made_modal)):
+        with_params = cycle == "define" or (entry is not None and (self._written_as_call(written, running) or made_modal))
+        if plane == "XY" and forget:
+            # T011 (NC-18): the cycle leaves Z at its start level or at its retract plane,
+            # which one is not computed (`G98`/`G99` are no data). Both are levels the program
+            # wrote when the level it started from was known (the Z before the block, or a
+            # level an earlier cycle left). NCR-9: a cycle with parameters leaves the tool at
+            # the levels its parameters give, where it was defined or called with them (the
+            # `MCALL` line, the Klartext definition's `Q203`): only where each was written as
+            # a number; an empty one is 0, which nobody wrote.
+            step = self._step
+            levels_written = not with_params or self.cycle_levels.get(str(as_dict(entry).get("code"))) is True
+            if levels_written and (step.before.get("Z") is not None or "Z" in step.levels):
+                self.levels = self.levels | forget
+            else:
+                self.levels = self.levels - forget
+        elif self.levels:
+            self.levels = self.levels - forget
+        self.last_polar = None
+        if with_params:
             defined = state.get("definedCycle") or {}
             at = defined.get("line") if cycle == "define" else modal.get("line") if made_modal else line
             self._cycle_miss("%s (line %d)" % (running, at or line), running, plane)
@@ -1944,6 +2354,7 @@ __all__ = [
     "centre_from_radius",
     "centre_reading",
     "dec",
+    "empty_levels",
     "head_of",
     "is_word_code",
     "distance",
@@ -1954,5 +2365,6 @@ __all__ = [
     "upper_list",
     "values_of",
     "within",
+    "writes_tool_offset",
     "zero",
 ]

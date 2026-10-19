@@ -12,6 +12,7 @@ import { trimBlankEnd } from '$lib/contrib/segments';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 type Selection = { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number };
 const select = (a: number, b: number, c: number, d: number): Selection => ({ startLineNumber: a, startColumn: b, endLineNumber: c, endColumn: d });
@@ -233,6 +234,52 @@ describe('the P4e scenarios (H4e) and the suites around them', () => {
       .replace(/m\{([0-9,]+)\}/g, (_all, digits: string) => digits.split(',').map((d) => `m${d}`).join(','))
       .split(',');
     expect([...names].sort()).toEqual(suiteFiles.map((f) => f.replace(/\.txt$/, '')).sort());
+  });
+
+  describe.skipIf(process.platform === 'win32')('a manual run of harness.yml can name scenarios (the `scenarios` input)', () => {
+    const workflow = readFileSync(join(root, '.github', 'workflows', 'harness.yml'), 'utf8');
+    // The shell of the suite step, with the call of suite.sh replaced by a line that prints what it would get.
+    const step = /- name: Suite m0[^\n]*\n([\s\S]*?)\n\s+shell: bash/.exec(workflow)?.[1] ?? '';
+    const script = (/run: \|\n([\s\S]*)$/.exec(step)?.[1] ?? '')
+      .split('\n')
+      .map((line) => line.replace(/^ {10}/, ''))
+      .join('\n')
+      .replace(/tests\/runtime\/suite\.sh /g, 'echo SUITE ')
+      .replace(/\| tee "\$RUNNER_TEMP\/logs\/suite\.log"/g, '')
+      .replace(/exit "\$\{PIPESTATUS\[0\]\}"/g, 'exit 0');
+    const run = (scenarios: string) => {
+      const out = spawnSync('bash', ['-c', script], { cwd: root, env: { PATH: process.env.PATH ?? '', SCENARIOS: scenarios, RUNNER_TEMP: root }, encoding: 'utf8' });
+      return { code: out.status, stdout: out.stdout, stderr: out.stderr };
+    };
+
+    it('declares the input as a string that defaults to empty, and hands it to the step as an environment variable', () => {
+      expect(workflow).toMatch(/workflow_dispatch:\n\s+inputs:\n\s+scenarios:[\s\S]*?default: ''[\s\S]*?type: string/);
+      expect(workflow).toContain('SCENARIOS: ${{ github.event.inputs.scenarios }}');
+      expect(workflow).not.toMatch(/run:[^\n]*\$\{\{ *(github\.event\.)?inputs/);
+    });
+
+    it('runs the whole list, unchanged, when the field is empty (a push to main never has it)', () => {
+      expect(step).toContain('tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"');
+      for (const empty of ['', '   ']) {
+        const { code, stdout } = run(empty);
+        expect(code).toBe(0);
+        expect(stdout.trim()).toBe(
+          `SUITE ${['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12', 'rp', 'm13', 'p3a', 'p3b', 'b1', 'p4a', 'p4e'].map((n) => `tests/runtime/suites/${n}.txt`).join(' ')}`,
+        );
+      }
+    });
+
+    it('turns a suite name into its file and passes a scenario name as it is', () => {
+      const { code, stdout } = run('p4-compare p4e');
+      expect(code).toBe(0);
+      expect(stdout.trim()).toBe('SUITE p4-compare tests/runtime/suites/p4e.txt');
+    });
+
+    it.each(['p4e; rm -rf /', 'a$(id)', 'x`id`', 'a|b', 'a&b', 'a\nb', '../x', '-x', 'a --repeat 9'])('refuses %j before it reaches a shell command', (bad) => {
+      const { code, stdout } = run(bad);
+      expect(code).toBe(2);
+      expect(stdout).not.toContain('SUITE');
+    });
   });
 
   it('states the number of scenarios as the sum of the lines of the suites, in harness.yml and CONTRIBUTING.md', () => {

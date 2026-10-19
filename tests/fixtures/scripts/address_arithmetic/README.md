@@ -75,7 +75,76 @@ along Z, the taper `R` of `G76`); the axis words of such a cycle whose axis word
 (`U2.`, `W0.1` of `G71`) count as such lengths, and a block that scales an end point of it is
 refused whenever the cycle declares such a length, written in that block or not (`G76 X40.
 Z-20. F1.5` takes `Q` and `R` from the first block or the control's settings). The radius `R`
-of an arc is scaled only when `R` is chosen (the form says so).
+of an arc is scaled only when `R` is chosen (the form says so) and both axes of its plane are
+scaled (below).
+
+**Arcs need both axes of their plane** (v1.2.0 NC review, NCR-8). A multiply or divide that
+scales one axis of the plane in force but not the other (every axis counts while the plane is
+not known) refuses (`not-scaled`) a block that runs an arc — a code with `sets.path: 'arc'`
+written in it, or in force while the block writes a position, unless the block runs a cycle
+written as a word (NCR-1) — and a block that writes an arc centre word (`addresses.arcCenter`)
+no code of it describes (the lathe chamfer `G1 Z-10. I2.`). One factor on both axes keeps an
+arc an arc (a lathe's diameter `X` too).
+
+**The radius of an arc** (NCR-5, owner decision 2026-10-18): a length of a code with
+`sets.path: 'arc'` (Fanuc `G2`/`G3` `R`, Klartext `CR … R`, Okuma `L`) written with a chosen
+address is scaled when both axes of its plane are scaled, left and listed (`data`, "the radius
+of the arc of G2 in the XY plane, which this run does not scale") when neither is, and refuses
+its block when one is. A shift leaves it and lists it (`data`, "a shift does not change a
+radius"). A corner word of a chosen address (`RND R2`) is changed as asked.
+
+**Corner words no code describes** (NCR-6, interim; owner decision 2026-10-18, the full
+description follows with the rotate and mirror rules): a multiply or divide of an axis of the
+plane refuses (`not-scaled`) a block that writes a comma word (`,R`, `,C`, `,A`), and a move
+that is no arc and writes an `R`, or a `C` that is no axis of the profile or stands on a turning
+profile (the lathe `G1 Z-10. R2.` and `G1 Z-10. C2.`; a setting of the control decides whether
+`C` is a chamfer there), not 0, that no code of the block, the motion code or the single pass
+in force describes and that is not chosen. A shift keeps them.
+
+**Approach sizes** (NCR-7, owner decision 2026-10-18): a length of a move code written in its
+block with no `lengthAlong`, `position` or `axis` (the Klartext `APPR`/`DEP` `LEN` and `R`) is
+a process value. A multiply or divide of an axis of the plane scales the end point and keeps
+it, with a `process-value` warning ("a size of APPR LN, kept; check the approach fits the
+scaled contour"), also when its address is chosen; otherwise a chosen one is left as `data`.
+
+**A cycle written as a word** (NCR-1): a block that runs one (`place` puts it into a modal or
+one-shot word cycle, or the interpreter runs one in it) reads no length of the motion code in
+force (`R` of a modal `G2` before `G81 … R2.`) and no taper of a single pass in force (the relief
+`R1.` of a lathe `G74` under `G90`), and writes none of them. A block that writes such a cycle
+and an arc code together is refused (`cycle-mode`).
+
+**Lengths along an axis** (v1.2 NC fix round, T009 and T012; `CodeParam.lengthAlong`). A
+parameter that is a length along one axis (an axis letter) or in the working plane (`'plane'`)
+is not scaled; a multiply or divide of that axis (or of one of the plane's axes; every axis
+while the plane is not known) refuses (`not-scaled`):
+
+* a cycle that writes such a length, not written as 0 — the side lengths, diameters, corner
+  radii and stock sizes of the Klartext cycles 251–257 (`Q218`, `Q219`, `Q220`, `Q222`, `Q223`,
+  `Q375`, `Q424`, `Q425`), with every call of the definition. Scaling them would be right only
+  for one factor on both axes of the plane and a size the user wants scaled, which gEdit does
+  not decide. The same holds for the diameters of Klartext 208, 240 and 262, the sizes of the
+  Sinumerik `CYCLE61`, `POCKET3`, `POCKET4`, `SLOT1`, `SLOT2`, `CYCLE72` and `CYCLE93` (refused
+  for their positions in the plane anyway), and the thread-pass tapers of Okuma `G31`–`G33`;
+* a block that writes such a length for a code that is neither a cycle nor a single pass, not
+  written as 0: the radius `R` of a Fanuc arc (`G2`, `G3`, mill and both lathe systems; NCF-C,
+  owner decision 2026-10-18), the radius `L` of an Okuma arc (`G2`, `G3`, `G102`, `G103`, `G132`, `G133`), the
+  chamfer and the round of Okuma `G75`/`G76`, the Sinumerik corner words `CHF=`, `CHR=`, `RND=`
+  and the arc radius `CR=`, the Klartext `CHF 2` (the keyword's own number), `RND R2` and the `R`
+  of `CR`. Read in that block only. A corner word of a chosen address keeps the form's rule: it
+  is changed as asked and never refused; an arc radius of a chosen address follows the arc rule
+  (NCR-5, below); without `R` chosen, an arc written with a radius is left and listed;
+* every block that moves while a length that stays in force (`CodeParam.lengthInForce`:
+  Sinumerik `RNDM=2`, up to and including the block with `RNDM=0`) rounds its corner;
+* every block that runs a single pass of the lathe (`G90`, `G92`, `G94`; system B `G77`, `G78`,
+  `G79`: the motion code in force declares the length) while its taper `R` is in force and not
+  0 — X for the turning and threading passes, Z for the facing pass. The control keeps `X`, `Z`
+  and `R` of the passes until a block writes them again, so a taper written once is in force for
+  the passes after it; the script keeps it until `R` is written again (the control also clears
+  it on some one-shot codes; keeping it can only refuse more). The passes from the code until
+  the motion leaves them are one series: one refused block leaves the whole series as written.
+  A selection may start inside a series (every pass runs on its own).
+
+A shift never changes such a length: the `R` of a pass is listed as `data` when `R` is chosen.
 
 A word of a chosen address that is a reviewed `'none'` parameter of the cycle in its block and
 may be a length (no `unit` of `dwell`, `count` or `angle`) is a value of the cycle, left and
@@ -125,25 +194,28 @@ under a Z shift has nothing to change and is not listed.
 | `cycle-outside` | (WP10.4) the block runs a cycle that started or was defined **above the selection** and that this run would have moved there (a selection cannot change those lines), or the block itself starts above the selection | the primed walk |
 | `cycle-not-reviewed` | a block that runs or defines a cycle (an entry with `sets.cycle` `'start'` or `'define'`; a `'call'`/`'call-modal'` block, a positioning block under a modal call, or a block under a modal cycle, judged by the cycle in force) whose entry has no parameter with a `position` role, or that writes a parameter without a role, or an argument the entry does not describe; also a cycle that resolves to the generic stand-in (a `CYCL DEF` number the database lacks), **a call the database does not know with a number among its arguments** (`CYCLE76(…)`, `CYCLE77(…)`; found at the M10 integration on `CYCLE61` and `POCKET4`, where it was skipped in silence while every Z word around it moved — B1 described those two, whose points in the plane now refuse the call as `cycle-position`), and **a call while no reviewed cycle is defined** (`definedCycle` is `null`, which is what a definition the database lacks leaves, §7.4 rule 8: the call runs positions from a definition that was left as written) | `position_of`, `params`, modal `definedCycle` |
 | `cycle-position` | the cycle's entry has a parameter with role `'other'` (`CYCL CALL POS`, `CYCL CALL PAT`, `CYCLE800`) | `position_of` |
-| `cycle-mode` | a `'mode'` parameter written with a value other than empty or `0` (`_AMODE`, `_DMODE`, `_GMODE`, `_AXN`) | `position_of` |
+| `cycle-mode` | a `'mode'` parameter written with a value other than empty or `0` (`_AMODE`, `_DMODE`, `_GMODE`, `_AXN`); (NCR-1) a block that writes a cycle written as a word and an arc code (`G2 G81 …`) | `position_of`, `sets.path` |
 | `cycle-plane` | a `'tool-axis'` parameter is written (or in force) while the plane is not `XY`: the tool axis is then not certain | modal `plane` (rules of §7.4, rule 15 for Klartext) |
 | `cycle-expression` | a `'tool-axis'` parameter written as a variable or an expression (`Q203=Q10`, `RFP=R1`) while the run moves the tool axis; also (WP10.4) an axis word of a chosen address in a cycle block written as one (`X30. Y30. Z#101` under `G83`) | the token |
 | `cycle-unresolved` | (WP10.4) a position of a cycle block that the run would move has no resolved value (a point-less `R2` with no machine chosen): the cycle cannot be moved in one piece | `resolve_value` |
+| `cycle-empty` | (v1.2.0, NCR-9b) a shift (add or subtract) of the tool axis and a call (`CYCLE81(10,,2,-10)`) that leaves a `'tool-axis'` argument empty or out, which the control reads as 0, while its `twin` (`CodeParam.twin`: `DPR` for `DP`, `FDPR` for `FDEP`) is not written either; with the positions under its `MCALL`. A multiply or divide keeps 0 at 0 | `position_of`, `CodeParam.twin` |
+| `cycle-level-outside` | (v1.2.0, D4) a shift (add or subtract) of the tool axis on a selection, and a cycle written as a word (`G81`) that starts in it while the tool axis still stands at the level of the lines above (they wrote it, and no block of the selection before the cycle has a tool-axis word the run moves): the cycle moves to its holes at that unmoved level and, in `G98`, returns to it. `G98` and `G99` are no data, so both refuse; the blocks of the cycle with it | `sets.cycle`, `Run.level_above`, `Run.level_inside` |
 | `pole` | (M10 review, NC-2) the block sets the pole (`pole: 'set'`, Klartext `CC`) or moves around it (`pole: 'use'`: `C`, `LP`, `CP`, `CTP`) while the run changes an axis of the plane in force, and the pole cannot be moved: one of its words is a variable or has no resolved value, the plane is not known, or the run multiplies or divides (the polar radii would stay); the pole and every move around it until the next pole are refused together | `CodeEntry.pole`, modal `plane` |
 | `arc-geometry` | (M10 review, NC-3) an arc whose centre or intermediate point is an absolute coordinate of a chosen axis — `I=AC(…)`, `J=AC(…)`, `K=AC(…)`, the `CIP` point `I1=`, `J1=`, `K1=` (`CodeParam.axis`) — and that coordinate cannot be computed (`I=AC(R1)`, `I1=R2`), or cannot be changed while the end point is | `CodeParam.axis`, the value functions |
-| `not-scaled` | (M10 review, CODE-8) a multiply or divide: a coordinate shift or set (`CodeEntry.shift`) written with a chosen axis, or a cycle that writes a length parameter it does not scale, or (NC-16) a block that scales an end point of a cycle with such lengths (above) | `CodeEntry.shift`, `position_of` |
+| `not-scaled` | (M10 review, CODE-8) a multiply or divide: a coordinate shift or set (`CodeEntry.shift`) written with a chosen axis, or a cycle that writes a length parameter it does not scale, or (NC-16) a block that scales an end point of a cycle with such lengths, or (v1.2, T009/T012) a cycle or a single pass with a length along a scaled axis (above), or (v1.2.0, NCR-8, NCR-5, NCR-6) an arc scaled along one axis of its plane, and a corner word no code describes | `CodeEntry.shift`, `position_of`, `CodeParam.lengthAlong`, `sets.path` |
 
 ### Words left as written (`severity: "info"`; the rest of the block is changed)
 
 | `reason` | When |
 |---|---|
 | `unreadable` | (M13 review, NC-5; **`severity: "warning"`**, the block still goes to the old position) the address of a chosen word stands alone, followed by a character no control reads: `Z–5.` with an en dash (U+2013) or a minus sign (U+2212) pasted for `-`. The finding names the character; the summary counts "words that cannot be read" |
-| `data` | a code whose axis words are data (`axisWords: 'data'` or `wordsAreData`: `G92`, `G52`, `G10`, `CYCL DEF 7`, `TRANS`) — its words are values, not positions. The pole (`pole: 'set'`) is not: its words in the plane are positions. Also (P4a review, NC-16) a reviewed `'none'` parameter of the cycle in its block that may be a length: the `R` of the Fanuc lathe's `G74`–`G76` |
+| `data` | a code whose axis words are data (`axisWords: 'data'` or `wordsAreData`: `G92`, `G52`, `G10`, `CYCL DEF 7`, `TRANS`) — its words are values, not positions. The pole (`pole: 'set'`) is not: its words in the plane are positions. Also (P4a review, NC-16) a reviewed `'none'` parameter of the cycle in its block that may be a length: the `R` of the Fanuc lathe's `G74`–`G76`; and (v1.2, T009) the taper `R` of a single pass (`lengthAlong` on the motion code in force) |
 | `incremental` | the distance mode is incremental (`G91`), or the address is an incremental twin (`addresses.incremental`, R6's `U`/`W` choice), or a Klartext `I` prefix (`IZ`) |
 | `expression` | a variable or an `=` expression (Okuma `X=V1+2`, Sinumerik `X=R1`); a value function around a plain number is read (M10 review): `Z=AC(3.25)` is an absolute position whatever the distance mode, `Z=IC(2)` an incremental distance (`incremental` on add and subtract, scaled on multiply and divide) |
 | `machine-dependent` | the word has no resolved value (`resolve_value` is `None`), which includes every machine-dependent word while no machine is chosen: "the reading depends on the machine; choose a machine" |
 | `count` | a `count`/`increment` parameter reached through `arcCentres` (`G83 … K3` under multiply) |
 | `fk-point` | (B1 fix NC, NC-03; a **warning**) an absolute point of a Klartext FK contour on a chosen axis (`P1X` … `P3Y`, the centre `CCX`/`CCY`, `P1Z` … `P3Z`): "an absolute point of an FK contour; gEdit does not move it. Check the FK contour" |
+| `process-value` | (v1.2.0, NCR-7; a **warning**) the length or radius of a Klartext approach or departure (`APPR`/`DEP` `LEN`, `R`) under a multiply or divide of an axis of the plane: "a size of APPR LN, kept; check the approach fits the scaled contour". The summary counts "approach or departure sizes" |
 
 `incremental` also covers a distance mode that is **not known** (no code set it before the
 block: a Fanuc or Sinumerik program that never writes `G90`): adding to an incremental word
@@ -267,7 +339,7 @@ and the blocks under it refused (`frame`), a `TRAORI` section judged and a simul
 | `fanuc-multiply-rule` | Fanuc mill | (CODE-8) multiply 2 on `X`, `Y`, `Z`: a `G91` block and a block before `G90` scaled, `G52` refused (`not-scaled`), the `G4` dwell `X` left (`data`) |
 | `lathe-frames` | Fanuc lathe | (B1 fix NC, NC-02) − 0.5 on `Z`: the blocks under the turret mirror `G68` refused (`frame`), the block after `G69` moved, a `G68.1` rotation stays in force across a `G69` (its blocks refused, `frame`) until `G69.1` |
 | `klartext-fk` | Klartext | (B1 fix NC, NC-03) + 5 on `X`: `FPOL`, `FL`, `APPR`, `L` moved; the FK points `CCX`, `P1X`, `P2X` of `FC`, `FLT`, `FCT` left (`fk-point`, warnings) |
-| `b4-lathe-cycle-values` | Fanuc lathe, none | (P4a review, NC-16) + 1 on `X` and `R`: the end points of `G74`, `G75`, `G76` and the `G71` contour moved; the relief `R` of `G74`/`G75`, the allowance and the taper `R` of `G76` and the words of `G71` left (`data`); the radius of a `G2` changed |
+| `b4-lathe-cycle-values` | Fanuc lathe, none | (P4a review, NC-16) + 1 on `X` and `R`: the end points of `G74`, `G75`, `G76` and the `G71` contour moved; the relief `R` of `G74`/`G75`, the allowance and the taper `R` of `G76` and the words of `G71` left (`data`); the radius of a `G2` left too (`data`; v1.2.0 NCR-5: a shift never changes an arc radius) |
 | `b4-lathe-cycle-multiply` | Fanuc lathe, none | (P4a review, NC-16) multiply 2 on `X`: both blocks of `G74`, `G75`, `G76` and `G71` refused (`not-scaled`), never scaled in part; the moves and the `G71` contour scaled, `G70` (block numbers only) not listed |
 
 The machines of the IS-B and 1 mm cases are written so that they do not equal the profile's

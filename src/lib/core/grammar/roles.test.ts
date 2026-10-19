@@ -114,15 +114,15 @@ describe('the role palette', () => {
     expect([...byColor].filter(([, roles]) => roles.length > 1)).toEqual([]);
   });
 
-  it.each(MODES)('%s: no two roles look alike', (mode) => {
+  it.each(MODES)('%s: no two roles look alike (ΔE 15 or more)', (mode) => {
     const close: string[] = [];
     for (let i = 0; i < ROLES.length; i++) {
       for (let j = i + 1; j < ROLES.length; j++) {
         const distance = deltaE(ROLE_COLORS[mode][ROLES[i]], ROLE_COLORS[mode][ROLES[j]]);
-        if (distance < 10) close.push(`${ROLES[i]}/${ROLES[j]} ${distance.toFixed(1)}`);
+        if (distance < 15) close.push(`${ROLES[i]}/${ROLES[j]} ${distance.toFixed(1)}`);
       }
     }
-    expect(close, `${mode}: pairs under ΔE 10`).toEqual([]);
+    expect(close, `${mode}: pairs under ΔE 15`).toEqual([]);
   });
 
   it.each(MODES)('%s: tool, feed and axis are told apart', (mode) => {
@@ -134,6 +134,17 @@ describe('the role palette', () => {
     for (const [a, b] of pairs) {
       expect(deltaE(ROLE_COLORS[mode][a], ROLE_COLORS[mode][b]), `${mode}: ${a} vs ${b}`).toBeGreaterThan(15);
     }
+  });
+
+  it.each(MODES)('%s: feed is told apart from every other role (more than 15)', (mode) => {
+    // The feed word is violet in both themes (it was a tint of the brand orange, which is the
+    // colour of links and the cursor). Held to the strict distance against *every* role, not
+    // only tool and axis.
+    const close = ROLES.filter((role) => role !== 'feed')
+      .map((role) => ({ role, distance: deltaE(ROLE_COLORS[mode].feed, ROLE_COLORS[mode][role]) }))
+      .filter((entry) => entry.distance <= 15)
+      .map((entry) => `${entry.role} ${entry.distance.toFixed(1)}`);
+    expect(close, `${mode}: roles within ΔE 15 of feed`).toEqual([]);
   });
 
   it('matches the program-map colours of app.css', () => {
@@ -176,10 +187,11 @@ describe('generateThemes', () => {
   });
 
   it('spells the colours the way Monaco parses them', () => {
-    // `ColorMap.getId` accepts `#rrggbb` or `rrggbb` and throws on anything else.
+    // `ColorMap.getId` (token rules) accepts `#rrggbb` or `rrggbb` and throws on anything else; the
+    // workbench colours may also carry an alpha byte (`#rrggbbaa`).
     for (const mode of MODES) {
       for (const rule of themes[mode].rules) expect(rule.foreground).toMatch(/^#?[0-9a-fA-F]{6}$/);
-      for (const value of Object.values(themes[mode].colors)) expect(value).toMatch(/^#[0-9a-fA-F]{6}$/);
+      for (const value of Object.values(themes[mode].colors)) expect(value).toMatch(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/);
     }
   });
 

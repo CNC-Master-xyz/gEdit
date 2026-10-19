@@ -136,6 +136,51 @@ export interface CodeParam {
    * that writes it (`chamfer-sign`). Only `'next-move'`.
    */
   signOf?: 'next-move';
+  /**
+   * v1.2 NC fix round (T009, T012). The parameter is a **length that lies along an axis** — a
+   * size, a diameter, a radius or a taper, never a position — so a multiply or divide of that
+   * axis would have to scale it together with the positions:
+   *   - an axis letter (`'X'`, `'Z'`): along that axis whatever the plane (the taper `R` of the
+   *     lathe's single passes: a radius difference along X for `G90`/`G92`, a difference along
+   *     Z for `G94`);
+   *   - `'plane'`: in the working plane in force, along either of its axes (the side lengths,
+   *     diameters, corner radii and stock sizes of the Klartext pocket, slot and stud cycles).
+   * Address arithmetic never changes such a value: a shift leaves it and lists it as a value of
+   * its code, and a multiply or divide of its axis refuses the block, and the cycle or the series
+   * of passes it belongs to (`not-scaled`), while the value is in force and not zero. Only with
+   * `position` absent or `'none'`. Absent: the parameter lies along no axis.
+   */
+  lengthAlong?: string;
+  /**
+   * v1.2 NC fix round. Only with `lengthAlong`: the value stays in force for the blocks after it
+   * until it is written as 0 (Sinumerik `RNDM=2` rounds every following corner up to `RNDM=0`).
+   * Address arithmetic then refuses every block that moves while it is in force, not only the
+   * block that writes it. Absent: the length counts in its own block only.
+   */
+  lengthInForce?: boolean;
+  /**
+   * v1.2 NC fix round (T013). On a parameter of a code with `shift` (Fanuc `G10`, its `L`): the
+   * values, as plain numbers, with which the block writes a **tool offset** (`G10 L1`, `L10`–`L13`:
+   * a length or radius offset, its geometry or its wear) instead of a work offset (`L2`, `L20`).
+   * Such a block sets no coordinate system, so the geometry transforms do not refuse it as a
+   * coordinate shift. Any other value, a variable, or the parameter left out keeps the reading
+   * of `shift`.
+   */
+  toolOffsetValues?: string[];
+  /**
+   * v1.2.0 NC fix round (NCR-9b). The address of this cycle's other parameter that gives the
+   * **same depth the other way**: one is an absolute position on the tool axis
+   * (`position: 'tool-axis'`), its twin the same depth measured from the reference plane
+   * (`position: 'none'`) — Sinumerik `DP` ↔ `DPR` and `FDEP` ↔ `FDPR` (CYCLE81 to CYCLE89,
+   * CYCLE840, SLOT1/SLOT2 with `_DP` ↔ `_DPR`). The control takes the depth from either; when
+   * both are written, the relative one counts (the cycles manual), and an empty or left-out one
+   * reads as 0. So an empty parameter of such a pair is **covered** when its twin is written: it
+   * is no level the run would have to move. Both sides name each other, and the pair is always
+   * one `'tool-axis'` and one `'none'` parameter (`core/codes/load.ts` drops a pair that is not).
+   * Python reads the same member from the loaded entry (`param.get("twin")`). Absent: the
+   * parameter has no twin, and an empty one reads as 0 on its own.
+   */
+  twin?: string;
 }
 
 /**
@@ -237,9 +282,11 @@ export interface CodeSets {
    * an arc (`G2`, `G3`, Sinumerik `CIP` and `CT`, the Klartext circles `C`, `CR`, `CT`, `CP`,
    * `CTP` and the circular approach and departure). Absent: a straight line. `'cycle'`: each
    * block of the code is a whole pass of its own (approach, cut, retract, return; the lathe
-   * single-pass turning and facing cycles, Fanuc system A `G90`, `G94` and system B `G77`,
-   * `G79`), which the colours show as a cycle. Read by the motion colours only; nothing that
-   * judges a program reads it.
+   * single passes, Fanuc system A `G90`, `G92`, `G94` and system B `G77`, `G78`, `G79`),
+   * which the colours show as a cycle. Also read by the path tracker of the scripts (v1.2.0,
+   * T111: such a block reaches the point it writes and leaves the tool at its start, and the
+   * extents add the start of a taper) and by the lathe Z mirror (a block of it that writes a
+   * taper `R` is refused as `single-pass-taper` unless it is refused as a thread).
    */
   path?: 'arc' | 'cycle';
   /**

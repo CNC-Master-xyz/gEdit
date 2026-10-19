@@ -38,7 +38,7 @@
     cursor: pointer;
   }
   .item:hover:enabled {
-    background-color: rgb(255 255 255 / 20%);
+    background-color: var(--status-hover);
   }
   .item:disabled {
     cursor: default;

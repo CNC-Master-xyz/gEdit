@@ -194,7 +194,7 @@ function oneOf<T extends string>(
  * B1: the members of a parameter that change how its value is read or moved. On a two-block
  * entry an address declared once per block has to agree on all of them (`CodeParam.block`).
  */
-const READING_MEMBERS = ['unit', 'position', 'axis', 'programNumber'] as const;
+const READING_MEMBERS = ['unit', 'position', 'axis', 'programNumber', 'lengthAlong', 'twin'] as const;
 
 /**
  * B1 (`CodeParam.block`): on a two-block entry, an address is declared at most once per block
@@ -226,6 +226,34 @@ function checkBlockParams(params: CodeParam[], path: string, report: (p: CodeDbP
     kept.push(param);
   });
   return kept;
+}
+
+/**
+ * v1.2.0 NC fix round (NCR-9b, `CodeParam.twin`): a twin is kept only as half of a pair. The
+ * parameter it names exists in the same code and names this one back, and of the two one is an
+ * absolute position on the tool axis (`'tool-axis'`) and the other the same depth measured from
+ * the reference plane (`'none'`). Anything else is reported and the twin dropped from both, so a
+ * broken pair reads as two parameters without a twin, each an empty 0 on its own: a mistake can
+ * only make a script refuse more.
+ */
+function checkTwins(params: CodeParam[], path: string, report: (p: CodeDbProblem) => void): void {
+  const broken = new Set<CodeParam>();
+  params.forEach((param, i) => {
+    if (param.twin === undefined) return;
+    const partner = params.find((p) => p !== param && p.address === param.twin);
+    const roles = [param.position, partner?.position].sort().join(' ');
+    let message: string | undefined;
+    if (partner === undefined) message = `twin ${param.twin} is no other parameter of this code`;
+    else if (partner.twin !== param.address) message = `twin ${param.twin} has to name ${param.address} as its twin too`;
+    else if (roles !== 'none tool-axis') {
+      message = `twin needs one parameter with "position": "tool-axis" and the other with "position": "none"`;
+    }
+    if (message === undefined) return;
+    report({ path: `${path}[${i}].twin`, message });
+    broken.add(param);
+    if (partner !== undefined && partner.twin === param.address) broken.add(partner);
+  });
+  for (const param of broken) delete param.twin;
 }
 
 function readParams(
@@ -291,6 +319,40 @@ function readParams(
     if (flag(item.keepsRotary, `${at}.keepsRotary`, report)) param.keepsRotary = true;
     const signOf = oneOf(item.signOf, SIGN_OF, `${at}.signOf`, report);
     if (signOf !== undefined) param.signOf = signOf;
+    // v1.2 NC fix round (T009, T012): the axis a length lies along, or the working plane. A
+    // length is no position: next to another role it is dropped, so address arithmetic reads
+    // the parameter by that role alone.
+    if (item.lengthAlong !== undefined) {
+      const along = str(item.lengthAlong);
+      if (along === undefined || !(along === 'plane' || /^[A-Za-z]$/.test(along))) {
+        report({ path: `${at}.lengthAlong`, message: 'lengthAlong has to be one axis letter or "plane"' });
+      } else if (param.position !== undefined && param.position !== 'none') {
+        report({ path: `${at}.lengthAlong`, message: `lengthAlong needs no position or "position": "none", not "${param.position}"` });
+      } else {
+        param.lengthAlong = along === 'plane' ? along : along.toUpperCase();
+      }
+    }
+    if (flag(item.lengthInForce, `${at}.lengthInForce`, report)) {
+      if (param.lengthAlong !== undefined) param.lengthInForce = true;
+      else report({ path: `${at}.lengthInForce`, message: 'lengthInForce needs lengthAlong' });
+    }
+    // v1.2 NC fix round (T013): the values that make a data setting write a tool offset; plain
+    // whole numbers only. Checked against the entry's `shift` in `readEntry`.
+    if (item.toolOffsetValues !== undefined) {
+      const values = Array.isArray(item.toolOffsetValues) ? item.toolOffsetValues : null;
+      if (values === null || values.length === 0 || !values.every((v) => typeof v === 'string' && /^\d+$/.test(v))) {
+        report({ path: `${at}.toolOffsetValues`, message: 'toolOffsetValues has to be a list of whole numbers written as text' });
+      } else {
+        param.toolOffsetValues = [...values] as string[];
+      }
+    }
+    // v1.2.0 NC fix round (NCR-9b): the parameter that gives the same depth the other way (DP and
+    // DPR). Read as an address here; whether the two make a pair is checked over the whole list.
+    if (item.twin !== undefined) {
+      const twin = str(item.twin);
+      if (twin !== undefined && twin.trim() !== '') param.twin = twin.trim().toUpperCase();
+      else report({ path: `${at}.twin`, message: 'twin has to be the address of another parameter of this code' });
+    }
     // B1: the block of a two-block cycle this parameter belongs to; only on such an entry.
     if (item.block !== undefined) {
       if (item.block !== 1 && item.block !== 2) report({ path: `${at}.block`, message: 'block has to be 1 or 2' });
@@ -299,6 +361,7 @@ function readParams(
     }
     out.push(param);
   });
+  checkTwins(out, path, report);
   const checked = twoBlocks ? checkBlockParams(out, path, report) : out;
   return checked.length > 0 ? checked : undefined;
 }
@@ -517,6 +580,11 @@ function readEntry(
       if (param.keepsRotary && entry.positionsRotary !== true) {
         report({ path: `${path}.params[${i}].keepsRotary`, message: 'keepsRotary needs positionsRotary on the entry' });
         delete param.keepsRotary;
+      }
+      // v1.2 NC fix round (T013): a tool-offset value only tells a shift code's blocks apart.
+      if (param.toolOffsetValues !== undefined && entry.shift !== true) {
+        report({ path: `${path}.params[${i}].toolOffsetValues`, message: 'toolOffsetValues needs shift on the entry' });
+        delete param.toolOffsetValues;
       }
     });
     entry.params = params;

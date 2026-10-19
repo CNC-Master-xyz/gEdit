@@ -215,7 +215,7 @@
     border-top-color: var(--accent);
   }
   .tab:focus-visible {
-    outline: 1px solid var(--accent-hover);
+    outline: 1px solid var(--accent-text);
     outline-offset: -2px;
   }
   .name {
@@ -236,10 +236,10 @@
   .external {
     flex: 0 0 auto;
     font-size: 11px;
-    color: var(--accent-hover);
+    color: var(--accent-text);
   }
   .external.deleted {
-    color: #f38ba8;
+    color: var(--danger-text);
   }
   .locked {
     flex: 0 0 auto;

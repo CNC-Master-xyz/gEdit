@@ -127,7 +127,8 @@
       "sets": { "motion": "feed", "path": "arc", "arcDirection": "cw" },
       "review": "pending",
       "label": "Circular move, clockwise",
-      "description": "Arc to the target in the active plane, turning clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R."
+      "description": "Arc to the target in the active plane, turning clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
+      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }]
     },
     {
       "code": "G3",
@@ -136,7 +137,8 @@
       "sets": { "motion": "feed", "path": "arc", "arcDirection": "ccw" },
       "review": "pending",
       "label": "Circular move, counter-clockwise",
-      "description": "Arc to the target in the active plane, turning counter-clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R."
+      "description": "Arc to the target in the active plane, turning counter-clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
+      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }]
     },
     {
       "code": "G4",
@@ -227,10 +229,11 @@
       "group": "nonmodal",
       "wordsAreData": true,
       "shift": true,
+      "review": "pending",
       "label": "Data setting",
-      "description": "Writes a tool offset, a work coordinate system or a parameter from the program: L says which table, P which entry. The other words of the block are the values written there, not a move, a feed or a speed.",
+      "description": "Writes a tool offset, a work coordinate system or a parameter from the program: L says which table, P which entry. L1 and L10 to L13 write a tool length or radius offset (its geometry or its wear), L2 and L20 a work offset. The other words of the block are the values written there, not a move, a feed or a speed.",
       "params": [
-        { "address": "L", "label": "Which table" },
+        { "address": "L", "label": "Which table", "toolOffsetValues": ["1", "10", "11", "12", "13"] },
         { "address": "P", "label": "Which entry" }
       ]
     },

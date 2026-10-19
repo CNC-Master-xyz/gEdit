@@ -40,6 +40,13 @@
 //   NC-12   the partner tokens a mark names that the machine does not declare are ONE
 //           `unknown-channel` per mark, listing them all.
 //
+// v1.2.0 (T044, the P4e NC-3 follow-up, owner yes 2026-10-17): a rule whose partners are a
+// `P` word (`partners.kind: 'word'`, the rule the machine page builds) asks for the same
+// partners by default (`asksSamePartners`), as the built-in Fanuc presets do: a `P`-less
+// wait meeting one with `P`, or two `P` words naming different channels, is `partners-differ`.
+// The rule says `samePartners: false` to turn it off. The channel view's key (`waitKey`) must
+// read the same answer, so the view and the check never disagree.
+//
 // Two ids are the same when their text is the same or, when both are digits after the same
 // letters, when the values are (`M0101` = `M101`, `0101` = `101`). Findings quote the ids as
 // written. A pair is only compared when both channels are keys of `perChannel`: a channel the
@@ -55,8 +62,21 @@ import {
   type SyncFinding,
   type SyncFindingKind,
   type SyncHit,
+  type SyncRule,
   type SyncSemantics,
 } from './types';
+
+/**
+ * Whether the marks of `rule` that meet must name the same channels and be written alike
+ * (NC-01): `samePartners` as the rule says it, and by default (absent) for a rule whose
+ * partners are a `P` word (`partners.kind: 'word'`; T044, the P4e NC-3 follow-up). A Siemens
+ * list rule (`kind: 'line'`), whose lists may differ, stays off unless it says so.
+ */
+export function asksSamePartners(rule: Pick<SyncRule, 'samePartners' | 'partners'> | undefined): boolean {
+  if (rule === undefined) return false;
+  if (typeof rule.samePartners === 'boolean') return rule.samePartners;
+  return rule.partners?.kind === 'word';
+}
 
 export interface CheckSyncOptions extends ChannelBudget {
   /** Per channel, the lines the written order may not be carried across: a label that is a
@@ -191,7 +211,7 @@ export function checkSyncMarksReport(
         label: typeof r.label === 'string' ? r.label : r.id,
         semantics: r.semantics ?? 'rendezvous',
         answers: r.answers === true,
-        samePartners: r.samePartners === true,
+        samePartners: asksSamePartners(r),
         prefix: markPrefixOf(r),
       });
     }

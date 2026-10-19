@@ -67,8 +67,9 @@ machine's G-code system rather than on the dialect (plan AD-31). Each case is a 
 * `lathe-per-revolution-no` — the same program with the option set to no: nothing is
   scaled, and each finding names the code that is in force (`G99`), not the mill's `G95`
 * `lathe-system-b` / `lathe-system-b-as-a` — one program, two machines. In system B `G78`
-  cuts the thread and its `F` is the 2 mm lead; read as system A, where `G78` is not a code
-  at all, the same word is multiplied. Which one happens is the machine's setting
+  cuts the thread and its `F` is the 2 mm lead; read as system A, the lead is left alone too:
+  system A reads `G78` the way system B does (v1.2.0, NCR-4), so the run says it is a thread
+  pitch either way
 * `lathe-decimal-is-b` / `-calculator` / `-no-machine` — `F155` becomes `F140` in all three,
   because scaling is unit-free whatever the control makes of a number without a point
 * `lathe-feed-limit-machine` / `-no-machine` — and the limits are not: the same program,
@@ -88,7 +89,8 @@ way the program and the profile are paired, because the flag sits on the **code*
 
 * `lathe-b-thread-no-clamp` — a G-code system B program whose post writes no `G92 S`
   clamp, so variant detection cannot reach its margin and the program is read as system A,
-  where `G78` is not a code at all. The three 1.5 mm leads are left alone all the same
+  which reads `G78` as system B's threading pass (v1.2.0, NCR-4). The three 1.5 mm leads are
+  left alone as thread pitches
 * `lathe-a-thread-as-b` — the mirror: a system A program opened with the shop's system-B
   machine, where `G92` sets the coordinate system. Its `G92 X… Z… F1.5` is still a thread
 * `lathe-mill-tapping` — a milling program opened with the lathe profile, where `G74` pecks

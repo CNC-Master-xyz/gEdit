@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be moved by Y5 Z0.5: 1 first move of the selection that would miss the moved path. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "G81 X10. Y10. Z-5. R2. F100.: the selection starts where the lines above it leave the tool, and that point is not moved with the selection. An arc, an incremental move, a turning or facing pass (which goes back to that point), a drilling cycle (which moves to its hole at that level and, with G98, returns to it), or a move without a shifted axis whose position above is not known, would miss the moved path, and so would a pass that takes its end point from a block above the selection. Start the selection at a block that moves to a position on every shifted axis, and give its first pass every value.",
+      "reason": "selection-start"
+    }
+  ]
+}

@@ -128,10 +128,17 @@
     },
     {
       "code": "G2",
-      "description": "Arc to the target in the active plane, turning clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R.",
+      "description": "Arc to the target in the active plane, turning clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
       "group": "motion",
       "label": "Circular move, clockwise",
       "modal": true,
+      "params": [
+        {
+          "address": "R",
+          "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees",
+          "lengthAlong": "plane"
+        }
+      ],
       "review": "pending",
       "sets": {
         "arcDirection": "cw",
@@ -141,10 +148,17 @@
     },
     {
       "code": "G3",
-      "description": "Arc to the target in the active plane, turning counter-clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R.",
+      "description": "Arc to the target in the active plane, turning counter-clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
       "group": "motion",
       "label": "Circular move, counter-clockwise",
       "modal": true,
+      "params": [
+        {
+          "address": "R",
+          "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees",
+          "lengthAlong": "plane"
+        }
+      ],
       "review": "pending",
       "sets": {
         "arcDirection": "ccw",
@@ -272,19 +286,27 @@
     },
     {
       "code": "G10",
-      "description": "Writes a tool offset, a work coordinate system or a parameter from the program: L says which table, P which entry. The other words of the block are the values written there, not a move, a feed or a speed.",
+      "description": "Writes a tool offset, a work coordinate system or a parameter from the program: L says which table, P which entry. L1 and L10 to L13 write a tool length or radius offset (its geometry or its wear), L2 and L20 a work offset. The other words of the block are the values written there, not a move, a feed or a speed.",
       "group": "nonmodal",
       "label": "Data setting",
       "params": [
         {
           "address": "L",
-          "label": "Which table"
+          "label": "Which table",
+          "toolOffsetValues": [
+            "1",
+            "10",
+            "11",
+            "12",
+            "13"
+          ]
         },
         {
           "address": "P",
           "label": "Which entry"
         }
       ],
+      "review": "pending",
       "shift": true,
       "wordsAreData": true
     },
@@ -1807,7 +1829,7 @@
     },
     {
       "code": "G90",
-      "description": "Cuts one outside or inside turning pass, straight or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. On a mill and in G-code system B the same number means absolute positions instead.",
+      "description": "Cuts one outside or inside turning pass, straight or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. X, Z and R stay in force for the next pass blocks, shared by the three single passes, until a block writes them again. On a mill and in G-code system B the same number means absolute positions instead.",
       "group": "motion",
       "label": "Turning pass",
       "modal": true,
@@ -1822,7 +1844,8 @@
         },
         {
           "address": "R",
-          "label": "Taper: the difference in radius between the start and the end"
+          "label": "Taper: the difference in radius between the start and the end",
+          "lengthAlong": "X"
         },
         {
           "address": "F",
@@ -1830,6 +1853,7 @@
           "min": 0
         }
       ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "cycle"
@@ -1837,7 +1861,7 @@
     },
     {
       "code": "G92",
-      "description": "Cuts one threading pass, straight or tapered, and returns to the start point, so a thread is written as a list of X values. F is the thread lead per revolution, not a feed rate. On a mill and in G-code system B the same number sets the coordinate system and clamps the spindle speed instead. A threading pass carries no S word, so gEdit reads the S of a G92 block as that speed clamp rather than as a speed to scale — which is what protects a system-B program opened with a system-A machine.",
+      "description": "Cuts one threading pass, straight or tapered, and returns to the start point, so a thread is written as a list of X values. X, Z and R stay in force for the next pass blocks, shared by the three single passes, until a block writes them again. F is the thread lead per revolution, not a feed rate. On a mill and in G-code system B the same number sets the coordinate system and clamps the spindle speed instead. A threading pass carries no S word, so gEdit reads the S of a G92 block as that speed clamp rather than as a speed to scale — which is what protects a system-B program opened with a system-A machine.",
       "group": "motion",
       "label": "Threading pass as a cycle",
       "modal": true,
@@ -1852,7 +1876,8 @@
         },
         {
           "address": "R",
-          "label": "Taper: the difference in radius between the start and the end"
+          "label": "Taper: the difference in radius between the start and the end",
+          "lengthAlong": "X"
         },
         {
           "address": "F",
@@ -1863,8 +1888,10 @@
         }
       ],
       "pitchFeed": true,
+      "review": "pending",
       "sets": {
         "motion": "feed",
+        "path": "cycle",
         "speedLimit": true
       }
     },
@@ -1891,7 +1918,7 @@
     },
     {
       "code": "G94",
-      "description": "Cuts one facing pass, square or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. On a mill and in G-code system B the same number means feed per minute instead; on a lathe in system A the feed modes are G98 and G99.",
+      "description": "Cuts one facing pass, square or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. X, Z and R stay in force for the next pass blocks, shared by the three single passes, until a block writes them again. On a mill and in G-code system B the same number means feed per minute instead; on a lathe in system A the feed modes are G98 and G99.",
       "group": "motion",
       "label": "Facing pass",
       "modal": true,
@@ -1906,7 +1933,8 @@
         },
         {
           "address": "R",
-          "label": "Taper: the difference along Z between the start and the end"
+          "label": "Taper: the difference along Z between the start and the end",
+          "lengthAlong": "Z"
         },
         {
           "address": "F",
@@ -1914,6 +1942,7 @@
           "min": 0
         }
       ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "cycle"
@@ -2654,35 +2683,103 @@
     },
     {
       "code": "G77",
-      "description": "G-code system A does not use this number; in system B it is the single-pass turning cycle that system A writes as G90. Its F is an ordinary feed. A program that writes it was almost certainly posted for system B, so set a machine with that G-code system to read it properly.",
+      "description": "G-code system A does not use this number; in system B it is the single-pass turning cycle that system A writes as G90. It cuts one outside or inside turning pass, straight or tapered, and returns to the start point; X, Z and R stay in force for the next pass blocks. gEdit reads it that way here too, so a script treats each block as a whole pass and the taper R as a length along X. Its F is an ordinary feed. A program that writes it was almost certainly posted for system B, so set a machine with that G-code system to read it properly.",
       "group": "motion",
       "label": "Turning pass (G-code system B)",
       "modal": true,
+      "params": [
+        {
+          "address": "X",
+          "label": "End diameter of the pass"
+        },
+        {
+          "address": "Z",
+          "label": "End of the pass along Z"
+        },
+        {
+          "address": "R",
+          "label": "Taper: the difference in radius between the start and the end",
+          "lengthAlong": "X"
+        },
+        {
+          "address": "F",
+          "label": "Feed",
+          "min": 0
+        }
+      ],
+      "review": "pending",
       "sets": {
-        "motion": "feed"
+        "motion": "feed",
+        "path": "cycle"
       },
       "verify": true
     },
     {
       "code": "G78",
-      "description": "G-code system A does not use this number; in system B it is the single-pass threading cycle that system A writes as G92, and its F is the thread lead per revolution. gEdit therefore never scales the F of such a block, whichever G-code system the document is read in: a program that writes G78 was almost certainly posted for system B. Set a machine with that G-code system to read the rest of the program properly.",
+      "description": "G-code system A does not use this number; in system B it is the single-pass threading cycle that system A writes as G92. It cuts one threading pass, straight or tapered, and returns to the start point; X, Z and R stay in force for the next pass blocks, and its F is the thread lead per revolution. gEdit reads it that way here too, whichever G-code system the document is read in: it never scales the F of such a block, a mirror treats it as a thread, and a script treats each block as a whole pass and the taper R as a length along X. A program that writes G78 was almost certainly posted for system B. Set a machine with that G-code system to read the rest of the program properly.",
       "group": "motion",
       "label": "Threading pass (G-code system B)",
       "modal": true,
-      "pitchFeedAmbiguous": true,
+      "params": [
+        {
+          "address": "X",
+          "label": "Thread diameter of this pass"
+        },
+        {
+          "address": "Z",
+          "label": "Thread end along Z"
+        },
+        {
+          "address": "R",
+          "label": "Taper: the difference in radius between the start and the end",
+          "lengthAlong": "X"
+        },
+        {
+          "address": "F",
+          "label": "Thread lead per revolution",
+          "min": 0,
+          "required": true,
+          "unit": "feedPerRev"
+        }
+      ],
+      "pitchFeed": true,
+      "review": "pending",
       "sets": {
-        "motion": "feed"
+        "motion": "feed",
+        "path": "cycle"
       },
       "verify": true
     },
     {
       "code": "G79",
-      "description": "G-code system A does not use this number; in system B it is the single-pass facing cycle that system A writes as G94. Its F is an ordinary feed. A program that writes it was almost certainly posted for system B, so set a machine with that G-code system to read it properly.",
+      "description": "G-code system A does not use this number; in system B it is the single-pass facing cycle that system A writes as G94. It cuts one facing pass, square or tapered, and returns to the start point; X, Z and R stay in force for the next pass blocks. gEdit reads it that way here too, so a script treats each block as a whole pass and the taper R as a length along Z. Its F is an ordinary feed. A program that writes it was almost certainly posted for system B, so set a machine with that G-code system to read it properly.",
       "group": "motion",
       "label": "Facing pass (G-code system B)",
       "modal": true,
+      "params": [
+        {
+          "address": "X",
+          "label": "End diameter of the pass"
+        },
+        {
+          "address": "Z",
+          "label": "End of the pass along Z"
+        },
+        {
+          "address": "R",
+          "label": "Taper: the difference along Z between the start and the end",
+          "lengthAlong": "Z"
+        },
+        {
+          "address": "F",
+          "label": "Feed",
+          "min": 0
+        }
+      ],
+      "review": "pending",
       "sets": {
-        "motion": "feed"
+        "motion": "feed",
+        "path": "cycle"
       },
       "verify": true
     }

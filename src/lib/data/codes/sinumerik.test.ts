@@ -392,7 +392,10 @@ describe('the cycles', () => {
     // P4a integration (§7 #307): the intermediate point of CIP (`I1=`, `J1=`, `K1=`) is a
     // coordinate of its axis and has the axis word's class, length; no cycle argument has one.
     expect([...units].sort()).toEqual(['count', 'dwell', 'feedPerRev', 'length']);
-    expect(ENTRIES.filter((e) => (e.params ?? []).some((p) => p.unit === 'length')).map((e) => e.code)).toEqual(['CIP']);
+    // v1.2 NC fix round (FZ-7 and after): the words written with `=` that describe their own value, a
+    // length: the rounding distances ADIS= and ADISPOS=, the corner words CHF=, CHR=, RND=, RNDM=
+    // and the arc radius CR=.
+    expect(ENTRIES.filter((e) => (e.params ?? []).some((p) => p.unit === 'length')).map((e) => e.code)).toEqual(['CIP', 'ADIS', 'ADISPOS', 'CHF', 'CHR', 'RND', 'RNDM', 'CR']);
     expect(
       ENTRIES.filter((e) => (e.params ?? []).some((p) => p.unit === 'feedPerRev')).map((e) => e.code),
     ).toEqual(['G33', 'G331', 'G332', 'G34', 'G35', 'G335', 'G336']);
@@ -617,12 +620,29 @@ describe('SLOT2, CYCLE72, ADIS= and ADISPOS= from the manuals (owner decision 20
     // Values written with `=`, as CTOL= is: no group, no modal flag, nothing they set.
     for (const code of ['ADIS', 'ADISPOS']) {
       expect([entry(code)?.group, entry(code)?.modal, entry(code)?.sets], code).toEqual([undefined, undefined, undefined]);
-      expect(entry(code)?.params, code).toBeUndefined();
+      // v1.2 NC fix round: described by their own address, a length, so the transforms keep
+      // them; no size of the part (no lengthAlong).
+      expect(entry(code)?.params, code).toEqual([expect.objectContaining({ address: code, unit: 'length' })]);
+      expect(entry(code)?.params?.[0].lengthAlong, code).toBeUndefined();
       expect(entry(code)?.description, code).toMatch(/G641/);
       expect(entry(code)?.description, code).toMatch(/a length written without a sign, not a feed/);
     }
     expect(entry('ADISPOS')?.description).toMatch(/G0/);
     expect(entry('ADISPOS')?.description).toMatch(/smaller of ADIS and ADISPOS/);
+  });
+
+  it('v1.2.0 (NCF-C): describes FRC= and FRCM= as the feeds of a chamfer or rounding, no length', () => {
+    // The transforms keep a word an entry describes by its own address; without the entry they
+    // refused FRC= as an unknown word. A feed in the unit in force: no unit class, no lengthAlong.
+    for (const code of ['FRC', 'FRCM']) {
+      expect([entry(code)?.group, entry(code)?.modal, entry(code)?.sets], code).toEqual([undefined, undefined, undefined]);
+      expect(entry(code)?.params, code).toEqual([expect.objectContaining({ address: code, min: 0 })]);
+      expect(entry(code)?.params?.[0].unit, code).toBeUndefined();
+      expect(entry(code)?.params?.[0].lengthAlong, code).toBeUndefined();
+      expect((entry(code) as (CodeEntry & { review?: string }) | undefined)?.review, code).toBe('pending');
+      expect(entry(code)?.description, code).toMatch(/G94.*G95/);
+    }
+    expect(entry('FRCM')?.description).toMatch(/FRCM=0/);
   });
 });
 

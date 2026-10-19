@@ -1,4 +1,11 @@
 {
-  "message": "Moved by Y5 Z0.5: 5 words on 3 blocks. No machine chosen: a word whose reading depends on the machine would refuse the run.",
-  "findings": []
+  "message": "Moved by Y5 Z0.5: 7 words on 4 blocks, 1 word added to the first move of the selection. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 10,
+      "severity": "info",
+      "message": "Z50.5 added: the move started at the unmoved Z of the lines above.",
+      "reason": "word-added"
+    }
+  ]
 }

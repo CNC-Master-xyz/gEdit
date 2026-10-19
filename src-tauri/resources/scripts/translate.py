@@ -79,7 +79,11 @@ the positions behind `MCALL`) and the cycle parameters on the tool axis (`R` und
 `Q203`, `RTP`, `RFP`, `DP`) with a Z shift. Left as written: incremental moves and twins
 (`G91`, `U`, `W`, Klartext `IX`), incremental centres, radii, polar radii and angles, and
 every word that is no position. A cycle moves with the blocks that run it in one piece,
-which the all-or-nothing rule gives for free. The shift is in the units of the first block
+which the all-or-nothing rule gives for free. An incremental move along the tool axis after
+a drilling cycle starts where the cycle left the tool, its start level or its retract plane:
+the shift moves both, so the increment, left as written, ends where it should, when the
+level the cycle started from was written (v1.2.0, NC-18); from a level nobody knows it is
+refused (`axis-unwritten`). The shift is in the units of the first block
 that states them; a block in the other units gets it converted (25.4 exactly).
 
 **A cycle called at a position** (Klartext `CYCL CALL POS X… Y… Z…`) moves with a shift in
@@ -102,6 +106,20 @@ force at its end; a cycle defined in it, whose definition the shift changes, can
 called below it) or inside a block written over several lines (Klartext `~`, Okuma `$`) is
 refused (`selection-inside`): select the whole of it. Without the lines above, the run
 says so and refuses: what is in force above the selection decides how its words are read.
+v1.2.0 (NCR-3): the tool stands where the lines above left it, a point the shift does not move,
+until a block moves it to a written position on every shifted axis the program has written
+above (the join); a block that runs from there otherwise (an arc, a polar move, an increment, a
+move without one of them, a single pass, which goes back there) is refused
+(`selection-start`, the id rotate and mirror use), and so is a single pass that takes its end
+point on a shifted axis from above the selection; a selection that ends while the single passes
+are in force and that the run changed is refused (`selection-inside`). The owner's decision of
+2026-10-19 (D4): a first move without a shifted axis whose position the lines above wrote as a
+number (not lost since to a call, a cycle, a tool change, or a work offset or tool offset picked
+since) gets that axis added, shifted, in the form the lines above wrote it, in absolute mode
+only, and an information row says so (`word-added`: "Z55. added: the move started at the
+unmoved Z of the lines above"). A cycle that runs while the tool axis
+still stands at the level of the lines above is refused (`selection-start`): it moves to its
+holes at that level and, in `G98`, returns to it (`G98`/`G99` are no data, so both).
 
 Two refusals concern the whole run rather than a block, with reasons of their own: a run
 with no code database (`no-database`: a move cannot be told from a machine position or a
@@ -134,6 +152,16 @@ MAX_FINDINGS = 500
 
 #: One inch in millimetres, exactly.
 INCH = Decimal("25.4")
+#: v1.2.0 (D4): the code groups that change where the program's coordinates put the tool
+#: without a move of their own: a work offset (`G55`, `G15 H2`, Klartext cycle 7) and a tool
+#: length compensation (`G43 H2`, `G49`). An axis written in the same block is written under
+#: the new setting.
+OFFSET_GROUPS = ("offset", "lengthComp")
+#: v1.2.0 (D4): the words that pick a tool or its offsets when no code of the block takes them
+#: as a parameter (Sinumerik `D2`, a lathe `T0202`, a lone `H2`); `T` also changes the tool,
+#: which may move it to the change position.
+OFFSET_WORDS = ("D", "H")
+TOOL_WORDS = ("T",)
 
 #: What the message calls a count of refused blocks by their first reason (singular, plural),
 #: for the refusals of `_nc_geom.REASONS` that apply to translate.
@@ -153,11 +181,36 @@ REASON_TEXT = {
     "selection-inside": ("block at a selection edge inside a cycle or a block", "blocks at a selection edge inside a cycle or a block"),
     "cycle-not-reviewed": ("cycle not reviewed", "cycles not reviewed"),
     "cycle-position": ("cycle with positions of its own", "cycles with positions of their own"),
+    "cycle-level-empty": ("cycle with an empty level on the tool axis", "cycles with an empty level on the tool axis"),
     "cycle-plane": ("cycle outside the XY plane", "cycles outside the XY plane"),
     "fk-contour": ("free contour (FK)", "free contours (FK)"),
     "arc-unsupported": ("arc gEdit cannot compute", "arcs gEdit cannot compute"),
     "pole-unknown": ("move around a pole that is not known", "moves around a pole that is not known"),
     "resolution": ("block with a word that cannot hold the shift", "blocks with a word that cannot hold the shift"),
+    "selection-start": ("first move of the selection that would miss the moved path", "first moves of the selection that would miss the moved path"),
+}
+
+#: The refusals of the run itself, beside ``_nc_geom.REASONS``: id -> the plain text after
+#: "<as written>: " (v1.2.0, NCR-3; the same id as rotate's and mirror's).
+RUN_REASONS = {
+    "selection-start": (
+        "the selection starts where the lines above it leave the tool, and that point is not "
+        "moved with the selection. An arc, an incremental move, a turning or facing pass (which "
+        "goes back to that point), a drilling cycle (which moves to its hole at that level and, "
+        "with G98, returns to it), or a move without a shifted axis whose position above is not "
+        "known, would miss the moved path, and so would a pass that takes its end point from a "
+        "block above the selection. Start the selection at a block that moves to a position on "
+        "every shifted axis, and give its first pass every value"
+    ),
+}
+#: The information rows of the run itself, beside ``_nc_geom.INFO``: id -> (the count's words,
+#: singular and plural; the row's text after "<the words>: "). v1.2.0, the owner's decision of
+#: 2026-10-19: a word added to the selection's first move.
+OWN_INFO = {
+    "word-added": (
+        ("word added to the first move of the selection", "words added to the first move of the selection"),
+        "the move started at the unmoved %s of the lines above",
+    ),
 }
 #: The information rows: a machine position is a return or a position in machine coordinates.
 INFO_TEXT = {
@@ -269,7 +322,7 @@ class Params:
 class Line:
     """One line of the selection or the document, and what the run makes of it."""
 
-    __slots__ = ("index", "number", "text", "block", "edits", "refusals", "notes")
+    __slots__ = ("index", "number", "text", "block", "edits", "refusals", "notes", "added")
 
     def __init__(self, index: int, number: int, text: str, block: int) -> None:
         self.index = index
@@ -280,6 +333,9 @@ class Line:
         self.edits: List[Tuple[int, int, str]] = []
         self.refusals: List[_nc_geom.Refusal] = []
         self.notes: List[_nc_geom.Refusal] = []
+        #: v1.2.0 (owner decision 2026-10-19): the words added to the selection's first move,
+        #: as (axis, the word as written).
+        self.added: List[Tuple[str, str]] = []
 
 
 class Run:
@@ -322,6 +378,19 @@ class Run:
         #: NC-3: the cycle definitions called at a position along a shifted tool axis, as
         #: (line of the definition, the call's line, the call's code, the tool axis).
         self.called_at: List[Tuple[int, int, str, str]] = []
+        #: v1.2.0 (NCR-3): the shifted axes on which the tool still stands where the lines above
+        #: a selection left it (a point the run does not move), until a block moves it to a
+        #: written position on all of them; and the axes a single pass of the selection wrote
+        #: its end point on (a pass takes the others from the block that last wrote them).
+        #: ``None`` until the selection's first line, which says which axes the program has
+        #: written above it.
+        self.outside: Optional[set] = set()
+        self.pass_axes: set = set()
+        #: v1.2.0 (owner decision 2026-10-19): the last absolute word the lines above the
+        #: selection wrote on each axis (its token): the form a word added to the selection's
+        #: first move is written in; ``None`` after a subprogram or macro call.
+        self.last_word: Dict[str, Any] = {}
+        self._macro_seen = False
 
     def op_for(self, units: Optional[str]) -> _nc_geom.Translate:
         """The shift in the units of a block: the form's shift is in the program's units (the
@@ -349,6 +418,10 @@ class Run:
             state, step = tracker.line(text, first_number + offset, state, False)
             continued = any(t.kind == "continuation" for t in step.tokens)
             self.note_rotary(step, record=False)
+            if self.is_selection:
+                self.note_last_words(step)
+        if preceding and self.is_selection:
+            self.outside = None
         block = 0
         edge: Optional[_nc_geom.Refusal] = None
         if preceding and (continued or gedit_nc.continues_block(lines[0] if lines else "", cp)):
@@ -373,6 +446,12 @@ class Run:
             self.call_position(line, step)
             self.note_rotary(step, record=True, line=line)
             self.selection_start(line, step)
+            if self.is_selection:
+                self.check_outside(line, step)
+                if self.outside:
+                    # The first move is still to come: a call, a tool change or an offset of
+                    # the selection before it makes a position of the lines above unknown too.
+                    self.note_last_words(step)
             continues = any(t.kind == "continuation" for t in step.tokens)
             if text.strip() != "":
                 # The trailing empty element of a selection that ends with a line break is
@@ -387,6 +466,63 @@ class Run:
         self.settle_called_at()
         self.settle_rotary()
 
+    def note_last_words(self, step: _nc_path.Step) -> None:
+        """The last absolute word on each axis above the selection, for the form of a word the
+        first move gets added (``add_missing``). A subprogram or macro call may leave the tool
+        anywhere, whatever the tracker still holds: every axis is not known after it until a
+        block writes it again (``None``). So may a tool change (the change position is the
+        machine's), and a work offset or a tool offset picked since puts the same point at other
+        coordinates (``position_events``)."""
+        before, after = self.position_events(step)
+        if before:
+            for axis in AXES:
+                self.last_word[axis] = None
+        if step.kind == "move":
+            for read in step.reads or []:
+                token = read.token
+                if read.incremental is False and token is not None and (token.address or "").upper() == read.axis and _nc_path.literal_of(token)[0] is not None:
+                    self.last_word[read.axis] = token
+        if after or (self.may_call(step) and _nc_geom._line_has_call(_nc_geom._block_of(step, self.tracker)) is not None):
+            for axis in AXES:
+                self.last_word[axis] = None
+
+    def position_events(self, step: _nc_path.Step) -> Tuple[bool, bool]:
+        """v1.2.0 (D4): whether ``step`` changes where the program's coordinates put the tool
+        without a move the tracker follows: (before its words, after them). Before: a work
+        offset or a tool length compensation (``OFFSET_GROUPS``), or a lone offset word
+        (``OFFSET_WORDS``): an axis written in the same block is written under the new setting.
+        After: a tool change (a code of the group ``tool``: `M6`, Klartext `TOOL CALL`) or a
+        lone `T` word: the change may move the tool to the machine's change position."""
+        before = after = False
+        taken: set = set()
+        for entry, _, _ in step.entries:
+            group = entry.get("group")
+            if group in OFFSET_GROUPS:
+                before = True
+            elif group == "tool":
+                after = True
+            taken.update(str(p.get("address") or "").upper() for p in entry_params(entry))
+        words = step.words or {}
+        if any(address in words and address not in taken for address in OFFSET_WORDS):
+            before = True
+        if any(address in words and address not in taken for address in TOOL_WORDS):
+            after = True
+        return before, after
+
+    def may_call(self, step: _nc_path.Step) -> bool:
+        """A quick look whether ``step`` may call a program, before `_nc_geom` is asked (which
+        builds the whole block): a call token, a code that calls or names a program, the
+        profile's call pattern, or a modal macro call seen above (`G66`)."""
+        if step.calls or self._macro_seen:
+            return True
+        for entry, _, _ in step.entries:
+            if entry.get("call") is True or any(p.get("programNumber") for p in entry_params(entry)):
+                if entry.get("modal") is True and entry.get("wordsAreData") is True:
+                    self._macro_seen = True
+                return True
+        text = step.masked or ""
+        return any(regex.search(text) for regex in _nc_geom._data(self.tracker).calls)
+
     # -- one line -----------------------------------------------------------------
 
     def judge(self, line: Line, step: _nc_path.Step) -> None:
@@ -394,7 +530,7 @@ class Run:
         context = self.context
         op = self.op_for(step.units)
         roles = _nc_geom.roles_of(step, tracker)
-        refusals = list(_nc_geom.refusals_of(step, roles, tracker, op, context))
+        refusals = at_levels(list(_nc_geom.refusals_of(step, roles, tracker, op, context)), step, op)
         notes = _nc_geom.notes_of(step, roles, tracker, op, context)
         edits: List[Tuple[int, int, str]] = []
         # A block refused for a reason that comes before every reason `moved` can give is listed
@@ -566,14 +702,173 @@ class Run:
                     _nc_geom.Refusal(line.number, "selection-inside", _quote(line.text), "%s (line %d)" % (running, start))
                 )
 
+    def pass_runs(self, step: _nc_path.Step) -> bool:
+        """The block runs a single pass (`sets.path: 'cycle'`: the lathe `G90`, `G92`, `G94`,
+        `G77`-`G79`, written or in force): while the passes are in force a block runs one again
+        even when it moves nothing (lathe manual, the canned cycles)."""
+        tracker = self.tracker
+        if not tracker.whole_pass(tracker.interp.state, [e for e, _, _ in step.entries]):
+            return False
+        return any(t.kind not in ("whitespace", "comment") for t in step.tokens)
+
+    def check_outside(self, line: Line, step: _nc_path.Step) -> None:
+        """v1.2.0 (NCR-3): the start of a selection. The tool stands where the lines above left
+        it, a point the shift does not move. A single pass goes back to that point (refused
+        while the tool stands there); a pass that does not write its end point on a shifted
+        axis takes it from above the selection (refused until a pass of the selection wrote
+        it); and the first block that moves the tool must go to a written position on every
+        shifted axis (the join): an arc, a polar move, an increment or a move without one of
+        them would run from the unmoved point (`selection-start`).
+
+        The owner's decision of 2026-10-19: a move without a shifted axis whose position the
+        lines above wrote gets that axis added, shifted (``add_missing``), in absolute mode only.
+        v1.2.0 (D4): a block that runs a cycle while the tool axis still stands at the level the
+        lines above left (the cycle positions there and, with `G98`, returns there; `G98` and
+        `G99` are no data, so both) is refused; no word is added to it."""
+        if self.outside is None:
+            # An axis the program has not written above the selection, or not since a move to a
+            # machine position, stands where the whole run leaves it too; one it wrote stands
+            # at a point the whole run moves (or at one nobody knows: refused alike).
+            unwritten = step.unwritten or frozenset()
+            tracker = self.tracker
+            self.outside = {axis for axis in AXES if self.params.shift[axis] != 0 and axis in tracker.pos and axis not in unwritten}
+        if self.pass_runs(step):
+            written = {r.axis for r in self._roles if r.role in ("point", "cycle-position") and r.axis in AXES}
+            changed = {axis for axis in AXES if self.params.shift[axis] != 0}
+            taken = sorted(axis for axis in changed & set(self.pass_lengths_axes(step)) if axis not in written and axis not in self.pass_axes)
+            self.pass_axes |= written
+            if self.outside:
+                self.refuse_start(line, "a single pass, which goes back to where the lines above left the tool")
+            elif taken and step.line >= self.base_line and self.base_line > 1:
+                self.refuse_start(line, "a single pass that takes its %s from above the selection" % "".join(taken))
+            return
+        if not self.outside:
+            return
+        # An axis a move to a machine position inside the selection took away stands where the
+        # whole run leaves it too.
+        self.outside -= set(step.unwritten or ())
+        if not self.outside:
+            return
+        roles = self._roles
+        polar = step.polar is not None or any(r.role.startswith("polar") for r in roles)
+        arc = step.arc is not None or any(isinstance(e, _nc_path.Unknown) and e.kind == "arc" for e in step.events)
+        linear = [r for r in roles if r.role in ("point", "point-inc", "cycle-position") and r.axis in AXES]
+        if step.kind in ("machine", "data", "pole", "frame", "unknown-code") or not (linear or arc or polar or step.cycle):
+            return  # it does not move the tool from there (a machine position is left as written)
+        absolute = {r.axis for r in linear if r.role != "point-inc"}
+        increments = {r.axis for r in linear if r.role == "point-inc"}
+        if arc:
+            self.refuse_start(line, "an arc")
+        elif polar:
+            self.refuse_start(line, "a polar move")
+        elif step.cycle and self.level_outside():
+            self.refuse_start(line, "a cycle that starts at the level the lines above left the tool at")
+        elif increments & self.outside:
+            self.refuse_start(line, "an incremental move")
+        elif self.outside - absolute:
+            missing = self.outside - absolute
+            if step.cycle or not self.add_missing(line, step, linear, missing):
+                self.refuse_start(line, "a move without %s" % "".join(sorted(missing)))
+        self.outside = set()
+
+    def level_outside(self) -> bool:
+        """v1.2.0 (D4): whether a cycle run now starts at a level the lines above left the tool
+        at: the tool axis (Z in the XY plane) still stands there; in another plane, or one not
+        known, any shifted axis that still stands there. The cycle moves to its position at that
+        level, and a word cycle in `G98` returns to it after every hole: the unmoved level."""
+        plane = self.tracker.interp.state.get("plane")
+        if plane == "XY":
+            return "Z" in (self.outside or set())
+        return bool(self.outside)
+
+    def add_missing(self, line: Line, step: _nc_path.Step, linear: Sequence[_nc_geom.WordRole], missing: set) -> bool:
+        """The owner's decision of 2026-10-19: the first move of a selection that does not write
+        a shifted axis gets that axis added, shifted, where the lines above wrote its position as
+        a number: the move then ends on the moved path. Only in absolute mode (an added word in
+        incremental mode would be an increment), only where the position is known, not on an
+        axis read as a diameter, and in the form the lines above wrote the axis in (the block's
+        own word of another axis when they wrote none). Returns whether every missing axis was
+        added; when one cannot be, none is (the block is refused as before)."""
+        tracker = self.tracker
+        state = tracker.interp.state
+        if not linear or any(r.role == "point-inc" for r in linear) or state.get("distance") != "absolute":
+            return False
+        if any(self.position_events(step)):
+            return False  # a tool or an offset picked in the block itself
+        units = step.units if step.units in ("mm", "inch") else as_dict(state.get("units")).get("value")
+        if units not in ("mm", "inch"):
+            return False
+        op = self.op_for(units)
+        before = step.before or {}
+        unsure = step.unsure or frozenset()
+        report = tracker.report_units
+        anchor = sorted(linear, key=lambda r: r.token.start)
+        edits: List[Tuple[int, int, str]] = []
+        added: List[Tuple[str, str]] = []
+        for axis in sorted(missing, key=AXES.index):
+            value = before.get(axis)
+            if value is None or axis in unsure or axis in self.diameter_words:
+                return False
+            value = tracker.axes.geo(axis, value)
+            if report == "mm" and units == "inch":
+                value = value / INCH
+            elif report == "inch" and units == "mm":
+                value = value * INCH
+            if axis in self.last_word and self.last_word[axis] is None:
+                return False  # a call above the selection may have left it anywhere
+            token = self.last_word.get(axis)
+            if token is not None:
+                like = _nc_geom.WordRole(token, "point", axis, anchor[0].number_class, None)
+            else:
+                like = anchor[0]
+            written = _nc_geom.write_added(axis, like, value + op.shift[axis], tracker, units, True, self.context)
+            if isinstance(written, _nc_geom.Refusal):
+                return False
+            # Beside the block's words of the other axes, in the order X, Y, Z.
+            after = [r for r in anchor if r.axis in AXES and AXES.index(r.axis) < AXES.index(axis)]
+            near = after[-1].token if after else anchor[0].token
+            text = line.text
+            # The block's own spacing, as the mirror adds a word: a packed block stays packed.
+            if near.start > 0:
+                gap = " " if text[near.start - 1 : near.start].isspace() else ""
+            else:
+                gap = " " if near.end >= len(text) or text[near.end : near.end + 1].isspace() else ""
+            if after:
+                edits.append((near.end, near.end, gap + written.text))
+            else:
+                edits.append((near.start, near.start, written.text + gap))
+            added.append((axis, written.text))
+        line.edits.extend(edits)
+        line.added.extend(added)
+        return True
+
+    def pass_lengths_axes(self, step: _nc_path.Step) -> List[str]:
+        """The axes a single pass writes its end point on (its parameters named after an axis)."""
+        tracker = self.tracker
+        motion = tracker.pass_motion(tracker.interp.state, [e for e, _, _ in step.entries])
+        return [a for a in (str(p.get("address") or "").upper() for p in entry_params(motion)) if a in AXES]
+
+    def refuse_start(self, line: Line, detail: str) -> None:
+        if not any(r.reason == "selection-start" for r in line.refusals):
+            line.refusals.append(_nc_geom.Refusal(line.number, "selection-start", _quote(line.text), detail))
+        self.outside = set()
+
     def selection_end(self, last: Optional[Line], continued: bool) -> None:
         """The selection ends inside a block (its last line goes on below it), while a modal
         cycle started in it is in force, or while a cycle defined in it, whose definition
-        the shift changed, can still be called below it."""
+        the shift changed, can still be called below it. v1.2.0 (NCR-3): or while the single
+        passes are in force and the run changed the selection: a pass below it would run from
+        a moved start point or with a moved end point."""
         if last is None:
             return
         if continued:
             last.refusals.append(_nc_geom.Refusal(last.number, "selection-inside", _quote(last.text), "the block goes on below"))
+        tracker = self.tracker
+        if tracker.whole_pass(tracker.interp.state, []) and any(line.edits for line in self.lines):
+            motion = tracker.pass_motion(tracker.interp.state, [])
+            last.refusals.append(
+                _nc_geom.Refusal(last.number, "selection-inside", _quote(last.text), "%s is still in force at the end" % as_dict(motion).get("code"))
+            )
         state = self.tracker.interp.state
         by_number = {line.number: line for line in self.lines}
         active = as_dict(state.get("activeCycle"))
@@ -617,11 +912,34 @@ def turned_blind(step: _nc_path.Step, axis: str) -> bool:
     return False
 
 
-#: The place of each reason of `_nc_geom.REASONS` in its order.
-REASON_PLACE = {reason: place for place, reason in enumerate(_nc_geom.REASONS)}
+#: The place of each reason of `_nc_geom.REASONS` in its order, then the run's own.
+REASON_PLACE = {reason: place for place, reason in enumerate(list(_nc_geom.REASONS) + list(RUN_REASONS))}
 
 #: The first place of the reasons `Run.moved` can add to a block (a word with no value, one that does not fit its form).
 MOVED_FROM = min(REASON_PLACE[reason] for reason in ("expression", "machine-dependent", "distance-assumed", "resolution"))
+
+
+def at_levels(refusals: List[_nc_geom.Refusal], step: _nc_path.Step, op: _nc_geom.Translate) -> List[_nc_geom.Refusal]:
+    """v1.2.0 (T011, NC-18): an increment along a shifted axis from a level the program wrote
+    (``Step.levels``: where a drilling cycle left the tool axis, its start level or its retract
+    plane, when the level it started from was known) is moved with the program, as the level
+    is: it is not refused for ``axis-unwritten``. The refusal names the first axis it found,
+    so it is dropped only when no other shifted axis could have been the reason: each is known
+    or at such a level, and the program has written every one of them."""
+    levels = getattr(step, "levels", None)
+    if not levels:
+        return refusals
+    kept = [r for r in refusals if not (r.reason == "axis-unwritten" and r.detail in levels)]
+    if len(kept) == len(refusals):
+        return refusals
+    before = step.before or {}
+    unwritten = step.unwritten or frozenset()
+    for axis, amount in op.shift.items():
+        if Decimal(amount) == 0 or axis not in before:
+            continue
+        if axis in unwritten or (before.get(axis) is None and axis not in levels):
+            return refusals
+    return kept
 
 
 def first_refusal(refusals: Sequence[_nc_geom.Refusal]) -> _nc_geom.Refusal:
@@ -650,7 +968,9 @@ class Findings:
 
 
 def own_text(refusal: _nc_geom.Refusal) -> Optional[str]:
-    """The text of a refusal translate words itself (NC-3), or ``None``."""
+    """The text of a refusal translate words itself (NC-3, NCR-3), or ``None``."""
+    if refusal.reason in RUN_REASONS:
+        return RUN_REASONS[refusal.reason]
     if refusal.reason != "cycle-position":
         return None
     parts = refusal.detail.split(":")
@@ -685,7 +1005,7 @@ def collect(run: Run, findings: Findings) -> Tuple[Dict[str, int], Dict[str, int
     for block in sorted(refused_blocks):
         first = first_refusal(by_block[block])
         refused[first.reason] = refused.get(first.reason, 0) + 1
-        item = _nc_geom.finding_of(first)
+        item = _nc_geom.finding_of(first) if first.reason in _nc_geom.REASONS else {"line": first.line, "severity": "error", "message": "", "reason": first.reason}
         own = own_text(first)
         if own is not None:
             item["message"] = "%s: %s." % (first.written, own)
@@ -703,6 +1023,13 @@ def collect(run: Run, findings: Findings) -> Tuple[Dict[str, int], Dict[str, int
                 note = note._replace(written=_quote(note.detail))
             item = _nc_geom.finding_of(note)
             rows.append((line.number, SEVERITY_ORDER[item["severity"]], item))
+        if line.added and not refused_blocks:
+            # Only in a run that writes: a refused run adds nothing.
+            info["word-added"] = info.get("word-added", 0) + len(line.added)
+            axes = " and ".join(axis for axis, _ in line.added)
+            words = " ".join(text for _, text in line.added)
+            message = "%s added: %s." % (words, OWN_INFO["word-added"][1] % axes)
+            rows.append((line.number, SEVERITY_ORDER["info"], {"line": line.number, "severity": "info", "message": message, "reason": "word-added"}))
     rows.sort(key=lambda row: (row[0], row[1]))
     for _, _, item in rows:
         findings.add(item)
@@ -768,7 +1095,7 @@ def info_sentence(info: Dict[str, int]) -> Optional[str]:
 def summary(run: Run, findings: Findings, refused: Dict[str, int], info: Dict[str, int], blocks_refused: int) -> str:
     sentences: List[str] = []
     if blocks_refused:
-        parts = [count_text(refused[reason], *REASON_TEXT.get(reason, (reason, reason))) for reason in _nc_geom.REASONS if refused.get(reason)]
+        parts = [count_text(refused[reason], *REASON_TEXT.get(reason, (reason, reason))) for reason in REASON_PLACE if refused.get(reason)]
         sentences.append(
             "Nothing was changed: %s cannot be moved by %s: %s."
             % (count_text(blocks_refused, "block"), shift_text(run), ", ".join(parts))
@@ -777,7 +1104,9 @@ def summary(run: Run, findings: Findings, refused: Dict[str, int], info: Dict[st
         words = sum(len(line.edits) for line in run.lines)
         blocks = len({line.block for line in run.lines if line.edits})
         if words:
-            sentences.append("Moved by %s: %s on %s." % (shift_text(run), count_text(words, "word"), count_text(blocks, "block")))
+            added = info.get("word-added", 0)
+            extra = ", %s" % count_text(added, *OWN_INFO["word-added"][0]) if added else ""
+            sentences.append("Moved by %s: %s on %s%s." % (shift_text(run), count_text(words, "word"), count_text(blocks, "block"), extra))
         else:
             sentences.append("Moved by %s: no word changed." % shift_text(run))
         left = info_sentence(info)

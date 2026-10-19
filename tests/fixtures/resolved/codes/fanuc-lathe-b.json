@@ -128,10 +128,17 @@
     },
     {
       "code": "G2",
-      "description": "Arc to the target in the active plane, turning clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R.",
+      "description": "Arc to the target in the active plane, turning clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
       "group": "motion",
       "label": "Circular move, clockwise",
       "modal": true,
+      "params": [
+        {
+          "address": "R",
+          "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees",
+          "lengthAlong": "plane"
+        }
+      ],
       "review": "pending",
       "sets": {
         "arcDirection": "cw",
@@ -141,10 +148,17 @@
     },
     {
       "code": "G3",
-      "description": "Arc to the target in the active plane, turning counter-clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R.",
+      "description": "Arc to the target in the active plane, turning counter-clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
       "group": "motion",
       "label": "Circular move, counter-clockwise",
       "modal": true,
+      "params": [
+        {
+          "address": "R",
+          "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees",
+          "lengthAlong": "plane"
+        }
+      ],
       "review": "pending",
       "sets": {
         "arcDirection": "ccw",
@@ -272,19 +286,27 @@
     },
     {
       "code": "G10",
-      "description": "Writes a tool offset, a work coordinate system or a parameter from the program: L says which table, P which entry. The other words of the block are the values written there, not a move, a feed or a speed.",
+      "description": "Writes a tool offset, a work coordinate system or a parameter from the program: L says which table, P which entry. L1 and L10 to L13 write a tool length or radius offset (its geometry or its wear), L2 and L20 a work offset. The other words of the block are the values written there, not a move, a feed or a speed.",
       "group": "nonmodal",
       "label": "Data setting",
       "params": [
         {
           "address": "L",
-          "label": "Which table"
+          "label": "Which table",
+          "toolOffsetValues": [
+            "1",
+            "10",
+            "11",
+            "12",
+            "13"
+          ]
         },
         {
           "address": "P",
           "label": "Which entry"
         }
       ],
+      "review": "pending",
       "shift": true,
       "wordsAreData": true
     },
@@ -2588,7 +2610,7 @@
     },
     {
       "code": "G77",
-      "description": "Cuts one outside or inside turning pass, straight or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. G-code system A spells this G90.",
+      "description": "Cuts one outside or inside turning pass, straight or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. X, Z and R stay in force for the next pass blocks, shared by the three single passes, until a block writes them again. G-code system A spells this G90.",
       "group": "motion",
       "label": "Turning pass",
       "modal": true,
@@ -2603,7 +2625,8 @@
         },
         {
           "address": "R",
-          "label": "Taper: the difference in radius between the start and the end"
+          "label": "Taper: the difference in radius between the start and the end",
+          "lengthAlong": "X"
         },
         {
           "address": "F",
@@ -2611,6 +2634,7 @@
           "min": 0
         }
       ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "cycle"
@@ -2618,7 +2642,7 @@
     },
     {
       "code": "G78",
-      "description": "Cuts one threading pass, straight or tapered, and returns to the start point, so a thread is written as a list of X values. F is the thread lead per revolution, not a feed rate. G-code system A spells this G92.",
+      "description": "Cuts one threading pass, straight or tapered, and returns to the start point, so a thread is written as a list of X values. X, Z and R stay in force for the next pass blocks, shared by the three single passes, until a block writes them again. F is the thread lead per revolution, not a feed rate. G-code system A spells this G92.",
       "group": "motion",
       "label": "Threading pass as a cycle",
       "modal": true,
@@ -2633,7 +2657,8 @@
         },
         {
           "address": "R",
-          "label": "Taper: the difference in radius between the start and the end"
+          "label": "Taper: the difference in radius between the start and the end",
+          "lengthAlong": "X"
         },
         {
           "address": "F",
@@ -2644,13 +2669,15 @@
         }
       ],
       "pitchFeed": true,
+      "review": "pending",
       "sets": {
-        "motion": "feed"
+        "motion": "feed",
+        "path": "cycle"
       }
     },
     {
       "code": "G79",
-      "description": "Cuts one facing pass, square or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. G-code system A spells this G94.",
+      "description": "Cuts one facing pass, square or tapered, and returns to the start point. It belongs to the motion group, so the next G00 or G01 ends it. X, Z and R stay in force for the next pass blocks, shared by the three single passes, until a block writes them again. G-code system A spells this G94.",
       "group": "motion",
       "label": "Facing pass",
       "modal": true,
@@ -2665,7 +2692,8 @@
         },
         {
           "address": "R",
-          "label": "Taper: the difference along Z between the start and the end"
+          "label": "Taper: the difference along Z between the start and the end",
+          "lengthAlong": "Z"
         },
         {
           "address": "F",
@@ -2673,6 +2701,7 @@
           "min": 0
         }
       ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "cycle"

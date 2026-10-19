@@ -45,7 +45,7 @@
         "minLine": 48,
         "max": "123456.789",
         "maxLine": 70,
-        "unresolved": 2,
+        "unresolved": 4,
         "line": 70
       },
       {
@@ -93,7 +93,7 @@
         "minLine": 33,
         "max": "100",
         "maxLine": 34,
-        "unresolved": 0,
+        "unresolved": 2,
         "line": 34
       },
       {
@@ -205,7 +205,7 @@
         "line": 74
       }
     ],
-    "message": "No machine: readings assumed from the profile defaults, and a word whose reading depends on the machine is not resolved. X is a diameter: diameter programming is on (assumed from the profile). 6 positions not resolved; the findings say why.",
+    "message": "No machine: readings assumed from the profile defaults, and a word whose reading depends on the machine is not resolved. X is a diameter: diameter programming is on (assumed from the profile). 8 positions not resolved; the findings say why.",
     "findings": [
       {
         "line": 4,
@@ -224,6 +224,12 @@
         "severity": "warning",
         "message": "1 word, first Z2000 (line 27): the value depends on how the machine reads a number (calculator: 2000 mm; is-b: 2 mm; is-c: 0.2 mm). Not resolved; choose a machine for this document to read them.",
         "reason": "machine-dependent"
+      },
+      {
+        "line": 32,
+        "severity": "warning",
+        "message": "the taper start of G92 (line 32), run in 2 blocks: the positions this cycle works to are in its parameters, which the extents do not compute; they are not resolved (its depth is not in the X (diameter) range).",
+        "reason": "cycle"
       },
       {
         "line": 36,

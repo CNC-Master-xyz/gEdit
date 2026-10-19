@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# gEdit pre-push hook: the type check has to be clean before anything leaves this machine.
+# Runs `npm run check` (svelte-kit sync + svelte-check) and fails unless it reports
+# 0 errors and 0 warnings. Install once per clone with `npm run hooks:install`.
+# Emergency only: GEDIT_SKIP_PREPUSH=1 git push ...  skips this check.
+
+if [ "${GEDIT_SKIP_PREPUSH:-}" = "1" ]; then
+  echo "pre-push: skipped (GEDIT_SKIP_PREPUSH=1)" >&2
+  exit 0
+fi
+
+root="$(git rev-parse --show-toplevel)" || exit 1
+cd "$root" || exit 1
+
+log="$(mktemp "${TMPDIR:-/tmp}/gedit-prepush.XXXXXX")" || exit 1
+echo "pre-push: npm run check ..." >&2
+# The output is captured to a file: the exit code of a pipe would hide a failing check.
+npm run check >"$log" 2>&1
+status=$?
+
+if [ "$status" -eq 0 ] && grep -q " 0 ERRORS 0 WARNINGS" "$log"; then
+  rm -f "$log"
+  echo "pre-push: check is clean (0 errors, 0 warnings)" >&2
+  exit 0
+fi
+
+tail -n 30 "$log" >&2
+echo >&2
+echo "pre-push: the type check is not clean (exit $status, or it did not report 0 ERRORS 0 WARNINGS). Full output: $log" >&2
+echo "pre-push: fix it, or in an emergency push with GEDIT_SKIP_PREPUSH=1 git push ..." >&2
+exit 1

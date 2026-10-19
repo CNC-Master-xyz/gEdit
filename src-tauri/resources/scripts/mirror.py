@@ -139,7 +139,11 @@ one whose blocks run under an arc direction or a compensation side set above it
 selection starts where the lines above leave the tool, a point the mirror does not move: a move
 to an absolute point is written with the other axis too, an arc or an incremental move there
 refuses the run, and so does, on a lathe, a first move without Z, or without Y while the tool
-stands away from Y0 (``selection-start``). The Klartext workpiece blank (``BLK FORM``) is left as
+stands away from Y0 (``selection-start``). v1.2.0 (NCR-3): under the Z mirror a single pass
+(``sets.path: 'cycle'``) is refused while the tool still stands there and the mirror moves that
+point (or it is not known), and so is a pass that takes its Z from above the selection; a
+selection that ends while the passes are in force and that the run changed refuses
+(``selection-inside``). The Klartext workpiece blank (``BLK FORM``) is left as
 written, with one information row per run (``blank``, the owner's decision Q-D).
 Everything outside the words it changes is handed back byte for byte.
 """
@@ -196,6 +200,18 @@ class Params:
     def verb(self) -> str:
         return "mirrored for the counter spindle" if self.about == "z" else "mirrored"
 
+
+#: The text of the run's own refusal ``selection-start`` (``RUN_REASONS`` below): rotate works
+#: on milling programs only; the mirror's Z mirror also names the single passes (v1.2.0, NCR-3).
+SELECTION_START = (
+    "this first move of the selection starts where the lines above the selection leave the "
+    "tool, and that point is not moved with the selection, so an arc, an incremental move or "
+    "(on a lathe) a move without Z, or without Y away from the turning axis, or a turning or "
+    "facing pass (which goes back to that point) from there would miss the moved path, and so "
+    "would a pass that takes its Z from a block above the selection. Start the selection at a "
+    "block that moves to an absolute position, with Z on a lathe (and Y where Y is not 0), "
+    "and give its first pass every value"
+)
 
 # ===========================================================================
 # The run: the same text in rotate.py and mirror.py, from here to the end of
@@ -256,13 +272,7 @@ REASON_LABEL = {
 #: The refusals of the run itself, beside ``_nc_geom.REASONS``: id -> the plain text after
 #: "<as written>: " (plan §7, the P4a fix round).
 RUN_REASONS = {
-    "selection-start": (
-        "this first move of the selection starts where the lines above the selection leave the "
-        "tool, and that point is not moved with the selection, so an arc, an incremental move or "
-        "(on a lathe) a move without Z, or without Y away from the turning axis, from there would "
-        "miss the moved path. Start the selection at a block that moves to an absolute position, "
-        "with Z on a lathe (and Y where Y is not 0)"
-    ),
+    "selection-start": SELECTION_START,
 }
 
 
@@ -401,6 +411,9 @@ class Run:
         #: A selection's first moves start where the lines above it leave the tool, a point the
         #: run does not move: True until the first block that moves the tool (`check_outside`).
         self.outside = False
+        #: v1.2.0 (NCR-3): the axes a single pass of the selection wrote its end point on (a
+        #: pass takes the others from the block that last wrote them, perhaps above it).
+        self.pass_axes: set = set()
         #: The axes whose position the tracker computed (after a polar move, Klartext ``LP``,
         #: ``CP``): a word written from it is an approximation and counts as rounded.
         self.computed: set = set()
@@ -469,10 +482,17 @@ class Run:
                 block.refuse("selection-mode", written, str(self.inherited_arc.get("code")))
 
     def end_selection(self, state: Any) -> None:
-        """A selection that ends inside a block or while a cycle it started is still in force."""
+        """A selection that ends inside a block or while a cycle it started is still in force.
+        v1.2.0 (NCR-3): or while the single passes are in force and the run changed the
+        selection: a pass below it would run from a moved start point or to a moved end point."""
         last = self.blocks[-1]
         if state is not None and state.continuation:
             last.refuse("selection-inside", quote(last.text), "a block that runs on below the selection")
+        tracker = self.tracker
+        if tracker.whole_pass(tracker.interp.state, []) and any(b.edits for b in self.blocks):
+            motion = tracker.pass_motion(tracker.interp.state, [])
+            target = next((b for b in reversed(self.blocks) if b.text.strip()), last)
+            target.refuse("selection-inside", quote(target.text), "%s is still in force at the end" % as_dict(motion).get("code"))
         active = as_dict(self.tracker.interp.state.get("activeCycle"))
         line = active.get("line")
         if active and isinstance(line, int) and line >= self.first:
@@ -492,7 +512,8 @@ class Run:
         if self.selection:
             self.selection_reasons(step, block, written)
         moving = False
-        if self.outside and not self.identity:
+        passes = self.selection and self.lathe_z and not self.identity and self.check_passes(step, roles, block, written)
+        if self.outside and not self.identity and not passes:
             moving = self.check_outside(step, roles, block, written)
         if not block.refusals and not self.identity:
             # A rotation by whole turns changes no word (a polar angle would otherwise come
@@ -507,6 +528,50 @@ class Run:
         if arc is not None and self.swapping:
             block.helix = any(end is not None and start != end for start, end in arc.helix.values())
         return block
+
+    def pass_runs(self, step: Any) -> bool:
+        """The block runs a single pass (`sets.path: 'cycle'`: the lathe `G90`, `G92`, `G94`,
+        `G77`-`G79`, written or in force): while the passes are in force a block runs one again
+        even when it moves nothing (lathe manual, the canned cycles)."""
+        tracker = self.tracker
+        if not tracker.whole_pass(tracker.interp.state, [e for e, _, _ in step.entries]):
+            return False
+        return any(t.kind not in ("whitespace", "comment") for t in step.tokens)
+
+    def check_passes(self, step: Any, roles: Sequence[Any], block: Block, written: str) -> bool:
+        """v1.2.0 (NCR-3): a single pass in a selection under the Z mirror. It goes back to where
+        it started: refused while the tool still stands where the lines above left it and the
+        mirror moves that point (or it is not known); a pass that does not write its Z takes it
+        from the pass before, refused while no pass of the selection wrote it
+        (``selection-start``). Returns whether the block runs a pass."""
+        if not self.pass_runs(step):
+            return False
+        tracker = self.tracker
+        motion = tracker.pass_motion(tracker.interp.state, [e for e, _, _ in step.entries])
+        axes = {str(p.get("address") or "").upper() for p in (motion or {}).get("params") or [] if isinstance(p, dict)}
+        absolute = {r.axis for r in roles if r.role in ("point", "cycle-position") and r.axis in ("X", "Y", "Z")}
+        taken = "Z" in axes and "Z" not in absolute and "Z" not in self.pass_axes
+        self.pass_axes |= absolute
+        if self.outside and self.start_moved(step):
+            block.refuse("selection-start", written, "a single pass, which goes back to where the lines above left the tool")
+        elif taken and self.first > 1:
+            block.refuse("selection-start", written, "a single pass that takes its Z from above the selection")
+        return True
+
+    def start_moved(self, step: Any) -> set:
+        """The axes the lathe Z mirror moves of the point the tool stands at before ``step``:
+        where it is known and the mirror changes it, or where it is not known although the
+        program has written the axis (one never written, or not since a machine position,
+        stands where the whole run leaves it too)."""
+        units = self.units_of(step)
+        start = {axis: self.start(step, axis, units) for axis in ("X", "Y", "Z")}
+        known = {axis: value for axis, value in start.items() if value is not None}
+        moved_to, _ = _nc_geom.transform("point", dict(known), self.op)
+        moved = {axis for axis, value in known.items() if differs(moved_to[axis], value)}  # type: ignore[index]
+        unwritten = getattr(step, "unwritten", None) or frozenset()
+        before = step.before or {}
+        moved |= {axis for axis in ("Y", "Z") if axis in before and before[axis] is None and axis not in unwritten}
+        return moved
 
     def check_outside(self, step: Any, roles: Sequence[Any], block: Block, written: str) -> bool:
         """A block of a selection while the tool still stands where the lines above left it,
@@ -528,8 +593,12 @@ class Run:
         if not self.lathe_z and len(known) != len(PLANE):
             # Where the tool stands is not known: the other rules decide (`position-unknown`).
             return moving
-        moved_to, _ = _nc_geom.transform("point", dict(known), self.op)
-        moved = {axis for axis, value in known.items() if differs(moved_to[axis], value)}  # type: ignore[index]
+        if self.lathe_z:
+            # v1.2.0 (NCR-3): a start not known on an axis the program wrote refuses too.
+            moved = self.start_moved(step)
+        else:
+            moved_to, _ = _nc_geom.transform("point", dict(known), self.op)
+            moved = {axis for axis, value in known.items() if differs(moved_to[axis], value)}  # type: ignore[index]
         if not moved:
             return moving  # it stands on a point the run does not move
         increments = [r for r in roles if r.role in ("point-inc", "pole-inc") and r.axis in axes]

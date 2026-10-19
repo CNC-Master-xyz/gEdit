@@ -276,7 +276,7 @@
   }
   .item.channel .icon,
   .item.sync .icon {
-    color: var(--accent);
+    color: var(--accent-text);
   }
   .item.channel .text {
     font-weight: 600;

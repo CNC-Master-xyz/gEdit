@@ -15,8 +15,8 @@ import { scenario } from '../lib/index.js'
 import { configPaths, read } from './m2-common.js'
 
 /** The two palettes of `app.css`. WebKit prints `--bg-app` in its shortest form. */
-const BACKGROUND = { dark: ['#1e1e1e'], light: ['#ffffff', '#fff'] }
-const BODY = { dark: 'rgb(30, 30, 30)', light: 'rgb(255, 255, 255)' }
+const BACKGROUND = { dark: ['#0f1115'], light: ['#f9f9fb'] }
+const BODY = { dark: 'rgb(15, 17, 21)', light: 'rgb(249, 249, 251)' }
 
 scenario('m2-theme', { timeout: 180 }, async (h) => {
   const ctx = /** @type {any} */ (h.app.ctx)

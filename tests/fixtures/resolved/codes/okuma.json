@@ -160,6 +160,7 @@
         {
           "address": "L",
           "label": "Radius, written instead of I and K",
+          "lengthAlong": "plane",
           "min": 0,
           "unit": "length"
         }
@@ -197,6 +198,7 @@
         {
           "address": "L",
           "label": "Radius, written instead of I and K",
+          "lengthAlong": "plane",
           "min": 0,
           "unit": "length"
         }
@@ -356,7 +358,8 @@
         },
         {
           "address": "I",
-          "label": "Taper, as the difference in radius from start to end"
+          "label": "Taper, as the difference in radius from start to end",
+          "lengthAlong": "X"
         },
         {
           "address": "A",
@@ -366,6 +369,7 @@
         {
           "address": "L",
           "label": "Chamfer at the end of the thread, with M23",
+          "lengthAlong": "plane",
           "min": 0,
           "unit": "length"
         },
@@ -377,6 +381,7 @@
         }
       ],
       "pitchFeed": true,
+      "review": "pending",
       "sets": {
         "motion": "feed"
       }
@@ -405,7 +410,8 @@
         },
         {
           "address": "K",
-          "label": "Taper, as the difference from start to end"
+          "label": "Taper, as the difference from start to end",
+          "lengthAlong": "Z"
         },
         {
           "address": "A",
@@ -415,6 +421,7 @@
         {
           "address": "L",
           "label": "Chamfer at the end of the thread, with M23",
+          "lengthAlong": "plane",
           "min": 0,
           "unit": "length"
         },
@@ -426,6 +433,7 @@
         }
       ],
       "pitchFeed": true,
+      "review": "pending",
       "sets": {
         "motion": "feed"
       }
@@ -454,7 +462,8 @@
         },
         {
           "address": "I",
-          "label": "Taper, as the difference in radius from start to end"
+          "label": "Taper, as the difference in radius from start to end",
+          "lengthAlong": "X"
         },
         {
           "address": "A",
@@ -464,6 +473,7 @@
         {
           "address": "L",
           "label": "Chamfer at the end of the thread, with M23",
+          "lengthAlong": "plane",
           "min": 0,
           "unit": "length"
         },
@@ -475,6 +485,7 @@
         }
       ],
       "pitchFeed": true,
+      "review": "pending",
       "sets": {
         "motion": "feed"
       }
@@ -953,6 +964,7 @@
         {
           "address": "L",
           "label": "Chamfer size",
+          "lengthAlong": "plane",
           "signOf": "next-move",
           "unit": "length"
         }
@@ -968,6 +980,7 @@
         {
           "address": "L",
           "label": "Radius of the round",
+          "lengthAlong": "plane",
           "signOf": "next-move",
           "unit": "length"
         }
@@ -1372,6 +1385,7 @@
         {
           "address": "L",
           "label": "Arc radius",
+          "lengthAlong": "plane",
           "min": 0,
           "required": true,
           "unit": "length"
@@ -1382,6 +1396,7 @@
           "unit": "feedPerMin"
         }
       ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "arc"
@@ -1405,6 +1420,7 @@
         {
           "address": "L",
           "label": "Arc radius",
+          "lengthAlong": "plane",
           "min": 0,
           "required": true,
           "unit": "length"
@@ -1415,6 +1431,7 @@
           "unit": "feedPerMin"
         }
       ],
+      "review": "pending",
       "sets": {
         "motion": "feed",
         "path": "arc"
@@ -1522,6 +1539,7 @@
         {
           "address": "L",
           "label": "Arc radius on the side surface",
+          "lengthAlong": "plane",
           "min": 0,
           "required": true,
           "unit": "length"
@@ -1556,6 +1574,7 @@
         {
           "address": "L",
           "label": "Arc radius on the side surface",
+          "lengthAlong": "plane",
           "min": 0,
           "required": true,
           "unit": "length"

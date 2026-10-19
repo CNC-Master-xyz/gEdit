@@ -599,7 +599,9 @@ class Extents:
             elif entry.get("shift") is True and self.record and (moves or self.bare(step.tokens, step.entries)):
                 self.shift_group(code, line)
 
-        if not moves and not step.calls and not step.entries:
+        if not moves and not step.calls and not step.entries and not step.events:
+            # v1.2.0 (NCF-C): a block that writes only the taper of the pass in force (`R-1.`)
+            # runs the pass again, and its taper start is an event of its own.
             return
         entries = [e for e, _, _ in step.entries]
         if self.rotary.rotary:
