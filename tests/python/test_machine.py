@@ -57,7 +57,22 @@ class GoldenCases(unittest.TestCase):
             return None
         inputs = self.golden["inputs"]
         self.assertIn(name, inputs)
-        return inputs[name]
+        entry = inputs[name]
+        if "preset" in entry:
+            return self.shipped_preset(entry["preset"])
+        return entry
+
+    def shipped_preset(self, ref):
+        """T206: a preset the golden set names (``fanuc-gcode/is-b``), read from the shipped profile.
+
+        The golden set used to copy the presets, and the copies drifted from the data the app
+        ships. Mirrors ``shippedPreset`` in ``numbers.test.ts``.
+        """
+        profile_id, preset_id = ref.split("/")
+        number_input = helpers.resolved_profile(profile_id)["machineParams"]["numberInput"]
+        found = [preset["value"] for preset in number_input["presets"] if preset["id"] == preset_id]
+        self.assertEqual(len(found), 1, "no preset %s in the shipped profiles" % ref)
+        return found[0]
 
     def params_of(self, name):
         """The machine parameters a case describes; only ``numberInput`` matters here."""
@@ -80,8 +95,8 @@ class GoldenCases(unittest.TestCase):
         """A profile that carries the declaration a case names.
 
         ``readings_of`` and ``resolve_value`` take the profile, not the declaration, so a
-        declaration the golden set writes itself (the Okuma presets, whose profile ships
-        in M8) is wrapped in a profile here.
+        declaration the golden set writes itself (none since T206 reads the Okuma presets
+        from ``okuma-osp``) is wrapped in a profile here.
         """
         entry = self.golden["decls"][name]
         if "profile" in entry:
@@ -104,14 +119,21 @@ class GoldenCases(unittest.TestCase):
     def test_every_word_gets_the_class_typescript_gives_it(self):
         for number, case in enumerate(self.golden["class"], 1):
             with self.subTest(case=number, note=case["note"]):
+                profile = self.profile_of(case["profile"])
+                # FB-2: what the modes in force lend, as `arc_centre_modes` adds it
+                # (`inForceEntries` in TypeScript).
+                lent = [e for e in (gedit_nc.arc_centre_entry(m, profile) for m in case.get("modes", [])) if e is not None]
+                in_force = case.get("inForce")
+                if lent:
+                    in_force = list(in_force or []) + lent
                 self.assertEqual(
                     gedit_nc.number_class_of(
                         case["address"],
-                        self.profile_of(case["profile"]),
+                        profile,
                         case["feedUnit"],
                         case["codes"],
                         case.get("pitchFeed", False),
-                        case.get("inForce"),
+                        in_force,
                     ),
                     case["expected"],
                 )
@@ -186,6 +208,76 @@ class GoldenCases(unittest.TestCase):
                 self.assertEqual([r["preset"] for r in readings], case["expected"]["readings"])
 
 
+class ShippedPresetsT083T084(unittest.TestCase):
+    """T083 and T084: the IS-A preset and the "Point-less feeds" option, as the profiles ship them."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.golden = helpers.load_json(helpers.FIXTURES_DIR / "machines" / "numbers.json")
+
+    def preset(self, profile_id, preset_id):
+        presets = helpers.resolved_profile(profile_id)["machineParams"]["numberInput"]["presets"]
+        found = [p for p in presets if p["id"] == preset_id]
+        self.assertEqual(len(found), 1, "%s/%s" % (profile_id, preset_id))
+        return found[0]
+
+    def written(self, name):
+        entry = dict(self.golden["inputs"][name])
+        entry.pop("note", None)
+        return entry
+
+    def test_both_fanuc_profiles_offer_is_a_and_leave_it_out_of_the_digit_check(self):
+        for profile_id in ("fanuc-gcode", "fanuc-lathe"):
+            ids = [p["id"] for p in helpers.resolved_profile(profile_id)["machineParams"]["numberInput"]["presets"]]
+            self.assertEqual(ids, ["is-a", "is-b", "is-c", "calculator"], profile_id)
+            is_a = self.preset(profile_id, "is-a")
+            self.assertIs(is_a.get("digitCheck"), False)
+            self.assertEqual(is_a["value"]["incrementMm"], "0.01")
+            self.assertEqual(is_a["value"]["incrementInch"], "0.001")
+            # The others take part in the digit check.
+            for other in ("is-b", "is-c", "calculator"):
+                self.assertNotIn("digitCheck", self.preset(profile_id, other))
+
+    def test_the_golden_machine_inputs_are_what_a_point_less_feeds_choice_makes_of_a_preset(self):
+        # numbers.test.ts checks the same two inputs against `withPointlessFeeds`, the form's own
+        # function: both languages read the values of one and the same machine.
+        decl = helpers.resolved_profile("fanuc-gcode")["machineParams"]["numberInput"]["pointlessFeeds"]
+        choice = {c["value"]: c for c in decl["choices"]}
+        self.assertEqual(decl["default"], "standard")
+        self.assertNotIn("classes", choice["standard"])
+        self.assertEqual(
+            helpers.apply_pointless_feeds(self.preset("fanuc-gcode", "is-c")["value"], choice["per-rev"]), self.written("is-c-per-rev")
+        )
+        # Manual-check fix D4-2: the lathe states its own option, with its own choices.
+        lathe = helpers.resolved_profile("fanuc-lathe")["machineParams"]["numberInput"]["pointlessFeeds"]
+        own = {c["value"]: c for c in lathe["choices"]}
+        self.assertEqual(lathe["default"], "standard")
+        self.assertEqual(list(own), ["standard", "per-minute", "series-15", "both"])
+        self.assertNotIn("classes", own["standard"])
+        is_b = self.preset("fanuc-lathe", "is-b")["value"]
+        self.assertEqual(helpers.apply_pointless_feeds(is_b, own["per-minute"]), self.written("lathe-per-minute"))
+        self.assertEqual(helpers.apply_pointless_feeds(is_b, own["series-15"]), self.written("lathe-series-15"))
+        # Calculator-type input reads every feed as written, whatever the feed parameters say.
+        calculator = self.preset("fanuc-lathe", "calculator")["value"]
+        self.assertEqual(helpers.apply_pointless_feeds(calculator, own["both"]), calculator)
+
+    def test_d4_1_a_lathe_counts_a_point_less_feed_per_revolution_in_0_0001_mm(self):
+        # Manual-check fix D4-1: on every lathe increment preset, G99 F12345 is 1.2345 mm/rev.
+        for preset_id in ("is-a", "is-b", "is-c"):
+            with self.subTest(preset=preset_id):
+                rev = self.preset("fanuc-lathe", preset_id)["value"]["classes"]["feedPerRev"]
+                self.assertEqual(rev, {"mode": "increment", "increment": "0.0001", "incrementInch": "0.000001"})
+
+    def test_with_no_machine_the_option_is_never_assumed(self):
+        # The defaults of a document with no machine are the default preset as declared.
+        machine = gedit_nc.machine_params({"profile": helpers.resolved_profile("fanuc-gcode")})
+        self.assertEqual(machine["params"]["numberInput"], self.preset("fanuc-gcode", "is-b")["value"])
+        value, readings = gedit_nc.resolve_value(
+            literal("200"), "feedPerMin", machine, helpers.resolved_profile("fanuc-gcode"), "mm"
+        )
+        self.assertEqual((value, readings), ("200", []))
+
+
 class MachineParams(unittest.TestCase):
     """What a script gets when nobody chose a machine (§7.15)."""
 
@@ -202,7 +294,10 @@ class MachineParams(unittest.TestCase):
         profile = helpers.load_profile("fanuc-gcode")
         machine = gedit_nc.machine_params(helpers.make_context(profile=profile))
         self.assertEqual(machine["choice"], "none")
-        self.assertEqual(machine["params"]["numberInput"], profile["machineParams"]["numberInput"]["presets"][0]["value"])
+        # The default preset by its id, not by its place in the list.
+        declared = profile["machineParams"]["numberInput"]
+        default = [preset["value"] for preset in declared["presets"] if preset["id"] == declared["default"]]
+        self.assertEqual(machine["params"]["numberInput"], default[0])
         self.assertEqual(machine["params"]["units"], "mm")
         for name in ("numberInput", "units", "diameter"):
             self.assertEqual(machine["source"][name], "profile")
@@ -215,10 +310,11 @@ class MachineParams(unittest.TestCase):
         wanted = next(p for p in presets if p["id"] == profile["machineParams"]["numberInput"]["default"])
         self.assertEqual(machine["params"]["numberInput"], wanted["value"])
         self.assertEqual(machine["params"]["diameter"], "on")
-        # M9 (R6): the two tool/U-W variants join the G-code system, each at its default.
+        # M9 (R6): the two tool/U-W variants join the G-code system, each at its default
+        # (the tool change since D3-4a, the counter spindle since the review round's D5-7).
         self.assertEqual(
             machine["params"]["variants"],
-            {"gcodeSystem": "A", "incrementalAddresses": "uw", "toolWord": "byLength"},
+            {"gcodeSystem": "A", "incrementalAddresses": "uw", "toolWord": "byLength", "toolChange": "turret", "counterSpindleY": "turns"},
         )
 
     def test_a_profile_that_declares_nothing_reads_its_numbers_as_written(self):
@@ -305,3 +401,43 @@ class WriteBackEdges(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class ArcCentreModes(unittest.TestCase):
+    """FB-2 (T120, WX-NC-6): a mode in force that declares the arc-centre words lends a block
+    those words only (`wordValue.ts` `inForceEntries` / `arcCentreEntry`)."""
+
+    @classmethod
+    def setUpClass(cls):
+        context = helpers.effective_context("fanuc-gcode")
+        cls.profile = context["profile"]
+        cls.entries = {e["code"]: e for e in context["codes"] if isinstance(e, dict)}
+
+    def modes(self, groups, written=()):
+        return gedit_nc.arc_centre_modes(
+            {group: {"code": code, "line": 1} for group, code in groups.items()}, self.entries.get, self.profile, written
+        )
+
+    def test_g43_5_lends_i_j_k_and_keeps_its_q(self):
+        lent = self.modes({"lengthComp": "G43.5", "motion": "G1"})
+        self.assertEqual([e["code"] for e in lent], ["G43.5"])
+        self.assertEqual([p["address"] for p in lent[0]["params"]], ["I", "J", "K"])
+        self.assertTrue(gedit_nc.redefines_arc_centre(self.entries["G43.5"], self.profile))
+        # The same copy every block, so a cache by `id` sees one entry.
+        self.assertIs(self.modes({"lengthComp": "G43.5"})[0], lent[0])
+        self.assertIs(gedit_nc.arc_centre_entry(self.entries["G43.5"], self.profile), lent[0])
+
+    def test_under_a_modal_g83_q_stays_a_length(self):
+        in_force = [self.entries["G83"]] + self.modes({"lengthComp": "G43.5", "cycle": "G83"})
+        self.assertEqual(gedit_nc.number_class_of("Q", self.profile, "per-minute", [], False, in_force), "length")
+        self.assertEqual(gedit_nc.number_class_of("I", self.profile, "per-minute", [], False, in_force), "count")
+
+    def test_g49_g40_and_a_written_code_lend_nothing(self):
+        self.assertEqual(self.modes({"lengthComp": "G49", "compensation": "G40"}), [])
+        self.assertEqual(self.modes({"lengthComp": "G43.5"}, written=[self.entries["G43.5"]]), [])
+        self.assertEqual([e["code"] for e in self.modes({"compensation": "G41.6"})], ["G41.6"])
+        self.assertEqual(self.modes({"compensation": "G41"}), [])
+        self.assertFalse(gedit_nc.redefines_arc_centre(self.entries["G41"], self.profile))
+
+    def test_a_profile_without_arc_centre_words_lends_nothing(self):
+        self.assertEqual(gedit_nc.arc_centre_modes({"lengthComp": {"code": "G43.5"}}, self.entries.get, {"addresses": {}}), [])

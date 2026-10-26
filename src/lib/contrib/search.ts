@@ -28,7 +28,9 @@ import type { FieldSpec } from '$lib/core/forms/types';
 import { initialValues } from '$lib/core/forms/values';
 import { findInLines, parseQuery, SEARCH_MAX_HITS, wholeAddressRegex } from '$lib/core/search';
 import type { SearchHit } from '$lib/core/search';
-import { flagsOf, replace, searchFields } from '$lib/core/search/replace';
+import { findInLinesGuarded, guardQuery } from '$lib/core/search/guard';
+import { appGuardRunner } from '$lib/core/regexGuard/app';
+import { flagsOf, replace, searchFields, searchLive } from '$lib/core/search/replace';
 import { t } from '$lib/i18n';
 import { editor } from '$lib/monaco/editorService';
 import { docs } from '$lib/stores/documents';
@@ -69,7 +71,7 @@ async function askQuery(
   const selected = selectedQuery();
   if (selected !== undefined) values = { ...values, query: selected };
   for (;;) {
-    const answered = await modals.form({ title, fields, values });
+    const answered = await modals.form({ title, fields, values, live: searchLive });
     if (answered === undefined) return undefined;
     uiState.setLastParams(key, answered);
     const parsed = parseQuery(String(answered.query ?? ''), machines.effective(docId).cp, flagsOf(answered));
@@ -118,6 +120,7 @@ async function findAll(context: CommandContext): Promise<void> {
     return;
   }
 
+  const runner = await appGuardRunner();
   const rows: Record<string, unknown>[] = [];
   let dropped = 0;
   for (const target of targets) {
@@ -126,7 +129,12 @@ async function findAll(context: CommandContext): Promise<void> {
     if ('error' in query) continue; // the active document parsed it; a word parses the same everywhere
     const lines = editor.getLines(target.id, 1, editor.getLineCount(target.id));
     const room = SEARCH_MAX_HITS - rows.length;
-    const found = findInLines(lines, view.cp, query, { max: Math.max(room, 0), codes: view.codes });
+    const found = await findInLinesGuarded(runner, lines, view.cp, query, { max: Math.max(room, 0), codes: view.codes });
+    if ('refused' in found) {
+      // T227: the pattern ran away and was stopped in the background reader; nothing is listed.
+      say(found.refused, true);
+      return;
+    }
     for (const hit of found.hits) rows.push(rowOf(hit, target));
     if (found.truncated) dropped += countHits(lines, view.cp, query, { codes: view.codes }) - found.hits.length;
   }
@@ -171,6 +179,15 @@ async function replaceAll(context: CommandContext): Promise<void> {
   const selected = selectedQuery();
   const answers = await askQuery(t('search.replace'), fields, REPLACE_KEY, docId);
   if (answers === undefined) return;
+  // T227: a pattern that runs away is stopped in the background reader before the replace reads the document.
+  const query = parseQuery(String(answers.query ?? ''), cp, flagsOf(answers));
+  if (!('error' in query)) {
+    const refused = await guardQuery(await appGuardRunner(), editor.getLines(docId, 1, editor.getLineCount(docId)), query);
+    if (refused !== null) {
+      say(refused, true);
+      return;
+    }
+  }
   // CODE-3: a query that is the selection, still as it was pre-filled, is not a scope. The
   // runner takes the selection as the scope, so "select G01, Replace All" would have
   // changed one line while the form looked like a whole-program replace. Collapsing the

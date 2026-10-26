@@ -13,7 +13,9 @@
     },
     "source": {
       "diameter": "profile",
-      "modalInitial": {},
+      "modalInitial": {
+        "feedmode": "profile"
+      },
       "numberInput": "profile",
       "units": "profile",
       "variants": {}
@@ -107,7 +109,11 @@
     "id": "heidenhain-klartext",
     "machineType": "mill",
     "modal": {
+      "initial": {
+        "feedmode": "M137"
+      },
       "sources": {
+        "feedmode": "profile",
         "units": "profile"
       },
       "units": "mm"
@@ -196,7 +202,9 @@
         "(?:BEGIN|END)\\s+PGM\\s+(?<text>[^\\s;]+)(?=\\s*$)",
         "CYCL\\s+DEF\\s+12\\.1\\s+PGM\\s+(?<text>[^\\s;~]+)",
         "FN\\s*16\\s*:\\s*(?<text>[^\\s;](?:[^;]*?[^\\s;])?)(?=\\s*(?:;|$))",
-        "CALL\\s+PGM\\s+(?<text>[^\\s;~\"]+)"
+        "CALL\\s+PGM\\s+(?<text>[^\\s;~\"]+)",
+        "SEL\\s+PGM\\s+(?<text>[^\\s;~\"]+)",
+        "SEL\\s+(?:CYCLE|TABLE|PATTERN|CORR-TABLE)\\s+(?<text>[^\\s;~\"]+)"
       ],
       "incrementalPrefix": "I",
       "keywords": [

@@ -489,10 +489,17 @@ describe('the turret tool rule', () => {
     ['T0012', false, undefined],
     ['T000000', false, undefined],
     ['T120012', false, undefined],
+    // Three digits (manual-check fix D3-2, verify): a station of one digit, then the
+    // two-digit offset — `T100` indexes station 1 with offset 00, as `T0100` does.
+    ['T100', true, '1'],
+    ['T123', true, '1'],
+    ['T905', true, '9'],
+    ['G00 X200 Z100 T101', true, '1'],
+    ['T012', false, undefined],
+    ['T000', false, undefined],
     // Other lengths are not T words of this control.
     ['T1', false, undefined],
     ['T12', false, undefined],
-    ['T123', false, undefined],
     ['T12345', false, undefined],
     ['T1234567', false, undefined],
     // A T in a comment names nothing.
@@ -534,6 +541,21 @@ describe('the turret tool rule', () => {
     const index = new OutlineIndex(okuma);
     index.reset(['T010101', 'G00 X40 Z2', 'T010102', 'G00 X40 Z2', 'T020202']);
     expect(index.items().map((item) => `${item.line}:${String(item.tool)}`)).toEqual(['1:01', '3:01', '5:02']);
+    expect(index.toolLines()).toEqual([1, 3, 5]);
+  });
+
+  it('lists a three-digit T as a turret change and names T100 and T0101 as one station (D3-2)', () => {
+    // Manual-check fix D3-2: with two-digit offsets the control indexes station 1 on `T100`.
+    // The program map names the station without its leading zero, so `T0101` and `T101`
+    // are one tool; `T012` (station 0) and the five-digit `T12345` are no change.
+    const index = new OutlineIndex(okuma);
+    index.reset(['T100', 'G00 X40 Z2', 'T0101', 'G00 X40 Z2', 'T305', 'T012', 'T12345', 'M02']);
+    const tools = index.items().filter((item) => item.kind === 'tool');
+    expect(tools.map((item) => [item.line, item.tool, item.text])).toEqual([
+      [1, '1', 'T1'],
+      [3, '01', 'T1'],
+      [5, '3', 'T3'],
+    ]);
     expect(index.toolLines()).toEqual([1, 3, 5]);
   });
 
@@ -754,8 +776,9 @@ describe('the machine parameters', () => {
     expect(decl?.units).toBe('mm');
     expect(decl?.diameter).toBe('on');
     expect(decl?.modalGroups).toEqual(['feedmode', 'distance', 'spindlemode']);
-    // M9 (R6): the one variant is the tool word's offset digits (r6Variants.test.ts).
-    expect(decl?.variants?.map((v) => v.id)).toEqual(['toolWord']);
+    // M9 (R6): the tool word's offset digits (r6Variants.test.ts); the review round
+    // added whether the counter spindle's Y turns (D5-7).
+    expect(decl?.variants?.map((v) => v.id)).toEqual(['toolWord', 'counterSpindleY']);
     expect(okuma.profile.modal?.initial).toEqual({ feedmode: 'G95', distance: 'G90' });
     expect(okuma.profile.machineType).toBe('lathe');
     // M12 (P12, §8.9): channel presets are offered, never applied, all `verify`;
@@ -862,27 +885,20 @@ describe('the machine parameters', () => {
     expect(valueOf(literal('50'), 'length', tenMicron, 'mm')).toBe('0.5');
   });
 
-  it('agrees with the Okuma unit systems of the number golden set', () => {
-    // `tests/fixtures/machines/numbers.json` (WP6.9) wrote the §8.8 systems before this
-    // profile existed. Two declarations of one fact must read every number alike.
+  it('is the source of the Okuma unit systems of the number golden set', () => {
+    // `tests/fixtures/machines/numbers.json` (WP6.9) wrote the §8.8 systems out before this
+    // profile existed, and this test compared the two copies. Since v1.2 (T206) the golden set
+    // names these presets instead of copying them (`numbers.test.ts` and `test_machine.py` read
+    // them from this profile), so there is one declaration and nothing to drift.
     const golden = JSON.parse(readFileSync(join(FIXTURES_DIR, 'machines/numbers.json'), 'utf8')) as {
-      inputs: Record<string, NumberInput>;
+      inputs: Record<string, { preset?: string; mode?: string }>;
+      decls: Record<string, { profile?: string }>;
     };
-    const inputs = golden.inputs;
     for (const id of ['okuma-1mm', 'okuma-1um', 'okuma-10um']) {
-      const written = paramsWith(inputs[id]);
-      const shipped = paramsWith(preset(id).value);
-      for (const cls of CLASSES) {
-        for (const text of ['1', '50', '50.', '0.1', '23.456', '-12.5']) {
-          const units = id === 'okuma-10um' ? (['mm'] as const) : (['mm', 'inch'] as const);
-          for (const u of units) {
-            expect(valueOf(literal(text), cls, shipped, u), `${id} ${cls} ${text} ${u}`).toBe(
-              valueOf(literal(text), cls, written, u),
-            );
-          }
-        }
-      }
+      expect(golden.inputs[id], id).toEqual({ note: expect.any(String), preset: `okuma-osp/${id}` });
+      expect(preset(id).value.mode, id).toBeDefined();
     }
+    expect(golden.decls.okuma).toEqual({ profile: 'okuma-osp' });
   });
 
   it('gives a length, feed, angle or dwell word no value while no machine is chosen', () => {

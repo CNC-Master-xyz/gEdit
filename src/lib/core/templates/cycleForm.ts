@@ -10,12 +10,15 @@
 //
 //  1. **Which cycles.** An entry with `params` whose `sets.cycle` is `start` (Fanuc, Okuma
 //     `G73`–`G89`, `G181`…, Sinumerik `CYCLE81`… by position) or `define` (Klartext `CYCL DEF 2xx`
-//     over several lines), and that is not written in two blocks (`blocks: 2`, set by P3.6 on the
-//     lathe roughing and threading cycles; the inspector's pairing heuristic also marks such a
-//     block, `InspectedCycle.part`). A two-block cycle is refused with the reason
-//     (`cycleForm.refused.twoBlocks`): its words cannot be put in the right block until the
-//     database says which block each belongs to (`CodeParam.block`, backlog). A `verify` entry is
-//     not offered. `cycleEntries(db, machineType)` lists them in database order. A block that
+//     over several lines). A cycle written in two blocks (`blocks: 2`, the lathe roughing,
+//     grooving and threading cycles) is edited **one block at a time** (v1.2.0 T119): the form of
+//     the block at the cursor, with the parameters the database declares for that block
+//     (`CodeParam.block`; which block it is: `InspectedCycle.part`, from its words, else the
+//     pairing of neighbours); `CycleForm.part` says which. It is refused with the reason where
+//     the database does not say which parameter belongs to which block
+//     (`cycleForm.refused.twoBlocks`) or the block's words do not say which block it is
+//     (`refused.whichBlock`), and it is not offered for a new block (its template writes both
+//     blocks). A `verify` entry is not offered. `cycleEntries(db, machineType)` lists them in database order. A block that
 //     only runs or calls a cycle written on another line (a position under a modal `G83`, a
 //     Klartext `CYCL CALL`, a position under `MCALL`) is refused with that line
 //     (`cycleForm.refused.elsewhere`): the form edits the block that writes the cycle.
@@ -71,7 +74,8 @@
 //     would change what the next position of the old one does. A Sinumerik call and a Klartext
 //     definition are not modal cycles and stay one block.
 // 10. **Two blocks** only by the database's `blocks: 2` (review NC-11): the inspector's pairing
-//     heuristic also paired Okuma one-block cycles written twice in a row.
+//     heuristic also paired Okuma one-block cycles written twice in a row. An edit of one block of
+//     a two-block cycle must leave it that block (`refused.noWord` otherwise, T119).
 // 11. **A variable stays** (review NC-16): a changed or cleared value of a read-only field is
 //     `refused.variable` in every layout, not only where the words are rewritten.
 // 12. **More decimals than the machine has** (review NC-13): with a machine whose number input
@@ -80,12 +84,14 @@
 //     would round it). Without a machine nothing is guessed.
 // 13. **The reading of a point-less word** (review NC-08): `CycleForm.readings` says what a word
 //     written without a point is on the machine (`Q4000` = 4 mm), so the user types the value as
-//     it is written.
+//     it is written. v1.2.0 T146: also any other word whose reading differs from its literal, and
+//     `cycleFormReadings` gives the readings of the values as typed, for the form's live hook.
 
 import type { Msg } from '$lib/app/types';
 import { blockRange, checkEdit, checkValue, inspectBlock, type InspectInput, type InspectView, type InspectedWord } from '$lib/core/codes/inspect';
 import { lookupCode } from '$lib/core/codes/lookup';
 import type { CodeDb, CodeEntry, CodeParam } from '$lib/core/codes/types';
+import { declaresBlocks, paramOfBlock, paramsOfBlock, type CycleBlock } from '$lib/core/codes/blocks';
 import { blockEntries, isAxisWord, paramOf } from '$lib/core/codes/wordValue';
 import type { FieldSpec } from '$lib/core/forms/types';
 import { valueOf, WRITE_BACK_ERRORS } from '$lib/core/machines/numbers';
@@ -96,11 +102,14 @@ import { rewriteWord } from '$lib/core/nc/rewriteWord';
 import { tokenizeLine } from '$lib/core/nc/tokenizer';
 import type { LineState, ModalState, NcToken } from '$lib/core/nc/types';
 import type { Profile } from '$lib/core/profiles/types';
+import { offeredToMachine } from './load';
 import type { CycleForm, CycleFormAt, CycleFormEdit, TemplateEnv } from './types';
 
 /** The reasons `cycleFormAt` refuses, and the errors of `applyCycleForm`, as message keys (`cycleForm` namespace). */
 export const CYCLE_FORM_REFUSALS = {
   twoBlocks: { key: 'cycleForm.refused.twoBlocks' },
+  /** v1.2.0 T119: a block of a two-block cycle whose words do not say which of the two it is. */
+  whichBlock: { key: 'cycleForm.refused.whichBlock' },
   verify: { key: 'cycleForm.refused.verify' },
   noParams: { key: 'cycleForm.refused.noParams' },
   tooLong: { key: 'cycleForm.refused.tooLong' },
@@ -136,20 +145,39 @@ function paramsOf(entry: CodeEntry): CodeParam[] {
   return Array.isArray(entry.params) ? entry.params.filter((p) => p && typeof p.address === 'string' && p.address !== '') : [];
 }
 
+/** The parameters a form edits: those of the block it is on for a two-block cycle (T119), else all of them. */
+function formParams(form: Pick<CycleForm, 'entry' | 'part'>): CodeParam[] {
+  return form.part === undefined ? paramsOf(form.entry) : paramsOfBlock(form.entry, form.part);
+}
+
 function isCycle(entry: CodeEntry): boolean {
   return entry.sets?.cycle === 'start' || entry.sets?.cycle === 'define';
 }
 
 /**
- * The cycles the form can edit and insert (rule 1), in database order. `machineType` is
- * reserved (Phase 3 plan §7 #236, decided at the Wave A integration): no code entry names a
- * machine type, the Fanuc cycles are split by database already, and only Sinumerik's shared
- * database lists turning and milling cycles alike; nothing is filtered by it.
+ * The machine type a code entry is for, where the database says so (v1.2.0 T144). The code
+ * database's reader carries the member (`CodeEntry.machineType`, P4b) and the Sinumerik turning and
+ * milling cycles are marked; an unmarked entry (`undefined`) is for every machine type.
+ */
+function entryMachineType(entry: CodeEntry): 'mill' | 'lathe' | undefined {
+  const type = (entry as CodeEntry & { machineType?: unknown }).machineType;
+  return type === 'mill' || type === 'lathe' ? type : undefined;
+}
+
+/**
+ * The cycles the form can edit and insert (rule 1), in database order. v1.2.0 T144: an entry
+ * marked with a machine type is offered to a program of that machine type only (the rule of the
+ * templates, `offeredToMachine`); an unmarked one to every program. Sinumerik's one database marks
+ * only its turning cycles, so a milling program lacks those; its milling cycles stay on both.
  */
 export function cycleEntries(db: CodeDb, machineType?: string): CodeEntry[] {
-  void machineType;
   return (Array.isArray(db?.codes) ? db.codes : []).filter(
-    (entry) => isCycle(entry) && entry.verify !== true && entry.blocks !== 2 && paramsOf(entry).length > 0,
+    (entry) =>
+      isCycle(entry) &&
+      entry.verify !== true &&
+      entry.blocks !== 2 &&
+      paramsOf(entry).length > 0 &&
+      offeredToMachine({ machineType: entryMachineType(entry) }, machineType),
   );
 }
 
@@ -257,13 +285,18 @@ function plainNumber(text: string): ReturnType<typeof parseNumber> {
   return parseNumber(text.trim().replace(',', '.'));
 }
 
-/** The words of the block that are parameters of `entry`, by address: the first one written. */
-function paramRows(words: readonly InspectedWord[], entry: CodeEntry): Map<string, InspectedWord> {
+/** The parameter of `entry` written with `address`, in block `part` of a two-block cycle (T119). */
+function paramIn(entry: CodeEntry, address: string, part: CycleBlock | undefined): CodeParam | null {
+  return part === undefined ? paramOf(entry, address) : paramOfBlock(entry, address, part);
+}
+
+/** The words of the block that are parameters of `entry` (of block `part`), by address: the first one written. */
+function paramRows(words: readonly InspectedWord[], entry: CodeEntry, part?: CycleBlock): Map<string, InspectedWord> {
   const out = new Map<string, InspectedWord>();
   for (const word of words) {
     if (word.kind === 'code' || word.kind === 'call' || word.token.kind === 'blockNumber' || word.token.kind === 'programMarker') continue;
     if (word.address === null || word.token.valueText === undefined) continue;
-    const param = paramOf(entry, word.address);
+    const param = paramIn(entry, word.address, part);
     if (!param) continue;
     const key = upper(param.address);
     if (!out.has(key)) out.set(key, word);
@@ -336,13 +369,19 @@ function readCycle(input: InspectInput, view: InspectView, after: ModalState | n
   }
   if (entry.verify === true) return { ok: false, reason: CYCLE_FORM_REFUSALS.verify };
   // Rule 10: the database says which cycles are written in two blocks (the pairing heuristic
-  // of the inspector paired an Okuma one-block cycle written twice in a row).
-  if (entry.blocks === 2) return { ok: false, reason: CYCLE_FORM_REFUSALS.twoBlocks };
-  const params = paramsOf(entry);
+  // of the inspector paired an Okuma one-block cycle written twice in a row). T119: the form edits
+  // the block it is on, with that block's parameters, where the database says which they are.
+  let part: CycleBlock | undefined;
+  if (entry.blocks === 2) {
+    if (!declaresBlocks(entry)) return { ok: false, reason: CYCLE_FORM_REFUSALS.twoBlocks };
+    if (cycle.part === undefined) return { ok: false, reason: CYCLE_FORM_REFUSALS.whichBlock };
+    part = cycle.part.index;
+  }
+  const params = part === undefined ? paramsOf(entry) : paramsOfBlock(entry, part);
   if (params.length === 0) return { ok: false, reason: CYCLE_FORM_REFUSALS.noParams };
 
   const layout = layoutOf(entry, view);
-  const rows = paramRows(inspection.words, entry);
+  const rows = paramRows(inspection.words, entry, part);
   const values: Record<string, string> = {};
   const fields: FieldSpec[] = [];
   const kept: string[] = [];
@@ -376,13 +415,25 @@ function readCycle(input: InspectInput, view: InspectView, after: ModalState | n
   for (const word of inspection.words) {
     if (used.has(word) || word.kind === 'code' || word.kind === 'call') continue;
     if (word.token.kind === 'blockNumber' || word.token.kind === 'programMarker') continue;
-    if (word.address !== null && paramOf(entry, word.address)) continue;
+    if (word.address !== null && paramIn(entry, word.address, part)) continue;
     kept.push(word.written);
   }
 
   const form: CycleForm = { entry, mode: 'edit', block: { first, last }, fields, values, kept };
+  if (part !== undefined) form.part = part;
   if (readings !== undefined) form.readings = readings;
   return { ok: true, reading: { entry, layout, block, words: inspection.words, rows, call, args, form } };
+}
+
+/**
+ * T146: how the machine reads each value of the block an edit would write (rule 13 for the values
+ * as they are typed, so the form can say it beside each field while the user types), by field id.
+ * Empty for a refused edit.
+ */
+export function cycleFormReadings(edit: CycleFormEdit, input: InspectInput, view: InspectView, after: ModalState | null): Record<string, Msg> {
+  if (!edit.ok || edit.lines.length === 0) return {};
+  const again = readCycle(spliced(input, edit.first, edit.last, edit.lines, edit.first), view, after);
+  return again !== null && again.ok ? { ...(again.reading.form.readings ?? {}) } : {};
 }
 
 /** The form of the cycle at the cursor (rules 1–3); null when the cursor's block runs, defines or calls no cycle. */
@@ -432,13 +483,18 @@ function scaledWithoutPoint(cls: ResolvedClass, row: InspectedWord): boolean {
   return value !== null && value !== '1';
 }
 
-/** Rule 13: how the machine reads a word written without a point, where that is not the literal itself. */
+/**
+ * Rule 13: how the machine reads a word, where that is not the literal itself: a word written
+ * without a point read in increments (`Q4000` = 4 mm on IS-B), and (T146) any other word whose
+ * reading on the machine differs from what is written (a machine that scales every number).
+ */
 function readingOf(row: InspectedWord): Msg | null {
   const lit = row.token.value;
   const effective = row.value?.effective;
-  if (!lit || lit.hasPoint || typeof effective !== 'string' || row.value?.unit === null || row.value?.unit === undefined) return null;
+  if (!lit || typeof effective !== 'string' || row.value?.unit === null || row.value?.unit === undefined) return null;
   if (canonical(effective) === canonical(row.token.valueText ?? '')) return null;
-  return { key: 'cycleForm.withoutPoint', params: { literal: row.token.valueText ?? '', value: `${canonical(effective)} ${String(row.value.unit)}` } };
+  const params = { literal: row.token.valueText ?? '', value: `${canonical(effective)} ${String(row.value.unit)}` };
+  return { key: lit.hasPoint ? 'cycleForm.reading' : 'cycleForm.withoutPoint', params };
 }
 
 /**
@@ -523,7 +579,7 @@ interface Change {
 /** The changes the values make, and the errors of the values that cannot be taken. */
 function changesOf(form: CycleForm, values: Record<string, unknown>, current: Record<string, string>, errors: Record<string, Msg>): Change[] {
   const out: Change[] = [];
-  paramsOf(form.entry).forEach((param, index) => {
+  formParams(form).forEach((param, index) => {
     const typed = typedText(values, param.address);
     const now = current[param.address] ?? '';
     if (typed === undefined || typed === now) return;
@@ -608,7 +664,7 @@ function editWords(r: Reading, changes: readonly Change[], view: InspectView, er
         if (written === r.entry && code === null) code = at;
         continue;
       }
-      if (word.address !== null && paramOf(r.entry, word.address) !== null && later(at, anchor)) anchor = at;
+      if (word.address !== null && paramIn(r.entry, word.address, r.form.part) !== null && later(at, anchor)) anchor = at;
     }
     anchor = anchor ?? code;
     if (anchor === null) {
@@ -668,7 +724,7 @@ function editKlartext(r: Reading, changes: readonly Change[], view: InspectView,
   const patched = applyPatches(r.block.lines, patches);
 
   // New Q lines, each after the line of the parameter before it in the database's order.
-  const params = paramsOf(r.entry);
+  const params = formParams(r.form);
   const indent = (() => {
     for (const row of r.rows.values()) {
       const i = row.line - r.block.first;
@@ -752,7 +808,8 @@ function argumentWord(param: CodeParam, typed: string): InspectedWord {
 /** Each changed or added value reads back from the new block as typed; and an added word passes the inspector's checks. */
 function verify(r: Reading, changes: readonly Change[], next: InspectInput, view: InspectView, after: ModalState | null, errors: Record<string, Msg>): void {
   const again = readCycle(next, view, after);
-  if (!again || !again.ok || again.reading.entry !== r.entry) {
+  // T119: the block of a two-block cycle stays the block it was (clearing P and Q would make it the other one).
+  if (!again || !again.ok || again.reading.entry !== r.entry || again.reading.form.part !== r.form.part) {
     for (const c of changes) if (!errors[c.param.address]) errors[c.param.address] = CYCLE_FORM_REFUSALS.noWord;
     return;
   }
@@ -832,6 +889,8 @@ function blockNumberText(env: TemplateEnv | undefined, profile: Profile, nth = 1
 function insertCycle(form: CycleForm, values: Record<string, unknown>, input: InspectInput, view: InspectView, after: ModalState | null, env?: TemplateEnv): CycleFormEdit {
   const errors: Record<string, Msg> = {};
   const entry = form.entry;
+  // A new two-block cycle has two blocks to write: its template does that, not this form (rule 1).
+  if (entry.blocks === 2) return { ok: false, errors: { [CYCLE_FORM_WHOLE]: CYCLE_FORM_REFUSALS.twoBlocks } };
   // Rule 9 (SK-01): not inside a cycle that is still on.
   const active = after?.activeCycle ?? null;
   const running = active ? lookupCode(view.db, active.code) : null;
@@ -945,7 +1004,7 @@ export function applyCycleForm(
   if (!found) return whole(CYCLE_FORM_REFUSALS.changed);
   if (!found.ok) return whole(found.reason);
   const r = found.reading;
-  if (r.entry !== form.entry || r.block.first !== form.block.first || r.block.last !== form.block.last) return whole(CYCLE_FORM_REFUSALS.changed);
+  if (r.entry !== form.entry || r.form.part !== form.part || r.block.first !== form.block.first || r.block.last !== form.block.last) return whole(CYCLE_FORM_REFUSALS.changed);
 
   const errors: Record<string, Msg> = {};
   const changes = changesOf(r.form, values, r.form.values, errors);

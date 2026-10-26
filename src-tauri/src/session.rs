@@ -452,7 +452,9 @@ pub fn grant_on_startup(app: &AppHandle) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-    let grant = |paths: &[String]| state::grant_files(&scope, paths, MAX_SESSION_PATHS);
+    let state_file = dirs.state_file();
+    let grant =
+        |paths: &[String]| state::grant_files(&scope, paths, MAX_SESSION_PATHS, &state_file);
     if let Err(err) = start(&dirs, grant, now) {
         // The grants are made; only the count of missing starts could not be stored,
         // which at worst lets a dead entry live a little longer.
@@ -780,7 +782,9 @@ mod tests {
         let scope = app.fs_scope();
         assert!(!scope.is_allowed(&here));
 
-        let grant = |paths: &[String]| state::grant_files(&scope, paths, MAX_SESSION_PATHS);
+        let state_file = dirs.state_file();
+        let grant =
+            |paths: &[String]| state::grant_files(&scope, paths, MAX_SESSION_PATHS, &state_file);
         start(&dirs, grant, DAY).unwrap();
         assert!(scope.is_allowed(&here));
         // The canonical spelling of the same file, which is what `is_allowed`
@@ -794,6 +798,55 @@ mod tests {
         // counted it.
         assert_eq!(load(&dirs).paths.len(), 2);
         assert_eq!(load_stored(&dirs).missing.len(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// T135. A hand-edited session list naming `state.json` — or a link to it — used to
+    /// have the file granted at the next start, which let the webview rewrite the
+    /// recent list and the session behind Rust's lock. Neither is granted now and both
+    /// count as missing; an ordinary file in the same list still is granted.
+    #[test]
+    fn the_state_file_is_never_granted_by_the_session() {
+        let (root, dirs) = scratch_dirs("grant-state-file");
+        let here = root.join("a.nc");
+        fs::write(&here, b"G0\n").unwrap();
+        let state_file = dirs.state_file();
+        state::touch_recent(&dirs, "/x.nc", 15).unwrap();
+        assert!(state_file.is_file());
+        // Only the Unix build adds the link below.
+        #[cfg_attr(not(unix), allow(unused_mut))]
+        let mut named = vec![
+            here.to_str().unwrap().to_string(),
+            state_file.to_str().unwrap().to_string(),
+        ];
+        #[cfg(unix)]
+        let link = {
+            let link = root.join("link.json");
+            std::os::unix::fs::symlink(&state_file, &link).unwrap();
+            named.push(link.to_str().unwrap().to_string());
+            link
+        };
+        store(
+            &dirs,
+            &SessionState {
+                paths: named,
+                active: Some(0),
+            },
+        );
+
+        let app = mock_app();
+        let scope = app.fs_scope();
+        let grant =
+            |paths: &[String]| state::grant_files(&scope, paths, MAX_SESSION_PATHS, &state_file);
+        start(&dirs, grant, DAY).unwrap();
+
+        assert!(scope.is_allowed(&here), "the ordinary file is granted");
+        assert!(!scope.is_allowed(&state_file), "state.json was granted");
+        #[cfg(unix)]
+        assert!(!scope.is_allowed(&link), "a link to state.json was granted");
+        // They stay in the list and count as missing, like any file that is not there.
+        let stored = load_stored(&dirs);
+        assert!(stored.missing.contains_key(state_file.to_str().unwrap()));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1046,7 +1099,9 @@ mod tests {
 
         let app = mock_app();
         let scope = app.fs_scope();
-        let grant = |paths: &[String]| state::grant_files(&scope, paths, MAX_SESSION_PATHS);
+        let state_file = dirs.state_file();
+        let grant =
+            |paths: &[String]| state::grant_files(&scope, paths, MAX_SESSION_PATHS, &state_file);
         start(&dirs, grant, DAY).unwrap();
         // Only the file is granted; a folder counts as missing, as it does in the
         // webview, and is not granted either.

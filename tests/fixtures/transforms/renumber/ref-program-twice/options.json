@@ -1,0 +1,34 @@
+{
+  "note": "P4.19 (plan 6.6 rule 10, 7 row): O2011 is in the file twice, so which of the two M98 P2011 runs, and so where either M99 P20 returns from, cannot be told. Both values are reported (programTwice) and left as they are.",
+  "profile": "fanuc-lathe",
+  "options": {},
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 6,
+        "severity": "info"
+      },
+      {
+        "line": 8,
+        "severity": "warning"
+      },
+      {
+        "line": 9,
+        "severity": "info"
+      },
+      {
+        "line": 11,
+        "severity": "warning"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.referencesUnresolved"
+    ],
+    "preflight": "ncNumbering.renumber.references"
+  }
+}

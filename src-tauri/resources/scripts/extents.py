@@ -38,6 +38,17 @@ and an honest "not resolved" is worth more than a confident wrong minimum.
   arithmetic reads too);
 * a cycle start whose words are data (the Fanuc lathe ``G71``–``G73``): the control
   computes its passes, so they are not resolved;
+* a drilling cycle the code database describes step by step (``CodeEntry.expand``, the
+  roles of its parameters, plan §6.3) is read the way ``expand_cycles.py`` writes it out
+  (v1.2.0, P4.7b, T108): ``_nc_cycles.holes_of`` gives each hole's position and every level
+  it goes to, so the ranges reach the bottom of a Klartext 200/201 (``Q203 + Q201``) and of a
+  Sinumerik ``CYCLE81``–``CYCLE89`` (``RFP − DPR``, or ``DP`` where ``DPR`` is 0), the set-up
+  clearance and the return level, every hole of a repeat count and the point of a
+  ``CYCL CALL POS``, and the extents of the program and of its expansion are the same (X23).
+  A cycle the expansion refuses (no description, as Klartext 203; a value it cannot read; a
+  return mode only assumed) stays as the tracker reads it: a Fanuc cycle's bottom from its
+  ``Z`` word under ``G90`` (under ``G91`` it is measured from the R point: not resolved), a
+  cycle whose positions are its parameters not resolved;
 * a code of the ``offset`` group (``G54``–``G59``, ``CYCL DEF 247``) starts a work-offset
   group; the modal ``frame`` (§7.4 rule 13) makes a position not resolved; tool centre point
   control (``tcp``, rule 14) does not: under it ``X``/``Y``/``Z`` are the tool tip;
@@ -72,8 +83,10 @@ import sys
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import _nc_cycles
+import _nc_path
 import gedit_nc
-from _nc_path import PathTracker, Reach, Step, as_dict, literal_of, rounded
+from _nc_path import PathTracker, Reach, Step, Unknown, as_dict, literal_of, rounded
 
 TITLE = "Extents"
 
@@ -91,6 +104,18 @@ COLUMNS = [
 #: Decimals a range value is written with, by kind: millimetres and degrees, inches.
 DECIMALS = {"mm": 4, "inch": 5, "angle": 4}
 _ZERO = Decimal(0)
+
+#: v1.2.0 (P4.7b): the axes a drilling cycle's holes move (``_nc_cycles``: the plane XY and the
+#: tool axis Z; a cycle in another plane is not written out, so it has no holes).
+HOLE_AXES = ("X", "Y", "Z")
+#: The peck values the holes of the extents are worked out with. The high-speed peck retract
+#: (``G73``) and the deep peck clearance (``G83``) are settings of the control that only shape
+#: the moves between the R point and the bottom of the hole (a retract after a peck, a rapid
+#: back down to just above the last bottom), never a level outside them, so the extents do
+#: not ask for them: a retract of 0 and the smallest clearance stand in, and the levels of the
+#: hole (the start, the R point, the bottom, the return level) are the ones the expansion
+#: writes with any values of the form.
+HOLE_PECKS = _nc_cycles.PeckValues(retract=Decimal(0), clearance=Decimal("0.001"))
 
 
 def text_of(value: Decimal, places: int) -> str:
@@ -345,6 +370,10 @@ class Extents:
         self.machine = self.tracker.machine
         self.axes = self.tracker.axes
         self.findings = Findings()
+        #: v1.2.0 (P4.7b): the holes of the drilling cycles, read as the expansion reads them;
+        #: a turning program's drilling cycles are not written out (``expand_cycles.py``).
+        self.context = context
+        self.holes_on = gedit_nc.machine_type_of(self.profile) != "lathe" and bool(self.codes)
 
         self.program = Scope("program", "Program")
         self.groups: List[Group] = []
@@ -564,11 +593,14 @@ class Extents:
             diameter = self.interp.state["diameter"]
             self.diameter_start = dict(diameter) if diameter is not None else {}
         state, step = self.tracker.line(line, number, state, record)
+        # Asked on every line, the priming lines too: a definition, a `MCALL` line and a cycle
+        # block leave the values the later blocks run with (`_nc_cycles.holes_of`).
+        holes = _nc_cycles.holes_of(step, self.tracker, HOLE_PECKS, self.context)[0] if self.holes_on else []
         tool = self.interp.tool
         if tool is not None and tool.get("line") == number:
             self.tool_words[number] = self.tool_word(step.tokens, step.masked, tool)
         self.record = record
-        self.block(step, number)
+        self.block(step, number, holes)
         return state
 
     def tool_word(self, tokens: Sequence[gedit_nc.Token], masked: str, tool: Dict[str, Any]) -> str:
@@ -585,7 +617,7 @@ class Extents:
                     return token.text.strip()
         return written
 
-    def block(self, step: Step, line: int) -> None:
+    def block(self, step: Step, line: int, holes: Sequence[_nc_cycles.Hole] = ()) -> None:
         moves = step.moves
         for entry, code, _ in step.entries:
             sets = as_dict(entry.get("sets"))
@@ -608,7 +640,42 @@ class Extents:
             self.track_rotary(moves, entries, self.interp.state, line)
         if step.kind == "machine":
             self.machine_block(step, entries, line)
+        if holes:
+            self.replay([e for e in step.events if not self.hole_event(e)])
+            self.note_holes(step, holes)
+            return
         self.replay(step.events)
+
+    # -- the drilling cycles (v1.2.0, P4.7b) ----------------------------------
+
+    @staticmethod
+    def hole_event(event: Any) -> bool:
+        """Whether the tracker's ``event`` is about where a cycle's holes take the tool (the
+        plane and the tool axis), which the holes say instead: the block's own move to the hole,
+        a bottom it reads from the block's words, the depth it leaves not resolved."""
+        if isinstance(event, Reach):
+            return event.axis in HOLE_AXES
+        return isinstance(event, Unknown) and bool(event.axes) and all(axis in HOLE_AXES for axis in event.axes)
+
+    def note_holes(self, step: Step, holes: Sequence[_nc_cycles.Hole]) -> None:
+        """Every point the holes of a block reach: each hole's position at its start level,
+        the end of every move (the R point or the set-up clearance, each peck, the bottom, a
+        lift-off, the return level) and where it ends; in the block's units, as the
+        expansion writes them, converted to the report's."""
+        units = step.units if step.units in ("mm", "inch") else as_dict(self.interp.state.get("units")).get("value")
+        units = units if units in ("mm", "inch") else "mm"
+        report = self.report_units if self.report_units in ("mm", "inch") else units
+        for hole in holes:
+            points: List[Tuple[str, Decimal]] = list(hole.position.items()) + [("Z", hole.start)]
+            for move in hole.moves:
+                points.extend(move.to.items())
+            points.extend(hole.end.items())
+            for axis, value in points:
+                if axis not in self.axes.known:
+                    continue
+                if units != report:
+                    value = value * _nc_path.INCH if units == "inch" else value / _nc_path.INCH
+                self.note(axis, value, hole.line)
 
     # -- the kinds of block ---------------------------------------------------
 

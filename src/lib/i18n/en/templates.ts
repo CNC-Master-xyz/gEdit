@@ -46,8 +46,8 @@ export default {
   /** P3b fix NC (NC-02): what a draft "from selection" leaves as written (`TemplateDraft.notes`). */
   fromSelection: {
     referencedKept: '{words} point at blocks outside the selection; they stay as written.',
-    labelsKept: 'Labels (LBL) stay as written. Check them before you insert the template twice into one program.',
-    skipNumberKept: '{words}: a block number behind / stays as written. Check it before you insert the template into the same program.',
+    /** T160: the label words "from selection" leaves as written; {words} as written (`CALL LBL 5`, `LBL "CONTOUR"`). */
+    labelsKept: '{words}: stays as written. Check the labels before you insert the template twice into one program.',
   },
   /** P3b fix NC (SK-02): the form's note when a number the template writes is one a reference of the program points at. */
   numberNamed: '{word} on line {line} points at {number}, and this template writes a block {number} as well.',
@@ -68,10 +68,19 @@ export default {
     blockNumberNamed: '{word} on line {line} already points at {number}. Choose a number nothing in the program points at.',
     blockNumberOwn: 'This template writes {number} itself. Choose another number.',
     blockNumberTwice: 'Another field already has {number}. Each block needs a number of its own.',
+    /** T160: a Klartext label the program already defines or calls; {number} as written (`LBL 5`). */
+    labelUsed: '{number} is already on line {line}. Choose a label number the program does not use.',
+    labelCalled: '{word} on line {line} already calls this label. Choose a label number the program does not use.',
     commentDelimiter: 'The text cannot contain {delimiter}.',
     oneLine: 'Write it on one line.',
     control: 'Remove the invisible control character.',
     noComments: 'This dialect has no comments.',
     blockNumberMax: 'The next block number would be above {max}. Renumber the program first.',
+    /** T155: a name longer than its parameter allows. */
+    tooLong: 'At most {max} characters.',
+    /** T155: the characters a name may hold (`charset`). */
+    charsetNoSpaces: 'Write it without spaces.',
+    charsetLettersDigits: 'Use only letters and digits.',
+    charsetName: 'Start with a letter, then use only letters and digits.',
   },
 } as const satisfies Messages;

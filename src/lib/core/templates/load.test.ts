@@ -143,24 +143,24 @@ describe('loadTemplates: what drops a template, with its path', () => {
     ['a machine type that is neither', { ...DRILL, machineType: 'router' }, '[0].machineType'],
     ['params that are no list', { ...DRILL, params: {} }, '[0].params'],
     ['too many params', { ...DRILL, body: 'G0', params: Array.from({ length: TEMPLATE_LIMITS.params + 1 }, (_, i) => ({ id: `p${i}`, label: 'P', type: 'number' })) }, '[0].params'],
-    ['a parameter id used twice', { ...DRILL, params: [DRILL.params[0], DRILL.params[0]] }, '[0].params[1].id'],
-    ['a parameter id with capitals', { ...DRILL, params: [{ ...DRILL.params[0], id: 'X' }] }, '[0].params[0].id'],
+    ['a parameter id used twice', { ...DRILL, body: '{{x}}', params: [DRILL.params[0], DRILL.params[0]] }, '[0].params[1].id'],
+    ['a parameter id with capitals', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], id: 'X' }] }, '[0].params[0].id'],
     ['a reserved parameter id', { ...DRILL, body: '{{sin}}', params: [{ id: 'sin', label: 'S', type: 'number' }] }, '[0].params[0].id'],
-    ['a parameter type it does not know', { ...DRILL, params: [{ ...DRILL.params[0], type: 'float' }] }, '[0].params[0].type'],
-    ['min above max', { ...DRILL, params: [{ ...DRILL.params[0], min: 5, max: 1 }] }, '[0].params[0].min'],
+    ['a parameter type it does not know', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], type: 'float' }] }, '[0].params[0].type'],
+    ['min above max', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], min: 5, max: 1 }] }, '[0].params[0].min'],
     ['a fractional bound on an integer', { ...DRILL, body: '{{x}}', params: [{ id: 'x', label: 'X', type: 'integer', max: 2.5 }] }, '[0].params[0].max'],
-    ['a default below min', { ...DRILL, params: [{ ...DRILL.params[0], min: 0, default: -1 }] }, '[0].params[0].default'],
-    ['a default with more decimals than fixed', { ...DRILL, params: [{ ...DRILL.params[0], decimals: 2, default: '1.005' }] }, '[0].params[0].default'],
-    ['a default that is no number', { ...DRILL, params: [{ ...DRILL.params[0], default: '1,5' }] }, '[0].params[0].default'],
+    ['a default below min', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], min: 0, default: -1 }] }, '[0].params[0].default'],
+    ['a default with more decimals than fixed', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], decimals: 2, default: '1.005' }] }, '[0].params[0].default'],
+    ['a default that is no number', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], default: '1,5' }] }, '[0].params[0].default'],
     ['a fractional default on an integer', { ...DRILL, body: '{{x}}', params: [{ id: 'x', label: 'X', type: 'integer', default: '2.0' }] }, '[0].params[0].default'],
     ['a choice without choices', { ...DRILL, body: '{{d}}', params: [{ id: 'd', label: 'D', type: 'choice' }] }, '[0].params[0].choices'],
     ['a choice value twice', { ...DRILL, body: '{{d}}', params: [{ id: 'd', label: 'D', type: 'choice', choices: [{ label: 'a', value: 'M3' }, { label: 'b', value: 'M3' }] }] }, '[0].params[0].choices[1].value'],
     ['a choice default that is no choice', { ...DRILL, body: '{{d}}', params: [{ id: 'd', label: 'D', type: 'choice', choices: [{ label: 'a', value: 'M3' }], default: 'M5' }] }, '[0].params[0].default'],
     ['decimals on a text', { ...DRILL, body: '{{c}}', params: [{ id: 'c', label: 'C', type: 'text', decimals: 2 }] }, '[0].params[0].decimals'],
-    ['decimals out of range', { ...DRILL, params: [{ ...DRILL.params[0], decimals: 7 }] }, '[0].params[0].decimals'],
-    ['digits on a number', { ...DRILL, params: [{ ...DRILL.params[0], digits: 4 }] }, '[0].params[0].digits'],
-    ['a prefix with a brace', { ...DRILL, params: [{ ...DRILL.params[0], prefix: 'X{' }] }, '[0].params[0].prefix'],
-    ['a prefix too long', { ...DRILL, params: [{ ...DRILL.params[0], prefix: 'X'.repeat(TEMPLATE_LIMITS.affix + 1) }] }, '[0].params[0].prefix'],
+    ['decimals out of range', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], decimals: 7 }] }, '[0].params[0].decimals'],
+    ['digits on a number', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], digits: 4 }] }, '[0].params[0].digits'],
+    ['a prefix with a brace', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], prefix: 'X{' }] }, '[0].params[0].prefix'],
+    ['a prefix too long', { ...DRILL, body: '{{x}}', params: [{ ...DRILL.params[0], prefix: 'X'.repeat(TEMPLATE_LIMITS.affix + 1) }] }, '[0].params[0].prefix'],
     ['a text default that is not upper case', { ...DRILL, body: '{{c}}', params: [{ id: 'c', label: 'C', type: 'text', uppercase: true, default: 'rough' }] }, '[0].params[0].default'],
     ['a formula without its formula', { ...DRILL, body: '{{f}}', params: [{ id: 'f', label: 'F', type: 'formula' }] }, '[0].params[0].formula'],
     ['a formula that reads a text', { ...DRILL, body: '{{f}}', params: [{ id: 'c', label: 'C', type: 'text' }, { id: 'f', label: 'F', type: 'formula', formula: 'c * 2' }] }, '[0].params[1].formula'],
@@ -322,5 +322,85 @@ describe('P3b fix code: the loader’s edges', () => {
     expect(choice.problems[0].message).toContain('control character');
     // A tab is fine in a body.
     expect(one({ body: '{{N}}G1\t{{p}}' }).ids).toEqual(['t']);
+  });
+});
+
+describe('v1.2.0 T150: every problem of a template at once', () => {
+  it('reports each independent problem of one template, in member order, and drops it', () => {
+    const { ids, problems } = load([
+      {
+        id: 't',
+        label: '',
+        group: 'G',
+        body: '{{N}}G1 {{a}} {{q}}',
+        params: [
+          { id: 'a', label: 'A', type: 'number', min: 5, max: 1 },
+          { id: 'b', label: 'B', type: 'text', decimals: 2 },
+        ],
+      },
+      { ...DRILL, id: 'kept' },
+    ]);
+    expect(ids).toEqual(['kept']);
+    expect(problems.map((p) => p.path)).toEqual(['[0].label', '[0].params[0].min', '[0].params[1].decimals', '[0].body']);
+  });
+
+  it('says one mistake once: a parameter id it cannot read leaves the placeholders unchecked, broken bounds the default', () => {
+    const id = load([{ id: 't', label: 'T', group: 'G', body: '{{x}}', params: [{ id: 'X', label: 'X', type: 'number' }] }]);
+    expect(id.problems.map((p) => p.path)).toEqual(['[0].params[0].id']);
+    const bounds = load([{ id: 't', label: 'T', group: 'G', body: '{{x}}', params: [{ id: 'x', label: 'X', type: 'number', min: 5, max: 1, default: 'q' }] }]);
+    expect(bounds.problems.map((p) => p.path)).toEqual(['[0].params[0].min']);
+    const type = load([{ id: 't', label: 'T', group: 'G', body: '{{x}} {{f}}', params: [{ id: 'x', label: 'X', type: 'float' }, { id: 'f', label: 'F', type: 'formula', formula: 'x * 2' }] }]);
+    expect(type.problems.map((p) => p.path)).toEqual(['[0].params[0].type']);
+  });
+});
+
+describe('v1.2.0 T155: the length and the characters of a text parameter (the format)', () => {
+  const textParam = (extra: Record<string, unknown>) => load([{ id: 't', label: 'T', group: 'G', body: 'O{{n}}', params: [{ id: 'n', label: 'Name', type: 'text', ...extra }] }]);
+
+  it('reads maxLength and charset on a text parameter', () => {
+    const { templates, problems } = textParam({ maxLength: 4, charset: 'letters-digits', default: 'AB12' });
+    expect(problems).toEqual([]);
+    expect(templates[0].params?.[0]).toMatchObject({ maxLength: 4, charset: 'letters-digits', default: 'AB12' });
+    for (const charset of ['no-spaces', 'letters-digits', 'name']) expect(textParam({ charset }).problems).toEqual([]);
+  });
+
+  it('refuses them anywhere else, out of range, an unknown charset and a default that does not fit', () => {
+    expect(textParam({ maxLength: 0 }).problems.map((p) => p.path)).toEqual(['[0].params[0].maxLength']);
+    expect(textParam({ maxLength: TEMPLATE_LIMITS.text + 1 }).problems.map((p) => p.path)).toEqual(['[0].params[0].maxLength']);
+    expect(textParam({ maxLength: 2.5 }).problems.map((p) => p.path)).toEqual(['[0].params[0].maxLength']);
+    expect(textParam({ charset: 'ascii' }).problems.map((p) => p.path)).toEqual(['[0].params[0].charset']);
+    expect(textParam({ maxLength: 4, default: 'ABCDE' }).problems.map((p) => p.path)).toEqual(['[0].params[0].default']);
+    expect(textParam({ charset: 'name', default: '1AB' }).problems.map((p) => p.path)).toEqual(['[0].params[0].default']);
+    expect(textParam({ charset: 'no-spaces', default: 'MY PART' }).problems.map((p) => p.path)).toEqual(['[0].params[0].default']);
+    const onNumber = load([{ id: 't', label: 'T', group: 'G', body: 'X{{x}}', params: [{ id: 'x', label: 'X', type: 'number', maxLength: 4, charset: 'name' }] }]);
+    expect(onNumber.problems.map((p) => p.path)).toEqual(['[0].params[0].maxLength', '[0].params[0].charset']);
+  });
+});
+
+describe('v1.2.0 T154: the unit of a value, shown beside its field', () => {
+  const withUnit = (type: string, unit: unknown, extra: Record<string, unknown> = {}) =>
+    load([{ id: 't', label: 'T', group: 'G', body: 'F{{v}}', params: [{ id: 'v', label: 'V', type, unit, ...extra }] }]);
+
+  it('reads it on a number, a whole number and a calculated value, trimmed', () => {
+    expect(withUnit('number', ' mm/min ').templates[0].params?.[0].unit).toBe('mm/min');
+    expect(withUnit('integer', '1/min').templates[0].params?.[0].unit).toBe('1/min');
+    const formula = load([{ id: 't', label: 'T', group: 'G', body: 'F{{f}}', params: [{ id: 's', label: 'S', type: 'number', default: 1 }, { id: 'f', label: 'F', type: 'formula', formula: 's * 2', unit: 'mm/min' }] }]);
+    expect(formula.problems).toEqual([]);
+    expect(formula.templates[0].params?.[1].unit).toBe('mm/min');
+  });
+
+  it('refuses it on a text or a choice, too long, or on two lines', () => {
+    expect(withUnit('text', 'mm').problems.map((p) => p.path)).toEqual(['[0].params[0].unit']);
+    expect(withUnit('choice', 'mm', { choices: [{ label: 'a', value: '1' }] }).problems.map((p) => p.path)).toEqual(['[0].params[0].unit']);
+    expect(withUnit('number', 'x'.repeat(TEMPLATE_LIMITS.unit + 1)).problems.map((p) => p.path)).toEqual(['[0].params[0].unit']);
+    expect(withUnit('number', 'mm\nmin').problems.map((p) => p.path)).toEqual(['[0].params[0].unit']);
+    expect(withUnit('number', 5).problems.map((p) => p.path)).toEqual(['[0].params[0].unit']);
+  });
+});
+
+describe('v1.2.0 T157: {{N}} right behind a leading block-delete slash', () => {
+  it('takes /{{N}}, /1 {{N}} and an indented slash; refuses {{N}} anywhere else', () => {
+    for (const body of ['/{{N}}G1 X1.', '/1 {{N}}G1', '  / {{N}}G1', '/9{{N}}M9']) expect(placeholdersOf(body, new Set()), body).toEqual({ used: new Set() });
+    for (const body of ['G0 /{{N}}', '//{{N}}G1', '/12{{N}}G1', 'X/{{N}}']) expect('error' in placeholdersOf(body, new Set()), body).toBe(true);
   });
 });

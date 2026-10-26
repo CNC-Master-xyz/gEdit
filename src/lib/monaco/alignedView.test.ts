@@ -89,6 +89,7 @@ interface FakeEditor {
   scrollListeners: ((e: { scrollTopChanged: boolean; scrollLeftChanged: boolean }) => void)[];
   mouseListeners: ((e: unknown) => void)[];
   contentListeners: (() => void)[];
+  cursorListeners: (() => void)[];
   modelListeners: (() => void)[];
   layoutListeners: (() => void)[];
   /** What `getLayoutInfo()` answers: the scrollbar and the overview ruler on the right. */
@@ -161,6 +162,7 @@ vi.mock('$lib/monaco/setup', () => ({
           scrollListeners: [],
           mouseListeners: [],
           contentListeners: [],
+          cursorListeners: [],
           modelListeners: [],
           layoutListeners: [],
           layout: { width: 400, contentLeft: 50, verticalScrollbarWidth: 14, overviewRuler: { width: 14, right: 0 } },
@@ -189,6 +191,7 @@ vi.mock('$lib/monaco/setup', () => ({
           onDidScrollChange: (fn: never) => listen(state.scrollListeners, fn),
           onMouseDown: (fn: never) => listen(state.mouseListeners, fn),
           onDidFocusEditorText: () => ({ dispose() {} }),
+          onDidChangeCursorPosition: (fn: never) => listen(state.cursorListeners, fn),
           onDidChangeModelContent: (fn: never) => listen(state.contentListeners, fn),
           onDidChangeModel: (fn: never) => listen(state.modelListeners, fn),
           onDidLayoutChange: (fn: never) => listen(state.layoutListeners, fn),
@@ -641,6 +644,23 @@ describe('what is drawn', () => {
     s.handle.dispose();
   });
 
+  it('marks the changed parts inside a long word as well (review NC-8)', async () => {
+    const s = await setup({ original: ['O1000', 'N10 G1 X[#1+#2] F100', 'N30 M30'], modified: ['O1000', 'N10 G1 X[#1+#3] F100', 'N30 M30'] });
+    await vi.runAllTimersAsync();
+    const marks = (side: 'original' | 'modified') =>
+      editorOf(side).collections[1].items.map((i) => [i.range.startLineNumber, i.range.startColumn, i.range.endColumn, i.options.inlineClassName]);
+    // The whole word `X[#1+#2]` (offsets 7..15) and, inside it, `#2` (offsets 12..14).
+    expect(marks('original')).toEqual([
+      [2, 8, 16, 'gedit-word-changed'],
+      [2, 13, 15, 'gedit-word-part'],
+    ]);
+    expect(marks('modified')).toEqual([
+      [2, 8, 16, 'gedit-word-changed'],
+      [2, 13, 15, 'gedit-word-part'],
+    ]);
+    s.handle.dispose();
+  });
+
   it('follows the toggles: realigning replaces the zones and the tints', async () => {
     const s = await setup();
     const first = [...editorOf('original').zones.keys()];
@@ -815,6 +835,41 @@ describe('after an edit', () => {
     s.handle.dispose();
   });
 
+  it('waits longer after an edit when the last alignment took long, twice its time (review CODE-4)', async () => {
+    // A clock the alignment moves on: every alignment takes 1.3 s, as 100,000 lines do.
+    let clock = 0;
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    try {
+      const s = await setup();
+      const slow = s.align.getMockImplementation()!;
+      s.align.mockImplementation((o: { reuse: boolean }) => {
+        clock += 1300;
+        return slow(o);
+      });
+      s.handle.recompute();
+      expect(s.align).toHaveBeenCalledTimes(2);
+      for (const fn of editorOf('modified').contentListeners) fn();
+      await vi.advanceTimersByTimeAsync(RECOMPUTE_DELAY_MS + 1);
+      // A quick program would be aligned again by now; this one is not.
+      expect(s.handle.isCurrent()).toBe(false);
+      expect(s.align).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2600 - RECOMPUTE_DELAY_MS - 2);
+      expect(s.handle.isCurrent()).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(s.handle.isCurrent()).toBe(true);
+      expect(s.align).toHaveBeenCalledTimes(3);
+      // Quick again: the wait goes back to the short one.
+      s.align.mockImplementation(slow);
+      s.handle.recompute();
+      for (const fn of editorOf('modified').contentListeners) fn();
+      await vi.advanceTimersByTimeAsync(RECOMPUTE_DELAY_MS + 1);
+      expect(s.handle.isCurrent()).toBe(true);
+      s.handle.dispose();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('goes to the next difference once the alignment is back (the merge keys do this after a copy)', async () => {
     const s = await setup();
     s.handle.reveal('modified', 1);
@@ -853,6 +908,21 @@ describe('navigation and the handle', () => {
     expect(s.handle.cursorAt()).toEqual({ side: 'modified', line: 1, column: 1 });
     expect(s.handle.cursor()).toEqual({ side: 'modified', line: 1 });
     expect(s.handle.model('original')).toBe(s.original);
+    s.handle.dispose();
+  });
+
+  it('hands out one list of changes per alignment, and a new one after it is worked out again (WX-CODE-2)', async () => {
+    const s = await setup();
+    const first = s.handle.lineChanges();
+    // The cursor asks on every move: the same list, not a new map of every block.
+    expect(s.handle.lineChanges()).toBe(first);
+    expect(s.handle.lineChanges()).toBe(first);
+    expect(s.align).toHaveBeenCalledTimes(1);
+    s.handle.recompute();
+    const second = s.handle.lineChanges();
+    expect(second).not.toBe(first);
+    expect(second).toEqual(first);
+    expect(s.handle.lineChanges()).toBe(second);
     s.handle.dispose();
   });
 

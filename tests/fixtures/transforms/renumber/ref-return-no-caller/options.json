@@ -1,0 +1,30 @@
+{
+  "note": "P4.19 (plan 6.6 rule 10): no program of the file calls O2011. M99 P30 returns into a caller in another file, or jumps inside O2011 when it runs as a main program, and which one cannot be read from the file: reported (noCaller) and left as it is. The subprogram's own N30 is not taken as the answer.",
+  "profile": "fanuc-lathe",
+  "options": {},
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 2,
+        "severity": "info"
+      },
+      {
+        "line": 5,
+        "severity": "warning"
+      },
+      {
+        "line": 6,
+        "severity": "info"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.referencesUnresolved"
+    ],
+    "preflight": "ncNumbering.renumber.references"
+  }
+}

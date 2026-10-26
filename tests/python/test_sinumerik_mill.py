@@ -28,12 +28,18 @@ TURNING = "sinumerik"
 AXIS_WORDS = {
     "machine": ["G153", "G53", "G74", "G75", "SUPA"],
     # G25 and G26 (M9 review F10): with axis words they limit the working area.
-    "data": ["AMIRROR", "AROT", "ASCALE", "ATRANS", "G25", "G26", "MIRROR", "ROT", "SCALE", "TRANS"],
+    # v1.2.0 manual-check fix round (D6-1): the rotations by solid angles take angles too.
+    "data": ["AMIRROR", "AROT", "AROTS", "ASCALE", "ATRANS", "CROTS", "G25", "G26", "MIRROR", "ROT", "ROTS", "SCALE", "TRANS"],
 }
 FRAME = {
     # P10 (decision of 2026-10-04): TRAORI is tool centre point control, not a frame.
-    "open": ["AMIRROR", "AROT", "ASCALE", "CYCLE800", "MIRROR", "ROT", "SCALE", "TRAANG", "TRACYL", "TRANSMIT"],
-    "close": ["TRAFOOF"],
+    # v1.2.0 manual-check fix round (D6-1): the rotations by solid angles, along the tool and on
+    # the workpiece; TOROTOF ends the frames along the tool, PAROTOF ends PAROT.
+    "open": [
+        "AMIRROR", "AROT", "AROTS", "ASCALE", "CROTS", "CYCLE800", "MIRROR", "PAROT", "ROT", "ROTS", "SCALE",
+        "TOFRAME", "TOFRAMEX", "TOFRAMEY", "TOFRAMEZ", "TOROT", "TOROTX", "TOROTY", "TOROTZ", "TRAANG", "TRACYL", "TRANSMIT",
+    ],
+    "close": ["PAROTOF", "TOROTOF", "TRAFOOF"],
 }
 #: P10: the codes that switch tool centre point control (`sets.tcp`).
 TCP = {"on": ["TRAORI"], "off": ["TRAFOOF"]}

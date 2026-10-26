@@ -115,6 +115,8 @@ export function watchContext(notify: () => void): Disposable {
 
 /** The `window.__gedit` surface (§7.9). Only a `VITE_GEDIT_TEST=1` build installs it. */
 export function buildTestHook(readyPromise: Promise<void>): GeditTestHook {
+  let loaded: Monaco | null = null;
+  void readyPromise.then(() => getMonaco()).then((m) => (loaded = m), () => undefined);
   return {
     ready: readyPromise,
     version: __APP_VERSION__,
@@ -137,6 +139,9 @@ export function buildTestHook(readyPromise: Promise<void>): GeditTestHook {
       files.setProfile(docId, id);
     },
     ctx,
+    modelCount(): number {
+      return loaded === null ? -1 : loaded.editor.getModels().length;
+    },
   };
 }
 

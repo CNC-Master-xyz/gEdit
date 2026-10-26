@@ -14,7 +14,8 @@ import { validateProfile } from '$lib/core/profiles/validate';
 import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
 import { BUILTIN_PROFILE_SOURCES } from '$lib/data/profiles';
 import { createDocumentStore } from '$lib/stores/documents';
-import { createModalService, type ModalServiceInternals, type ModalView } from '$lib/app/modalService';
+import { createModalService, runWhenIdle, type ModalServiceInternals, type ModalView } from '$lib/app/modalService';
+import { nextTurn } from '$lib/app/scheduler';
 import type { MachineConfig } from '$lib/core/machines/types';
 import type { LineState, ModalState } from '$lib/core/nc/types';
 import type { Profile } from '$lib/core/profiles/types';
@@ -41,6 +42,29 @@ export function viewOf(profileId: string, params?: MachineConfig['params']): Mod
 }
 
 export const MILL = viewOf('fanuc-gcode');
+export const KLARTEXT = viewOf('heidenhain-klartext');
+
+/** A deterministic Klartext program: a header, a tool call and a long run of numbered straight moves (the shape of the runtime scenario `p3-perf`). */
+export function klartextProgram(count: number): string[] {
+  const lines = ['0 BEGIN PGM PERF MM', '1 BLK FORM 0.1 Z X+0 Y+0 Z-20', '2 BLK FORM 0.2 X+100 Y+80 Z+0', '3 TOOL CALL 1 Z S3000', '4 L Z+25 R0 FMAX M3', '5 L X+0 Y+0 R0 FMAX', '6 L Z-1 R0 F200'];
+  let n = lines.length;
+  let x = 0;
+  let y = 0;
+  let direction = 1;
+  const signed = (value: number): string => `${value < 0 ? '-' : '+'}${Math.abs(value).toFixed(3)}`;
+  while (lines.length < count - 1) {
+    x += 0.5 * direction;
+    if (x > 100 || x < 0) {
+      direction = -direction;
+      x += 0.5 * direction;
+      y = y >= 80 ? 0 : y + 1;
+    }
+    const z = -2 + Math.sin(x / 7) * Math.cos(y / 5);
+    lines.push(`${n++} L X${signed(x)} Y${signed(y)} Z${signed(z)} R0 F800`);
+  }
+  lines.push(`${n} END PGM PERF MM`);
+  return lines;
+}
 
 /** The states of a fresh walk, power-on first. */
 export function walk(view: ModalView, lines: readonly string[]): ModalState[] {
@@ -83,7 +107,20 @@ interface Task {
   cancelled: boolean;
 }
 
-export function harness(o: { budgetMs?: number } = {}) {
+/**
+ * `turns`: the service gets `nextTurn` (a queue of its own, run with `turnOnce`) and `inputPending` (`input.pending`),
+ * so it chains its slices (T170); without it every slice waits on the idle queue. `clock`: the service's `now`,
+ * which a test moves.
+ */
+export function harness(
+  o: {
+    budgetMs?: number;
+    turns?: boolean;
+    clock?: { t: number };
+    /** The app's own scheduling with real timers (a timer a frame away for idle time, as in the macOS web view), alone or with `nextTurn`; `every` is then the index's default. */
+    real?: 'idle' | 'chained';
+  } = {},
+) {
   const docs = createDocumentStore({ caseInsensitivePaths: false });
   const lines = new Map<DocId, string[]>();
   /** Documents whose text the editor only has queued (`hasModel` is true for them, `model` is undefined). */
@@ -92,6 +129,8 @@ export function harness(o: { budgetMs?: number } = {}) {
   const views = new Map<DocId, ModalView | null>();
   const idle: Task[] = [];
   const timers: Task[] = [];
+  const turns: Task[] = [];
+  const input = { pending: false };
   const machineRevision = writable(0);
   const profileRevision = writable(0);
   let onContent: (id: DocId, change: ContentChange) => void = () => {};
@@ -123,6 +162,7 @@ export function harness(o: { budgetMs?: number } = {}) {
         onContent = cb;
         return () => (onContent = () => {});
       },
+      versionId: () => version,
       onDidCreateModel: (cb) => {
         onCreate = cb;
         return () => (onCreate = () => {});
@@ -134,9 +174,18 @@ export function harness(o: { budgetMs?: number } = {}) {
     },
     machineRevision,
     profileRevision,
-    idle: (fn) => queue(idle, fn),
-    schedule: (fn) => queue(timers, fn),
-    every: 10,
+    idle: o.real === undefined ? (fn) => queue(idle, fn) : runWhenIdle,
+    schedule:
+      o.real === undefined
+        ? (fn) => queue(timers, fn)
+        : (fn, ms) => {
+            const handle = setTimeout(fn, ms);
+            return () => clearTimeout(handle);
+          },
+    ...(o.real === 'chained' ? { nextTurn, inputPending: () => false } : {}),
+    ...(o.turns === true ? { nextTurn: (fn: () => void) => queue(turns, fn), inputPending: () => input.pending } : {}),
+    ...(o.clock === undefined ? {} : { now: () => (o.clock as { t: number }).t }),
+    ...(o.real === undefined ? { every: 10 } : {}),
     budgetMs: o.budgetMs,
   });
   const stop = service.start();
@@ -149,15 +198,26 @@ export function harness(o: { budgetMs?: number } = {}) {
     return true;
   }
 
+  /** Runs one queued next-turn callback; false when none was queued. */
+  function turnOnce(): boolean {
+    const task = turns.shift();
+    if (task === undefined) return false;
+    if (!task.cancelled) task.fn();
+    return true;
+  }
+
   return {
     docs,
     service,
+    input,
     lines,
     views,
     machineRevision,
     profileRevision,
     queued,
     reads,
+    /** The fake editor's `versionId`: it moves with every edit event. */
+    version: () => version,
     /** Fires the created-model event for `id` (Monaco attached and realized its queued model). */
     created: (id: DocId) => onCreate(id),
     stop,
@@ -193,6 +253,9 @@ export function harness(o: { budgetMs?: number } = {}) {
       onContent(id, { startLine: 1, endLineOld: 1, endLineNew: text.length, flush: true, versionId: ++version });
     },
     idleOnce,
+    turnOnce,
+    turnPending: () => turns.filter((task) => !task.cancelled).length,
+    timerPending: () => timers.filter((task) => !task.cancelled).length,
     /** Runs every idle callback until nothing is queued; the number that ran. */
     idleAll(): number {
       let ran = 0;

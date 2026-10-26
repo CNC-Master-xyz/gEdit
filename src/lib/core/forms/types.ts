@@ -13,6 +13,26 @@
 // The functions of §7.5 live next door, where WP2.2 owns them:
 // `validateFields` in `./validate.ts` and `initialValues` in `./values.ts`.
 
+import type { FormLiveResult } from '$lib/app/types';
+
+/**
+ * v1.2.0 (T146, T159): what a form's `live` hook may answer besides `FormLiveResult`. `note`
+ * replaces the form's note while it is set (a note that follows the values: a block number the
+ * text would write that the program points at); `help` replaces a field's help by field id, `''`
+ * for none (how the machine reads the value typed). The two members are proposed for
+ * `FormLiveResult` itself (app types); until then the form dialog reads them from here.
+ */
+export interface FormLiveAnswer extends FormLiveResult {
+  note?: string;
+  help?: Record<string, string>;
+  /**
+   * T226: ids of fields shown greyed out and not changeable while the values stand as they do
+   * (an option that does nothing for the choice made above it). The value is kept and handed
+   * over as it is; `validateFields` still sees the field as the form declared it.
+   */
+  readOnly?: string[];
+}
+
 /**
  * What a field collects.
  * - `number` / `integer`: numeric input, bounded by `min`/`max`; `integer` rejects a fraction.
@@ -61,6 +81,11 @@ export interface FieldSpec {
    * stored). A longer text is refused with a message; it is never cut (B1 A4).
    */
   maxLength?: number;
+  /**
+   * v1.2.0 (T154): display text shown beside the control, a template value's unit (`mm/min`).
+   * Nothing reads it but the renderer: it is not checked and not part of the value.
+   */
+  unit?: string;
   /** The options of a `choice` or `address-list` field. */
   choices?: FieldChoice[];
   /**
@@ -69,4 +94,11 @@ export interface FieldSpec {
    * `validateFields` skips it; `initialValues` gives it its `default` (usually none).
    */
   readOnly?: boolean;
+  /**
+   * Phase 4 (P4b; Phase 4 plan §6.4 rule 5). Only on a script parameter: the machine value the
+   * field starts from, `"machine.motion.<member>"` from the closed list `meta.rs` checks
+   * (`core/machines/motion.ts` `prefillMember`). `src/lib/app/scripts.ts` reads it when the form
+   * opens; the generated forms themselves ignore it.
+   */
+  prefill?: string;
 }

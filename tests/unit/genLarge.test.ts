@@ -104,11 +104,12 @@ describe('generateLarge: Klartext', () => {
 });
 
 describe('generateLarge: the turning dialects (M8)', () => {
-  // The two seeds live in the generator itself until WP8.3 and WP8.5 have their fixtures
-  // in (P8). What is checked here is what the harness needs of them: the line count, the
-  // same bytes every time, and a tool section per copy that the profile's own outline
-  // finds — detection is not among them, because the profiles score no content until the
-  // content work packages write their rules.
+  // The two turning seeds live in the generator itself (a seed in a fixture folder would
+  // need its own goldens). What is checked here is what the harness needs of them: the
+  // line count, the same bytes every time, and a tool section per copy that the profile's
+  // own outline finds. That they are still programs of their dialect — the shipped profiles
+  // detect them, and the harness's port of the generator writes the same bytes — is the next
+  // two blocks (T208): the seeds cannot go stale against the data they imitate unnoticed.
   it.each([
     ['okuma' as const, 'okuma-osp', '(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)', '%'],
     ['sinumerik' as const, 'sinumerik', '; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE', 'M30'],
@@ -136,6 +137,32 @@ describe('generateLarge: the turning dialects (M8)', () => {
       expect(moves.length).toBeGreaterThan(100);
       expect(moves.every((line) => /^X-?[\d.]+ Z-?[\d.]+( F0\.\d+)?$/.test(line)), moves[0]).toBe(true);
     }
+  });
+});
+
+describe('the seeds of the turning dialects, against the shipped data (T208)', () => {
+  it.each([
+    ['okuma' as const, 'okuma-osp', 'min'],
+    ['sinumerik' as const, 'sinumerik', 'mpf'],
+  ])('%s: the shipped profiles detect a generated program as %s, under the extension the generator writes', (dialect, profileId, ext) => {
+    // By content alone an Okuma lathe program reads as a Fanuc lathe one (the known detection
+    // gap, docs/user/dialects.md); the extension settles it, as it does for a user's file.
+    const text = generateLarge({ lines: 2000, dialect });
+    expect(detect(`/work/big.${ext}`, text, 'fanuc-gcode')).toBe(profileId);
+    expect(detect(`/work/big.${ext}`, text, 'heidenhain-klartext')).toBe(profileId);
+  });
+
+  it.each([
+    ['okuma' as const, { lines: 9000 }],
+    ['okuma' as const, { lines: 3000, mb: 0.5 }],
+    ['sinumerik' as const, { lines: 9000 }],
+    ['sinumerik' as const, { lines: 3000, mb: 0.5 }],
+  ])('%s %j: the harness port (m8-common.js) writes the same bytes as the generator', async (dialect, size) => {
+    // The page cannot import this module (it needs node:fs), so tests/runtime/scenarios/m8-common.js
+    // carries a port of its turning half; its perf scenarios open what the port writes and
+    // compare with what this writes. Nothing else ties the two together.
+    const { turningProgram } = await import('../runtime/scenarios/m8-common.js');
+    expect(turningProgram(dialect, { mb: 0, ...size })).toBe(generateLarge({ mb: 0, ...size, dialect }));
   });
 });
 

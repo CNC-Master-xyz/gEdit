@@ -40,6 +40,7 @@ import type { CodeDb } from '$lib/core/codes/types';
 import type { EffectiveMachine } from '$lib/core/machines/types';
 import type { FieldSpec } from '$lib/core/forms/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
+import type { RenumberOutcome } from './programs';
 
 /** Everything a transform may read besides the lines themselves. */
 export interface TransformContext {
@@ -104,6 +105,13 @@ export interface TransformResult {
   skipped: Located[];
   /** Anything the user should know that is not a skip. */
   warnings: Msg[];
+  /**
+   * P4d (plan §6.6 rule 11): what a renumber did to the block numbers of the document's
+   * named programs, so the references from the other open documents can be listed after
+   * the run (`contrib/renumberOthers.ts`). Only Renumber Blocks sets it; additive, and
+   * every other transform leaves it out.
+   */
+  renumbered?: RenumberOutcome;
 }
 
 /**

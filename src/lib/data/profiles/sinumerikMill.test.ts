@@ -496,8 +496,13 @@ describe('the tool change without M6 (M12.5 decision 5, the toolChange variant)'
     expect(t.detect?.map((rule) => rule.weight)).toEqual([3]);
     expect(/verify/.test(m6.label)).toBe(true);
     expect(/verify/.test(t.label)).toBe(false);
-    // The turning profile has no such choice: there `T` is always the change.
-    expect(turn.profile.machineParams?.variants).toBeUndefined();
+    // v1.2.0 manual-check fix round (D3-4b, MD22550): the turning profile has the same choice,
+    // with T as built (a turret); `sinumerik.test.ts` holds it. Review round D5-7: the turning
+    // profile's counter spindle is no variant of the mill, which declares its own list.
+    expect(turn.profile.machineParams?.variants?.map((v) => [v.id, v.default])).toEqual([
+      ['toolChange', 't'],
+      ['counterSpindleY', 'turns'],
+    ]);
   });
 
   it('lists the T of a program that never writes M6, and never claims L6 is the change', () => {

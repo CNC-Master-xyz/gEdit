@@ -117,7 +117,9 @@
       "(?:BEGIN|END)\\s+PGM\\s+(?<text>[^\\s;]+)(?=\\s*$)",
       "CYCL\\s+DEF\\s+12\\.1\\s+PGM\\s+(?<text>[^\\s;~]+)",
       "FN\\s*16\\s*:\\s*(?<text>[^\\s;](?:[^;]*?[^\\s;])?)(?=\\s*(?:;|$))",
-      "CALL\\s+PGM\\s+(?<text>[^\\s;~\"]+)"
+      "CALL\\s+PGM\\s+(?<text>[^\\s;~\"]+)",
+      "SEL\\s+PGM\\s+(?<text>[^\\s;~\"]+)",
+      "SEL\\s+(?:CYCLE|TABLE|PATTERN|CORR-TABLE)\\s+(?<text>[^\\s;~\"]+)"
     ],
     "colonWords": ["VCONST", "VC", "HSC-MODE"],
     "tapeMarker": false
@@ -153,6 +155,7 @@
   "numbering": { "mode": "consecutive", "start": 0, "step": 1 },
   "numberFormat": { "decimals": "keep", "trailingZeros": "keep", "keepPoint": true, "plusSign": "signed" },
   "editing": { "forceUppercase": true, "preventLineJoin": true },
+  "modal": { "initial": { "feedmode": "M137" } },
   "compare": {
     "ignoreBlockNumbers": true,
     "ignoreWhitespace": true,

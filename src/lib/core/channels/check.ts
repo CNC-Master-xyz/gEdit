@@ -47,12 +47,26 @@
 // The rule says `samePartners: false` to turn it off. The channel view's key (`waitKey`) must
 // read the same answer, so the view and the check never disagree.
 //
+// The manual check (2026-10-25, decisions D2-2, D2-4, D2-5):
+//   D2-2    a `samePartners` rule compares the partner sets AS WRITTEN: the own channel is no
+//           longer added before comparing, and a mark whose partner word names other channels
+//           but not its own is `own-channel-not-named` (it is not compared again with its pair).
+//   D2-4    a rule's `withCodes` (the Okuma spindle commands): one standing at a mark of the rule
+//           that a partner channel lacks is `missing` (one in a block without a mark is not
+//           judged: the manual's own example writes it in the block after the `P` code). An
+//           `ordered` rule's `sharesWaitsWith` (`M100` beside the `P` codes): walking both
+//           channels' waits, a mark of one meeting a mark of the other is the warning
+//           `meets-other-rule`, once per pair; not judged when either channel has a jump line or
+//           when the two carry a different number of the `count` marks.
+//   D2-5    the warnings `shares-block` (a `samePartners` wait whose block holds other words)
+//           and `mark-out-of-range` (a plain-number mark outside the rule's `markValues`).
+//
 // Two ids are the same when their text is the same or, when both are digits after the same
 // letters, when the values are (`M0101` = `M101`, `0101` = `101`). Findings quote the ids as
 // written. A pair is only compared when both channels are keys of `perChannel`: a channel the
 // caller could not read (its file is not open) is left out, never reported as missing.
 
-import { markPrefixOf } from './marks';
+import { asksSamePartners, markPrefixOf } from './marks';
 import { budgetClock } from './resolve';
 import {
   CHANNEL_CAPS,
@@ -66,17 +80,7 @@ import {
   type SyncSemantics,
 } from './types';
 
-/**
- * Whether the marks of `rule` that meet must name the same channels and be written alike
- * (NC-01): `samePartners` as the rule says it, and by default (absent) for a rule whose
- * partners are a `P` word (`partners.kind: 'word'`; T044, the P4e NC-3 follow-up). A Siemens
- * list rule (`kind: 'line'`), whose lists may differ, stays off unless it says so.
- */
-export function asksSamePartners(rule: Pick<SyncRule, 'samePartners' | 'partners'> | undefined): boolean {
-  if (rule === undefined) return false;
-  if (typeof rule.samePartners === 'boolean') return rule.samePartners;
-  return rule.partners?.kind === 'word';
-}
+export { asksSamePartners };
 
 export interface CheckSyncOptions extends ChannelBudget {
   /** Per channel, the lines the written order may not be carried across: a label that is a
@@ -97,6 +101,11 @@ export interface CheckSyncResult {
 }
 
 /** One mark as the check sees it. */
+const NO_ITEMS: readonly number[] = [];
+
+/** A mark written as a plain number: optional sign, digits, optional point and fraction. */
+const NUMBER_LITERAL = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+
 interface Item {
   hit: SyncHit;
   channel: string;
@@ -107,6 +116,10 @@ interface Item {
   flagged: boolean;
   /** It names a token the machine does not declare (`unknown-channel` was reported). */
   unknown: boolean;
+  /** D2-2: its partners name its own channel (or it was written without the partner word). */
+  self: boolean;
+  /** D2-2: `own-channel-not-named` was reported for it; it takes no part in the pairing. */
+  ownMiss?: boolean;
 }
 
 interface RuleInfo {
@@ -118,6 +131,15 @@ interface RuleInfo {
   /** M13 review NC-10: a `prefix` rule's prefix (`M1`), `''` otherwise. Its marks are keyed by
    *  the digits; the messages show `prefix + mark` (`M130`, [`markText`]). */
   prefix: string;
+  /** D2-5: `SyncRule.markValues` when it is well formed. */
+  markValues: { min: number; max: number } | null;
+  /** D2-4 (c): the rule has `withCodes`. */
+  withCodes: boolean;
+  /** D2-4 (a): `SyncRule.sharesWaitsWith`. */
+  sharesWaitsWith: string | null;
+  /** D2-4 (a): how an id-less mark of this rule is named in a sentence: a `codes` rule's list
+   *  (`M100`), else its label. */
+  shown: string;
 }
 
 const KIND_ORDER: readonly SyncFindingKind[] = [
@@ -131,11 +153,16 @@ const KIND_ORDER: readonly SyncFindingKind[] = [
   'order-not-checked',
   'not-increasing',
   'unmatched',
+  'own-channel-not-named',
+  'meets-other-rule',
+  'shares-block',
+  'mark-out-of-range',
 ];
 
-/** `M0101` → `M\u0000101`; anything that is not letters + digits stays as written. */
+/** `M0101` → `M\u0000101`, `P-010` → `P-\u000010` (the Okuma negative `P`, D2-1); anything
+ *  that is not letters (and a minus) + digits stays as written. */
 export function markKey(mark: string): string {
-  const m = /^([A-Za-z]*)(\d+)$/.exec(mark);
+  const m = /^([A-Za-z]*-?)(\d+)$/.exec(mark);
   if (!m) return mark;
   const digits = m[2].replace(/^0+(?=\d)/, '');
   return `${m[1]}\u0000${digits}`;
@@ -213,6 +240,11 @@ export function checkSyncMarksReport(
         answers: r.answers === true,
         samePartners: asksSamePartners(r),
         prefix: markPrefixOf(r),
+        markValues:
+          r.markValues && Number.isFinite(r.markValues.min) && Number.isFinite(r.markValues.max) ? { min: r.markValues.min, max: r.markValues.max } : null,
+        withCodes: typeof r.withCodes === 'string' && r.withCodes.trim() !== '',
+        sharesWaitsWith: typeof r.sharesWaitsWith === 'string' ? r.sharesWaitsWith : null,
+        shown: r.match?.kind === 'codes' && typeof r.match.codes === 'string' ? r.match.codes.trim() : typeof r.label === 'string' ? r.label : r.id,
       });
     }
   }
@@ -223,6 +255,10 @@ export function checkSyncMarksReport(
     answers: false,
     samePartners: false,
     prefix: '',
+    markValues: null,
+    withCodes: false,
+    sharesWaitsWith: null,
+    shown: STOPS_AND_ENDS_RULE,
   });
 
   const jumps = new Map<string, number[]>();
@@ -301,7 +337,9 @@ export function checkSyncMarksReport(
           names,
           flagged: false,
           unknown: unknown.length > 0,
+          self: hit.absent === true || (Array.isArray(hit.partners) && hit.partners.includes(channel)),
         };
+        stepZero(rule, item);
         if (unknown.length > 0) {
           item.flagged = true;
           add({
@@ -330,6 +368,22 @@ export function checkSyncMarksReport(
       }
     }
     for (const items of [...byRule.values()].flatMap((m) => [...m.values()])) items.sort((a, b) => a.hit.line - b.hit.line);
+
+    // D2-4 (c): a `withCodes` code at a mark a partner lacks.
+    for (const [ruleId, perCh] of byRule) {
+      const rule = rules.get(ruleId)!;
+      if (rule.withCodes && rule.semantics === 'ordered') checkWithCodes(rule, perCh);
+    }
+    // D2-4 (a): an `ordered` rule's marks against the `count` rule it shares its wait points with.
+    for (const [ruleId, perCh] of byRule) {
+      const rule = rules.get(ruleId)!;
+      const other = rule.sharesWaitsWith === null ? undefined : rules.get(rule.sharesWaitsWith);
+      if (rule.semantics !== 'ordered' || other === undefined || other.semantics !== 'count') continue;
+      const counted = byRule.get(other.id);
+      for (let i = 0; i < present.length; i++) {
+        for (let j = i + 1; j < present.length; j++) checkMeeting(other, present[i], present[j], perCh, counted);
+      }
+    }
 
     for (const [ruleId, perCh] of [...byRule.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       const rule = rules.get(ruleId)!;
@@ -396,7 +450,8 @@ export function checkSyncMarksReport(
   /** NC-01: two paired marks of a `samePartners` rule must name the same channels, each with
    *  its own, and be written alike (both with the partner word or both without). */
   function comparePartners(rule: RuleInfo, a: string, b: string, x: Item, y: Item): void {
-    if (x.unknown || y.unknown || differs.has(x)) return;
+    // D2-2: a mark that does not name its own channel was reported on its own (one defect, one finding).
+    if (x.unknown || y.unknown || !x.self || !y.self || differs.has(x)) return;
     const setX = x.names | bit(a);
     const setY = y.names | bit(b);
     const absentX = x.hit.absent === true;
@@ -443,6 +498,156 @@ export function checkSyncMarksReport(
               },
             },
     });
+  }
+
+  /** The display names of the declared channels of a partner list, in declared order. */
+  function namesOf(partners: readonly string[]): string {
+    return list
+      .filter((c, i) => rank.get(c.id) === i && partners.includes(c.id))
+      .map((c) => c.name)
+      .join(', ');
+  }
+
+  /** D2-2 and D2-5: the findings a blocking mark gives on its own. */
+  function stepZero(rule: RuleInfo, it: Item): void {
+    const hit = it.hit;
+    if (rule.samePartners && !it.self && !it.unknown && it.names !== 0) {
+      it.flagged = true;
+      it.ownMiss = true;
+      add({
+        kind: 'own-channel-not-named',
+        mark: hit.mark,
+        ruleId: rule.id,
+        channel: it.channel,
+        line: hit.line,
+        message: {
+          key: 'channels.findings.ownChannelNotNamed',
+          params: { mark: markText(hit, rules), channel: display(it.channel), names: namesOf(hit.partners) },
+        },
+      });
+    }
+    if (rule.samePartners && hit.shared === true) {
+      add({
+        kind: 'shares-block',
+        mark: hit.mark,
+        ruleId: rule.id,
+        channel: it.channel,
+        line: hit.line,
+        severity: 'warning',
+        message: { key: 'channels.findings.sharesBlock', params: { mark: markText(hit, rules), channel: display(it.channel) } },
+      });
+    }
+    const range = rule.markValues;
+    // CODE-9: a number literal is judged whatever its sign or fraction (`-1`, `1.5` are no mark of 0 to 99);
+    // `1.` is the whole number 1, as the control reads it. A variable (`R1`) is not judged.
+    if (range !== null && NUMBER_LITERAL.test(hit.mark)) {
+      const value = Number(hit.mark);
+      if (value < range.min || value > range.max || !Number.isInteger(value)) {
+        add({
+          kind: 'mark-out-of-range',
+          mark: hit.mark,
+          ruleId: rule.id,
+          channel: it.channel,
+          line: hit.line,
+          severity: 'warning',
+          message: {
+            key: 'channels.findings.markOutOfRange',
+            params: { mark: markText(hit, rules), channel: display(it.channel), min: range.min, max: range.max },
+          },
+        });
+      }
+    }
+  }
+
+  /** D2-4 (c): a mark carrying a `withCodes` code whose id a partner channel does not have. */
+  function checkWithCodes(rule: RuleInfo, perCh: Map<string, Item[]>): void {
+    const keysOf = new Map<string, Set<string>>();
+    for (const channel of present) keysOf.set(channel, new Set((perCh.get(channel) ?? []).map((it) => it.key)));
+    for (const channel of present) {
+      for (const it of perCh.get(channel) ?? []) {
+        tick();
+        const code = it.hit.withCode;
+        if (code === undefined || it.unknown) continue;
+        for (const other of present) {
+          if (other === channel || (it.names & bit(other)) === 0 || keysOf.get(other)!.has(it.key)) continue;
+          it.flagged = true;
+          add({
+            kind: 'missing',
+            mark: it.hit.mark,
+            ruleId: rule.id,
+            channel,
+            other,
+            line: it.hit.line,
+            message: {
+              key: 'channels.findings.missingWithCode',
+              params: { code, mark: markText(it.hit, rules), channel: display(channel), other: display(other), line: it.hit.line },
+            },
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * D2-4 (a): the waits of channels `a` and `b` walked in order, both stopping at their next wait:
+   * two `count` marks pass together; two `ordered` marks let the smaller number pass (both when
+   * equal); a mark of one rule against a mark of the other is the warning, and the walk ends
+   * there (what follows is out of step). Not judged when either channel has a jump line.
+   */
+  function checkMeeting(other: RuleInfo, a: string, b: string, perCh: Map<string, Item[]>, counted: Map<string, Item[]> | undefined): void {
+    if ((jumps.get(a)?.length ?? 0) > 0 || (jumps.get(b)?.length ?? 0) > 0) return;
+    const events = (ch: string, otherCh: string): Item[] =>
+      [...(perCh.get(ch) ?? []), ...(counted?.get(ch) ?? [])]
+        .filter((it) => (it.names & bit(otherCh)) !== 0 && (it.hit.ruleId === other.id || orderValue(it.hit.mark) !== null))
+        .sort((x, y) => x.hit.line - y.hit.line);
+    const ea = events(a, b);
+    const eb = events(b, a);
+    // A count difference is `count-mismatch` already; the walk would be out of step after it.
+    if (ea.filter((it) => it.hit.ruleId === other.id).length !== eb.filter((it) => it.hit.ruleId === other.id).length) return;
+    let i = 0;
+    let j = 0;
+    while (i < ea.length && j < eb.length) {
+      tick();
+      const x = ea[i];
+      const y = eb[j];
+      const xCount = x.hit.ruleId === other.id;
+      const yCount = y.hit.ruleId === other.id;
+      if (xCount && yCount) {
+        i++;
+        j++;
+        continue;
+      }
+      if (!xCount && !yCount) {
+        const vx = orderValue(x.hit.mark)!.value;
+        const vy = orderValue(y.hit.mark)!.value;
+        if (vx <= vy) i++;
+        if (vy <= vx) j++;
+        continue;
+      }
+      const [m, p, chM, chP] = xCount ? [x, y, a, b] : [y, x, b, a];
+      add({
+        kind: 'meets-other-rule',
+        mark: m.hit.mark,
+        ruleId: other.id,
+        channel: chM,
+        other: chP,
+        line: m.hit.line,
+        otherLine: p.hit.line,
+        severity: 'warning',
+        message: {
+          key: 'channels.findings.meetsOtherRule',
+          params: {
+            mark: m.hit.mark !== '' ? markText(m.hit, rules) : other.shown,
+            channel: display(chM),
+            line: m.hit.line,
+            otherMark: markText(p.hit, rules),
+            other: display(chP),
+            otherLine: p.hit.line,
+          },
+        },
+      });
+      return;
+    }
   }
 
   /** NC-04: a mark with a jump line before and after it in its channel (in a loop); a label on the
@@ -536,11 +741,21 @@ export function checkSyncMarksReport(
   }
 
   function checkRendezvous(rule: RuleInfo, a: string, b: string, la: Item[], lb: Item[]): void {
-    // Ordinal pairing: one pass over each list into id → positions.
+    // Ordinal pairing: one pass over each list into id → positions. A mark reported as
+    // `own-channel-not-named` (D2-2) is left out of the pairing, as the channel view leaves it out;
+    // it only absorbs a count difference of its id that is left (already reported).
     const posA = new Map<string, number[]>();
     const posB = new Map<string, number[]>();
-    la.forEach((it, i) => (posA.get(it.key) ?? posA.set(it.key, []).get(it.key)!).push(i));
-    lb.forEach((it, i) => (posB.get(it.key) ?? posB.set(it.key, []).get(it.key)!).push(i));
+    let missA: Map<string, number[]> | undefined;
+    let missB: Map<string, number[]> | undefined;
+    la.forEach((it, i) => {
+      if (it.ownMiss === true) ((missA ??= new Map()).get(it.key) ?? missA.set(it.key, []).get(it.key)!).push(i);
+      else (posA.get(it.key) ?? posA.set(it.key, []).get(it.key)!).push(i);
+    });
+    lb.forEach((it, i) => {
+      if (it.ownMiss === true) ((missB ??= new Map()).get(it.key) ?? missB.set(it.key, []).get(it.key)!).push(i);
+      else (posB.get(it.key) ?? posB.set(it.key, []).get(it.key)!).push(i);
+    });
     const partnerOfA = new Int32Array(la.length).fill(-1);
     const answeredA = answered.get(a);
     const answeredB = answered.get(b);
@@ -555,8 +770,12 @@ export function checkSyncMarksReport(
       const n = Math.min(pa.length, pb.length);
       for (let k = 0; k < n; k++) partnerOfA[pa[k]] = pb[k];
       if (rule.samePartners) for (let k = 0; k < n; k++) comparePartners(rule, a, b, la[pa[k]], lb[pb[k]]);
-      if (pa.length === pb.length) continue;
-      const [more, fewer, lMore, lFewer, chMore, chFewer] = pa.length > pb.length ? [pa, pb, la, lb, a, b] : [pb, pa, lb, la, b, a];
+      // The marks already reported on their own stand in for the missing ones of the shorter side.
+      const wrongFewer = (pa.length < pb.length ? missA?.get(key) : missB?.get(key)) ?? NO_ITEMS;
+      const absorbed = Math.min(Math.abs(pa.length - pb.length), wrongFewer.length);
+      if (Math.max(pa.length, pb.length) === Math.min(pa.length, pb.length) + absorbed) continue;
+      const [more, fewerPaired, lMore, lFewer, chMore, chFewer] = pa.length > pb.length ? [pa, pb, la, lb, a, b] : [pb, pa, lb, la, b, a];
+      const fewer = absorbed === 0 ? fewerPaired : [...fewerPaired, ...wrongFewer.slice(0, absorbed)];
       if (fewer.length > 0 && (pa.some((idx) => looped(la[idx])) || pb.some((idx) => looped(lb[idx])))) {
         // NC-04: a mark of this id sits in a loop, so the written counts say nothing.
         const first = lMore[more[fewer.length]];

@@ -6,6 +6,7 @@
 // re-reads. The markup is rendered with `svelte/server`, so there is no DOM, no Monaco
 // and no `onMount`, and what is checked is the seam the runtime harness clicks.
 
+import { readFileSync } from 'node:fs';
 import { render } from 'svelte/server';
 import { get } from 'svelte/store';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -281,6 +282,25 @@ describe('ResultsPanel markup', () => {
     expect(html.match(/data-testid="results-row"/g)).toHaveLength(3);
     expect(html).toContain(`data-line="12"`);
     expect(html).toContain(`data-doc-id="${docId}"`);
+  });
+
+  // T140: each row used to be a grid of its own, sized by its own text, so a value stood
+  // right of its heading and one description was pushed in. The table is one set of column
+  // tracks on the grid, and the heading and every row take the columns from it.
+  it('lays the heading and every row on one set of column tracks', () => {
+    results.show(TOOL_LIST);
+    const html = render(ResultsPanel).body;
+    const grid = /<div class="grid[^"]*"[^>]*>/.exec(html)?.[0] ?? '';
+    expect(grid).toContain('grid-template-columns: repeat(3, minmax(0, auto))');
+    // no row carries a template of its own
+    expect(html.match(/class="row[^"]*"[^>]*style=/g) ?? []).toHaveLength(0);
+    const source = readFileSync(new URL('./ResultsPanel.svelte', import.meta.url), 'utf8');
+    const row = /\n {2}\.row \{[^}]*\}/.exec(source)?.[0] ?? '';
+    expect(row).toContain('grid-template-columns: subgrid');
+    expect(row).toContain('grid-column: 1 / -1');
+    expect(source).not.toMatch(/\.row[^{]*\{[^}]*grid-template-columns:\s*repeat/);
+    // a heading button has no side padding of its own: it starts where the values start
+    expect(/\n {2}\.sort \{[^}]*\}/.exec(source)?.[0]).toContain('padding: 2px 0;');
   });
 
   it('leaves a row with no line unclickable', () => {

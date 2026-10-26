@@ -1,0 +1,29 @@
+{
+  "message": "Nothing was changed: 4 blocks cannot be written out as plain moves: 4 cycle calls that are not written out. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N60 F250: this way of calling the cycle is not written out yet (F250 under MCALL: the control runs the cycle after this block too).",
+      "reason": "call-form"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "N70 S2500: this way of calling the cycle is not written out yet (S2500 under MCALL: the control runs the cycle after this block too).",
+      "reason": "call-form"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "N80 G0: this way of calling the cycle is not written out yet (G0 under MCALL: the control runs the cycle after this block too).",
+      "reason": "call-form"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "N90 HOLES1(20,20,0,0,10,4): this way of calling the cycle is not written out yet (HOLES1 while CYCLE81 is in force).",
+      "reason": "call-form"
+    }
+  ]
+}

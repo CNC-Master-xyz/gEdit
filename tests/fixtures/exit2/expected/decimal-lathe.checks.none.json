@@ -29,21 +29,21 @@
         "check": "Machine reading",
         "checkId": "machineReading",
         "severity": "info",
-        "message": "Z1000: read as 1000 mm by 'As written' (the assumed default), 1 mm by 'Increments of 0.001 mm (IS-B)' or 0.1 mm by 'Increments of 0.0001 mm (IS-C)'; choose a machine"
+        "message": "Z1000: read as 1000 mm by 'As written' (the assumed default), 10 mm by 'Increments of 0.01 mm (IS-A)', 1 mm by 'Increments of 0.001 mm (IS-B)' or 0.1 mm by 'Increments of 0.0001 mm (IS-C)'; choose a machine"
       },
       {
         "line": 13,
         "check": "Machine reading",
         "checkId": "machineReading",
         "severity": "info",
-        "message": "X50: read as 50 mm by 'As written' (the assumed default), 0.05 mm by 'Increments of 0.001 mm (IS-B)' or 0.005 mm by 'Increments of 0.0001 mm (IS-C)'; choose a machine"
+        "message": "X50: read as 50 mm by 'As written' (the assumed default), 0.5 mm by 'Increments of 0.01 mm (IS-A)', 0.05 mm by 'Increments of 0.001 mm (IS-B)' or 0.005 mm by 'Increments of 0.0001 mm (IS-C)'; choose a machine"
       },
       {
         "line": 15,
         "check": "Machine reading",
         "checkId": "machineReading",
         "severity": "info",
-        "message": "W-2000: read as -2000 mm by 'As written' (the assumed default), -2 mm by 'Increments of 0.001 mm (IS-B)' or -0.2 mm by 'Increments of 0.0001 mm (IS-C)'; choose a machine"
+        "message": "W-2000: read as -2000 mm by 'As written' (the assumed default), -20 mm by 'Increments of 0.01 mm (IS-A)', -2 mm by 'Increments of 0.001 mm (IS-B)' or -0.2 mm by 'Increments of 0.0001 mm (IS-C)'; choose a machine"
       }
     ],
     "message": "3 findings in 1 check. No machine chosen: where the presets read a number differently, the finding lists every reading.",

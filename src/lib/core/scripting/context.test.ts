@@ -297,3 +297,40 @@ describe('buildContext: channels', () => {
     expect(ctx.channels?.marks[0].partners).toEqual(['2']);
   });
 });
+
+describe('buildContext: motion and limits (P4.8, plan §6.4 rule 4)', () => {
+  const motion = { units: 'mm' as const, rapid: { X: 30_000 }, maxFeed: 9000, peckRetract: 0.5 };
+  const limits = { spindle: { main: 6000 }, units: 'mm' as const, travel: { X: { min: -300, max: 300 } } };
+
+  it('has no member without a block, and the shape of an older context is untouched', () => {
+    const ctx = build();
+    expect('motion' in ctx.machine).toBe(false);
+    expect('limits' in ctx.machine).toBe(false);
+    expect(Object.keys(ctx.machine).sort()).toEqual(['choice', 'id', 'name', 'params', 'source']);
+    expect(ctx.contract).toBe(2);
+  });
+
+  it('carries a valid block as machine.motion and machine.limits, each on its own', () => {
+    const both = build({ motion, limits });
+    expect(both.machine.motion).toEqual(motion);
+    expect(both.machine.limits).toEqual(limits);
+    const onlyMotion = build({ motion });
+    expect(onlyMotion.machine.motion).toEqual(motion);
+    expect('limits' in onlyMotion.machine).toBe(false);
+    const onlyLimits = build({ limits });
+    expect('motion' in onlyLimits.machine).toBe(false);
+    expect(onlyLimits.machine.limits).toEqual(limits);
+  });
+
+  it('an empty valid block is passed as the empty object it is', () => {
+    expect(build({ motion: {} }).machine.motion).toEqual({});
+  });
+
+  it('copies: changing the block afterwards does not change the context', () => {
+    const live = { units: 'mm' as const, rapid: { X: 1000 } };
+    const ctx = build({ motion: live });
+    live.rapid.X = 5;
+    expect(ctx.machine.motion?.rapid?.X).toBe(1000);
+    expect(JSON.parse(JSON.stringify(ctx)).machine.motion.rapid.X).toBe(1000);
+  });
+});

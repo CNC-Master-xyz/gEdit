@@ -430,6 +430,36 @@ describe('M12 (WP12.3): validateChannels', () => {
 
   const rule = (over: Block): Block => ({ ...good(), syncMarks: [{ id: 'w', label: 'W', match: { kind: 'codes', codes: 'M100' }, partners: { kind: 'all' }, ...over }] });
 
+  // Manual check fix round, integration: the rule members B4 added (D2-4, D2-5).
+  it('checks markSeparator, markValues, withCodes and sharesWaitsWith', () => {
+    expect(checkCh(rule({ match: { kind: 'regex', pattern: 'SETM\\((?<mark>[^)]*)\\)' }, markSeparator: ',' }))).toEqual([]);
+    expect(rel(checkCh(rule({ markSeparator: '' })))).toEqual(['syncMarks[0].markSeparator']);
+    expect(rel(checkCh(rule({ markSeparator: 1 })))).toEqual(['syncMarks[0].markSeparator']);
+    expect(checkCh(rule({ markValues: { min: 0, max: 99 } }))).toEqual([]);
+    for (const bad of [{ min: 0.5, max: 99 }, { min: 10, max: 5 }, { min: 0 }, 'all'])
+      expect(rel(checkCh(rule({ markValues: bad })))).toEqual(['syncMarks[0].markValues']);
+    const ordered = { semantics: 'ordered', match: { kind: 'codes', codes: 'P1-P9999' } };
+    expect(checkCh(rule({ ...ordered, withCodes: 'S0-S99999999, M3-M5, G96' }))).toEqual([]);
+    expect(rel(checkCh(rule({ ...ordered, withCodes: 'M3-' })))).toEqual(['syncMarks[0].withCodes']);
+    // On a rule that does not check the order it is read by nothing, and kept.
+    expect(checkCh(rule({ withCodes: 'M3' }))).toEqual([]);
+    const shared = (target: Block | null, over: Block = {}): string[] =>
+      rel(
+        checkCh({
+          ...good(),
+          syncMarks: [
+            { id: 'p', label: 'P', partners: { kind: 'all' }, ...ordered, sharesWaitsWith: 'm', ...over },
+            ...(target === null ? [] : [{ id: 'm', label: 'M', match: { kind: 'codes', codes: 'M100' }, partners: { kind: 'all' }, ...target }]),
+          ],
+        }),
+      );
+    expect(shared({ semantics: 'count' })).toEqual([]);
+    expect(shared({ semantics: 'rendezvous' })).toEqual(['syncMarks[0].sharesWaitsWith']);
+    expect(shared(null)).toEqual(['syncMarks[0].sharesWaitsWith']);
+    expect(shared({ semantics: 'count' }, { sharesWaitsWith: 'p' })).toEqual(['syncMarks[0].sharesWaitsWith']);
+    expect(shared({ semantics: 'count' }, { sharesWaitsWith: '' })).toEqual(['syncMarks[0].sharesWaitsWith']);
+  });
+
   it('checks a sync rule: unique id, semantics, blocking, label', () => {
     const two = { ...good(), syncMarks: [(good().syncMarks as Block[])[0], (good().syncMarks as Block[])[0]] };
     expect(rel(checkCh(two))).toEqual(['syncMarks[1].id']);

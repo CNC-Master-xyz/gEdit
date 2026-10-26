@@ -28,4 +28,7 @@ p4-geometry
 # degrees on an arc-heavy one, within the 900 s of their timeout (h.checkTime: 450 s on the development Mac, and on the
 # runner the app's limit divided by 10), every line of the result compared with the answer worked out from the
 # program's text, and one undo that brings the whole program back. Never retried (retry: false in the scenario).
+# The same scenario also holds X34 for P4b (sections B and C) and for P4e (sections D to F): the typing budget of P1 with a
+# second pane (split view and the channel view on 300,000 lines, the aligned view on 100,000), the opens and the line break
+# in a channel pane (budgets in scenarios/p4e-perf-common.js, each with its reason).
 p4-perf

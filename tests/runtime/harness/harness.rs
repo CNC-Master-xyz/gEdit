@@ -62,6 +62,7 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
     let mut builder = tauri::plugin::Builder::<R, ()>::new("harness")
         .setup(|app, _api| {
             app.manage(FakeDialogs::default());
+            isolate_clipboard();
             start_watchdog();
             Ok(())
         })
@@ -86,6 +87,7 @@ fn start_watchdog() {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(secs));
         rh(&json!({ "kind": "timeout", "secs": secs }));
+        restore_clipboard();
         std::process::exit(2);
     });
 }
@@ -98,8 +100,13 @@ fn prepare_main_window<R: Runtime>(webview: &tauri::Webview<R>) {
         return;
     }
     let window = webview.window();
-    let _ = window.set_size(tauri::LogicalSize::new(1100.0, 700.0));
-    let _ = window.center();
+    // A scenario that tests what the window-state plugin restored sets
+    // `HARNESS_KEEP_GEOMETRY=1` (its `vars`): the size and place the plugin applied stay.
+    // Every other run is the same size, wherever the last session left the window.
+    if std::env::var("HARNESS_KEEP_GEOMETRY").as_deref() != Ok("1") {
+        let _ = window.set_size(tauri::LogicalSize::new(1100.0, 700.0));
+        let _ = window.center();
+    }
     #[cfg(target_os = "macos")]
     let _ = webview.with_webview(|pv| unsafe {
         use objc2::msg_send;
@@ -147,7 +154,10 @@ fn log_run_event(event: &RunEvent) {
         RunEvent::ExitRequested { code, .. } => {
             rh(&json!({ "kind": "event", "event": "ExitRequested", "code": code }))
         }
-        RunEvent::Exit => rh(&json!({ "kind": "event", "event": "Exit" })),
+        RunEvent::Exit => {
+            restore_clipboard();
+            rh(&json!({ "kind": "event", "event": "Exit" }))
+        }
         RunEvent::WindowEvent { label, event, .. } => match event {
             WindowEvent::CloseRequested { .. } => {
                 rh(&json!({ "kind": "event", "event": "CloseRequested", "label": label }))
@@ -487,6 +497,7 @@ pub fn h_log(msg: String) {
 #[tauri::command]
 pub fn h_done(code: i32) {
     rh(&json!({ "kind": "exit-requested-by-page", "code": code }));
+    restore_clipboard();
     std::process::exit(code);
 }
 
@@ -571,6 +582,124 @@ pub fn h_menu_dump(app: AppHandle) -> String {
         None => s.push_str("<no app menu>"),
     }
     s
+}
+
+// ---------------------------------------------------------------- the clipboard
+
+/// The clipboard text the owner had when the run started, `None` while this run has not
+/// taken the clipboard over (or has already given it back).
+static SAVED_CLIPBOARD: Mutex<Option<String>> = Mutex::new(None);
+
+/// Runs a clipboard tool and answers what it printed. It is given 3 s: a pasteboard service that
+/// does not answer (no desktop session) must not hold the app's startup, which calls this from
+/// `setup`, for longer than that.
+#[cfg(target_os = "macos")]
+fn run_tool(program: &str, input: Option<&str>) -> Result<String, String> {
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(program)
+        .env("LANG", "en_US.UTF-8")
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("{program}: {e}"))?;
+    if let (Some(text), Some(mut stdin)) = (input, child.stdin.take()) {
+        // Dropped at the end of this block, which closes the pipe and lets the tool finish.
+        let _ = stdin.write_all(text.as_bytes());
+    }
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(out) = stdout.as_mut() {
+            let _ = out.read_to_end(&mut bytes);
+        }
+        bytes
+    });
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                let bytes = reader.join().unwrap_or_default();
+                return Ok(String::from_utf8_lossy(&bytes).into_owned());
+            }
+            Ok(Some(status)) => return Err(format!("{program} ended with {status}")),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{program} did not answer within 3 s"));
+            }
+            Err(e) => return Err(format!("{program}: {e}")),
+        }
+    }
+}
+
+/// The text on the system clipboard, through `pbpaste` (macOS), empty when there is none.
+fn clipboard_text() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        run_tool("/usr/bin/pbpaste", None)
+    }
+    #[cfg(not(target_os = "macos"))]
+    Err("the clipboard is read on macOS only".to_string())
+}
+
+/// Replaces the text on the system clipboard through `pbcopy`; an empty text empties it.
+fn set_clipboard_text(text: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        run_tool("/usr/bin/pbcopy", Some(text)).map(|_| ())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = text;
+        Err("the clipboard is written on macOS only".to_string())
+    }
+}
+
+/// Starts a run with an empty clipboard and keeps the owner's text to put back at the end,
+/// so a scenario neither reads what was copied before it nor leaves its own text behind.
+/// Only text is kept; `HARNESS_CLIPBOARD=keep` leaves the clipboard alone.
+fn isolate_clipboard() {
+    if std::env::var("HARNESS_CLIPBOARD").as_deref() == Ok("keep") {
+        return;
+    }
+    match clipboard_text() {
+        Ok(text) => {
+            *SAVED_CLIPBOARD.lock().unwrap() = Some(text);
+            if let Err(e) = set_clipboard_text("") {
+                diag(format!("clipboard: could not empty it: {e}"));
+            }
+        }
+        Err(e) => diag(format!("clipboard: not isolated: {e}")),
+    }
+}
+
+/// Puts the owner's text back (once; every end of a run calls it).
+fn restore_clipboard() {
+    let saved = SAVED_CLIPBOARD.lock().unwrap().take();
+    if let Some(text) = saved {
+        if let Err(e) = set_clipboard_text(&text) {
+            diag(format!("clipboard: could not put it back: {e}"));
+        }
+    }
+}
+
+/// The text on the system clipboard.
+#[tauri::command(async)]
+pub fn h_clipboard_read() -> Result<String, String> {
+    clipboard_text()
+}
+
+/// Puts `text` on the system clipboard; `None` empties it.
+#[tauri::command(async)]
+pub fn h_clipboard_write(text: Option<String>) -> Result<(), String> {
+    set_clipboard_text(text.as_deref().unwrap_or(""))
 }
 
 // ---------------------------------------------------------------- fs scope and file dialogs
@@ -746,9 +875,150 @@ pub fn h_stat(path: String) -> Result<Value, String> {
     )
 }
 
+/// Copies a file, or a folder with everything in it, to `dst` and creates the folders above
+/// it (a copy into a folder that is not there yet used to fail). An existing folder at `dst`
+/// is merged into. Answers the number of bytes copied.
 #[tauri::command(async)]
 pub fn h_copy(src: String, dst: String) -> Result<u64, String> {
-    std::fs::copy(&src, &dst).map_err(|e| e.to_string())
+    copy_all(Path::new(&src), Path::new(&dst)).map_err(|e| format!("copy {src} to {dst}: {e}"))
+}
+
+/// Deletes a file, a link or a folder, and only below the run folder or the app's HOME:
+/// a scenario's own scratch files, never the folder itself and never anything else on the
+/// machine. Links are removed, not followed. A path that is not there answers `false`.
+/// `recursive` is needed for a folder that is not empty.
+#[tauri::command(async)]
+pub fn h_remove(path: String, recursive: Option<bool>) -> Result<bool, String> {
+    let target = Path::new(&path);
+    check_scratch_path(target)?;
+    let meta = match std::fs::symlink_metadata(target) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(format!("remove {path}: {e}")),
+    };
+    let done = if meta.file_type().is_dir() {
+        if recursive.unwrap_or(false) {
+            std::fs::remove_dir_all(target)
+        } else {
+            std::fs::remove_dir(target)
+        }
+    } else {
+        std::fs::remove_file(target)
+    };
+    done.map(|_| true)
+        .map_err(|e| format!("remove {path}: {e}"))
+}
+
+/// What a folder holds, sorted by name: `{ name, isFile, isDir, isSymlink, len }`. A link
+/// is reported as a link (its `isFile` and `isDir` are those of what it points to; a
+/// dangling one has neither).
+#[tauri::command(async)]
+pub fn h_list(path: String) -> Result<Vec<Value>, String> {
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(&path).map_err(|e| format!("list {path}: {e}"))? {
+        let entry = entry.map_err(|e| format!("list {path}: {e}"))?;
+        let is_symlink = entry.file_type().map(|t| t.is_symlink()).unwrap_or(false);
+        let meta = std::fs::metadata(entry.path()).ok();
+        entries.push(json!({
+            "name": entry.file_name().to_string_lossy().into_owned(),
+            "isFile": meta.as_ref().is_some_and(|m| m.is_file()),
+            "isDir": meta.as_ref().is_some_and(|m| m.is_dir()),
+            "isSymlink": is_symlink,
+            "len": meta.as_ref().map_or(0, |m| m.len()),
+        }));
+    }
+    entries.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    Ok(entries)
+}
+
+/// Makes a symbolic link at `link` to `target` (created the way a user or a CAM post would
+/// make one), and the folders above it. An existing `link` is an error.
+#[tauri::command(async)]
+pub fn h_symlink(target: String, link: String) -> Result<(), String> {
+    let link_path = Path::new(&link);
+    check_scratch_path(link_path)?;
+    if let Some(parent) = link_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("symlink {link}: {e}"))?;
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&target, link_path).map_err(|e| format!("symlink {link}: {e}"))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = target;
+        Err("symbolic links are made on macOS only".to_string())
+    }
+}
+
+/// A path a scenario may delete or replace: absolute, free of `..`, and strictly below the
+/// run folder (`HARNESS_RUN_DIR`) or the HOME of the app - and still so once the links on the
+/// way are followed (WX-CODE-9): `h_remove` and `h_symlink` act through the folders above the
+/// path, so a link to a folder outside the roots must not lead them out.
+fn check_scratch_path(path: &Path) -> Result<(), String> {
+    let roots: Vec<PathBuf> = [
+        std::env::var_os("HARNESS_RUN_DIR"),
+        std::env::var_os("HOME"),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|root| !root.is_empty())
+    .map(PathBuf::from)
+    .collect();
+    scratch_path_in(path, &roots)
+}
+
+/// The path with the links of its folders resolved. The last name is not followed (a link is
+/// removed, not followed); folders that do not exist yet are kept as written, below the
+/// deepest one that does.
+fn resolve_parent(path: &Path) -> std::io::Result<PathBuf> {
+    let Some(name) = path.file_name() else {
+        return Ok(path.to_path_buf());
+    };
+    let mut existing = path.parent().unwrap_or(Path::new("/"));
+    let mut missing: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut resolved = loop {
+        match existing.canonicalize() {
+            Ok(dir) => break dir,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let Some(up) = existing.parent() else {
+                    return Err(e);
+                };
+                missing.extend(existing.file_name());
+                existing = up;
+            }
+            Err(e) => return Err(e),
+        }
+    };
+    resolved.extend(missing.iter().rev());
+    resolved.push(name);
+    Ok(resolved)
+}
+
+/// `check_scratch_path` against the given roots, so it can be tested without the environment.
+fn scratch_path_in(path: &Path, roots: &[PathBuf]) -> Result<(), String> {
+    if !path.is_absolute() || path.components().any(|c| c == Component::ParentDir) {
+        return Err(format!(
+            "{} is not an absolute path without `..`",
+            path.display()
+        ));
+    }
+    let outside = || {
+        format!(
+            "{} is outside the run folder and the app's HOME",
+            path.display()
+        )
+    };
+    let resolved = resolve_parent(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let inside = roots.iter().any(|root| {
+        let real = root.canonicalize().unwrap_or_else(|_| root.clone());
+        path != root && path.starts_with(root) && resolved != real && resolved.starts_with(&real)
+    });
+    if inside {
+        Ok(())
+    } else {
+        Err(outside())
+    }
 }
 
 /// The file's bytes as space-separated hex, at most `max` bytes when given.
@@ -825,18 +1095,25 @@ pub fn h_fixture(rel: String, from: Option<String>) -> Result<String, String> {
 }
 
 fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    copy_all(src, dst).map(|_| ())
+}
+
+/// A file or a folder, recursively, with the folders above `dst` made first. Answers the
+/// bytes copied.
+fn copy_all(src: &Path, dst: &Path) -> std::io::Result<u64> {
     if src.is_dir() {
         std::fs::create_dir_all(dst)?;
+        let mut total = 0;
         for entry in std::fs::read_dir(src)? {
             let entry = entry?;
-            copy_tree(&entry.path(), &dst.join(entry.file_name()))?;
+            total += copy_all(&entry.path(), &dst.join(entry.file_name()))?;
         }
-        Ok(())
+        Ok(total)
     } else {
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::copy(src, dst).map(|_| ())
+        std::fs::copy(src, dst)
     }
 }
 
@@ -942,6 +1219,8 @@ pub fn h_quit(app: AppHandle, mode: String, delay_ms: Option<u64>) {
 /// with a plain `expectExit`.
 #[tauri::command]
 pub fn h_crash() {
+    // The kill is ours to time, so the owner's clipboard goes back first.
+    restore_clipboard();
     let pid = std::process::id();
     rh(&json!({ "kind": "diag", "msg": format!("h_crash: SIGKILL to {pid}") }));
     #[cfg(unix)]
@@ -1029,6 +1308,53 @@ pub fn h_window_state(app: AppHandle) -> Result<Value, String> {
     }
     #[cfg(not(target_os = "macos"))]
     Ok(json!({ "exists": exists }))
+}
+
+/// The size and place of the main window in physical pixels, the unit the window-state
+/// plugin writes to `.window-state.json`, with the scale that turns them into logical ones.
+#[tauri::command(async)]
+pub fn h_window_geometry(app: AppHandle) -> Result<Value, String> {
+    window_geometry(&app)
+}
+
+fn window_geometry(app: &AppHandle) -> Result<Value, String> {
+    let w = app.get_webview_window(MAIN).ok_or("no main window")?;
+    let size = w.inner_size().map_err(|e| e.to_string())?;
+    let pos = w.outer_position().map_err(|e| e.to_string())?;
+    let scale = w.scale_factor().map_err(|e| e.to_string())?;
+    Ok(json!({
+        "width": size.width,
+        "height": size.height,
+        "x": pos.x,
+        "y": pos.y,
+        "scale": scale,
+        "maximized": w.is_maximized().unwrap_or(false),
+        "fullscreen": w.is_fullscreen().unwrap_or(false),
+    }))
+}
+
+/// Resizes the main window to `width` x `height` logical pixels and, when both are given,
+/// moves it to `x`, `y`. Answers the geometry as the window reports it right after; the
+/// window server may apply it a run-loop turn later, which `h.window.setSize` waits for.
+#[tauri::command(async)]
+pub fn h_window_set_size(
+    app: AppHandle,
+    width: f64,
+    height: f64,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<Value, String> {
+    if !(width >= 200.0 && height >= 150.0 && width <= 10000.0 && height <= 10000.0) {
+        return Err(format!("{width} x {height} is not a usable window size"));
+    }
+    let w = app.get_webview_window(MAIN).ok_or("no main window")?;
+    w.set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|e| e.to_string())?;
+    if let (Some(x), Some(y)) = (x, y) {
+        w.set_position(tauri::LogicalPosition::new(x, y))
+            .map_err(|e| e.to_string())?;
+    }
+    window_geometry(&app)
 }
 
 #[derive(serde::Deserialize, Clone)]
@@ -1514,4 +1840,60 @@ fn click_alert_button(label: &str) -> Option<Value> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh folder below the system temp folder, with its real path.
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("gedit-harness-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.canonicalize().unwrap()
+    }
+
+    #[test]
+    fn a_path_below_the_root_passes_and_the_root_itself_does_not() {
+        let root = scratch("plain");
+        assert!(scratch_path_in(&root.join("a/b.txt"), std::slice::from_ref(&root)).is_ok());
+        assert!(scratch_path_in(&root, std::slice::from_ref(&root)).is_err());
+        assert!(scratch_path_in(&root.join("../x"), std::slice::from_ref(&root)).is_err());
+        assert!(scratch_path_in(Path::new("relative/x"), std::slice::from_ref(&root)).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_the_folders_above_cannot_lead_out_of_the_root() {
+        let root = scratch("link-root");
+        let outside = scratch("link-outside");
+        std::fs::write(outside.join("keep.txt"), "x").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("escape")).unwrap();
+        let roots = [root.clone()];
+        // The link is below the root, so removing the link itself is fine ...
+        assert!(scratch_path_in(&root.join("escape"), &roots).is_ok());
+        // ... but anything reached through it is outside, existing or not.
+        assert!(scratch_path_in(&root.join("escape/keep.txt"), &roots).is_err());
+        assert!(scratch_path_in(&root.join("escape/new/deeper.txt"), &roots).is_err());
+        // A real folder below the root is fine, also one that is not there yet.
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        assert!(scratch_path_in(&root.join("real/a.txt"), &roots).is_ok());
+        assert!(scratch_path_in(&root.join("not-yet/a/b.txt"), &roots).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_root_that_is_itself_reached_through_a_link_still_counts() {
+        let real = scratch("root-real");
+        let via = std::env::temp_dir().join(format!("gedit-harness-via-{}", std::process::id()));
+        let _ = std::fs::remove_file(&via);
+        std::os::unix::fs::symlink(&real, &via).unwrap();
+        assert!(scratch_path_in(&via.join("a.txt"), std::slice::from_ref(&via)).is_ok());
+        let _ = std::fs::remove_file(&via);
+        let _ = std::fs::remove_dir_all(&real);
+    }
 }

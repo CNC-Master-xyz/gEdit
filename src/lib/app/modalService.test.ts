@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ModalIndex } from '$lib/core/nc/modal';
 import { META, MILL, harness, program, viewOf, walk } from '../../../tests/unit/helpers/modalServiceHarness';
 import { FALLBACK_GAP_MS, IDLE_BUDGET_MS, modal, runWhenIdle } from './modalService';
+import { CHAIN_MS } from './scheduler';
 
 describe('the modal service', () => {
   it('is the singleton the app context exposes', async () => {
@@ -346,6 +347,108 @@ describe('the modal service', () => {
     expect(h.service.stateAfter(id, 39)).toEqual(oracle[39]);
     h.idleAll();
     expect(h.service.stateAfter(id, 100)).toEqual(oracle[100]);
+  });
+
+  // -- T170: the slices follow each other without an idle gap ------------------------------------
+
+  /** Every `buildSome` of the service costs 8 ms of the fake clock; the returned `slices()` counts them. */
+  function slicesOf8Ms(clock: { t: number }): { slices: () => number; restore: () => void } {
+    const original = ModalIndex.prototype.buildSome;
+    let slices = 0;
+    const spy = vi.spyOn(ModalIndex.prototype, 'buildSome').mockImplementation(function (this: ModalIndex, budget: number) {
+      slices++;
+      const done = original.call(this, budget);
+      clock.t += 8;
+      return done;
+    });
+    return { slices: () => slices, restore: () => spy.mockRestore() };
+  }
+
+  it('T170: only the first slice waits for idle time; the next ones follow in the next turn, and every CHAIN_MS of work takes one timer turn', async () => {
+    expect(CHAIN_MS).toBe(24);
+    const clock = { t: 0 };
+    const cost = slicesOf8Ms(clock);
+    try {
+      const h = harness({ budgetMs: 0, turns: true, clock }); // one line a slice
+      const text = program(100);
+      const id = h.add(text);
+      expect(h.idlePending()).toBe(1);
+      expect(h.turnPending()).toBe(0);
+      h.idleOnce();
+      expect(h.idlePending(), 'the slice behind the first does not wait for idle time').toBe(0);
+      expect(h.turnPending()).toBe(1);
+
+      let idleRuns = 1;
+      let turnRuns = 0;
+      let timerRuns = 0;
+      for (;;) {
+        if (h.turnOnce()) turnRuns++;
+        else if (h.timerPending() > 0) {
+          h.timers();
+          timerRuns++;
+        } else if (h.idleOnce()) idleRuns++;
+        else break;
+      }
+      const total = cost.slices();
+      expect(total).toBeGreaterThanOrEqual(100);
+      expect(idleRuns).toBe(1);
+      // 8 ms a slice: after the third slice (24 ms) of a chain the pump takes one timer turn.
+      expect(timerRuns).toBe(Math.floor((total - 1) / 3));
+      expect(1 + turnRuns + timerRuns).toBe(total);
+      await expect(h.service.whenReady(id)).resolves.toBeUndefined();
+      const oracle = walk(MILL, text);
+      for (let n = 0; n <= 100; n += 9) expect(h.service.stateAfter(id, n), `line ${n}`).toEqual(oracle[n]);
+    } finally {
+      cost.restore();
+    }
+  });
+
+  it('T170: with input waiting the build goes back to idle time, and chains again once the input is served', () => {
+    const clock = { t: 0 };
+    const cost = slicesOf8Ms(clock);
+    try {
+      const h = harness({ budgetMs: 0, turns: true, clock });
+      h.add(program(100));
+      h.input.pending = true;
+      h.idleOnce();
+      expect(h.idlePending()).toBe(1);
+      expect(h.turnPending()).toBe(0);
+      h.input.pending = false;
+      h.idleOnce();
+      expect(h.idlePending()).toBe(0);
+      expect(h.turnPending()).toBe(1);
+    } finally {
+      cost.restore();
+    }
+  });
+
+  it('T170: an edit while the next slice is queued does not queue a second one, and stopping cancels it', () => {
+    const clock = { t: 0 };
+    const cost = slicesOf8Ms(clock);
+    try {
+      const h = harness({ budgetMs: 0, turns: true, clock });
+      const id = h.add(program(100));
+      h.idleOnce();
+      expect(h.turnPending()).toBe(1);
+      h.edit(id, 5, 'G95 X1.');
+      expect(h.idlePending()).toBe(0);
+      expect(h.turnPending()).toBe(1);
+      const before = cost.slices();
+      h.stop();
+      h.turnOnce();
+      expect(cost.slices()).toBe(before);
+      expect(h.idlePending()).toBe(0);
+    } finally {
+      cost.restore();
+    }
+  });
+
+  it('T170: without a next-turn callback every slice still waits for idle time', () => {
+    const h = harness({ budgetMs: 0 });
+    h.add(program(100));
+    h.idleOnce();
+    expect(h.idlePending()).toBe(1);
+    expect(h.timerPending()).toBe(0);
   });
 
   afterEach(() => {

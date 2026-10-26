@@ -34,7 +34,7 @@ import {
   type TemplateServiceDeps,
 } from './templateService';
 import type { DocId, FormLiveResult, Msg, NewDocMeta, TemplateService } from '$lib/app/types';
-import type { FieldSpec } from '$lib/core/forms/types';
+import type { FieldSpec, FormLiveAnswer } from '$lib/core/forms/types';
 import { blockNumberOf } from '$lib/core/nc/tokenizer';
 
 // The singleton imports the real Monaco-facing modules; the dialogs it never opens here.
@@ -781,6 +781,115 @@ describe('P3b fix NC: block numbers a template names (NC-01, SK-02)', () => {
     const plain = rig({ profile: 'fanuc-lathe', view: effectiveOf('fanuc-lathe'), lines: LATHE, line: 4 });
     await plain.service.insert('tool-start');
     expect(plain.forms[0].note).toBe(t('templates.reviewPending'));
+  });
+});
+
+describe('v1.2.0 T159: the form\'s note follows the values', () => {
+  it('names a number the text writes that the program points at only while the text writes it', async () => {
+    const TPL = {
+      id: 'two-lines',
+      label: 'Two lines',
+      group: 'Mine',
+      machineType: 'lathe',
+      body: '{{N}}{{x}}\n{{N}}M1',
+      params: [{ id: 'x', label: 'X', type: 'number', prefix: 'G0 X', decimals: 'min1', default: '10' }],
+    };
+    const lines = ['%', 'O1000', 'N100 G0 X50.', 'N200 G71 P120 Q130 U0.4 W0.1 F0.2', 'N300 M30'];
+    const r = rig({ profile: 'fanuc-lathe', view: effectiveOf('fanuc-lathe', { extra: [TPL] }), lines, line: 3 });
+    await r.service.insert('two-lines');
+    const live = r.forms[0].live as (v: Record<string, unknown>) => FormLiveAnswer;
+    // With X the text writes N110 and N120, and P120 of line 4 points at N120.
+    expect(r.forms[0].note).toContain('P120');
+    expect(live({ x: '10' }).note).toContain('P120');
+    // Without X the first line goes and the text writes N110 only: the note goes with it.
+    expect(live({ x: '' }).note).toBe('');
+  });
+});
+
+describe('v1.2.0 T142: a Klartext snippet template with block numbers', () => {
+  it('moves the blocks behind it up by the numbers it writes, then hands its numbered text to the snippet controller', async () => {
+    const SNIP = { id: 'snip-two', label: 'Two blocks', group: 'Mine', snippet: true, body: '{{N}}L Z+${1:100} R0 FMAX\n{{N}}L X+${2:0} R0' };
+    const r = rig({
+      profile: 'heidenhain-klartext',
+      view: effectiveOf('heidenhain-klartext', { extra: [SNIP] }),
+      lines: ['0 BEGIN PGM TEST MM', '1 L Z+100 R0 FMAX', '2 L X+10 ~', '  Y+10 R0', '3 END PGM TEST MM'],
+      line: 2,
+    });
+    expect(await r.service.insert('snip-two')).toBe(true);
+    expect(r.lines).toEqual(['0 BEGIN PGM TEST MM', '1 L Z+100 R0 FMAX', '4 L X+10 ~', '  Y+10 R0', '5 END PGM TEST MM']);
+    expect(r.snippets).toEqual([{ template: '2 L Z+${1:100} R0 FMAX\n3 L X+${2:0} R0', at: { line: 2, replace: false } }]);
+  });
+
+  it('renumbers nothing in a program numbered by a step, nor for a snippet without {{N}}', async () => {
+    const SNIP = { id: 'snip-plain', label: 'Plain', group: 'Mine', snippet: true, body: 'L Z+${1:100} R0 FMAX' };
+    const lines = ['0 BEGIN PGM TEST MM', '1 L Z+100 R0 FMAX', '2 END PGM TEST MM'];
+    const r = rig({ profile: 'heidenhain-klartext', view: effectiveOf('heidenhain-klartext', { extra: [SNIP] }), lines, line: 2 });
+    expect(await r.service.insert('snip-plain')).toBe(true);
+    expect(r.lines).toEqual(lines);
+    expect(r.model.ops).toEqual([]);
+  });
+});
+
+describe('v1.2.0 T161, T162: every kind of parameter that writes a block number is checked against the program', () => {
+  const PROGRAM = ['O0001', 'N10 G21 G90', 'N100 G0 X0 Y0', 'N200 G1 X10.', 'N300 M30'];
+  const CHOICE = {
+    id: 'jump-target',
+    label: 'Jump target',
+    group: 'Mine',
+    body: 'N{{n}} M0',
+    params: [{ id: 'n', label: 'Block', type: 'choice', default: '100', choices: [{ label: 'A', value: '100' }, { label: 'B', value: '200' }, { label: 'C', value: '400' }] }],
+  };
+  const FORMULA = {
+    id: 'computed-target',
+    label: 'Computed target',
+    group: 'Mine',
+    body: 'N{{n}} M0',
+    params: [
+      { id: 'base', label: 'Base', type: 'integer', required: true, default: 90 },
+      { id: 'n', label: 'Block', type: 'formula', formula: 'base + 10', decimals: 0 },
+    ],
+  };
+
+  it('T161: a choice starts at a value the program does not use, and one it uses is refused, at the form and at the insert', async () => {
+    const r = rig({ lines: PROGRAM, line: 4, view: effectiveOf('fanuc-gcode', { extra: [CHOICE] }) });
+    r.answer.value = (call) => ({ ...call.values, n: '200' });
+    expect(await r.service.insert('jump-target')).toBe(false);
+    expect(r.forms[0].values?.n).toBe('400');
+    expect(r.forms[0].live!({ n: '100' }).fieldErrors?.n).toEqual({ key: 'templates.value.blockNumberUsed', params: { number: 'N100', line: 3 } });
+    expect(r.forms[0].live!({ n: '400' }).fieldErrors).toBeUndefined();
+    expect(r.statuses.pop()?.text).toContain('N200 is already on line 4');
+  });
+
+  it('T162: a formula that writes a block number is checked with the value it computes', async () => {
+    const r = rig({ lines: PROGRAM, line: 4, view: effectiveOf('fanuc-gcode', { extra: [FORMULA] }) });
+    r.answer.value = (call) => call.values;
+    expect(await r.service.insert('computed-target')).toBe(false);
+    expect(r.forms[0].live!({ base: '90' }).fieldErrors?.n).toEqual({ key: 'templates.value.blockNumberUsed', params: { number: 'N100', line: 3 } });
+    expect(r.forms[0].live!({ base: '140' }).fieldErrors).toBeUndefined();
+    expect(r.statuses.pop()?.text).toContain('N100 is already on line 3');
+    expect(await r.service.insert('computed-target', { base: '140' })).toBe(true);
+    expect(r.lines[4]).toBe('N150 M0');
+  });
+});
+
+describe('v1.2.0 T160: a Klartext label made from a selection', () => {
+  it('the form offers a label the program does not use, refuses one it defines or calls, and the insert reads the program again', async () => {
+    const source = ['3 LBL 1', '4 L X+10 R0 FMAX', '5 LBL 0'];
+    const base = effectiveOf('heidenhain-klartext');
+    const tpl = draftToTemplate(templateFromSelection(source, base.cp, base.codes), new Set(), { id: 'my-sub', label: 'My subprogram', group: 'Mine' });
+    const lines = ['0 BEGIN PGM A MM', '1 CALL LBL 1', '2 CALL LBL 7', ...source, '6 END PGM A MM'];
+    const r = rig({ profile: 'heidenhain-klartext', view: effectiveOf('heidenhain-klartext', { extra: [tpl] }), lines, line: 6 });
+    r.answer.value = (call) => ({ ...call.values, lbl: '1' });
+    expect(await r.service.insert('my-sub')).toBe(false);
+    expect(r.forms[0].values?.lbl).toBe('2');
+    expect(r.forms[0].live!({ ...r.forms[0].values, lbl: '1' }).fieldErrors?.lbl).toEqual({ key: 'templates.value.labelUsed', params: { number: 'LBL 1', line: 4 } });
+    expect(r.forms[0].live!({ ...r.forms[0].values, lbl: '7' }).fieldErrors?.lbl?.key).toBe('templates.value.labelCalled');
+    expect(r.statuses.pop()?.text).toContain('LBL 1 is already on line 4');
+    // The free one goes in, renumbered as Klartext wants.
+    r.answer.value = (call) => call.values;
+    expect(await r.service.insert('my-sub')).toBe(true);
+    expect(r.lines.slice(6, 9)).toEqual(['6 LBL 2', '7 L X+10 R0 FMAX', '8 LBL 0']);
+    expect(r.lines[9]).toBe('9 END PGM A MM');
   });
 });
 

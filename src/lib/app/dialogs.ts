@@ -8,8 +8,10 @@
 // unsaved changes, quit, and the Windows-1252 fallback. Everything else is a QuickPick
 // (`app/modals.ts`) or a status message.
 //
-// Filters follow AD-7: macOS gets NONE, because rfd merges every filter into one
-// `allowedFileTypes` list (F7); Windows and Linux get the list from `profiles`.
+// Filters follow AD-7: on macOS the profile-derived lists (`profiles.openFilters`, `saveFilters`) are empty, because
+// rfd merges every filter into one `allowedFileTypes` list (F7); Windows and Linux get the list from `profiles`.
+// Filters a caller passes explicitly (`saveFile({ filters })`, as Export as HTML does) are not touched and do
+// reach macOS.
 //
 // `exclusive` serializes whole dialog chains. The close guard, Cmd+Q and the ribbon all
 // go through it, so a second chain cannot open a second native alert on top of the first;
@@ -156,12 +158,12 @@ export function createNativeDialogs(deps: NativeDialogsDeps): NativeDialogs {
       return asPaths(picked);
     },
 
-    async saveFile(o: { defaultPath: string; profileId?: string }): Promise<string | null> {
+    async saveFile(o: { defaultPath: string; profileId?: string; filters?: DialogFilter[] }): Promise<string | null> {
       if (!deps.isTauri()) return null;
       return backend.save(
         withFilters(
           { title: t('files.saveAsTitle'), defaultPath: o.defaultPath },
-          o.profileId ? deps.profiles.saveFilters(o.profileId) : [],
+          o.filters ?? (o.profileId ? deps.profiles.saveFilters(o.profileId) : []),
         ),
       );
     },

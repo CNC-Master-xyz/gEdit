@@ -374,6 +374,54 @@ describe('taking snapshots', () => {
     stop();
   });
 
+  // T175. The throttle compared `now - ticked >= intervalMs` against two moments that each
+  // carry their own jitter: `ticked` is the clock at the *pass*, which runs after the idle
+  // callback, which a busy main thread delays by tens of milliseconds, while the ticker
+  // itself fires on a fixed grid. One late pass followed by one punctual one made the
+  // second look "29.96 s after the last write" and skip, so the next write waited for the
+  // tick after that: a crash at 89 s lost 59 s of typing, not 30.
+  it('does not skip a tick because the previous pass ran late', async () => {
+    let lateOnce = true;
+    const h = harness({
+      idle(fn) {
+        // The first pass is held up for 40 ms (a long task on the main thread); the rest
+        // run at once.
+        const handle = setTimeout(fn, lateOnce ? 40 : 0);
+        lateOnce = false;
+        return () => clearTimeout(handle);
+      },
+    });
+    const stop = h.service.start();
+    const id = h.add();
+
+    await vi.advanceTimersByTimeAsync(30_000 + 41);
+    expect(h.puts).toHaveLength(1);
+
+    // Typing continues, and the next tick (60 s on the ticker's grid) must write.
+    h.edit(id, 'O1000\nG1 X1');
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(h.puts).toHaveLength(2);
+    stop();
+  });
+
+  it('does not skip a tick that the clock reads a millisecond early', async () => {
+    // `setInterval` runs on the monotonic clock and `Date.now()` is the wall clock, so
+    // two ticks can be 29 999 ms apart on the second one's reading.
+    let skew = 0;
+    const h = harness({ now: () => Date.now() + skew });
+    const stop = h.service.start();
+    const id = h.add();
+
+    await tick();
+    expect(h.puts).toHaveLength(1);
+
+    h.edit(id, 'O1000\nG1 X1');
+    skew = -1;
+    await tick();
+    expect(h.puts).toHaveLength(2);
+    stop();
+  });
+
   it('still holds the ticker to one snapshot per period under repeated blurs', async () => {
     // The property the throttle exists for: a 10 MB program is not written twice by the
     // *ticker* in one period. A blur is a decision of the user's and is honoured.

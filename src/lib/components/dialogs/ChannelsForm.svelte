@@ -34,6 +34,7 @@
     aliasesFromText,
     applyLayoutEdit,
     applyRuleEdit,
+    removeRuleAt,
     moveIn,
     aliasesToText,
     codesPreview,
@@ -154,7 +155,7 @@
     setRules([...rulesOf(value), newRule(value)]);
   }
   function removeRule(i: number): void {
-    if (value) setRules(rulesOf(value).filter((_, k) => k !== i));
+    if (value) onChange(removeRuleAt({ ...value, syncMarks: rulesOf(value) }, i));
   }
   function moveRule(i: number, by: -1 | 1): void {
     if (value) setRules(moveIn(rulesOf(value), i, by));

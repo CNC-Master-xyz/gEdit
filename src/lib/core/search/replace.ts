@@ -9,7 +9,7 @@
 // The form fields are shared with find-all (`searchFields`), so the two dialogs say the
 // same thing: the word conditions compare the value as written (D51).
 
-import type { FieldSpec } from '$lib/core/forms/types';
+import type { FieldSpec, FormLiveAnswer } from '$lib/core/forms/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import type { TransformContext, TransformDef, TransformResult } from '$lib/core/transforms/types';
 import { t } from '$lib/i18n';
@@ -35,6 +35,16 @@ export function searchFields(): FieldSpec[] {
     { id: 'regex', type: 'bool', label: t('search.regex'), help: t('search.regexHelp'), default: false },
     { id: 'inComments', type: 'bool', label: t('search.inComments'), default: false },
   ];
+}
+
+/**
+ * T226: the form's live answer. "Also in comments" is for text searches only: a word is never
+ * found inside a comment or a string (§7.6), so while "Whole address" is ticked the field is
+ * greyed out and says why. Its value is kept, so it is as it was when the box is unticked.
+ */
+export function searchLive(values: Record<string, unknown>): FormLiveAnswer {
+  if (values.wholeAddress !== true) return {};
+  return { readOnly: ['inComments'], help: { inComments: t('search.inCommentsWord') } };
 }
 
 export const replace: TransformDef = {

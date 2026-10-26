@@ -1,0 +1,14 @@
+{
+  "note": "P4d §6.6 rules 1 and 7: \"Fit the increment to the maximum\" without a maximum is refused. A refusal writes nothing: the program comes back exactly as it was, nothing is listed, the reason is the summary, and the preflight asks nothing first.",
+  "profile": "fanuc-gcode",
+  "options": {
+    "max": null,
+    "fitToMax": true
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.refused.noMax",
+    "skipped": [],
+    "warnings": [],
+    "preflight": null
+  }
+}

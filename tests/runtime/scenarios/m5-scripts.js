@@ -139,7 +139,7 @@ scenario('m5-scripts-ui', { timeout: 420 }, async (h) => {
     last: ctx.commands.get('script.runLast')?.keys,
   })
   h.check(
-    'the Tools group offers the nine bundled scripts for a Fanuc program (three before M10, six before P4a)',
+    'the Tools group offers the eleven bundled scripts for a Fanuc program (three before M10, six before P4a, nine before P4b)',
     JSON.stringify([...menuScriptIds(h)].sort()) === JSON.stringify(BUNDLED),
     menuScriptIds(h),
   )
@@ -389,7 +389,7 @@ scenario('m5-scripts-timeout', { timeout: 240 }, async (h) => {
   await runScript(h, id)
   const tookMs = Math.round(performance.now() - started)
 
-  h.check(`the run is stopped at its own deadline rather than at the settings one: ${tookMs} ms`, tookMs < 20000, { tookMs })
+  h.checkTime('the run is stopped at its own deadline rather than at the settings one', tookMs, 20000, { tookMs }, { strict: true })
   h.check('it says the script ran past its time limit, as an error', messageIsError(h) && message(h) === 'The script ran past its time limit and was stopped. Nothing was applied.', message(h))
   h.check('nothing was applied', textOf(h, docId) === before)
   await h.waitFor(() => h.q('output-panel'), { timeout: 5000 })

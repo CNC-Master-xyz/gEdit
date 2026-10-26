@@ -399,7 +399,7 @@ function build(p: Profile, db: CodeDb): { rules: GrammarRule[]; states: Record<s
   const main = typeof mainPrefix === 'string' && mainPrefix !== '' ? mainPrefix : hasColonProgram(p) ? ':' : null;
   if (main !== null) rules.push(headRule([...lead, [`${escapeLiteral(main)}${gap}\\d+`, 'blockNumber']]));
   if (leadingInteger) rules.push(headRule([...lead, ['\\d+', 'blockNumber']]));
-  if (skip?.before) rules.push(...stackedSkipRules(p, skip.pattern), [lineStart(`\\s*${skip.pattern}`), 'skip']);
+  if (skip?.before) rules.push(...stackedSkipRules(p, skip.pattern), [lineStart(`(\\s*)(${skip.pattern})`), ['', 'skip']]);
   if (skip?.after && blockNumber !== null) {
     rules.push(
       headRule([

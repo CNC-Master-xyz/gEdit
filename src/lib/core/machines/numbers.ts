@@ -232,14 +232,30 @@ function feedClassOf(unit: FeedUnit | string | undefined): NumberClass | Undecla
   return null;
 }
 
-/** The `unit` a code declares for `word` among its parameters, if one of `codes` does. */
-function declaredUnit(codes: readonly CodeEntry[], word: string): CodeParam['unit'] | undefined {
+/** Two codes of one block (or two codes in force) declare one address with different units. */
+const CONFLICT = Symbol('conflict');
+
+/**
+ * The `unit` the codes of `codes` declare for `word` among their parameters: undefined when
+ * none does, `CONFLICT` when two of them say different things.
+ *
+ * The answer does not depend on the order of `codes` (T212): with the first declaration
+ * winning, a block that writes two codes declaring one address with different units read
+ * the word by whichever code the caller happened to list first, and M13's user databases can
+ * write such a pair. A disagreement is "cannot tell", which gets no class and so no value.
+ * The two declarations of one two-block cycle (`G71`, `G76`) have the same unit — the loader
+ * refuses a database where they differ — so they never conflict.
+ */
+function declaredUnit(codes: readonly CodeEntry[], word: string): CodeParam['unit'] | typeof CONFLICT | undefined {
+  let found: CodeParam['unit'] | undefined;
   for (const entry of codes) {
     for (const param of paramsOf(entry)) {
-      if (upper(param?.address ?? '') === word && param?.unit !== undefined) return param.unit;
+      if (upper(param?.address ?? '') !== word || param?.unit === undefined) continue;
+      if (found !== undefined && found !== param.unit) return CONFLICT;
+      found = param.unit;
     }
   }
-  return undefined;
+  return found;
 }
 
 function paramsOf(entry: CodeEntry | undefined): readonly CodeParam[] {
@@ -253,7 +269,8 @@ function paramsOf(entry: CodeEntry | undefined): readonly CodeParam[] {
  * The order is fixed by AD-31 and the first match wins:
  *
  *  1. `CodeParam.unit` of a code in this block — a cycle parameter is often the one place
- *     a control breaks its own convention (§8.2 is where these are written down); then
+ *     a control breaks its own convention (§8.2 is where these are written down); codes of
+ *     the block that declare the word with different units give it no class (T212); then
  *     (M9) the same of a code **in force** (`inForce`: the modal cycle, the motion code or
  *     a mode the caller's tracker has active), whose parameters keep their reading in the
  *     blocks that repeat it. A thread **lead** is declared this way (`F` with `unit:
@@ -312,8 +329,10 @@ export function numberClassOf(
   const inForce = Array.isArray(o.inForce) ? o.inForce : [];
 
   // 1. what the code database says about this parameter of this code, then of the code in
-  //    force: a lead is declared here (`F` with `unit: 'feedPerRev'`), never inferred
+  //    force: a lead is declared here (`F` with `unit: 'feedPerRev'`), never inferred. Codes
+  //    that disagree tell nothing (T212): no class, whatever order they come in.
   const declared = declaredUnit(codes, word) ?? declaredUnit(inForce, word);
+  if (declared === CONFLICT) return null;
   if (declared !== undefined) return declared;
 
   const unitWords = feedUnitWordsOf(o.profile);

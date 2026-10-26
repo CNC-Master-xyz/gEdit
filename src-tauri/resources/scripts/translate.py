@@ -70,6 +70,14 @@ Settled defaults (the owner's answers of 2026-10-12, plan §9; the same as `_nc_
 * **Q4-6, returns and machine positions.** `G53`, `M91`, `SUPA` and an incremental
   `G28`/`G30` return are left and listed as information (`machine-position`); an absolute
   intermediate point the shift would change refuses (`intermediate-point`).
+* **Two notes of the v1.2.0 review round.** On a profile whose tool centre point control can
+  read its coordinates in the table's or in the workpiece's system (Fanuc mill,
+  `syntax.tcpTableCoordinates`), the first block the shift moves under it carries an
+  information row (`tcp-table`) and the message a sentence: the shift assumes the table
+  coordinate system (parameter 19696 bit 5 = 0; owner decision D6-4). On a lathe set to the
+  Series 15 format (`syntax.cycleRAbsoluteWith` names the point-less-feeds choices), the `R`
+  of a drilling cycle is left as written with an information row (`cycle-r-left`): there R
+  can be an absolute position (parameter 5102 bit 6).
 
 What moves and what stays
 -------------------------
@@ -133,12 +141,15 @@ is handed back byte for byte: the only edits are the spans of the words that mov
 from __future__ import annotations
 
 import sys
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import gedit_nc
 import _nc_geom
 import _nc_path
+import _nc_run
+from _nc_run import INCH, as_dict, count_text, decimal_text, entry_params, trim
+from _nc_run import quote as _quote
 
 #: The axes of the form, in its order.
 AXES = ("X", "Y", "Z")
@@ -150,8 +161,6 @@ PARAM_LABELS = {"X": "X shift", "Y": "Y shift", "Z": "Z shift"}
 #: At most this many findings; the rest are counted in the message. The app takes 1000.
 MAX_FINDINGS = 500
 
-#: One inch in millimetres, exactly.
-INCH = Decimal("25.4")
 #: v1.2.0 (D4): the code groups that change where the program's coordinates put the tool
 #: without a move of their own: a work offset (`G55`, `G15 H2`, Klartext cycle 7) and a tool
 #: length compensation (`G43 H2`, `G49`). An axis written in the same block is written under
@@ -217,7 +226,16 @@ INFO_TEXT = {
     "return": ("return to the reference point", "returns to the reference point"),
     "machine-position": ("position in machine coordinates", "positions in machine coordinates"),
     "word-left": ("word gEdit cannot place", "words gEdit cannot place"),
+    # Review round (NC-9, D6-4).
+    "cycle-r-left": ("drilling R point (Series 15 format)", "drilling R points (Series 15 format)"),
+    "tcp-table": ("block under tool centre point control", "blocks under tool centre point control"),
 }
+#: Review round (D6-4): the run's sentence when a block it moved stands under tool centre point
+#: control on a profile whose control can read those coordinates in two ways.
+TCP_SENTENCE = (
+    "Tool centre point control: the shift assumes the table coordinate system "
+    "(parameter 19696 bit 5 = 0). Check your machine."
+)
 
 #: NC-3 (P4a review): a Klartext `CYCL CALL POS` adds its tool-axis position to the surface
 #: coordinate of the cycle it calls (TNC 640 cycle manual, cycle call with CYCL CALL POS: the
@@ -237,52 +255,6 @@ CALLED_AT_POSITION_TEXT = (
 )
 #: The order of the findings of one line.
 SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
-
-
-# ---------------------------------------------------------------------------
-# Small helpers
-# ---------------------------------------------------------------------------
-
-
-def as_dict(value: Any) -> Dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def trim(value: Decimal) -> str:
-    """``1.25`` for ``Decimal('1.2500')``, ``0`` for zero, ``-2`` for ``-2.0``."""
-    if value == 0:
-        return "0"
-    text = format(value.normalize(), "f")
-    return text
-
-
-def count_text(count: int, singular: str, plural: Optional[str] = None) -> str:
-    return "%s %s" % ("{:,}".format(count), singular if count == 1 else (plural or singular + "s"))
-
-
-def decimal_text(value: Any) -> Optional[Decimal]:
-    """A form value as a decimal: a JSON number as the user typed it (``repr`` of a float
-    gives its shortest form), or a numeric string; ``None`` for anything else."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return Decimal(value)
-    if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
-            return None
-        return Decimal(repr(value))
-    if isinstance(value, str) and value.strip() != "":
-        try:
-            found = Decimal(value.strip().replace(",", "."))
-        except InvalidOperation:
-            return None
-        return found if found.is_finite() else None
-    return None
-
-
-def entry_params(entry: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    params = entry.get("params") if isinstance(entry, dict) else None
-    return [p for p in params if isinstance(p, dict)] if isinstance(params, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -890,12 +862,6 @@ class Run:
                 )
 
 
-def _quote(text: str) -> str:
-    text = " ".join(text.split())
-    limit = _nc_geom.QUOTE_LENGTH
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
-
-
 def turned_blind(step: _nc_path.Step, axis: str) -> bool:
     """Whether a move turns the rotary ``axis`` by an increment from a position not known: a
     word read as incremental (or in a distance mode not known) whose value is not zero (or
@@ -1052,35 +1018,12 @@ def shift_text(run: Run) -> str:
 
 def machine_note(run: Run) -> str:
     """The machine, always last, as every script that reads numbers on the machine says it."""
-    machine = run.machine
-    if machine.get("id") is None:
-        return "No machine chosen: a word whose reading depends on the machine would refuse the run."
-    name = machine.get("name") or machine.get("id")
-    params = as_dict(machine.get("params"))
-    parts: List[str] = []
-    if as_dict(machine.get("source")).get("numberInput") == "machine":
-        number_input = as_dict(params.get("numberInput"))
-        length = as_dict(as_dict(number_input.get("classes")).get("length"))
-        mode = length.get("mode") or number_input.get("mode")
-        inch = params.get("units") == "inch"
-        unit = length.get("incrementInch" if inch else "increment") or number_input.get("incrementInch" if inch else "incrementMm")
-        unit_name = "inch" if inch else "mm"
-        if mode == "increment" and isinstance(unit, str):
-            parts.append("numbers without a point are increments of %s %s" % (unit, unit_name))
-        elif mode == "scale" and isinstance(unit, str):
-            parts.append("every number counts in units of %s %s, with or without a point" % (unit, unit_name))
-        elif mode == "calculator":
-            parts.append("numbers are read as written")
-    else:
-        parts.append("it does not say how it reads numbers, so a word whose reading depends on that would refuse the run")
-    if run.x_reading is not None:
-        parts.append("X is a %s" % run.x_reading)
-    return "Machine '%s': %s." % (name, "; ".join(parts))
+    return _nc_run.machine_note(run.machine, run.x_reading)
 
 
 def info_sentence(info: Dict[str, int]) -> Optional[str]:
     blocks = info.get("return", 0) + info.get("machine-position", 0)
-    words = info.get("word-left", 0)
+    words = info.get("word-left", 0) + info.get("cycle-r-left", 0)
     if not blocks and not words:
         return None
     what = []
@@ -1088,7 +1031,7 @@ def info_sentence(info: Dict[str, int]) -> Optional[str]:
         what.append(count_text(blocks, "block"))
     if words:
         what.append(count_text(words, "word"))
-    parts = [count_text(info[key], *INFO_TEXT[key]) for key in ("return", "machine-position", "word-left") if info.get(key)]
+    parts = [count_text(info[key], *INFO_TEXT[key]) for key in ("return", "machine-position", "word-left", "cycle-r-left") if info.get(key)]
     return "Left %s as written: %s." % (" and ".join(what), ", ".join(parts))
 
 
@@ -1112,6 +1055,8 @@ def summary(run: Run, findings: Findings, refused: Dict[str, int], info: Dict[st
         left = info_sentence(info)
         if left is not None:
             sentences.append(left)
+        if info.get("tcp-table"):
+            sentences.append(TCP_SENTENCE)
     if findings.dropped:
         sentences.append("%s further findings are not listed." % "{:,}".format(findings.dropped))
     sentences.append(machine_note(run))
@@ -1123,15 +1068,7 @@ def apply_edits(lines: Sequence[str], run: Run) -> List[str]:
     for line in run.lines:
         if not line.edits:
             continue
-        text = line.text
-        parts: List[str] = []
-        at = 0
-        for start, end, new in sorted(line.edits):
-            parts.append(text[at:start])
-            parts.append(new)
-            at = end
-        parts.append(text[at:])
-        out[line.index] = "".join(parts)
+        out[line.index] = _nc_run.splice(line.text, line.edits)
     return out
 
 
@@ -1141,38 +1078,14 @@ def apply_edits(lines: Sequence[str], run: Run) -> List[str]:
 
 
 def main() -> int:
-    context = gedit_nc.load_context()
-    lines = gedit_nc.read_input()
-
-    profile = context.get("profile")
-    if not isinstance(profile, dict) or not profile:
-        print(
-            "Translate needs a dialect profile. Run it from gEdit, which puts the profile into "
-            "the script context.",
-            file=sys.stderr,
-        )
-        return 1
-    try:
-        cp = gedit_nc.compile_profile(profile)
-    except ValueError as err:
-        print("Translate cannot use this profile: %s" % err, file=sys.stderr)
-        return 1
-    try:
-        params = Params(as_dict(context.get("params")), profile)
-    except ValueError as err:
-        print("Translate: %s" % err, file=sys.stderr)
-        return 1
-
-    text = "\n".join(lines)
-    codes = context.get("codes") if isinstance(context.get("codes"), list) else []
-    scope = as_dict(context.get("input"))
-    start = scope.get("startLine")
-    base_line = start if isinstance(start, int) and not isinstance(start, bool) and start >= 1 else 1
+    setup = _nc_run.prepare("Translate", Params, (ValueError,))
+    if isinstance(setup, int):
+        return setup
+    context, lines, text, profile, cp, params, codes = setup
     # CODE-3: a selection is a selection from line 1 too (its end is judged); only one that
-    # starts lower has lines above it to prime the walk with.
-    selection = scope.get("scope") == "selection"
-    fragment = selection and base_line > 1
-    preceding = gedit_nc.preceding_lines(context) if fragment else []
+    # starts lower has lines above it to prime the walk with (`_nc_run.Scope.fragment`).
+    scope = _nc_run.scope_of(context)
+    base_line, selection, fragment, preceding = scope.first, scope.selection, scope.fragment, scope.preceding
 
     run = Run(context, cp, params)
     if not codes:
@@ -1193,20 +1106,7 @@ def main() -> int:
     if fragment and not preceding:
         # What is in force above the selection (the distance mode, the units, a frame, a
         # cycle) decides how its words are read; without it a move is a guess.
-        gedit_nc.envelope(
-            text,
-            "Nothing was changed: this run saw only the selection, from line %d, so what is in "
-            "force above it is not known. Run Translate on the whole program. %s" % (base_line, machine_note(run)),
-            [
-                {
-                    "line": base_line,
-                    "severity": "error",
-                    "message": "The lines above the selection were not available, so the distance mode, the "
-                    "units, a frame and a cycle in force there are not known; nothing was moved.",
-                    "reason": "selection-unprimed",
-                }
-            ],
-        )
+        _nc_run.unprimed_envelope(text, base_line, "Translate", machine_note(run), "the distance mode, the units, a frame and a cycle", "moved")
         return 0
 
     run.is_selection = selection

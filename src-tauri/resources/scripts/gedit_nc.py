@@ -160,9 +160,12 @@ from _nc_channels import (
 )
 from _nc_machine import (
     WRITE_BACK_ERRORS,
+    arc_centre_entry,
+    arc_centre_modes,
     machine_params,
     number_class_of,
     readings_of,
+    redefines_arc_centre,
     resolve_value,
     value_of,
     write_back,
@@ -218,6 +221,11 @@ __all__ = [
     # Section 7.15, the machine (M6). A context without one answers the profile defaults.
     "machine_params",
     "number_class_of",
+    # T120 / FB-2: a mode in force that makes I, J and K its own words (Fanuc `G43.5`) lends
+    # the block only those words (`wordValue.ts` `inForceEntries`).
+    "arc_centre_entry",
+    "arc_centre_modes",
+    "redefines_arc_centre",
     "value_of",
     "write_back",
     "readings_of",

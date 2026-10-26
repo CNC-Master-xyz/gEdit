@@ -39,14 +39,32 @@
     "toolFrom": "same-line"
   },
   "modal": { "initial": { "feedmode": "G99", "spindlemode": "G97", "plane": "G18" } },
-  "syntax": { "decimalPointSignificant": false },
+  "syntax": { "decimalPointSignificant": false, "cycleRAbsoluteWith": ["series-15", "both"] },
   "machineParams": {
     "numberInput": {
       "default": "calculator",
       "presets": [
         {
+          "id": "is-a",
+          "label": "Increments of 0.01 mm (IS-A): X50 is 0.50 mm, X50. is 50 mm, C9000 is 90\u00b0; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution and a thread lead in 0.0001 mm/rev (F2500 is 0.25 mm/rev)",
+          "source": "syntax-fanuc.md \u00a73.2",
+          "verify": true,
+          "digitCheck": false,
+          "value": {
+            "mode": "increment",
+            "incrementMm": "0.01",
+            "incrementInch": "0.001",
+            "incrementDeg": "0.01",
+            "incrementSec": "0.01",
+            "classes": {
+              "feedPerMin": { "mode": "increment", "increment": "1", "incrementInch": "0.01" },
+              "feedPerRev": { "mode": "increment", "increment": "0.0001", "incrementInch": "0.000001" }
+            }
+          }
+        },
+        {
           "id": "is-b",
-          "label": "Increments of 0.001 mm (IS-B): X50 is 0.050 mm, X50. is 50 mm, C90000 is 90\u00b0; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution in 0.01 mm/rev (F25 is 0.25 mm/rev)",
+          "label": "Increments of 0.001 mm (IS-B): X50 is 0.050 mm, X50. is 50 mm, C90000 is 90\u00b0; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution and a thread lead in 0.0001 mm/rev (F2500 is 0.25 mm/rev)",
           "source": "syntax-fanuc.md \u00a73.2",
           "verify": true,
           "value": {
@@ -57,13 +75,13 @@
             "incrementSec": "0.001",
             "classes": {
               "feedPerMin": { "mode": "increment", "increment": "1", "incrementInch": "0.01" },
-              "feedPerRev": { "mode": "increment", "increment": "0.01", "incrementInch": "0.0001" }
+              "feedPerRev": { "mode": "increment", "increment": "0.0001", "incrementInch": "0.000001" }
             }
           }
         },
         {
           "id": "is-c",
-          "label": "Increments of 0.0001 mm (IS-C): X50 is 0.0050 mm, X50. is 50 mm; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution in 0.01 mm/rev (F25 is 0.25 mm/rev)",
+          "label": "Increments of 0.0001 mm (IS-C): X50 is 0.0050 mm, X50. is 50 mm; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution and a thread lead in 0.0001 mm/rev (F2500 is 0.25 mm/rev)",
           "source": "syntax-fanuc.md \u00a73.2",
           "verify": true,
           "value": {
@@ -74,7 +92,7 @@
             "incrementSec": "0.0001",
             "classes": {
               "feedPerMin": { "mode": "increment", "increment": "1", "incrementInch": "0.01" },
-              "feedPerRev": { "mode": "increment", "increment": "0.01", "incrementInch": "0.0001" }
+              "feedPerRev": { "mode": "increment", "increment": "0.0001", "incrementInch": "0.000001" }
             }
           }
         },
@@ -85,7 +103,36 @@
           "verify": true,
           "value": { "mode": "calculator", "incrementMm": "0.001" }
         }
-      ]
+      ],
+      "pointlessFeeds": {
+        "default": "standard",
+        "source": "syntax-fanuc.md \u00a73.2",
+        "verify": true,
+        "choices": [
+          {
+            "value": "standard",
+            "label": "Feed per minute in 1 mm/min (F200 is 200 mm/min), feed per revolution and thread lead in 0.0001 mm/rev (F2500 is 0.25 mm/rev)"
+          },
+          {
+            "value": "per-minute",
+            "label": "Feed per minute in 0.001 mm/min (F200000 is 200 mm/min), feed per revolution and thread lead in 0.0001 mm/rev (F2500 is 0.25 mm/rev)",
+            "classes": { "feedPerMin": { "increment": "0.001", "incrementInch": "0.00001" } }
+          },
+          {
+            "value": "series-15",
+            "label": "Series 15 format: feed per minute in 1 mm/min (F200 is 200 mm/min), feed per revolution and thread lead in 0.01 mm/rev (F25 is 0.25 mm/rev)",
+            "classes": { "feedPerRev": { "increment": "0.01", "incrementInch": "0.0001" } }
+          },
+          {
+            "value": "both",
+            "label": "Both: feed per minute in 0.001 mm/min (F200000 is 200 mm/min), feed per revolution and thread lead in the Series 15 format, 0.01 mm/rev (F25 is 0.25 mm/rev)",
+            "classes": {
+              "feedPerMin": { "increment": "0.001", "incrementInch": "0.00001" },
+              "feedPerRev": { "increment": "0.01", "incrementInch": "0.0001" }
+            }
+          }
+        ]
+      }
     },
     "diameter": "on",
     "modalGroups": ["feedmode", "spindlemode", "plane"],
@@ -121,10 +168,11 @@
         "id": "incrementalAddresses",
         "label": "U, W, V and H move incrementally",
         "default": "uw",
+        "defaultBy": { "variant": "gcodeSystem", "values": { "B": "none" } },
         "choices": [
           {
             "value": "uw",
-            "label": "U and W are incremental X and Z (default, verify)",
+            "label": "U and W are incremental X and Z (default in G-code system A, verify)",
             "overlay": { "addresses": { "incremental": { "U": "X", "W": "Z" } } }
           },
           {
@@ -134,7 +182,7 @@
           },
           {
             "value": "none",
-            "label": "None of them: G91 is the only incremental mode",
+            "label": "None of them: G91 is the only incremental mode (default in G-code system B)",
             "overlay": { "addresses": { "diameter": ["X"] } }
           }
         ]
@@ -187,6 +235,43 @@
                 "tool": "(?<![A-Z])T(?<tool>\\d{1,3}?)(?:\\d{3})?(?!\\d)"
               }
             }
+          }
+        ]
+      },
+      {
+        "id": "toolChange",
+        "label": "Tool change",
+        "default": "turret",
+        "choices": [
+          {
+            "value": "turret",
+            "label": "Turret: the T word indexes the station and changes the tool (default, verify)"
+          },
+          {
+            "value": "atc",
+            "label": "Tool changer: T selects the tool, M6 changes it (parameter 5040 bit 3)",
+            "overlay": {
+              "toolCall": {
+                "trigger": "(?<![A-Z])M0*6(?!\\d)",
+                "ignore": "^(?:(?!(?<![A-Z])T\\d).)*(?<![A-Z])T0+(?!\\d)|(?<![A-Z])G(?!(?:107|112|113|250|251)(?!\\d))[1-9]\\d{2}(?!\\d)",
+                "toolFrom": "same-line-or-last"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "counterSpindleY",
+        "label": "Counter spindle",
+        "default": "turns",
+        "choices": [
+          {
+            "value": "turns",
+            "label": "Y turns with Z: the Z mirror for the counter spindle changes the sign of Y too (default, verify)"
+          },
+          {
+            "value": "stays",
+            "label": "Y stays: the Z mirror for the counter spindle leaves Y as written"
           }
         ]
       }
@@ -417,7 +502,7 @@
         },
         {
           "id": "fanuc-3path-digits-nop12",
-          "label": "Three paths, one file per path named <name>_<path>.<ext> (PART_1.ISO, PART_2.ISO, PART_3.ISO; careful: a version file such as SHAFT_2.NC is read as path 2 too); waits M190-M199 (one builder's range; your machine's range is parameters 8110/8111); P as path numbers (P123 = paths 1, 2 and 3); a wait without P = paths 1 and 2",
+          "label": "Three paths, one file per path named <name>_<path>.<ext> (PART_1.ISO, PART_2.ISO, PART_3.ISO; careful: a version file such as SHAFT_2.NC is read as path 2 too); waits M190-M199 (one builder's range; your machine's range is parameters 8110/8111); P as path numbers (P123 = paths 1, 2 and 3); a wait without P = paths 1 and 2; M198 counts as a wait only if the machine moved the call of a program on an external device off M198 (parameter 6030)",
           "source": "Fanuc 30i/31i user manual, multi-path waiting function (a wait without P is defined for two paths only); a three-path machine on which a wait without P pairs paths 1 and 2 is one machine builder's variant, a layout seen in practice",
           "verify": true,
           "value": {
@@ -505,15 +590,144 @@
             ],
             "stopsAndEndsWait": false
           }
+        },
+        {
+          "id": "fanuc-nakamura-2unit",
+          "label": "Nakamura-Tome, two units (two paths), files tied by hand (no file-name rule); waits M100-M199, the same code in both unit programs, without P (paths 1 and 2); while one unit waits, a different wait code in the other unit is an alarm",
+          "source": "Nakamura-Tome programming manual for its Fanuc controls, miscellaneous functions: M100-M199 synchronise the unit programs; on a two-unit machine the same three-digit M code is written in both programs and a different one while a unit waits stops both units",
+          "verify": true,
+          "value": {
+            "layout": "multi-file",
+            "list": [
+              {
+                "id": "1",
+                "name": "Path 1"
+              },
+              {
+                "id": "2",
+                "name": "Path 2"
+              }
+            ],
+            "syncMarks": [
+              {
+                "id": "wait",
+                "label": "Waiting M-code: the same code in both unit programs",
+                "samePartners": true,
+                "match": {
+                  "kind": "codes",
+                  "codes": "M100-M199"
+                },
+                "partners": {
+                  "kind": "word",
+                  "address": "P",
+                  "decode": "digits",
+                  "whenAbsent": {
+                    "kind": "fixed",
+                    "channels": [
+                      "1",
+                      "2"
+                    ]
+                  }
+                }
+              }
+            ],
+            "stopsAndEndsWait": false
+          }
+        },
+        {
+          "id": "fanuc-nakamura-3unit-digits",
+          "label": "Nakamura-Tome, three units (three paths), files tied by hand (no file-name rule); waits M100-M199 with a P after the code that names the paths by number (the factory setting, parameter 8103 bit 1 = 1: P12 = paths 1 and 2, P123 = all three); the same code may come again with other paths (M100 P12, then M100 P13); a wait without P is an error",
+          "source": "Nakamura-Tome programming manual for its Fanuc controls, miscellaneous functions: on a three-unit machine a P word follows the waiting M code; the paths as digits (P12, P13, P23, P123, order free) are the factory setting, a bit sum is the other parameter setting; which unit is path 1, 2 or 3 depends on the machine type",
+          "verify": true,
+          "value": {
+            "layout": "multi-file",
+            "list": [
+              {
+                "id": "1",
+                "name": "Path 1"
+              },
+              {
+                "id": "2",
+                "name": "Path 2"
+              },
+              {
+                "id": "3",
+                "name": "Path 3"
+              }
+            ],
+            "syncMarks": [
+              {
+                "id": "wait",
+                "label": "Waiting M-code: the P word names the paths taking part",
+                "samePartners": true,
+                "match": {
+                  "kind": "codes",
+                  "codes": "M100-M199"
+                },
+                "partners": {
+                  "kind": "word",
+                  "address": "P",
+                  "decode": "digits",
+                  "whenAbsent": {
+                    "kind": "none"
+                  }
+                }
+              }
+            ],
+            "stopsAndEndsWait": false
+          }
+        },
+        {
+          "id": "fanuc-star-2head",
+          "label": "Star, two heads (HEAD1 and HEAD2), files tied by hand (no file-name rule); waits M200-M999, the same three-digit code in both head programs, without P; function codes that also wait for the other head (such as M40/M41 or M54/M55) are not counted",
+          "source": "Star SV-20 programming manual, M codes of HEAD1 and HEAD2: every M code from M200 to M999 can be a wait; with SIMUL on, a head goes on only when the other head has reached the same three-digit code",
+          "verify": true,
+          "value": {
+            "layout": "multi-file",
+            "list": [
+              {
+                "id": "1",
+                "name": "Head 1"
+              },
+              {
+                "id": "2",
+                "name": "Head 2"
+              }
+            ],
+            "syncMarks": [
+              {
+                "id": "wait",
+                "label": "Wait: the same three-digit M-code in both head programs",
+                "samePartners": true,
+                "match": {
+                  "kind": "codes",
+                  "codes": "M200-M999"
+                },
+                "partners": {
+                  "kind": "word",
+                  "address": "P",
+                  "decode": "digits",
+                  "whenAbsent": {
+                    "kind": "fixed",
+                    "channels": [
+                      "1",
+                      "2"
+                    ]
+                  }
+                }
+              }
+            ],
+            "stopsAndEndsWait": false
+          }
         }
       ]
     }
   },
   "numbering": {
     "references": [
-      { "trigger": "(?<![A-Z])M\\s*0*99(?!\\d)", "addresses": ["P"], "rewrite": false },
-      { "trigger": "^(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)", "addresses": ["Q"] },
-      { "trigger": "^(?=[^(]*P\\s*\\d)(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)", "addresses": ["Q"], "rewrite": false },
+      { "trigger": "(?<![A-Z])M\\s*0*99(?!\\d)", "addresses": ["P"], "program": "caller" },
+      { "trigger": "^(?![^(]*(?:(?<![A-Z])P|<))(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)", "addresses": ["Q"] },
+      { "trigger": "^(?=[^(]*(?:(?<![A-Z])P|<))(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)", "addresses": ["Q"], "rewrite": false, "program": "called" },
       { "trigger": "^(?=[^(]*P\\s*\\d)(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])G\\s*0*7[0-3](?![\\d.])", "addresses": ["P", "Q"] },
       { "trigger": "(?<![A-Z])GOTO", "addresses": ["GOTO"] }
     ]

@@ -1,0 +1,29 @@
+{
+  "message": "Nothing was changed: 4 blocks cannot be written out as plain moves: 1 cycle with a value gEdit does not know, 1 cycle run in a way gEdit does not write out, 1 cycle missing a value, 1 cycle call that is not written out. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "N40 G98 G81 X10. Y10. Z-5. R2. F150. K0: this way of calling the cycle is not written out yet (K0 with a position in the same block).",
+      "reason": "call-form"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "N70 G91 G98 G81 X5. Y0. Z-7. R-18. F150. K10000: a value the cycle needs is not written and has no default (K10000, more than 9999 repeats).",
+      "reason": "value-missing"
+    },
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "N100 G98 G81 X20. Y10. Z-5. R2. F150. G43 H2: this cycle block writes a value gEdit does not know the meaning of (G43, a tool length offset code in the cycle block).",
+      "reason": "param-unknown"
+    },
+    {
+      "line": 16,
+      "severity": "error",
+      "message": "N140 G98 G86 X30. Y10. Z-5. R2. F150.: this cycle runs in a way gEdit does not write out for this value (M4 in force).",
+      "reason": "variant-unknown"
+    }
+  ]
+}

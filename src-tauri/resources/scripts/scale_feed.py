@@ -1118,7 +1118,14 @@ def lead_carriers(
     carriers: Carriers = {}
     if as_dict(cp.profile.get("syntax")).get("calls") is not True or not codes:
         return carriers
-    names = {code.upper() for code in (entry.get("code") for entry in codes if entry.get("pitchFeed") is True) if isinstance(code, str) and code}
+    # Only a name can be written as a call (`CYCLE840(`): a code word such as `G33` or `G331` is
+    # no name to the tokenizer (`syntax.names`, two letters first), so its presence in the text
+    # says nothing and must not start a second pass over the program (T178).
+    names = {
+        code.upper()
+        for code in (entry.get("code") for entry in codes if entry.get("pitchFeed") is True)
+        if isinstance(code, str) and re.match(r"[A-Za-z_]{2}", code) is not None
+    }
     above = list(preceding or ())
     walk = above + list(lines)
     text = "\n".join(walk).upper()

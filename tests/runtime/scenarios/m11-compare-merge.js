@@ -60,7 +60,10 @@ scenario('m11-compare-merge', { timeout: 240 }, async (h) => {
   await openCompare(h, reg, mod, { kind: 'document', docId: orig })
   await guard(h, 'A. the starting point', async () => {
     h.check('raw mode, three changes: the changed line, the missing line, the extra line', view(h)?.dataset.mode === 'raw' && blocks() === 3, { mode: view(h)?.dataset.mode, changes: (lineChanges(reg) ?? []).map(spans) })
-    h.check('both copy controls are enabled: the original is an open document', h.qa('compare-copy').every((e) => e.dataset.disabled === 'false' || e.dataset.disabled === undefined || e.getAttribute('data-disabled') !== 'true'), h.qa('compare-copy').map((e) => `${e.dataset.direction}:${e.getAttribute('data-disabled')}`))
+    await cursorAt('modified', 1)
+    h.check('with the cursor on a line that is the same on both sides, both copy controls are marked disabled (M11 CODE-18)', h.qa('compare-copy').length === 2 && h.qa('compare-copy').every((e) => e.getAttribute('data-disabled') === 'true'), h.qa('compare-copy').map((e) => `${e.dataset.direction}:${e.getAttribute('data-disabled')}`))
+    await cursorAt('modified', 2)
+    h.check('with the cursor in a change, both copy controls are enabled: the original is an open document', h.qa('compare-copy').every((e) => e.dataset.disabled === 'false' || e.dataset.disabled === undefined || e.getAttribute('data-disabled') !== 'true'), h.qa('compare-copy').map((e) => `${e.dataset.direction}:${e.getAttribute('data-disabled')}`))
     h.check('the two documents are as written', text(orig) === ORIGINAL && text(mod) === MODIFIED)
   })
 
@@ -158,7 +161,10 @@ scenario('m11-compare-merge', { timeout: 240 }, async (h) => {
     await h.waitFor(() => !!view(h)?.querySelector('.monaco-diff-editor'), { timeout: 15000 })
     await h.waitFor(() => lineChanges(reg) !== null, { timeout: 20000 })
     h.check('the comparison opened in raw mode, the mode it was left in', view(h)?.dataset.mode === 'raw', view(h)?.dataset.mode)
-    h.check('with a file as the original the copy to the original is disabled and the other one is not', h.q('compare-copy', { direction: 'toOriginal' })?.getAttribute('data-disabled') === 'true' && h.q('compare-copy', { direction: 'toModified' })?.getAttribute('data-disabled') !== 'true', h.qa('compare-copy').map((e) => `${e.dataset.direction}:${e.getAttribute('data-disabled')}`))
+    // The copy controls follow the cursor (M11 CODE-18): put it in the first change.
+    const firstChange = /** @type {any} */ ((lineChanges(reg) ?? [])[0])
+    if (firstChange) await cursorAt('modified', Math.max(1, firstChange.modifiedStartLineNumber))
+    h.check('with a file as the original (and the cursor in a change) the copy to the original is disabled and the other one is not', h.q('compare-copy', { direction: 'toOriginal' })?.getAttribute('data-disabled') === 'true' && h.q('compare-copy', { direction: 'toModified' })?.getAttribute('data-disabled') !== 'true', h.qa('compare-copy').map((e) => `${e.dataset.direction}:${e.getAttribute('data-disabled')}`))
     const docBefore = text(/** @type {any} */ (read(compare.session)).docId)
     const key = await ctx.commands.run('compare.copyToOriginal')
     await h.idle()

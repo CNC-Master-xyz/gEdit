@@ -802,11 +802,19 @@ export interface AlignOptions {
   /** The machine's declared channel ids (`ChannelParams.list[].id`). A wait that names an id not
    *  in it is `unmatched` (`unknown`). Absent: such a wait is judged like any other. */
   declared?: readonly string[];
+  /**
+   * The alignment the same panes had before an edit (the one `alignPanes` returned last). An edit that only moves the
+   * lines of the waits (a line break typed in an ordinary line of a pane) leaves who meets whom and in which order as it
+   * was: then the answer is that alignment with the rows worked out again (`fillRows`) and not the whole of it again
+   * (v1.2.0 channel-enter: at 20,000 waits that is the cost of a line break). Used only when it is certain to give the
+   * answer a full alignment would (`reusablePlan`); otherwise it is ignored.
+   */
+  previous?: Alignment;
 }
 
 /** `M0901` and `M901` are one code; anything else is compared as written (as `sameMarkId` of the channel store). */
 function codeByValue(code: string): string {
-  const m = /^([A-Za-z]*)0*(\d+)$/.exec(code);
+  const m = /^([A-Za-z]*-?)0*(\d+)$/.exec(code); // `P-010` is `P-10` (the Okuma negative P, D2-1)
   return m === null ? code : m[1].toUpperCase() + m[2];
 }
 
@@ -868,7 +876,9 @@ export function answersWait(hit: SyncHit, rule: SyncRule | undefined): boolean {
  * (`sameMarkId`: `M0901` is `M901`; `''` for a `count` rule) and the set of channels taking
  * part, which is the mark's resolved partners (`SyncHit.partners`: the `P` word read as path
  * digits or bits by the machine's rule) **with its own channel added**, ids sorted (digits by
- * value). So `M901 P12` in path 1 and `M901 P12` in path 2 have one key, `M901 P123` another,
+ * value). Manual check D2-2 (2026-10-25): for a rule that asks for the same partners (below) the
+ * set is the one written, the own channel NOT added, as Check Wait Codes compares it; a set
+ * without the own channel keys apart (it meets nothing, as the check reports it). So `M901 P12` in path 1 and `M901 P12` in path 2 have one key, `M901 P123` another,
  * and a Siemens `WAITM(1,2)` in channel 1 the same key as `WAITM(1,1)` in channel 2. A piece the
  * machine does not declare stays in the set as written, so such a wait never completes.
  *
@@ -882,8 +892,19 @@ export function answersWait(hit: SyncHit, rule: SyncRule | undefined): boolean {
  * not by this key.
  */
 export function waitKey(hit: SyncHit, rule?: SyncRule): string {
-  const absent = asksSamePartners(rule) ? (hit.absent === true ? '\u0001-' : '\u0001+') : '';
-  return `${hit.ruleId}\u0001${codeByValue(hit.mark)}\u0001${takingPart(hit).join(',')}${absent}`;
+  if (!asksSamePartners(rule)) return `${hit.ruleId}\u0001${codeByValue(hit.mark)}\u0001${takingPart(hit).join(',')}`;
+  const absent = hit.absent === true ? '\u0001-' : '\u0001+';
+  // Manual check D2-2: the set as written. A set that leaves out the own channel (`M901 P2` in
+  // path 1, which Check Wait Codes reports) keys apart, with its channel, so it meets nothing.
+  const own = hit.absent === true || hit.partners.includes(hit.channel) ? '' : `\u0001!${hit.channel}`;
+  return `${hit.ruleId}\u0001${codeByValue(hit.mark)}\u0001${writtenSet(hit).join(',')}${own}${absent}`;
+}
+
+/** The channels a wait's partner word names, as written (the own channel not added), sorted, without repeats. */
+function writtenSet(hit: SyncHit): string[] {
+  const ids = [...hit.partners];
+  ids.sort(compareIds);
+  return ids.filter((id, i) => i === 0 || id !== ids[i - 1]);
 }
 
 /** One lined-up wait: one mark per pane it involves (at least two), `pane` ascending. */
@@ -995,6 +1016,8 @@ const MAX_CROSSING_WORK = 50_000;
  * `unmatched`, `elsewhere` (NC-12).
  */
 export function alignPanes(panes: readonly PaneMarks[], rules: readonly SyncRule[], o: AlignOptions = {}): Alignment {
+  const reused = o.previous === undefined ? null : realign(o.previous, panes, rules, o);
+  if (reused !== null) return reused;
   const ruleOf = new Map<string, SyncRule>();
   for (const r of rules) if (!ruleOf.has(r.id)) ruleOf.set(r.id, r);
   const semanticsOf = (id: string): string => ruleOf.get(id)?.semantics ?? 'rendezvous';
@@ -1240,7 +1263,16 @@ export function alignPanes(panes: readonly PaneMarks[], rules: readonly SyncRule
     inOrder.push(taken);
   }
 
-  // 4. Filler: every group at the row of its lowest mark, then equal heights. A line holds one row (NC-12).
+  const aligned = fillRows(panes, states, reasons, inOrder);
+  plans.set(aligned, { panes, rules, declared: o.declared === undefined ? null : o.declared.join('\u0001'), jumps: o.jumpLines !== undefined, inOrder, reused: false });
+  return aligned;
+}
+
+/**
+ * Step 4 of `alignPanes`: every group at the row of its lowest mark, then equal heights. A line holds one row (NC-12).
+ * `states` and `reasons` are the answer of the steps before it and are changed in place (`matched`, or `elsewhere`).
+ */
+function fillRows(panes: readonly PaneMarks[], states: MarkState[][], reasons: (MarkReason | null)[][], inOrder: readonly Occurrence[]): Alignment {
   const extra = new Array<number>(panes.length).fill(0);
   const rowOfLine = panes.map(() => new Map<number, number>());
   const zoneAt = new Map<string, FillerZone>();
@@ -1252,24 +1284,35 @@ export function alignPanes(panes: readonly PaneMarks[], rules: readonly SyncRule
   };
   const groups: AlignedGroup[] = [];
   for (const occ of inOrder) {
-    const marks = occ.members.map((m) => ({ pane: m.pane, index: m.index, line: panes[m.pane].marks[m.index].line }));
+    const members = occ.members;
     let target = 0;
-    for (const m of marks) target = Math.max(target, m.line + extra[m.pane]);
-    if (marks.some((m) => rowOfLine[m.pane].has(m.line) && m.line + extra[m.pane] !== target)) {
-      for (const m of marks) unmatched(m.pane, m.index, { kind: 'elsewhere' });
+    let crowded = false;
+    for (const m of members) target = Math.max(target, panes[m.pane].marks[m.index].line + extra[m.pane]);
+    for (const m of members) {
+      const line = panes[m.pane].marks[m.index].line;
+      if (rowOfLine[m.pane].has(line) && line + extra[m.pane] !== target) crowded = true;
+    }
+    if (crowded) {
+      for (const m of members) {
+        states[m.pane][m.index] = 'unmatched';
+        reasons[m.pane][m.index] = { kind: 'elsewhere' };
+      }
       continue;
     }
-    for (const m of marks) {
-      const need = target - (m.line + extra[m.pane]);
+    const placed: { pane: number; line: number }[] = [];
+    for (const m of members) {
+      const line = panes[m.pane].marks[m.index].line;
+      const need = target - (line + extra[m.pane]);
       if (need > 0) {
-        addZone(m.pane, m.line - 1, need);
+        addZone(m.pane, line - 1, need);
         extra[m.pane] += need;
       }
-      rowOfLine[m.pane].set(m.line, target);
+      rowOfLine[m.pane].set(line, target);
       states[m.pane][m.index] = 'matched';
       reasons[m.pane][m.index] = null;
+      placed.push({ pane: m.pane, line });
     }
-    groups.push({ marks: marks.map((m) => ({ pane: m.pane, line: m.line })) });
+    groups.push({ marks: placed });
   }
   const tallest = panes.reduce((t, p, i) => Math.max(t, p.lineCount + extra[i]), 0);
   panes.forEach((p, i) => {
@@ -1278,6 +1321,70 @@ export function alignPanes(panes: readonly PaneMarks[], rules: readonly SyncRule
   });
   const zones = [...zoneAt.values()].sort((a, b) => a.pane - b.pane || a.afterLine - b.afterLine);
   return { groups, states, reasons, zones };
+}
+
+/** What a full alignment keeps for `AlignOptions.previous`: the inputs it was made from and the order it found (steps 1 to 3). */
+interface Plan {
+  panes: readonly PaneMarks[];
+  rules: readonly SyncRule[];
+  declared: string | null;
+  jumps: boolean;
+  inOrder: readonly Occurrence[];
+  /** Made by `realign` from an earlier alignment, not by the whole of `alignPanes`. */
+  reused: boolean;
+}
+
+const plans = new WeakMap<Alignment, Plan>();
+
+/** Whether `a` and `b` are the same mark but for the line (what steps 1 to 3 read: the rule, the code, the channel, the partners, whether it blocks and whether its partner word was absent). */
+function sameButLine(a: SyncHit, b: SyncHit): boolean {
+  if (a === b) return true;
+  if (a.mark !== b.mark || a.ruleId !== b.ruleId || a.channel !== b.channel || a.blocking !== b.blocking || a.absent !== b.absent || a.partners.length !== b.partners.length) return false;
+  for (let i = 0; i < a.partners.length; i++) if (a.partners[i] !== b.partners[i]) return false;
+  return true;
+}
+
+/** Whether `alignment` was made from an earlier one (`AlignOptions.previous`) and not by the whole of `alignPanes`: for the tests, which hold a reuse to the whole. */
+export function wasRealigned(alignment: Alignment): boolean {
+  return plans.get(alignment)?.reused === true;
+}
+
+/** Whether two lists of rules are the same rules (the machine's block keeps its objects between edits, so the objects usually are). */
+function sameRules(a: readonly SyncRule[], b: readonly SyncRule[]): boolean {
+  if (a === b) return true;
+  return a.length === b.length && a.every((rule, i) => rule === b[i] || JSON.stringify(rule) === JSON.stringify(b[i]));
+}
+
+/**
+ * The alignment of `panes` from `prev`, the one of the same panes before an edit, when the edit only moved lines: the same
+ * panes (channels), the same rules and declared channels, and in every pane the same marks in the same order that differ
+ * in their lines at most. Who meets whom, in which order and what the reasons are is then what `prev` found (the first
+ * three steps of `alignPanes` read the marks by index and never by line, when no jump lines are given); only the rows,
+ * which are lines, are worked out again. Null when that cannot be said, or when `prev` used jump lines or `o` has them.
+ */
+function realign(prev: Alignment, panes: readonly PaneMarks[], rules: readonly SyncRule[], o: AlignOptions): Alignment | null {
+  const plan = plans.get(prev);
+  if (plan === undefined || plan.jumps || o.jumpLines !== undefined || !sameRules(plan.rules, rules)) return null;
+  if ((o.declared === undefined ? null : o.declared.join('\u0001')) !== plan.declared) return null;
+  if (plan.panes.length !== panes.length) return null;
+  for (let i = 0; i < panes.length; i++) {
+    const before = plan.panes[i];
+    const now = panes[i];
+    if (before.channel !== now.channel || before.marks.length !== now.marks.length) return null;
+    for (let j = 0; j < now.marks.length; j++) if (!sameButLine(before.marks[j], now.marks[j])) return null;
+  }
+  // The steps before step 4 left these marks as they came; step 4 made them `matched` or `elsewhere`.
+  const states = prev.states.map((row) => row.slice());
+  const reasons = prev.reasons.map((row) => row.slice());
+  for (const occ of plan.inOrder) {
+    for (const m of occ.members) {
+      states[m.pane][m.index] = 'none';
+      reasons[m.pane][m.index] = null;
+    }
+  }
+  const aligned = fillRows(panes, states, reasons, plan.inOrder);
+  plans.set(aligned, { ...plan, panes, reused: true });
+  return aligned;
 }
 
 /**

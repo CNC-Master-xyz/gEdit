@@ -3,10 +3,11 @@
 // One `OutlineIndex` (core/profiles/outline.ts) per open document. The first build runs
 // after the first render, in slices of at most `BUILD_BUDGET_MS` (8 ms, the budget of the
 // modal index), so opening a 10 MB program never blocks a frame (B1 B2; it was 20,000
-// lines a slice, which is 150 ms and more on a slow engine). A machine switch rebuilds the
-// same way. Every content change is fed into `applyChange`, and only the *published* items
-// are debounced by 150 ms. `toolLines()` and `itemAt()` answer from the index directly,
-// because F7 pressed right after a keystroke must not step to a stale line.
+// lines a slice, which is 150 ms and more on a slow engine). A machine switch that changes how
+// the program reads rebuilds the same way (below). Every content change is fed into
+// `applyChange`, and only the *published* items are debounced by 150 ms. `toolLines()` and
+// `itemAt()` answer from the index directly, because F7 pressed right after a keystroke
+// must not step to a stale line.
 //
 // **How the slices follow each other** (B1 fixperf). B2 scheduled every slice with
 // `runWhenIdle`, and where there is no `requestIdleCallback` (the macOS webview) that is a
@@ -29,6 +30,19 @@
 // every switch and paid ~36 ms on a 10 MB program (G7). Here the panel only swaps which
 // store it subscribes to.
 //
+// **The last stage** (T136). Once every line is read, the marks are put into the tree in runs
+// of their own (`OutlineIndex.aggregateSome`; `AGGREGATE_LINES`, `AGGREGATE_MARKS`), inside the
+// same slices and under the same budget. It used to be one stretch inside the slice that read
+// the last line: 100 to 230 ms for 300,000 lines with 30,000 rows (Okuma, Sinumerik).
+// While the build runs nothing is published: the tree of the part that is read was
+// aggregated whole for the debounce that `rebuild` arms, and again for every keystroke typed
+// meanwhile. What was published before stays until the build is done.
+//
+// **A machine switch** rebuilds the map only when the profile it reads is another one
+// (`sameOutlineReading`): the comment, program and tool rules, the tool list and the syntax.
+// A machine that changes the modal state the program starts from (power-on units, diameter
+// programming, feed mode) leaves the marks as they are.
+//
 // Why the slice loop re-reads the line count instead of trusting the change events: while
 // the first build is running, an edit *below* the built prefix needs no work at all (the
 // build has not read those lines yet), and an edit *inside* it is a normal `applyChange`
@@ -39,7 +53,7 @@
 // unit test drives it with a fake editor and a fake clock.
 
 import { writable, type Readable, type Writable } from 'svelte/store';
-import { OutlineIndex, type OutlineItem } from '$lib/core/profiles/outline';
+import { OutlineIndex, sameOutlineReading, type OutlineItem } from '$lib/core/profiles/outline';
 import { editor as appEditor } from '$lib/monaco/editorService';
 import { docs as appDocs } from '$lib/stores/documents';
 import { machines as appMachines } from '$lib/stores/machines';
@@ -52,6 +66,7 @@ import { labelsOf, referenceAddresses, referencesOn, blockKeyOf, comparesByText,
 import type { BlockKey } from '$lib/core/transforms/references';
 import { tokenizeLine } from '$lib/core/nc/tokenizer';
 import { IDLE_BUDGET_MS, runWhenIdle } from '$lib/app/modalService';
+import { CHAIN_MS, inputPending, nextTurn } from '$lib/app/scheduler';
 import { t } from '$lib/i18n';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import type { Disposable, DocId, DocumentStore, EditorService, OutlineService } from '$lib/app/types';
@@ -66,8 +81,16 @@ export const CHUNK_LINES = 250;
 export const MAX_CHUNK_LINES = 1000;
 /** How much of what is left of a slice's budget the next run is sized to use (the rest is margin). */
 const RUN_SHARE = 0.7;
-/** Chained slices (no idle gap) may run this long (ms of work) before the pump takes one timer turn. */
-export const CHAIN_MS = 24;
+/**
+ * The last stage of the first build, the aggregation of the marks into the tree, runs in
+ * runs as well (T136): at most this many lines, or this many marks that say something (a tool
+ * call, a comment, a stop), between two looks at the clock. A run of either costs a few
+ * milliseconds at most, so the stage ends within the slice's budget plus one run like the
+ * reading does; it used to be one stretch of 100 to 230 ms over 300,000 lines with 30,000
+ * rows.
+ */
+export const AGGREGATE_LINES = 20_000;
+export const AGGREGATE_MARKS = 400;
 /** After a switch to a document that is already open, no slice runs for this long (ms). */
 export const SWITCH_QUIET_MS = 150;
 /** The most one slice of the first build spends, the modal index's budget (B1 B2). */
@@ -132,6 +155,8 @@ export interface OutlineServiceDeps {
   budgetMs?: number;
   /** Lines between two looks at the clock (`CHUNK_LINES`). */
   chunkLines: number;
+  /** The most lines and the most marks one run of the aggregation covers (`AGGREGATE_LINES`, `AGGREGATE_MARKS`). */
+  aggregateRun?: { lines: number; marks: number };
   delayMs: number;
 }
 
@@ -142,8 +167,12 @@ interface Entry {
   cp: CompiledProfile;
   index: OutlineIndex;
   store: Writable<OutlineItem[]>;
-  /** The chunked first build (`next` is the first line it has not read), or null once it has finished. */
-  build: { next: number } | null;
+  /**
+   * The chunked first build, or null once it has finished: `next` is the first line it has
+   * not read, and `aggregating` says that every line is read and the marks are being put
+   * into the tree (`OutlineIndex.aggregateSome`).
+   */
+  build: { next: number; aggregating: boolean } | null;
   ready: Promise<void>;
   markReady: () => void;
   /** The pending aggregation. */
@@ -417,6 +446,7 @@ export function createOutlineService(deps: OutlineServiceDeps): OutlineServiceIn
   const budget = deps.budgetMs ?? BUILD_BUDGET_MS;
   const quietMs = deps.switchQuietMs ?? SWITCH_QUIET_MS;
   const maxRun = Math.max(deps.chunkLines, deps.maxChunkLines ?? deps.chunkLines);
+  const aggregateRun = deps.aggregateRun ?? { lines: AGGREGATE_LINES, marks: AGGREGATE_MARKS };
   /** The scheduler of a slice that waits for idle time: the idle clock, or the next turn where the deps give none. */
   const later = (fn: () => void): Disposable => (deps.idle !== undefined ? deps.idle(fn) : deps.schedule(fn, 0));
   /** The pump that runs the slices, or null while none is waiting. */
@@ -439,7 +469,9 @@ export function createOutlineService(deps: OutlineServiceDeps): OutlineServiceIn
           rebuild(id, entry);
           return;
         }
-        if (entry.build !== null) {
+        // Once every line is read an edit is a normal `applyChange`: the index is complete,
+        // and the aggregation either goes on (the edit is below it) or starts again.
+        if (entry.build !== null && !entry.build.aggregating) {
           const built = entry.build.next; // the first line the build has not read yet
           if (change.startLine >= built) return; // below the prefix: the build reads it
           if (change.endLineOld >= built) {
@@ -449,6 +481,16 @@ export function createOutlineService(deps: OutlineServiceDeps): OutlineServiceIn
           entry.build.next += change.endLineNew - change.endLineOld;
         }
         entry.index.applyChange(change.startLine, change.endLineOld, deps.editor.getLines(id, change.startLine, change.endLineNew));
+        // An edit that reached what the aggregation had read ends the first build here: every
+        // line is classified and the index is current, and starting the walk again would never
+        // end while the typing goes on (a keystroke every few ms above the walk sends it back
+        // to the first line each time). The map is published by the debounce the edit arms,
+        // which is the path of every edit after the first build; the walk goes on only for an
+        // edit below it.
+        if (entry.build !== null && entry.build.aggregating && !entry.index.aggregating) {
+          entry.build = null;
+          entry.markReady();
+        }
         schedulePublish(entry);
       }),
       // A switch to a document that is already open must not share the main thread with a
@@ -508,15 +550,15 @@ export function createOutlineService(deps: OutlineServiceDeps): OutlineServiceIn
   function reindexIfChanged(id: DocId, entry: Entry): void {
     const view = deps.effective(id);
     if (view === null) return;
-    if (view.key === entry.key) {
-      if (view.cp === entry.cp) return;
-      // A reload made a new object. Only a profile that reads differently needs a new index.
-      const same = JSON.stringify(view.cp.profile) === JSON.stringify(entry.cp.profile);
-      entry.cp = view.cp;
-      if (same) return;
-    }
+    if (view.key === entry.key && view.cp === entry.cp) return;
+    // A machine switch or a reload made another key or another object. Only a profile the
+    // map reads differently needs a new index (T136): a machine that changes the power-on
+    // state of the modal index, or a reload that made an equal profile, leaves the marks as
+    // they are, and the first build of a 300,000-line program is not paid again.
+    const same = sameOutlineReading(view.cp, entry.cp);
     entry.key = view.key;
     entry.cp = view.cp;
+    if (same) return;
     entry.index = new OutlineIndex(view.cp);
     rebuild(id, entry);
   }
@@ -536,6 +578,12 @@ export function createOutlineService(deps: OutlineServiceDeps): OutlineServiceIn
 
   /** The items as published: the P1 tree, or grouped by channel (M12). */
   function publishNow(entry: Entry): void {
+    // While the first build runs nothing is published: the tree of the part that is read
+    // would be aggregated in one go (a stall that grows with the prefix, once for the
+    // debounce that `rebuild` arms and once more for every keystroke typed meanwhile), and
+    // the map is published whole by the slice that finishes the build. What was published
+    // before stays until then.
+    if (entry.build !== null) return;
     const items = entry.index.items();
     const set = deps.channels?.forDoc(entry.id);
     if (deps.channels === undefined || set === undefined || set.layout !== 'single-file' || set.members.length === 0) {
@@ -573,8 +621,10 @@ export function createOutlineService(deps: OutlineServiceDeps): OutlineServiceIn
 
   /**
    * One slice of the first build of `entry`: reads runs of lines until the budget is spent (at
-   * least one run, so the build moves on), then hands the main thread back. The slice that
-   * reads the last line finishes the build and publishes at once. Answers the ms it took.
+   * least one run, so the build moves on), then hands the main thread back. Once every line
+   * is read, the marks are put into the tree in runs too (`OutlineIndex.aggregateSome`, T136),
+   * the first of them in the slice that read the last line. The slice that completes the tree
+   * finishes the build and publishes at once. Answers the ms it took.
    */
   function step(entry: Entry): number {
     const build = entry.build;
@@ -583,27 +633,37 @@ export function createOutlineService(deps: OutlineServiceDeps): OutlineServiceIn
     const started = now();
     let at = started;
     for (;;) {
-      const total = deps.editor.getLineCount(id);
-      const from = build.next;
-      const end = Math.min(total, from + runLines(budget - (at - started)) - 1);
-      if (end >= from) {
-        entry.index.applyChange(from, from - 1, deps.editor.getLines(id, from, end));
-        build.next = end + 1;
+      let sampled = false;
+      if (!build.aggregating) {
+        const total = deps.editor.getLineCount(id);
+        const from = build.next;
+        const end = Math.min(total, from + runLines(budget - (at - started)) - 1);
+        if (end >= from) {
+          entry.index.applyChange(from, from - 1, deps.editor.getLines(id, from, end));
+          build.next = end + 1;
+        }
+        if (build.next > total) build.aggregating = true;
+        else {
+          const after = now();
+          if (end >= from && after > at) {
+            const sample = (after - at) / (end - from + 1);
+            perLine = perLine === 0 ? sample : (perLine + sample) / 2;
+          }
+          at = after;
+          sampled = true;
+        }
       }
-      if (build.next > total) {
-        entry.build = null;
-        entry.publish?.();
-        entry.publish = null;
-        publishNow(entry);
-        entry.markReady();
-        return at - started;
+      if (build.aggregating) {
+        if (entry.index.aggregateSome(aggregateRun.lines, aggregateRun.marks)) {
+          entry.build = null;
+          entry.publish?.();
+          entry.publish = null;
+          publishNow(entry);
+          entry.markReady();
+          return at - started;
+        }
+        if (!sampled) at = now();
       }
-      const after = now();
-      if (end >= from && after > at) {
-        const sample = (after - at) / (end - from + 1);
-        perLine = perLine === 0 ? sample : (perLine + sample) / 2;
-      }
-      at = after;
       if (at - started >= budget) return at - started;
     }
   }
@@ -660,7 +720,7 @@ export function createOutlineService(deps: OutlineServiceDeps): OutlineServiceIn
     entry.index.reset([]);
     // The first slice waits for idle time as well, so opening a document never
     // classifies a run of lines inside the event that created it.
-    entry.build = { next: 1 };
+    entry.build = { next: 1, aggregating: false };
     if (pump === null) {
       chained = 0;
       pump = later(runPump);
@@ -766,40 +826,8 @@ const EMPTY_PROFILE: CompiledProfile = {
   keywords: [],
 };
 
-let turnChannel: MessageChannel | null = null;
-const turnQueue: { fn: () => void; cancelled: boolean }[] = [];
-
-/**
- * Runs `fn` in the next turn of the event loop, without the delay of a timer (a message on a
- * channel of our own; a timer is clamped to at least 1 ms and, nested, to 4). Input that has
- * arrived is served between this and the turn before. Without `MessageChannel` it is a
- * timer of 0.
- */
-export function nextTurn(fn: () => void): Disposable {
-  if (typeof MessageChannel !== 'function') {
-    const handle = setTimeout(fn, 0);
-    return () => clearTimeout(handle);
-  }
-  if (turnChannel === null) {
-    turnChannel = new MessageChannel();
-    turnChannel.port1.onmessage = () => {
-      const task = turnQueue.shift();
-      if (task !== undefined && !task.cancelled) task.fn();
-    };
-  }
-  const task = { fn, cancelled: false };
-  turnQueue.push(task);
-  turnChannel.port2.postMessage(null);
-  return () => {
-    task.cancelled = true;
-  };
-}
-
-/** Is the user's input waiting? Only some engines can say (`navigator.scheduling.isInputPending`); the others: no. */
-export function inputPending(): boolean {
-  const scheduling = (globalThis.navigator as { scheduling?: { isInputPending?: () => boolean } } | undefined)?.scheduling;
-  return scheduling?.isInputPending?.() === true;
-}
+/** The turn and input helpers the pump uses live in `scheduler.ts` (the modal service chains its slices the same way); re-exported for the callers and tests that import them from here. */
+export { CHAIN_MS, inputPending, nextTurn };
 
 /** The application-wide outline service. */
 export const outline: OutlineServiceInternals = createOutlineService({

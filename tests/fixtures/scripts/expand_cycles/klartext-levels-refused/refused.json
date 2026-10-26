@@ -1,0 +1,29 @@
+{
+  "message": "Nothing was changed: 4 blocks cannot be written out as plain moves: 3 cycles missing a value, 1 cycle whose bottom is not below its start. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 15,
+      "severity": "error",
+      "message": "5 L X+10 Y+10 R0 FMAX M99: a value the cycle needs is not written and has no default (a set-up clearance below 0).",
+      "reason": "value-missing"
+    },
+    {
+      "line": 27,
+      "severity": "error",
+      "message": "8 L X+20 Y+10 R0 FMAX M99: a value the cycle needs is not written and has no default (a return distance below 0).",
+      "reason": "value-missing"
+    },
+    {
+      "line": 39,
+      "severity": "error",
+      "message": "11 L X+30 Y+10 R0 FMAX M99: a value the cycle needs is not written and has no default (a depth of 0 and no other depth).",
+      "reason": "value-missing"
+    },
+    {
+      "line": 51,
+      "severity": "error",
+      "message": "14 L X+40 Y+10 R0 FMAX M99: the bottom of the hole is not below the level where the feed starts.",
+      "reason": "depth-direction"
+    }
+  ]
+}

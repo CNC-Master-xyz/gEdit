@@ -37,18 +37,6 @@ import { configPaths, python } from './m2-common.js'
 /** 50 MiB + a bit, in one write, so `readDisk` decodes more than `MODEL_SYNC_LIMIT_CHARS`. */
 const BIG = 'import sys\np = sys.stdin.read().strip()\nwith open(p, "w") as f:\n    f.write(("G1 X1 Y1 Z1 F500 (PADDING PADDING PADDING)\\n" * 1300000))\n    f.write("M30\\n")\nprint(1)\n'
 
-/** Monaco's model registry, through the editor's instantiation service (see the header). */
-function modelService(/** @type {any} */ ctx) {
-  let inst = /** @type {any} */ (ctx.editor.editorInstance())?._instantiationService
-  while (inst) {
-    for (const [id, service] of inst._services?._entries ?? []) {
-      if (String(id) === 'modelService' && typeof service?.getModels === 'function') return service
-    }
-    inst = inst._parent
-  }
-  return null
-}
-
 scenario('m2-compare', { timeout: 300 }, async (h) => {
   const ctx = /** @type {any} */ (h.app.ctx)
   const view = () => h.q('compare-view')
@@ -75,9 +63,10 @@ scenario('m2-compare', { timeout: 300 }, async (h) => {
   const cursorBefore = JSON.stringify(h.app.cursor())
   const textBefore = ctx.editor.getText(id)
 
-  const models = modelService(ctx)
-  h.check('Monaco’s model registry is reachable (monaco 0.55 internals)', models !== null)
-  const modelCount = () => models?.getModels().length ?? -1
+  // `h.monaco` is the one place the registry is read (T193); it keeps the service once found, so the count still works
+  // while a comparison has taken the editor away.
+  h.check('Monaco’s model registry is reachable (monaco 0.55 internals)', h.monaco.service('modelService', 'getModels') !== null)
+  const modelCount = () => h.monaco.modelCount()
   const baseline = modelCount()
   let steady = baseline
 

@@ -18,6 +18,9 @@ import {
   makePairReader,
   matchLines,
   neighbourBlock,
+  realignDelay,
+  REALIGN_DELAY_MAX_MS,
+  REALIGN_DELAY_MS,
   rowMergePlan,
   rowOf,
   wordMergePlan,
@@ -26,6 +29,9 @@ import {
   type PairReader,
 } from './aligned';
 import type { CompareOptions } from './types';
+import { copyModes, extendedOffsetP, modeChanges, modeDifferences, COPY_MODE_KINDS } from './aligned';
+import { ModalIndex } from '$lib/core/nc/modal';
+import { ctx as modalCtx } from '../../../../tests/unit/helpers/modalIndex';
 
 const cp = cpOf('fanuc');
 
@@ -695,5 +701,130 @@ describe('the word copy keeps what it does not copy (review NC-13)', () => {
     expect(copyWord('okuma', ['VC1=VC2+1'], ['VC1=VC2+1 X5'], { side: 'modified', line: 1, word: 'X5' }, 'toOriginal')).toBe('VC1=VC2+1 X5');
     // Packed Fanuc words stay packed.
     expect(copyWord('fanuc', ['G1X10Y20'], ['G1X10Z5Y20'], { side: 'modified', line: 1, word: 'Z5' }, 'toOriginal')).toBe('G1X10Z5Y20');
+  });
+});
+
+describe('the wait before the view aligns again (review CODE-4)', () => {
+  it('stays at a sixth of a second while an alignment is quick', () => {
+    expect(REALIGN_DELAY_MS).toBe(150);
+    expect(realignDelay(0)).toBe(REALIGN_DELAY_MS);
+    expect(realignDelay(5)).toBe(REALIGN_DELAY_MS);
+    expect(realignDelay(75)).toBe(REALIGN_DELAY_MS);
+    expect(realignDelay(Number.NaN)).toBe(REALIGN_DELAY_MS);
+    expect(realignDelay(-1)).toBe(REALIGN_DELAY_MS);
+  });
+
+  it('grows to twice the last alignment on a long program, and no further than its limit', () => {
+    // 100,000 lines align in about 1.3 s: the wait is 2.6 s, not 150 ms.
+    expect(realignDelay(1300)).toBe(2600);
+    expect(realignDelay(400)).toBe(800);
+    expect(realignDelay(10_000)).toBe(REALIGN_DELAY_MAX_MS);
+    expect(realignDelay(Number.POSITIVE_INFINITY)).toBe(REALIGN_DELAY_MS);
+  });
+});
+
+describe('the modes at the place of a copy (review NC-6)', () => {
+  /** The modal state after `line` of `lines`, read by the TS modal interpreter with a built-in profile. */
+  function stateAfter(profileId: string, lines: string[], line: number) {
+    const { cp, db } = modalCtx(profileId);
+    const index = new ModalIndex(cp, db);
+    index.reset(lines.length, (n) => lines[n - 1] ?? '');
+    while (!index.buildSome(1000));
+    return index.stateAfter(line);
+  }
+
+  it('reads absolute or incremental, inch or mm, the plane and the work offset, each by its code', () => {
+    const modes = copyModes(stateAfter('fanuc-gcode', ['G20 G91 G18 G55', 'G1 X1.'], 1));
+    expect(modes).toEqual({
+      distance: { value: 'incremental', label: 'G91' },
+      units: { value: 'inch', label: 'inch' },
+      plane: { value: 'ZX', label: 'G18' },
+      offset: { value: 'G55', label: 'G55' },
+    });
+    expect(COPY_MODE_KINDS).toEqual(['distance', 'units', 'plane', 'offset']);
+  });
+
+  it('compares a work offset G54.1 together with its P (WX-NC-7)', () => {
+    const one = ['G54.1 P1', 'G1 X1.'];
+    const two = ['G54.1 P2', 'G1 X1.'];
+    const text = (lines: string[]) => (n: number) => lines[n - 1];
+    const a = copyModes(stateAfter('fanuc-gcode', one, 1), text(one));
+    const b = copyModes(stateAfter('fanuc-gcode', two, 1), text(two));
+    expect(a.offset).toEqual({ value: 'G54.1 P1', label: 'G54.1 P1' });
+    expect(modeDifferences(a, b)).toEqual([{ kind: 'offset', source: 'G54.1 P1', target: 'G54.1 P2' }]);
+    // The same P, however it is written (P01, no space), is no difference; another offset code is.
+    const padded = ['G54.1P01', 'G1 X1.'];
+    expect(modeDifferences(a, copyModes(stateAfter('fanuc-gcode', padded, 1), text(padded)))).toEqual([]);
+    const plain = ['G55', 'G1 X1.'];
+    expect(modeDifferences(a, copyModes(stateAfter('fanuc-gcode', plain, 1), text(plain)))).toEqual([
+      { kind: 'offset', source: 'G54.1 P1', target: 'G55' },
+    ]);
+    // Without the line text, or with a line that names no P, it is the code alone (as before).
+    expect(copyModes(stateAfter('fanuc-gcode', one, 1)).offset).toEqual({ value: 'G54.1', label: 'G54.1' });
+    expect(copyModes(stateAfter('fanuc-gcode', one, 1), () => 'G54.1').offset?.label).toBe('G54.1');
+    expect(extendedOffsetP('G54.1 P12      ')).toBe('12');
+    expect(extendedOffsetP('G54 P3')).toBeNull();
+    expect(extendedOffsetP('G54.1 P#101')).toBe('#101');
+  });
+
+  it('leaves out what is not known, and knows nothing of an unknown state', () => {
+    expect(copyModes(null)).toEqual({});
+    // Before any line, with no machine: whatever the profile does not assume is left out.
+    const start = copyModes(stateAfter('fanuc-gcode', ['G1 X1.'], 0));
+    for (const kind of COPY_MODE_KINDS) if (start[kind] !== undefined) expect(start[kind]?.label).not.toBe('');
+  });
+
+  it('reads the Sinumerik codes the same way', () => {
+    expect(copyModes(stateAfter('sinumerik-mill', ['G70 G91 G19 G56'], 1))).toMatchObject({
+      distance: { label: 'G91' },
+      units: { value: 'inch' },
+      plane: { value: 'YZ', label: 'G19' },
+      offset: { label: 'G56' },
+    });
+  });
+
+  it('lists the modes both sides know and that differ, in order, with each side\'s label', () => {
+    const a = copyModes(stateAfter('fanuc-gcode', ['G20 G91 G18 G55'], 1));
+    const b = copyModes(stateAfter('fanuc-gcode', ['G21 G90 G18 G54'], 1));
+    expect(modeDifferences(a, b)).toEqual([
+      { kind: 'distance', source: 'G91', target: 'G90' },
+      { kind: 'units', source: 'inch', target: 'mm' },
+      { kind: 'offset', source: 'G55', target: 'G54' },
+    ]);
+    expect(modeDifferences(a, a)).toEqual([]);
+    // A mode only one side knows is a difference too: `null` is the side that does not know it (the owner, 2026-10-22).
+    expect(modeDifferences(a, { distance: b.distance })).toEqual([
+      { kind: 'distance', source: 'G91', target: 'G90' },
+      { kind: 'units', source: 'inch', target: null },
+      { kind: 'plane', source: 'G18', target: null },
+      { kind: 'offset', source: 'G55', target: null },
+    ]);
+    expect(modeDifferences({}, b)).toEqual([
+      { kind: 'distance', source: null, target: 'G90' },
+      { kind: 'units', source: null, target: 'mm' },
+      { kind: 'plane', source: null, target: 'G18' },
+      { kind: 'offset', source: null, target: 'G54' },
+    ]);
+    // A mode neither side knows is none.
+    expect(modeDifferences({}, {})).toEqual([]);
+    expect(modeDifferences({ units: a.units }, { units: a.units })).toEqual([]);
+  });
+
+  it('lists the modes a copy changed for the lines below it, before and after, in order (the owner, 2026-10-20)', () => {
+    const before = copyModes(stateAfter('fanuc-gcode', ['G21 G90 G17 G54'], 1));
+    const after = copyModes(stateAfter('fanuc-gcode', ['G21 G90 G17 G54', 'G20 G91'], 2));
+    expect(modeChanges(before, after)).toEqual([
+      { kind: 'distance', before: 'G90', after: 'G91' },
+      { kind: 'units', before: 'mm', after: 'inch' },
+    ]);
+    expect(modeChanges(before, before)).toEqual([]);
+    // A mode that was not known below the copy and is now, or the other way round, is a change (the owner, 2026-10-22).
+    expect(modeChanges({ units: before.units }, { units: before.units, distance: after.distance })).toEqual([
+      { kind: 'distance', before: null, after: 'G91' },
+    ]);
+    expect(modeChanges({ units: before.units, distance: before.distance }, { units: before.units })).toEqual([
+      { kind: 'distance', before: 'G90', after: null },
+    ]);
+    expect(modeChanges({}, {})).toEqual([]);
   });
 });

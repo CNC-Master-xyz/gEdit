@@ -10,7 +10,7 @@
 // A `RibbonGroupDef` whose `group` key equals an item group's key joins that group and is
 // rendered after its buttons, so a feature can add a custom control to an existing group.
 
-import type { RibbonGroupDef, RibbonItemDef, RibbonTab } from '$lib/app/types';
+import type { RibbonGroupDef, RibbonItemDef, RibbonTab, UiState } from '$lib/app/types';
 
 /** Left-to-right order of the ribbon tabs (plan AD-6). */
 export const TAB_ORDER: readonly RibbonTab[] = ['file', 'edit', 'insert', 'nc', 'tools', 'scripts', 'view'];
@@ -38,6 +38,11 @@ export function resolveTab(saved: unknown, tabs: readonly RibbonTab[]): RibbonTa
   const wanted = saved === 'home' ? DEFAULT_TAB : saved;
   const found = tabs.find((tab) => tab === wanted);
   return found ?? tabs[0] ?? DEFAULT_TAB;
+}
+
+/** The remembered state with `tab` as the ribbon tab (T141); the same object when it already is. */
+export function rememberTab(state: UiState, tab: RibbonTab): UiState {
+  return state.ribbonTab === tab ? state : { ...state, ribbonTab: tab };
 }
 
 export type RibbonEntry = RibbonItemDef | RibbonGroupDef;

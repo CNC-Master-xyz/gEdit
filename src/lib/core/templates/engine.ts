@@ -8,7 +8,7 @@
 //     and suffix included, and one space next to it, so `G0 {{x}} {{z}}` with no `x` is `G0 Z2.`;
 //     a line left with nothing but its block number (or nothing at all, where the body line had
 //     a placeholder) is dropped.
-//  2. `{{N}}` (only at a line start) is the next block number: `prevBlockNumber + step` (the
+//  2. `{{N}}` (only at a line start, or right behind a leading block-delete `/`) is the next block number: `prevBlockNumber + step` (the
 //     profile's `numbering.step`), then on from there for every later `{{N}}`, written as the
 //     profile writes a block number (`numbering.digits`, the address, `spacesAfter`); with no
 //     number above, `numbering.start`. In an unnumbered document (`numbered: false`) it is empty
@@ -42,7 +42,8 @@
 //     at the start of a line (indentation does not count), the one after it. `{{N}}`'s
 //     separator is not part of the word, so `{{N}}{{x}} G1` with no `x` is `N10 G1`.
 //  c. A body line is dropped when it had a placeholder and, after the substitutions, only a block
-//     number or blanks are left. A line without a placeholder is kept as written, blank or not.
+//     number or blanks are left (a leading block-delete slash counts as nothing: `/{{N}}{{x}}`
+//     with no `x` goes, T157). A line without a placeholder is kept as written, blank or not.
 //     A dropped line takes no block number. When the dropped line was the last of a continuation
 //     chain (Klartext `~`), the continuation mark of the line above goes too, so the chain ends.
 //  d. `{{N}}` writes the number as the profile's renumber does (`numbering.digits`, the
@@ -65,7 +66,8 @@ import type { FieldSpec } from '$lib/core/forms/types';
 import { parseNumber } from '$lib/core/nc/numbers';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import { evaluateFormulas, FORMULA_LIMITS } from './formula';
-import type { RenderResult, TemplateDef, TemplateEnv, TemplateParam } from './types';
+import { charsetFits } from './load';
+import type { RenderResult, TemplateCharset, TemplateDef, TemplateEnv, TemplateParam } from './types';
 
 // ---------------------------------------------------------------------------------------------
 // Values
@@ -81,6 +83,13 @@ function plainNumber(n: number): string {
   if (!/e/i.test(s)) return s;
   return n.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 });
 }
+
+/** T155: the message of each charset (`templates.value.*`). */
+const CHARSET_MESSAGES: Record<TemplateCharset, string> = {
+  'no-spaces': 'charsetNoSpaces',
+  'letters-digits': 'charsetLettersDigits',
+  name: 'charsetName',
+};
 
 /** A control character other than a tab (a line break has its own message). */
 const CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f]/;
@@ -185,6 +194,9 @@ function prepare(p: TemplateParam, raw: unknown, cp: CompiledProfile | undefined
     // U+0001 stands for `{{N}}` while a line is built: a typed control character would be numbered.
     if (CONTROL_CHARS.test(typed)) return { error: msg('control') };
     if (p.uppercase === true && typed !== typed.toUpperCase()) return { error: msg('notUppercase') };
+    // T155: the length and the characters of a name, refused and never cut or changed.
+    if (p.maxLength !== undefined && typed.length > p.maxLength) return { error: msg('tooLong', { max: p.maxLength }) };
+    if (p.charset !== undefined && !charsetFits(typed, p.charset)) return { error: msg(CHARSET_MESSAGES[p.charset]) };
     let core = typed;
     if (p.comment === true && cp !== undefined) {
       const pair = cp.profile.syntax.comments[0];
@@ -204,6 +216,8 @@ interface Analysis {
   errors: Record<string, Msg>;
   /** By parameter id: the word to write, or null for an empty optional one. */
   words: Map<string, string | null>;
+  /** By formula parameter id: its value as written (decimals and digits applied), without prefix and suffix; null when empty. */
+  computed: Map<string, string | null>;
 }
 
 /** Checks every value and builds every word (formulas first, rule 7). */
@@ -212,6 +226,7 @@ function analyse(t: TemplateDef, values: Record<string, unknown>, cp: CompiledPr
   // definition built in code is not loaded), and `errors[id] = …` is always a member.
   const errors: Record<string, Msg> = Object.create(null) as Record<string, Msg>;
   const words = new Map<string, string | null>();
+  const computed = new Map<string, string | null>();
   const params = t.params ?? [];
   const inputs: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const p of params) {
@@ -238,14 +253,18 @@ function analyse(t: TemplateDef, values: Record<string, unknown>, cp: CompiledPr
       const value = result.values[p.id];
       if (value === null || value === undefined || value === '') {
         words.set(p.id, null);
+        computed.set(p.id, null);
         continue;
       }
       const done = formatNumber(p, value, cp?.profile.syntax.decimalSeparator ?? '.', true);
       if ('error' in done) errors[p.id] = done.error;
-      else words.set(p.id, (p.prefix ?? '') + done.word + (p.suffix ?? ''));
+      else {
+        words.set(p.id, (p.prefix ?? '') + done.word + (p.suffix ?? ''));
+        computed.set(p.id, done.word);
+      }
     }
   }
-  return { errors, words };
+  return { errors, words, computed };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -268,11 +287,13 @@ export function templateFields(t: TemplateDef): FieldSpec[] {
       if (p.hidden === true) continue;
       const field: FieldSpec = { id: p.id, type: 'text', label: p.label, readOnly: true };
       if (p.help !== undefined) field.help = p.help;
+      if (p.unit !== undefined) field.unit = p.unit;
       fields.push(field);
       continue;
     }
     const field: FieldSpec = { id: p.id, type: p.type === 'choice' ? 'choice' : 'text', label: p.label };
     if (p.help !== undefined) field.help = p.help;
+    if (p.unit !== undefined) field.unit = p.unit;
     if (p.required === true) field.required = true;
     const initial = defaultText(p);
     if (initial !== undefined) field.default = initial;
@@ -291,12 +312,29 @@ export function validateTemplateValues(t: TemplateDef, values: Record<string, un
   return analyse(t, values, cp).errors;
 }
 
+/**
+ * v1.2.0 (T162): what each formula parameter writes, as the text goes into the program (its own
+ * decimals and digits applied, without prefix and suffix); a formula that is empty or refused is
+ * left out. The template service checks a formula that writes a block number (`N{{n}}`) with it.
+ */
+export function formulaTexts(t: TemplateDef, values: Record<string, unknown>, cp?: CompiledProfile): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!(t.params ?? []).some((p) => p.type === 'formula')) return out;
+  for (const [id, text] of analyse(t, values, cp).computed) if (text !== null) out[id] = text;
+  return out;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------------------------
 
 /** Stands for a `{{N}}` until the numbers are counted out (rule c: a dropped line takes none). */
 const NUMBER_MARK = '\u0001';
+
+/** Rule c: nothing but its block number is left (and a leading block-delete slash, `/{{N}}`, T157). */
+function emptyBlock(text: string): boolean {
+  return /^[ \t]*(?:\/[0-9]?)?[ \t]*$/.test(text.split(NUMBER_MARK).join(''));
+}
 
 /** One body line with its placeholders replaced; `touched` when it had any. */
 function expandLine(src: string, words: Map<string, string | null>, env: TemplateEnv, snippet: boolean): { text: string; touched: boolean } {
@@ -406,7 +444,7 @@ export function renderTemplate(t: TemplateDef, values: Record<string, unknown>, 
     (probed ??= new Map((t.params ?? []).map((p) => [p.id, `${p.prefix ?? ''}0${p.suffix ?? ''}`])));
   for (const src of t.body.split(/\r\n?|\n/)) {
     const line = expandLine(src, words, env, t.snippet === true);
-    if (line.touched && line.text.split(NUMBER_MARK).join('').trim() === '') {
+    if (line.touched && emptyBlock(line.text)) {
       // The last line of a continuation chain went (it would not have ended with the mark): the
       // line above must not point at it.
       const above = kept[kept.length - 1];

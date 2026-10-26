@@ -23,6 +23,8 @@ export interface GeditTestHook {
    * optional so that an M0 scenario still type-checks.
    */
   ctx?: AppContext;
+  /** How many text models Monaco holds; -1 before Monaco is loaded (T193). */
+  modelCount?(): number;
 }
 
 /** Exposes `h` as `window.__gedit`, only when `import.meta.env.VITE_GEDIT_TEST === '1'`. */

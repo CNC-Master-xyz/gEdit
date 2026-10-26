@@ -51,6 +51,53 @@ describe('performance', () => {
     expect(ms, `${Math.round(ms)} ms for 100k Sinumerik lines with main blocks`).toBeLessThan(3000);
   });
 
+  it('renumbers 100k lines with every advanced option on well inside a second (P4d, §6.6)', () => {
+    // Every option at once over one program: a fitted increment (it needs the count of a
+    // first walk before the first number), every third block, a column, two skipped regions,
+    // a start text and a skipped text, and a jump in every seventh block that `everyNth`
+    // must keep a number for.
+    const cp = compiledBuiltin(FANUC);
+    const lines: string[] = ['%', 'O1000 (ALL OPTIONS)', '(HEADER)', '(START)'];
+    for (let i = 0; i < 100_000; i++) {
+      if (i % 7 === 0) lines.push(`N${i + 1} GOTO ${i + 3}`);
+      else if (i % 50 === 1) lines.push(`N${i + 1} M01 (MSG ${i})`);
+      else lines.push(`N${i + 1} G1 X${i}.`);
+    }
+    lines.push('M30', '%', '');
+    const options = {
+      start: 10,
+      max: 99_999_999,
+      fitToMax: true,
+      alignColumn: 10,
+      everyNth: 3,
+      skipContaining: 'MSG',
+      skipFirst: 2,
+      skipLast: 2,
+      startTrigger: '(START)',
+      startAfterTrigger: true,
+      skipStartingWith: '% O (',
+      restartAtProgramStart: true,
+    };
+
+    const started = performance.now();
+    const result = renumber.run(lines, context(cp, options));
+    const ms = performance.now() - started;
+
+    expect(result.lines).toHaveLength(lines.length);
+    expect(result.lines.slice(0, 4)).toEqual(lines.slice(0, 4));
+    expect(result.lines[4].startsWith('N10      GOTO ')).toBe(true);
+    expect(result.warnings.map((w) => w.key)).toEqual(
+      expect.arrayContaining([
+        'ncNumbering.renumber.fitted',
+        'ncNumbering.renumber.everyNthRemoved',
+        'ncNumbering.renumber.everyNthKept',
+        'ncNumbering.renumber.referencesRewritten',
+      ]),
+    );
+    // The budget is 1 s; the assertion leaves room for a loaded CI machine.
+    expect(ms, `${Math.round(ms)} ms for 100k lines with every option`).toBeLessThan(3000);
+  });
+
   it('renumbers 100k lines well inside a second', () => {
     const source = ['G0 G90 X0. Y0.', 'N5 T1 M6', 'G43 H1 Z50. (ROUGH)', 'G1 X10. Y10. F250.', '/N100 G0 Z5.', 'M98 P2000', ''];
     const lines = Array.from({ length: 100_000 }, (_v, i) => source[i % source.length]);

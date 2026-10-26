@@ -124,6 +124,10 @@ export default {
       help: 'Suggestions for addresses and codes of the current dialect.',
       choices: { auto: 'While typing', manual: 'Only when asked', off: 'Off' },
     },
+    acceptOnEnter: {
+      label: 'Enter accepts a suggestion',
+      help: 'While the suggestion list is open, Enter takes the highlighted entry instead of ending the line. Off (the default), Enter always ends the block; Tab takes a suggestion in both cases.',
+    },
     motionColors: {
       label: 'Color lines by how they move',
       help: 'A colored mark beside each line that moves: rapid, straight, arc, thread or cycle, read from the codes in force.',

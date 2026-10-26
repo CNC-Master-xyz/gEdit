@@ -43,6 +43,7 @@
 // (AD-2), so a unit test drives the LRU and the caps without Tauri.
 
 import { get } from 'svelte/store';
+import { cleanBookmarkNames } from '$lib/core/nav/bookmarks';
 import { profiles as appProfiles } from '$lib/stores/profiles';
 import { settings as appSettings } from '$lib/stores/settings';
 import { uiState as appUiState } from '$lib/stores/uiState';
@@ -88,13 +89,26 @@ export const MAX_REMEMBERED_BYTES = 384 * 1024;
  */
 const MEMO_OVERHEAD_BYTES = 80;
 const BOOKMARK_LINE_BYTES = 12;
+/**
+ * What one bookmark name adds to the pretty-printed file beyond its compact JSON: the object is
+ * four lines of its own at ten to twelve spaces of indent (about 73 bytes pretty against 22 for
+ * `{"line":12,"name":"x"}`). Rounded up, like the two above; without it a table of short names
+ * would be counted at a third of its real size and could carry the file over its cap.
+ */
+const BOOKMARK_NAME_BYTES = 52;
+
+/** The size of `text` in the file: UTF-8 bytes, which is what `state.json` is capped in (a Kanji is three, not one). */
+function utf8Length(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
 
 function memoBytes(path: string, memo: FileMemo): number {
   return (
-    JSON.stringify(path).length +
-    JSON.stringify(memo).length +
+    utf8Length(JSON.stringify(path)) +
+    utf8Length(JSON.stringify(memo)) +
     MEMO_OVERHEAD_BYTES +
-    memo.bookmarks.length * BOOKMARK_LINE_BYTES
+    memo.bookmarks.length * BOOKMARK_LINE_BYTES +
+    (memo.bookmarkNames?.length ?? 0) * BOOKMARK_NAME_BYTES
   );
 }
 
@@ -137,7 +151,7 @@ function bookmarksOf(value: unknown): number[] {
 }
 
 /** The members this build knows about; anything else came from a later milestone. */
-const KNOWN_MEMBERS = new Set(['line', 'column', 'top', 'bookmarks', 'profileId', 'machineId', 'at']);
+const KNOWN_MEMBERS = new Set(['line', 'column', 'top', 'bookmarks', 'bookmarkNames', 'profileId', 'machineId', 'at']);
 
 /**
  * Whether `memo` would change anything about how the file opens (rule 2).
@@ -218,6 +232,7 @@ export function createFileMemory(deps: FileMemoryDeps): FileMemoryStore {
         else merged[key] = value;
       }
 
+      const bookmarks = bookmarksOf(merged.bookmarks);
       const memo: FileMemo = {
         // Everything the memo already carried, the members this build does not know
         // included (rule: a later milestone's `channelId` survives an M7 run).
@@ -227,9 +242,15 @@ export function createFileMemory(deps: FileMemoryDeps): FileMemoryStore {
         line: lineOr(merged.line, 1),
         column: lineOr(merged.column, 1),
         top: lineOr(merged.top, 1),
-        bookmarks: bookmarksOf(merged.bookmarks),
+        bookmarks,
         at: deps.now(),
       };
+      // The names of the bookmarks (§6.5 rule 4) are read as untrusted, whoever handed them over:
+      // a name is kept only for a line that is still bookmarked, so a name whose bookmark went
+      // goes with it. No names at all is no member.
+      const names = cleanBookmarkNames(merged.bookmarkNames, bookmarks);
+      if (names.length > 0) memo.bookmarkNames = names;
+      else delete memo.bookmarkNames;
       if (typeof memo.profileId !== 'string') delete memo.profileId;
 
       if (!carriesSomething(memo)) {

@@ -69,7 +69,8 @@ scenario('p3-hover', { timeout: 600 }, async (h) => {
   const g83 = await hoverOn(h, id, 50, 'G83')
   h.check('G83 (line 50): the drilling cycle table with Z -15., R 2., Q 3000 and F 0.08', word(g83, 'Z')?.written === '-15.' && word(g83, 'R')?.written === '2.' && word(g83, 'Q')?.written === '3000' && word(g83, 'F')?.written === '0.08', g83.rows.map((r) => `${r.word}=${r.written}`))
   const q = await hoverOn(h, id, 50, 'Q3000')
-  h.check('Q3000 in it depends on the machine (microns on the source controls): readings, the default first, and "choose a machine"', q.paragraphs.some((p) => p === say('value.readings', { word: 'Q3000' })) && q.items.length === 3 && q.items[0].startsWith('3 mm:') && /^0\.3 mm:/.test(q.items[2]), { paragraphs: q.paragraphs.slice(-2), items: q.items })
+  // Wave X (T083) added the IS-A preset (0.01 mm): four readings, the default first, then IS-A, IS-B and IS-C.
+  h.check('Q3000 in it depends on the machine (microns on the source controls): readings, the default first, and "choose a machine"', q.paragraphs.some((p) => p === say('value.readings', { word: 'Q3000' })) && q.items.length === 4 && q.items[0].startsWith('3 mm:') && /^30 mm: Increments of 0\.01 mm \(IS-A\)/.test(q.items[1]) && /^0\.3 mm:/.test(q.items[3]), { paragraphs: q.paragraphs.slice(-2), items: q.items })
   const comment = await hoverOn(h, id, 10, 'T0101')
   h.check('T0101 (line 10): a word that is not a position gets no "target" line', !comment.last.includes(say('target')), comment.last)
 
@@ -145,7 +146,7 @@ scenario('p3-hover', { timeout: 600 }, async (h) => {
   const u = await hoverOn(h, probe.id, 4, 'U-2.')
   h.check('U-2. is an incremental X, a diameter', u.last.startsWith('U — ') && u.last.includes(say('incrementalOf', { axis: 'X' })), u.last)
   const none = await hoverOn(h, probe.id, 2, 'X50')
-  h.check('no machine: X50 says it depends on the machine and to choose one, then lists the readings, the assumed default first', none.paragraphs.includes(say('value.readings', { word: 'X50' })) && none.items.length === 3 && /^50 mm: As written \(profile default\)$/.test(none.items[0]) && /^0\.05 mm: .*IS-B/.test(none.items[1]) && /^0\.005 mm: .*IS-C/.test(none.items[2]), { paragraphs: none.paragraphs.slice(-2), items: none.items })
+  h.check('no machine: X50 says it depends on the machine and to choose one, then lists the readings, the assumed default first', none.paragraphs.includes(say('value.readings', { word: 'X50' })) && none.items.length === 4 && /^50 mm: As written \(profile default\)$/.test(none.items[0]) && /^0\.5 mm: .*IS-A/.test(none.items[1]) && /^0\.05 mm: .*IS-B/.test(none.items[2]) && /^0\.005 mm: .*IS-C/.test(none.items[3]), { paragraphs: none.paragraphs.slice(-2), items: none.items })
   const pointed = await hoverOn(h, probe.id, 3, 'X50.')
   h.check('X50. (with a point) has no value line: one reading, nothing to choose', !pointed.html.includes('<li>') && !pointed.paragraphs.some((p) => p.includes(say('value.readings', { word: 'X50.' }))) && pointed.last.startsWith('X — '), pointed.paragraphs.slice(-2))
   const gA = await hoverOn(h, probe.id, 7, 'G94')

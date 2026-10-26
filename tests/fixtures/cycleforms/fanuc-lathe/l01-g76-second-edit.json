@@ -1,0 +1,32 @@
+{
+  "$format": 1,
+  "about": "v1.2.0 T119: the second block of the two-block G76 on an IS-B machine opens the form of that block (X, U, Z, W, R, P thread height, Q first cut, F). The first cut Q, in least increments without a point, changes from 250 to 300.",
+  "input": "../../nc/fanuc-lathe/l01-turning-a.nc",
+  "line": 33,
+  "machine": {
+    "numberInput": "is-b"
+  },
+  "form": {
+    "values": {
+      "X": "18.16",
+      "U": "",
+      "Z": "-18.",
+      "W": "",
+      "R": "",
+      "P": "920",
+      "Q": "250",
+      "F": "1.5"
+    },
+    "kept": []
+  },
+  "values": {
+    "Q": "300"
+  },
+  "expected": {
+    "first": 33,
+    "last": 33,
+    "lines": [
+      "G76 X18.16 Z-18. P920 Q300 F1.5"
+    ]
+  }
+}

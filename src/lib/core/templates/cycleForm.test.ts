@@ -20,7 +20,8 @@ import { compileProfile } from '$lib/core/profiles/compile';
 import { validateProfile } from '$lib/core/profiles/validate';
 import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
 import { profileOf } from '../../../../tests/unit/helpers/profiles';
-import { applyCycleForm, CYCLE_FORM_REFUSALS, CYCLE_FORM_WHOLE, cycleEntries, cycleFormAt, cycleFormFor } from './cycleForm';
+import { paramsOfBlock } from '$lib/core/codes/blocks';
+import { applyCycleForm, CYCLE_FORM_REFUSALS, CYCLE_FORM_WHOLE, cycleEntries, cycleFormAt, cycleFormFor, cycleFormReadings } from './cycleForm';
 import type { CycleForm, TemplateEnv } from './types';
 
 const ROOT = join(__dirname, '../../../../tests/fixtures/cycleforms');
@@ -126,8 +127,8 @@ describe('the cycle-form goldens (tests/fixtures/cycleforms)', () => {
         'fanuc-gcode/f01-g83-noop.json',
         'fanuc-gcode/f02-packed-g81.json',
         'fanuc-gcode/pointless-no-machine.json',
-        'fanuc-lathe/l01-g71-first-refused.json',
-        'fanuc-lathe/l01-g76-second-refused.json',
+        'fanuc-lathe/l01-g71-first-edit.json',
+        'fanuc-lathe/l01-g76-second-edit.json',
         'heidenhain-klartext/h01-cycl-def-200-edit.json',
         'heidenhain-klartext/q202-added.json',
         'sinumerik/s02-cycle83-edit.json',
@@ -165,8 +166,8 @@ describe('the cycle-form goldens (tests/fixtures/cycleforms)', () => {
         expect(form.values).toEqual(golden.form.values);
         expect(form.kept).toEqual(golden.form.kept);
       }
-      // The fields: one per parameter in database order, keyed by the address.
-      expect(form.fields.map((f) => f.id)).toEqual((form.entry.params ?? []).map((p) => p.address));
+      // The fields: one per parameter in database order, keyed by the address (of its block, T119).
+      expect(form.fields.map((f) => f.id)).toEqual(paramsOfBlock(form.entry, form.part ?? null).map((p) => p.address));
     }
 
     const env = golden.insert ? envOf(view, golden.insert.env) : undefined;
@@ -208,7 +209,43 @@ describe('which cycles (rule 1)', () => {
     expect(codes).toEqual([...codes].sort((a, b) => order.indexOf(a) - order.indexOf(b)));
     expect(cycleEntries(viewOf('heidenhain-klartext').db).map((e) => e.code)).toContain('CYCL DEF 200');
     expect(cycleEntries(viewOf('sinumerik').db).map((e) => e.code)).toContain('CYCLE83');
-    expect(cycleEntries(viewOf('sinumerik').db, 'mill').length).toBe(cycleEntries(viewOf('sinumerik').db).length);
+    // Merge seam (v12/wave): P4b marks Sinumerik's turning cycles `lathe`, so the two machine types differ
+    // (before the marks nothing was filtered). The milling cycles stay unmarked (owner 2026-10-22, WX-NC-4):
+    // a lathe with driven tools runs POCKET3, SLOT2, …, so the turning profile lists them too.
+    const sinumerik = viewOf('sinumerik').db;
+    const all = cycleEntries(sinumerik).map((e) => e.code);
+    const mill = cycleEntries(sinumerik, 'mill').map((e) => e.code);
+    const lathe = cycleEntries(sinumerik, 'lathe').map((e) => e.code);
+    const milling = ['CYCLE61', 'POCKET3', 'POCKET4', 'SLOT1', 'SLOT2', 'CYCLE72'];
+    expect(mill).toEqual(expect.arrayContaining(['CYCLE83', ...milling]));
+    expect(mill).not.toContain('CYCLE95');
+    expect(lathe).toEqual(expect.arrayContaining(['CYCLE95', 'CYCLE83', ...milling]));
+    expect(cycleEntries(viewOf('sinumerik').db, viewOf('sinumerik').profile.machineType).map((e) => e.code)).toContain('POCKET3');
+    // Without a machine type only the unmarked cycles are listed (the rule of the templates); the profiles
+    // `sinumerik` (lathe) and `sinumerik-mill` (mill) both carry one.
+    expect(all).not.toContain('CYCLE95');
+    expect(all).toEqual(expect.arrayContaining(['CYCLE83', ...milling]));
+    expect(mill).toEqual(expect.arrayContaining(all));
+    expect(lathe).toEqual(expect.arrayContaining(all));
+    expect(viewOf('sinumerik').profile.machineType).toBe('lathe');
+    expect(viewOf('sinumerik-mill').profile.machineType).toBe('mill');
+  });
+
+  it('T144: offers a cycle marked with a machine type to a program of that type only; an unmarked one to all', () => {
+    const base = viewOf('sinumerik');
+    const marked: CodeDb = {
+      ...base.db,
+      codes: base.db.codes.map((e) => (e.code === 'CYCLE95' ? { ...e, machineType: 'lathe' } : e.code === 'POCKET3' ? { ...e, machineType: 'mill' } : e)) as CodeDb['codes'],
+    };
+    const lathe = cycleEntries(marked, 'lathe').map((e) => e.code);
+    const mill = cycleEntries(marked, 'mill').map((e) => e.code);
+    expect(lathe).toContain('CYCLE95');
+    expect(lathe).not.toContain('POCKET3');
+    expect(mill).toContain('POCKET3');
+    expect(mill).not.toContain('CYCLE95');
+    for (const list of [lathe, mill]) expect(list).toContain('CYCLE83');
+    // A profile without a machine type sees the unmarked ones only.
+    expect(cycleEntries(marked).map((e) => e.code)).not.toContain('CYCLE95');
   });
 
   it('leaves out a two-block cycle once the database marks it (blocks: 2, P3.6)', () => {
@@ -219,16 +256,68 @@ describe('which cycles (rule 1)', () => {
     expect(codes).toContain('G70');
   });
 
-  it('refuses a lone G71 block through the flag, where the pairing heuristic has nothing to pair', () => {
+  it('T119: a lone G71 block is the block its words say (P and Q: the second); refused where the database says no parameter\'s block', () => {
     const lines = ['%', 'O2000', 'N10 G50 S2000', 'N20 G71 P100 Q200 U0.4 W0.1 F0.25', 'N30 G0 X100. Z100.'];
-    // The shipped database carries the flag (P3.6); the unflagged copy is the pairing heuristic alone.
-    const plain = viewOf('fanuc-lathe', null, (db) => ({ ...db, codes: db.codes.map((e) => (e.code === 'G71' ? { ...e, blocks: undefined } : e)) }));
     const flagged = viewOf('fanuc-lathe');
     expect(flagged.db.codes.find((e) => e.code === 'G71')?.blocks).toBe(2);
-    const a = docOf(plain, lines, 4);
-    expect(cycleFormAt(a.input, plain, a.after)).toMatchObject({ ok: true });
     const b = docOf(flagged, lines, 4);
-    expect(cycleFormAt(b.input, flagged, b.after)).toEqual({ ok: false, reason: CYCLE_FORM_REFUSALS.twoBlocks });
+    const at = cycleFormAt(b.input, flagged, b.after);
+    expect(at).toMatchObject({ ok: true, form: { part: 2 } });
+    expect(at?.ok && at.form.fields.map((f) => f.id)).toEqual(['P', 'Q', 'U', 'W', 'F', 'S', 'T']);
+    // A user database written before B1: two blocks, but no parameter says which block it belongs to.
+    const undeclared = viewOf('fanuc-lathe', null, (db) => ({ ...db, codes: db.codes.map((e) => (e.code === 'G71' ? { ...e, params: e.params?.map(({ block: _b, ...p }) => p) } : e)) }));
+    const c = docOf(undeclared, lines, 4);
+    expect(cycleFormAt(c.input, undeclared, c.after)).toEqual({ ok: false, reason: CYCLE_FORM_REFUSALS.twoBlocks });
+  });
+
+  it('T119: each block of a two-block cycle has its own form and its own labels; a block that does not say which it is is refused', () => {
+    const lathe = viewOf('fanuc-lathe');
+    const lines = ['%', 'O2000', 'N10 G71 U1.5 R0.5', 'N20 G71 P30 Q40 U0.4 W0.1 F0.25', 'N30 G0 X16.', 'N40 G1 X34.'];
+    const first = docOf(lathe, lines, 3);
+    const one = cycleFormAt(first.input, lathe, first.after);
+    if (!one?.ok) throw new Error('refused');
+    expect(one.form.part).toBe(1);
+    expect(one.form.fields.find((f) => f.id === 'U')?.label).toMatch(/^U — Depth of cut/);
+    const second = docOf(lathe, lines, 4);
+    const two = cycleFormAt(second.input, lathe, second.after);
+    if (!two?.ok) throw new Error('refused');
+    expect(two.form.fields.find((f) => f.id === 'U')?.label).toMatch(/^U — Finishing allowance/);
+    // The first block's U is changed in the first block only.
+    expect(applyCycleForm(one.form, { U: '2.5' }, first.input, lathe, first.after)).toEqual({ ok: true, first: 3, last: 3, lines: ['N10 G71 U2.5 R0.5'] });
+    const bare = docOf(lathe, ['%', 'O2000', 'N10 G0 X50.', 'N20 G71', 'N30 G0 X100.'], 4);
+    expect(cycleFormAt(bare.input, lathe, bare.after)).toEqual({ ok: false, reason: CYCLE_FORM_REFUSALS.whichBlock });
+    expect(hasKey(CYCLE_FORM_REFUSALS.whichBlock.key)).toBe(true);
+  });
+
+  it('T119: an edit that would turn one block into the other is refused; a new two-block cycle is not inserted by the form', () => {
+    const lathe = viewOf('fanuc-lathe');
+    const lines = ['%', 'O2000', 'N20 G71 P100 Q200 U0.4', 'N30 G0 X100.'];
+    const doc = docOf(lathe, lines, 3);
+    const at = cycleFormAt(doc.input, lathe, doc.after);
+    if (!at?.ok) throw new Error('refused');
+    expect(at.form.part).toBe(2);
+    // Merge seam (v12/wave): P4b marked P and Q of G71/G72/G73 required, so emptying them is refused as
+    // missing first. The T119 guard itself (a block that would read as the other) is kept for data that does
+    // not require them: the same view with the `required` marks taken off.
+    const required = applyCycleForm(at.form, { P: '', Q: '' }, doc.input, lathe, doc.after);
+    expect(required.ok === false && keyed(required.errors)).toEqual({ P: 'cycleForm.refused.required', Q: 'cycleForm.refused.required' });
+    const loose = {
+      ...lathe,
+      db: {
+        ...lathe.db,
+        codes: lathe.db.codes.map((e) => (e.code === 'G71' ? { ...e, params: e.params?.map((p) => ({ ...p, required: undefined })) } : e)) as CodeDb['codes'],
+      },
+    };
+    const looseAt = cycleFormAt(doc.input, loose, doc.after);
+    if (!looseAt?.ok) throw new Error('refused');
+    // Without P and Q only U is left, which both blocks have: it would read as the first block.
+    const edit = applyCycleForm(looseAt.form, { P: '', Q: '' }, doc.input, loose, doc.after);
+    expect(edit.ok === false && keyed(edit.errors)).toEqual({ P: 'cycleForm.refused.noWord', Q: 'cycleForm.refused.noWord' });
+    const g71 = lookupCode(lathe.db, 'G71')!;
+    expect(applyCycleForm(cycleFormFor(g71, lathe), { U: '1.' }, doc.input, lathe, doc.after, envOf(lathe, { prevBlockNumber: 20, numbered: true }))).toEqual({
+      ok: false,
+      errors: { [CYCLE_FORM_WHOLE]: CYCLE_FORM_REFUSALS.twoBlocks },
+    });
   });
 
   it('refuses a verify entry and one without parameters, and has nothing for a block without a cycle', () => {
@@ -414,7 +503,7 @@ describe('P3b fix NC', () => {
     if (!entry) throw new Error(code);
     const edit = applyCycleForm(cycleFormFor(entry, view), values, doc.input, view, doc.after, envOf(view, env));
     const after = edit.ok ? [...lines.slice(0, edit.first - 1), ...edit.lines, ...lines.slice(edit.first - 1)] : lines;
-    return { edit, after, view };
+    return { edit, after, view, doc };
   }
 
   it('NC-05: an inserted modal cycle is cancelled in a block of its own, so the next bare position is no hole', () => {
@@ -440,16 +529,17 @@ describe('P3b fix NC', () => {
     expect(inserted('fanuc-gcode', lines, 6, 'G84', { Z: '-10', R: '2', F: '100' }, { prevBlockNumber: 50, numbered: true }).edit.ok).toBe(true);
   });
 
-  it('NC-11: an Okuma one-block cycle written in two adjacent blocks opens a form on each; the Fanuc lathe pairs stay refused', () => {
+  it('NC-11: an Okuma one-block cycle written in two adjacent blocks opens a form on each; a Fanuc lathe pair opens the form of one block', () => {
     const view = viewOf('okuma-osp', { numberInput: 'okuma-1mm' });
     const lines = ['$O1.MIN%', 'N10 G0 X0 Z5', 'N20 G74 X0 Z-5 D2', 'N30 G74 X0 Z-12 D3 F0.12', 'N40 G0 Z5'];
     for (const line of [3, 4]) {
       const doc = docOf(view, lines, line);
       expect(cycleFormAt(doc.input, view, doc.after), `line ${line}`).toMatchObject({ ok: true });
     }
+    // The Fanuc lathe pairs are two-block cycles by the database: the form of the block at the cursor (T119).
     const lathe = viewOf('fanuc-lathe');
     const pair = docOf(lathe, ['%', 'O2000', 'N10 G71 U1.5 R0.5', 'N20 G71 P30 Q40 U0.4 W0.1 F0.25', 'N30 G0 X16.', 'N40 G1 X34.'], 3);
-    expect(cycleFormAt(pair.input, lathe, pair.after)).toEqual({ ok: false, reason: CYCLE_FORM_REFUSALS.twoBlocks });
+    expect(cycleFormAt(pair.input, lathe, pair.after)).toMatchObject({ ok: true, form: { part: 1 } });
   });
 
   it('NC-16: a value written as a variable is refused when it is changed, in every layout', () => {
@@ -475,6 +565,19 @@ describe('P3b fix NC', () => {
     const none = viewOf('fanuc-gcode');
     const plain = formAt(none, F01, 39);
     expect(applyCycleForm(plain.form, { R: '0.0005' }, plain.doc.input, none, plain.doc.after)).toMatchObject({ ok: true });
+  });
+
+  it('T146: the readings follow the values as typed, for the live hook of the form', () => {
+    const view = viewOf('fanuc-gcode', { numberInput: 'is-b' });
+    const { form, doc } = formAt(view, ['%', 'O1000', 'N20 G98 G83 X1. Y1. Z-5. R2. Q4000 F100.'], 3);
+    const now = (Q: string) => cycleFormReadings(applyCycleForm(form, { Q }, doc.input, view, doc.after), doc.input, view, doc.after).Q;
+    expect(now('5000')).toEqual({ key: 'cycleForm.withoutPoint', params: { literal: '5000', value: '5 mm' } });
+    expect(now('2500')).toEqual({ key: 'cycleForm.withoutPoint', params: { literal: '2500', value: '2.5 mm' } });
+    // A refused edit reads nothing.
+    expect(cycleFormReadings(applyCycleForm(form, { Q: 'x' }, doc.input, view, doc.after), doc.input, view, doc.after)).toEqual({});
+    // An inserted block: the word gets its point where it is a length, and reads as written.
+    const ins = inserted('fanuc-gcode', ['O1000', 'N10 G0 X0. Y0.'], 2, 'G83', { Z: '-5', R: '2', Q: '3', F: '100' }, { prevBlockNumber: 10, numbered: true }, { numberInput: 'is-b' });
+    expect(cycleFormReadings(ins.edit, ins.doc.input, ins.view, ins.doc.after)).toEqual({});
   });
 
   it('NC-08: a word written without a point says what it reads as on the machine', () => {

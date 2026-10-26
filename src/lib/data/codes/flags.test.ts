@@ -73,6 +73,8 @@ function declaredOf(entry: CodeEntry): Record<string, unknown> {
   // M10 review: the pole (NC-2), a program call (NC-6) and a coordinate shift (NC-7).
   if (entry.pole !== undefined) out.pole = entry.pole;
   if (entry.call !== undefined) out.call = entry.call;
+  // P4b fix batch 3 (NC-6): a feed for that block only (`CYCL CALL POS`).
+  if (entry.blockFeed !== undefined) out.blockFeed = entry.blockFeed;
   if (entry.shift !== undefined) out.shift = entry.shift;
   // P4a integration (§7 #299): a shift whose all-zero block sets no shift.
   if (entry.shiftZeroIsNone !== undefined) out.shiftZeroIsNone = entry.shiftZeroIsNone;
@@ -346,14 +348,22 @@ describe('what the flags decide (the reasons are in the entries and in the G10 t
     expect(codesWith('sinumerik', (e) => e.axisWords === 'machine')).toEqual(['G53', 'G153', 'G74', 'G75', 'SUPA']);
     // M9 review F10: G25/G26 with axis words limit the working area; the words are limits.
     expect(codesWith('sinumerik', (e) => e.axisWords === 'data')).toEqual(
-      ['G25', 'G26', 'TRANS', 'ATRANS', 'ROT', 'AROT', 'SCALE', 'ASCALE', 'MIRROR', 'AMIRROR'],
+      ['G25', 'G26', 'TRANS', 'ATRANS', 'ROT', 'AROT', 'SCALE', 'ASCALE', 'MIRROR', 'AMIRROR', 'ROTS', 'AROTS', 'CROTS'],
     );
     // TRANS and ATRANS shift the program's own frame (like Fanuc G52): data words, no frame of their own.
     expect(loadedEntry('sinumerik', 'TRANS').frame).toBeUndefined();
     expect(codesWith('sinumerik', (e) => e.frame === 'open')).toEqual(
-      ['CYCLE800', 'TRANSMIT', 'TRACYL', 'TRAANG', 'ROT', 'AROT', 'SCALE', 'ASCALE', 'MIRROR', 'AMIRROR'],
+      [
+        'CYCLE800', 'TRANSMIT', 'TRACYL', 'TRAANG', 'ROT', 'AROT', 'SCALE', 'ASCALE', 'MIRROR', 'AMIRROR',
+        // v1.2.0 manual-check fix round (D6-1): the rotations by solid angles write the
+        // programmable frame, so ROT or TRANS alone ends them; the frames along the tool (ended by
+        // TOROTOF) and PAROT (ended by PAROTOF) are groups of their own.
+        'ROTS', 'AROTS', 'CROTS', 'TOFRAME', 'TOFRAMEZ', 'TOFRAMEY', 'TOFRAMEX', 'TOROT', 'TOROTZ', 'TOROTY', 'TOROTX', 'PAROT',
+      ],
     );
-    expect(codesWith('sinumerik', (e) => e.frame === 'close')).toEqual(['TRAFOOF']);
+    expect(codesWith('sinumerik', (e) => e.frame === 'close')).toEqual(['TRAFOOF', 'TOROTOF', 'PAROTOF']);
+    expect(loadedEntry('sinumerik', 'TOROT').group).toBe('toolFrame');
+    expect(loadedEntry('sinumerik', 'PAROT').group).toBe('rotation');
     // P10 (decided 2026-10-04, the open question M9 left): TRAORI is tool centre point
     // control, as G43.4 and M128 are, so it carries `sets.tcp: 'on'` and no frame. Address
     // arithmetic judges a block under it, and refuses a simultaneous rotary move without it.
@@ -365,7 +375,7 @@ describe('what the flags decide (the reasons are in the entries and in the G10 t
     // not end a ROT, and TRANS alone ends ROT, SCALE and MIRROR but not the swivel.
     expect(codesWith('sinumerik', (e) => e.frameWithoutValues === 'close')).toEqual(['CYCLE800', 'TRANS', 'ROT', 'SCALE', 'MIRROR']);
     expect(loadedEntry('sinumerik', 'CYCLE800').group).toBe('tilt');
-    for (const code of ['TRANS', 'ROT', 'SCALE', 'MIRROR', 'AROT', 'ASCALE', 'AMIRROR']) {
+    for (const code of ['TRANS', 'ROT', 'SCALE', 'MIRROR', 'AROT', 'ASCALE', 'AMIRROR', 'ROTS', 'AROTS', 'CROTS']) {
       expect(loadedEntry('sinumerik', code).group, code).toBe('frame');
     }
     for (const dialect of DIALECTS.filter((d) => d !== 'sinumerik')) {

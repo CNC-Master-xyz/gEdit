@@ -34,15 +34,34 @@
     machineFields,
     machineFromValues,
     pruneModalValues,
+    followVariantDefaults,
     variantIdOf,
   } from '$lib/core/machines/fields';
   import { initialValues } from '$lib/core/forms/values';
   import { validateFields } from '$lib/core/forms/validate';
   import { channelBlock, MAX_NAME_LENGTH, validateChannels } from '$lib/core/machines/validate';
+  import { positionOf } from '$lib/core/machines/file';
+  import {
+    blockIssues,
+    blocksFromValues,
+    limitsBlock,
+    motionBlock,
+    motionToValues,
+    validateLimits,
+    validateMotion,
+    type AxisSets,
+  } from '$lib/core/machines/motion';
   import type { ChannelParams } from '$lib/core/channels/types';
   import type { CodeDb } from '$lib/core/codes/types';
   import type { FieldChoice, FieldSpec } from '$lib/core/forms/types';
-  import { wasReported, type MachineConfig, type MachineParams, type MachineProblem } from '$lib/core/machines/types';
+  import {
+    wasReported,
+    type MachineConfig,
+    type MachineLimits,
+    type MachineMotion,
+    type MachineParams,
+    type MachineProblem,
+  } from '$lib/core/machines/types';
   import type {
     CodeDbService,
     DocumentStore,
@@ -99,6 +118,19 @@
      * or not (a broken one is listed and has to be fixed or removed before Save).
      */
     channels?: ChannelParams;
+    /**
+     * The "Motion and limits" page (P4.8, plan §6.4 rule 4): the page's values and whether the
+     * user has changed anything of it. A block that is not touched is **never rewritten**: the
+     * stored `params.motion` and `params.limits` go back to the file as they were, usable or
+     * not, so a broken hand edit stays until the user changes it.
+     */
+    motion?: MotionDraft;
+  }
+
+  /** The Motion and limits page of a draft. */
+  export interface MotionDraft {
+    values: Record<string, unknown>;
+    touched: boolean;
   }
 
   /** The field of the first Add step: which dialect this machine runs. */
@@ -132,12 +164,21 @@
   }
 
   /**
+   * The JSON path of a record **in the file**: the list shown is sorted by name, so its
+   * index is not the line the user would open (`positionOf`, as `validateMachine` does).
+   * `index` is the fallback for a record that was added in this session.
+   */
+  function pathOfRecord(machine: MachineConfig, index: number): string {
+    return `machines[${positionOf(machine) ?? index}]`;
+  }
+
+  /**
    * A stored `channels` block that cannot be used (X12 d): the machine stays usable, only its
    * channels are off, and each problem is listed with its JSON path.
    */
   export function channelProblemsOf(machine: MachineConfig, index: number, deps: MachinesDeps): string[] {
     const waitLetters = deps.profiles.profile(machine.profile)?.machineParams?.channels?.waitLetters;
-    const block = channelBlock(machine, `machines[${index}]`, { waitLetters });
+    const block = channelBlock(machine, pathOfRecord(machine, index), { waitLetters });
     return block.state === 'invalid' ? block.problems.map((p) => problemText(deps, p)) : [];
   }
 
@@ -146,6 +187,42 @@
     if (draft.channels === undefined || draft.kind === 'duplicate') return [];
     const waitLetters = deps.profiles.profile(draft.profileId)?.machineParams?.channels?.waitLetters;
     return validateChannels(draft.channels, 'channels', null, { waitLetters }).map((p) => problemText(deps, p));
+  }
+
+  /** The dialect's axis letters and which of them are rotary: what a rate or a travel may name. */
+  export function axesOf(profileId: string, deps: MachinesDeps): AxisSets & { diameter: readonly string[] } {
+    const addresses = deps.profiles.profile(profileId)?.addresses;
+    return { axes: addresses?.axes ?? [], angular: addresses?.angular ?? [], diameter: addresses?.diameter ?? [] };
+  }
+
+  /**
+   * Stored `motion` or `limits` blocks that cannot be used (plan §6.4 rule 3): the machine
+   * stays usable and its other parameters stay in use, only the block is off, and each
+   * problem is listed with its JSON path.
+   */
+  export function motionProblemsOf(machine: MachineConfig, index: number, deps: MachinesDeps): string[] {
+    const sets = axesOf(machine.profile, deps);
+    const path = pathOfRecord(machine, index);
+    const motion = motionBlock(machine, path, sets);
+    const limits = limitsBlock(machine, path, sets);
+    return [
+      ...(motion.state === 'invalid' ? motion.problems : []),
+      ...(limits.state === 'invalid' ? limits.problems : []),
+    ].map((p) => problemText(deps, p));
+  }
+
+  /** What stops the Motion and limits page from being saved: only a page the user has changed is checked. */
+  export function motionErrors(draft: Draft, deps: MachinesDeps): string[] {
+    if (draft.motion === undefined || !draft.motion.touched || draft.kind === 'duplicate') return [];
+    const sets = axesOf(draft.profileId, deps);
+    const fields = Object.keys(blockIssues(draft.motion.values, sets));
+    if (fields.length > 0) return fields;
+    // The field messages are the validators' own rules; this is the belt for anything they do not name.
+    const made = blocksFromValues(draft.motion.values, sets);
+    return [
+      ...(made.motion === undefined ? [] : validateMotion(made.motion, 'motion', null, sets)),
+      ...(made.limits === undefined ? [] : validateLimits(made.limits, 'limits', null, sets)),
+    ].map((p) => p.path);
   }
 
   /** The Channels step is offered for dialects that declare `machineParams.channels`. */
@@ -182,6 +259,7 @@
       problems: [
         ...problems.filter((p) => p.machineId === machine.id).map((p) => problemText(deps, p)),
         ...channelProblemsOf(machine, index, deps),
+        ...motionProblemsOf(machine, index, deps),
       ],
       usable: true,
     }));
@@ -290,7 +368,7 @@
   /** The draft for "Add", once the dialect is known. */
   export function addDraft(profileId: string, deps: MachinesDeps): Draft {
     const values = initialValues(fieldsFor({ kind: 'add', id: null, profileId, values: {} }, deps));
-    return { kind: 'add', id: null, profileId, values };
+    return { kind: 'add', id: null, profileId, values, motion: { values: motionToValues(undefined, undefined), touched: false } };
   }
 
   /** The draft for "Edit": the stored record, through the form's own defaults. */
@@ -304,6 +382,7 @@
       ...draft,
       values: initialValues(fieldsFor(draft, deps)),
       ...(channels === undefined ? {} : { channels }),
+      motion: { values: motionToValues(machine.params?.motion, machine.params?.limits), touched: false },
     };
   }
 
@@ -350,7 +429,20 @@
         deps.status.show(deps.t('machines.channels.problemsTitle'), { error: true });
         return false;
       }
+      if (motionErrors(draft, deps).length > 0) {
+        deps.status.show(deps.t('machines.motion.title'), { error: true });
+        return false;
+      }
       const built = machineFromValues(decl, draft.values, currentOf(draft, deps), { channels: draft.channels });
+      // A page the user changed rewrites both blocks from its fields (an empty field removes
+      // the member, an empty block the block); one that was not touched leaves them as stored.
+      if (draft.motion?.touched === true) {
+        const made = blocksFromValues(draft.motion.values, axesOf(draft.profileId, deps));
+        if (made.motion === undefined) delete built.params.motion;
+        else built.params.motion = made.motion as MachineMotion;
+        if (made.limits === undefined) delete built.params.limits;
+        else built.params.limits = made.limits as MachineLimits;
+      }
       if (draft.kind === 'add') {
         await deps.machines.add({
           name: built.name,
@@ -468,6 +560,7 @@
   import FormRenderer from '$lib/components/forms/FormRenderer.svelte';
   import ChannelsForm from '$lib/components/dialogs/ChannelsForm.svelte';
   import ChannelsTester from '$lib/components/dialogs/ChannelsTester.svelte';
+  import MachineMotionForm from '$lib/components/dialogs/MachineMotionForm.svelte';
   import { REPOSITORY_URL } from '$lib/components/dialogs/AboutDialog.svelte';
   import { editor } from '$lib/monaco/editorService';
   import { commands } from '$lib/app/registry/commands';
@@ -521,7 +614,16 @@
     draft && hasChannelsStep(draft, deps) ? deps.profiles.profile(draft.profileId).machineParams?.channels : undefined,
   );
   const channelIssues = $derived(draft ? channelErrors(draft, deps) : []);
-  const blockedSave = $derived(Object.keys(errors).length > 0 || channelIssues.length > 0 || busy);
+  const motionIssues = $derived(draft ? motionErrors(draft, deps) : []);
+  const blockedSave = $derived(Object.keys(errors).length > 0 || channelIssues.length > 0 || motionIssues.length > 0 || busy);
+  /** The stored blocks' problems, shown until the user changes a field of the page (plan §6.4 rule 4). */
+  const storedMotionProblems = $derived.by(() => {
+    if (!draft || draft.kind !== 'edit' || draft.motion?.touched !== false) return [];
+    const machine = draft.id === null ? undefined : machines.get(draft.id);
+    const index = $list.findIndex((m) => m.id === draft?.id);
+    return machine === undefined || index < 0 ? [] : motionProblemsOf(machine, index, deps);
+  });
+  const motionAxes = $derived(draft ? axesOf(draft.profileId, deps) : { axes: [], angular: [], diameter: [] });
 
   const title = $derived.by(() => {
     if (!draft) return '';
@@ -569,6 +671,8 @@
     if (!draft) return;
     const values = { ...draft.values, [id]: value };
     if (variantIdOf(id) !== null) {
+      // D5-3: a default that follows this variant moves with it, unless set by hand.
+      followVariantDefaults(deps.profiles.profile(draft.profileId).machineParams, id, draft.values, values);
       const dropped = pruneModalValues(values, fieldsFor({ ...draft, values }, deps));
       if (dropped.length > 0) status.show(t('machines.page.modalDropped', { codes: dropped.join(', ') }));
     }
@@ -577,6 +681,15 @@
 
   function setChannels(next: ChannelParams | undefined): void {
     if (draft) draft = { ...draft, channels: next };
+  }
+
+  function setMotion(id: string, value: unknown): void {
+    if (draft?.motion) draft = { ...draft, motion: { values: { ...draft.motion.values, [id]: value }, touched: true } };
+  }
+
+  /** "Start this page again": every field empty, so saving removes both blocks. */
+  function startMotionAgain(): void {
+    if (draft) draft = { ...draft, motion: { values: motionToValues(undefined, undefined), touched: true } };
   }
 
   /**
@@ -732,6 +845,20 @@
               />
             {/if}
           {/if}
+        </div>
+      {/if}
+      {#if draft.motion && draft.kind !== 'duplicate'}
+        <div class="motion-step" data-testid="machine-motion-step">
+          <MachineMotionForm
+            values={draft.motion.values}
+            onChange={setMotion}
+            axes={motionAxes.axes}
+            angular={motionAxes.angular}
+            diameter={motionAxes.diameter}
+            problems={storedMotionProblems}
+            onStartAgain={startMotionAgain}
+            disabled={view.blocked}
+          />
         </div>
       {/if}
       <div class="actions">
@@ -896,6 +1023,12 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .motion-step {
     margin-top: 12px;
     padding-top: 10px;
     border-top: 1px solid var(--border-color);

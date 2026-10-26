@@ -1,0 +1,35 @@
+{
+  "message": "Estimated time 0:12.7 for 1 tool: feed 0:08.4, rapid 0:00.3, dwell 0:00.0, tool changes 0:04.0. 5 blocks are not estimated: 3 cycles, 2 moves whose start or end is not known. The estimate is a lower bound: it counts 100 % feed and rapid override, no acceleration, no time to read a block and no look-ahead. No machine chosen: a value whose reading depends on the machine is not estimated.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "warning",
+      "message": "N50 G0 X0 Y0 Z30: not estimated: where the move starts or ends is not known (the start of X: the program's first move of the axis, or the first after a move to a machine position, a roughing cycle's contour or a block gEdit cannot place).",
+      "reason": "position-unknown"
+    },
+    {
+      "line": 10,
+      "severity": "warning",
+      "message": "N90 F250: not estimated: the cycle is not timed (CYCLE81: this way of calling the cycle is not written out yet (F250 under MCALL: the control runs the cycle after this block too)).",
+      "reason": "cycle"
+    },
+    {
+      "line": 11,
+      "severity": "warning",
+      "message": "N100 S2500: not estimated: the cycle is not timed (CYCLE81: this way of calling the cycle is not written out yet (S2500 under MCALL: the control runs the cycle after this block too)).",
+      "reason": "cycle"
+    },
+    {
+      "line": 13,
+      "severity": "warning",
+      "message": "N120 CYCLE81(10,0,-2,-5): not estimated: the cycle is not timed (CYCLE81: a value the cycle needs is not written and has no default (a set-up clearance below 0)).",
+      "reason": "cycle"
+    },
+    {
+      "line": 14,
+      "severity": "warning",
+      "message": "N130 G0 Z100: not estimated: where the move starts or ends is not known (the start of Z: the program's first move of the axis, or the first after a move to a machine position, a roughing cycle's contour or a block gEdit cannot place).",
+      "reason": "position-unknown"
+    }
+  ]
+}

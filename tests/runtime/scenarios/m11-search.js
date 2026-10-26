@@ -45,6 +45,12 @@ scenario('m11-search', { timeout: 240 }, async (h) => {
     h.check('Mod+Shift+F opens the find-all form', !!opened)
     const fields = h.qa('form-field').map((e) => e.dataset.field)
     h.check('the form has the six fields of §7.12', same(fields, ['query', 'wholeAddress', 'caseSensitive', 'regex', 'inComments', 'scope']), fields)
+    // T226: Also in comments is for text searches only, so it is greyed out while Whole address is ticked.
+    const box = (/** @type {string} */ id) => /** @type {HTMLInputElement | null} */ (h.q('form-field', { field: id })?.querySelector('input') ?? null)
+    h.check('Also in comments is available for a text search', box('inComments')?.disabled === false, box('inComments')?.disabled)
+    h.click(box('wholeAddress'))
+    await h.waitFor(() => box('inComments')?.disabled === true, { timeout: 3000 })
+    h.check('and greyed out once Whole address is ticked', box('inComments')?.disabled === true, box('inComments')?.disabled)
     h.click(h.q('modal-cancel'))
     await h.waitFor(() => !h.q('modal'), { timeout: 5000 })
     h.check('Cancel leaves no report behind', report(h) === null)

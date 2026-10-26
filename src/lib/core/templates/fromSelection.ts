@@ -48,17 +48,29 @@
 //     no candidate, so a P/Q pair cannot be split; `draftToTemplate` always adds it, and the
 //     template service then offers and checks numbers the program does not use (NC-01). A
 //     reference to a block outside the selection stays as written, is no candidate either, and
-//     the draft says so (`templates.fromSelection.referencedKept`). A Klartext label
-//     (`LBL n`, `CALL LBL n`) has no reference rule: it stays as written, with a note
-//     (`templates.fromSelection.labelsKept`). A block number behind a block-delete slash that
-//     nothing points at stays as written (`/N40 …`): the loader takes `{{N}}` only at the very
-//     start of a line, so `/{{N}}` would make a draft that cannot be saved; the draft says so
-//     (`templates.fromSelection.skipNumberKept`). A referenced one is `/N{{p}}` like any other.
+//     the draft says so (`templates.fromSelection.referencedKept`); so does a reference whose rule
+//     says `rewrite: false` (a mill `G73 Q… P…`, a peck and a dwell or a contour) or that names a
+//     block of another program (`M99 P30`, `M98 P1000 Q10`; v1.2.0 WX-NC-2), even where the
+//     selection has a block of that number. Klartext labels: rule 9. A block number behind a block-delete slash that
+//     nothing points at is `/{{N}}` (v1.2.0 T157: the loader takes `{{N}}` right behind a leading
+//     slash); a referenced one is `/N{{p}}` like any other.
 //  7. **Least increments** (review NC-10): a word whose parameter the database reads in least
 //     increments (`unit: 'increment'`: the lathe `G74`–`G76` and `G83` pecks) is a whole number
 //     (`integer`), its label says "(least increments, no point)": a point is forbidden there.
 //  8. A number is read by a pattern that cannot backtrack and is at most 40 characters
 //     (review CODE-01).
+//  9. **Klartext labels** (v1.2.0 T160). A label the selection defines at the head of a block
+//     (`5 LBL 1`, behind a block-delete slash too) is one parameter (`TemplateDraft.references`,
+//     id `lbl`, `lbl_2`, …: a whole number from 1 to 65535, required, default as written), written
+//     there and at every `CALL LBL 1` of the selection, so a second insertion into one program can
+//     take another label (the template service offers and checks one the program does not use).
+//     Left as written, with the note `templates.fromSelection.labelsKept`: a label name
+//     (`LBL "CONTOUR"`), a call to a label the selection does not define, and a label that a
+//     contour list (`CYCL DEF 14.1`) or a `LBL` inside a block names, which this rule cannot
+//     rewrite with it. Every number behind `14.1` outside a comment is such a label, however the
+//     list is spelled (`KONTURLABEL1/2`, `CONTOUR LABEL1 /2`); a list this rule cannot read (no
+//     number, a parameter, the list on the next line) keeps every label of the selection
+//     (v1.2.0 WX-NC-1). `LBL 0` (the end of a subprogram) is no label.
 
 import type { Msg } from '$lib/app/types';
 import { codeAddressesOf } from '$lib/core/codes/hoverText';
@@ -193,7 +205,10 @@ export function templateFromSelection(lines: readonly string[], cp: CompiledProf
     for (const word of referencesOn(tokens[n], line, cp, addresses, labels)) {
       if (word.ambiguous) continue;
       const from = line.toUpperCase().lastIndexOf(word.address.toUpperCase(), word.start);
-      out.push({ address: word.address, start: word.start, end: word.end, key: keyOfDigits(word.text), written: line.slice(from < 0 ? word.start : from, word.end).trim(), name: false });
+      // Rule 6 (v1.2.0 WX-NC-2): a word the profile says not to rewrite (`G73 Q… P…` on a mill: a peck and
+      // a dwell, or a contour) or that names another program's block (`M99 P30`, `M98 P1000 Q10`) is kept.
+      const fixed = !word.rewrite || word.program !== 'own';
+      out.push({ address: word.address, start: word.start, end: word.end, key: keyOfDigits(word.text), written: line.slice(from < 0 ? word.start : from, word.end).trim(), name: false, fixed });
     }
     if (byText) {
       // Okuma: a sequence name behind a reference code (`G85 NLAP1`) is a label token.
@@ -202,7 +217,7 @@ export function templateFromSelection(lines: readonly string[], cp: CompiledProf
         const head = heads[n];
         for (const token of tokens[n]) {
           if (token.kind !== 'label' || !SEQUENCE_NAME.test(token.text) || (head !== null && token.start === head.start)) continue;
-          out.push({ address: 'N', start: token.start, end: token.end, key: token.text.toUpperCase(), written: token.text, name: true });
+          out.push({ address: 'N', start: token.start, end: token.end, key: token.text.toUpperCase(), written: token.text, name: true, fixed: false });
         }
       }
     }
@@ -214,11 +229,10 @@ export function templateFromSelection(lines: readonly string[], cp: CompiledProf
   const usedIds = new Set<string>();
   const shared = new Map<string, TemplateParam>(); // key → the reference parameter
   const kept: string[] = [];
-  const skipKept: string[] = [];
   refsOfLine.forEach((refs) => {
     for (const ref of refs) {
       if (ref.key === null) continue;
-      const target = defined.get(ref.key);
+      const target = ref.fixed ? undefined : defined.get(ref.key);
       if (target === undefined) {
         if (!kept.includes(ref.written)) kept.push(ref.written);
         continue;
@@ -230,6 +244,10 @@ export function templateFromSelection(lines: readonly string[], cp: CompiledProf
       shared.set(ref.key, referenceParam(id, target, ref));
     }
   });
+
+  // Rule 9 (T160): Klartext labels. A label the selection defines (`LBL 1` at the head of a block) is
+  // one parameter, written there and at every `CALL LBL 1` of the selection.
+  const lbl = profile.numbering?.mode === 'consecutive' ? klartextLabels(lines, tokens, heads, usedIds) : null;
 
   const body: string[] = [];
   const candidates: SelectionCandidate[] = [];
@@ -248,22 +266,24 @@ export function templateFromSelection(lines: readonly string[], cp: CompiledProf
       if (param !== undefined) {
         out = escape(line.slice(0, head.start)).trimStart() + (head.name ? `{{${param.id}}}` : `${head.prefix}{{${param.id}}}`);
         from = head.end;
-      } else if (!head.name && head.slash === '') {
-        out = '{{N}}';
+      } else if (!head.name) {
+        // Behind a block-delete slash too (T157): the slash and its level stay, the number is `{{N}}`.
+        out = head.slash === '' ? '{{N}}' : `${escape(line.slice(0, head.start)).trimStart()}{{N}}`;
         from = head.end;
         while (from < line.length && (line[from] === ' ' || line[from] === '\t')) from++;
-      } else if (!head.name) {
-        // Behind a block-delete slash: kept as written (rule 6), and said.
-        skipKept.push(line.slice(0, head.end).trim());
       }
     }
     const refs = refsOfLine[n];
-    const inRef = (start: number, end: number): boolean => refs.some((r) => start < r.end && end > r.start);
+    const inRef = (start: number, end: number): boolean =>
+      refs.some((r) => start < r.end && end > r.start) || (lbl?.sites[n] ?? []).some((r) => start < r.end && end > r.start);
     // The edits of this line in order: the references to a shared block, then the candidates.
     const edits: ({ kind: 'ref'; start: number; end: number; id: string } | { kind: 'word'; found: Found })[] = [];
     for (const ref of refs) {
       const param = ref.key === null ? undefined : shared.get(ref.key);
-      if (param !== undefined && ref.start >= from) edits.push({ kind: 'ref', start: ref.start, end: ref.end, id: param.id });
+      if (param !== undefined && !ref.fixed && ref.start >= from) edits.push({ kind: 'ref', start: ref.start, end: ref.end, id: param.id });
+    }
+    for (const site of lbl?.sites[n] ?? []) {
+      if (site.start >= from) edits.push({ kind: 'ref', start: site.start, end: site.end, id: site.id });
     }
     for (let i = 0; i < toks.length; i++) {
       const token = toks[i];
@@ -313,15 +333,135 @@ export function templateFromSelection(lines: readonly string[], cp: CompiledProf
     body.push(out);
   });
   const draft: TemplateDraft = { body: body.join('\n'), candidates };
-  if (shared.size > 0) draft.references = [...shared.values()];
+  const references = [...shared.values(), ...(lbl?.params ?? [])];
+  if (references.length > 0) draft.references = references;
   const notes: Msg[] = [];
   if (kept.length > 0) notes.push({ key: 'templates.fromSelection.referencedKept', params: { words: kept.join(' ') } });
-  if (skipKept.length > 0) notes.push({ key: 'templates.fromSelection.skipNumberKept', params: { words: skipKept.join(' ') } });
-  if (profile.numbering?.mode === 'consecutive' && lines.some((l) => typeof l === 'string' && /(?<![A-Z])LBL(?![A-Z])/i.test(l))) {
-    notes.push({ key: 'templates.fromSelection.labelsKept' });
-  }
+  if (lbl !== null && lbl.kept.length > 0) notes.push({ key: 'templates.fromSelection.labelsKept', params: { words: lbl.kept.join(', ') } });
   if (notes.length > 0) draft.notes = notes;
   return draft;
+}
+
+/** The highest label number a Klartext program takes (`LBL 1` to `LBL 65535`; `LBL 0` ends a subprogram). */
+const LABEL_MAX = 65535;
+
+/** Rule 9 (T160): the labels of a Klartext selection that become parameters, and where they are written. */
+interface LabelReading {
+  params: TemplateParam[];
+  /** By line of the selection: the label numbers to write as `{{id}}`. */
+  sites: { start: number; end: number; id: string }[][];
+  /** The label words left as written (a name, a call to a label outside the selection, a contour list), for the note. */
+  kept: string[];
+}
+
+/** The next token after `i` that is not whitespace, or undefined. */
+function after(toks: readonly NcToken[], i: number): NcToken | undefined {
+  const j = next(toks, i);
+  return j < 0 ? undefined : toks[j];
+}
+
+/** A label number as written behind `LBL`: a plain whole number from 1 to `LABEL_MAX`, or null (a name, `LBL 0`, a parameter). */
+function labelNumber(token: NcToken | undefined): string | null {
+  if (token === undefined || token.kind !== 'word' || (typeof token.address === 'string' && token.address !== '')) return null;
+  const text = token.text;
+  if (!/^\d{1,5}$/.test(text)) return null;
+  const n = Number(text);
+  return n >= 1 && n <= LABEL_MAX ? String(n) : null;
+}
+
+/**
+ * Rule 9: a label defined at the head of a block of the selection (`5 LBL 1`, `5 / LBL 1`) is one
+ * parameter, written there and at each `CALL LBL 1` of the selection. Left as written, with the
+ * note: a label name (`LBL "CONTOUR"`), a call to a label the selection does not define (it is the
+ * program's), and a label that something else names (a contour list of `CYCL DEF 14`, a
+ * `CONTOUR DEF`), which this rule cannot rewrite with it.
+ */
+function klartextLabels(lines: readonly string[], tokens: readonly NcToken[][], heads: readonly (Head | null)[], usedIds: Set<string>): LabelReading {
+  const defs = new Map<string, { line: number; token: NcToken }[]>();
+  const calls = new Map<string, { line: number; token: NcToken }[]>();
+  const unsafe = new Set<string>();
+  // A contour list this rule cannot read: no label of the selection can be told safe.
+  let unreadable = false;
+  const kept: string[] = [];
+  const keep = (word: string): void => {
+    if (!kept.includes(word)) kept.push(word);
+  };
+  tokens.forEach((toks, n) => {
+    const list = contourListOf(typeof lines[n] === 'string' ? lines[n] : '', toks);
+    if (list === 'unreadable') unreadable = true;
+    else if (list !== null) for (const number of list) unsafe.add(number);
+    for (let i = 0; i < toks.length; i++) {
+      const token = toks[i];
+      const word = upper(token.text);
+      if (token.kind !== 'keyword' || (word !== 'LBL' && word !== 'CALL LBL')) continue;
+      const value = after(toks, i);
+      const number = labelNumber(value);
+      if (number === null) {
+        if (value !== undefined && value.kind !== 'whitespace' && !(word === 'LBL' && value.text === '0')) keep(`${word} ${value.text}`);
+        continue;
+      }
+      if (word === 'CALL LBL') {
+        calls.set(number, [...(calls.get(number) ?? []), { line: n, token: value as NcToken }]);
+        continue;
+      }
+      // A definition stands at the head of a block: behind the block number and a block-delete slash only.
+      const head = heads[n];
+      const atHead = toks.slice(0, i).every((t) => t.kind === 'whitespace' || t.kind === 'skip' || (head !== null && t.kind === 'blockNumber' && t.start === head.start));
+      if (atHead) defs.set(number, [...(defs.get(number) ?? []), { line: n, token: value as NcToken }]);
+      else unsafe.add(number);
+    }
+  });
+  const params: TemplateParam[] = [];
+  const sites: { start: number; end: number; id: string }[][] = tokens.map(() => []);
+  for (const [number, at] of defs) {
+    if (unreadable || unsafe.has(number)) {
+      keep(`LBL ${number}`);
+      continue;
+    }
+    let id = 'lbl';
+    for (let k = 2; usedIds.has(id); k++) id = `lbl_${k}`;
+    usedIds.add(id);
+    params.push({
+      id,
+      label: 'Label number (LBL)',
+      type: 'integer',
+      help: 'Written at LBL and at every CALL LBL of the template. Each label may stand only once in the program; the form offers one the program does not use yet.',
+      required: true,
+      min: 1,
+      max: LABEL_MAX,
+      default: number,
+    });
+    for (const site of [...at, ...(calls.get(number) ?? [])]) sites[site.line].push({ start: site.token.start, end: site.token.end, id });
+  }
+  for (const number of calls.keys()) if (!defs.has(number) || unreadable || unsafe.has(number)) keep(`CALL LBL ${number}`);
+  return { params, sites, kept };
+}
+
+/** What a contour list may hold behind `14.1`: the word for it in any spelling, label numbers, `/` (WX-NC-1). */
+const CONTOUR_LIST = /^[A-Za-z0-9\s/]*$/;
+
+/**
+ * Rule 9 (v1.2.0 WX-NC-1): the labels a contour list names (`CYCL DEF 14.1 KONTURLABEL 1/2/3`), or null
+ * on a line that holds none. The control and the posts write the list in more than one way
+ * (`KONTURLABEL1`, `KONTURLABEL1/2`, `CONTOUR LABEL1 /2`, `KONTURLABEL 1/2/3`), and the tokenizer reads
+ * each one differently, so every run of digits behind `14.1` outside a comment counts as a label.
+ * `'unreadable'` where the list holds no number or anything but letters, digits and `/` (a parameter,
+ * a list carried on to the next line): then no label of the selection can be told safe.
+ */
+function contourListOf(line: string, toks: readonly NcToken[]): string[] | 'unreadable' | null {
+  let i = 0;
+  for (; i < toks.length; i++) if (toks[i].kind === 'keyword' && upper(toks[i].text) === 'CYCL DEF' && after(toks, i)?.text === '14.1') break;
+  if (i >= toks.length) return null;
+  const cycle = after(toks, i) as NcToken;
+  const rest = maskedOf(line, toks as NcToken[]).slice(cycle.end);
+  const runs = rest.match(/\d+/g);
+  if (runs === null || !CONTOUR_LIST.test(rest)) return 'unreadable';
+  const out: string[] = [];
+  for (const run of runs) {
+    const digits = run.replace(/^0+(?=\d)/, '');
+    if (digits.length <= 5) out.push(String(Number(digits)));
+  }
+  return out;
 }
 
 /** An Okuma sequence name (`NLAP1`): `N` and letters or digits. */
@@ -350,6 +490,12 @@ interface Ref {
   key: string | null;
   written: string;
   name: boolean;
+  /**
+   * True for a word that never becomes the selection's parameter (WX-NC-2): its rule says `rewrite: false`
+   * (a mill `G73 Q… P…` may be a peck and a dwell) or it names a block of another program (`M99 P`,
+   * `M98 P… Q…`). It stays as written, is no candidate, and the draft says so.
+   */
+  fixed: boolean;
 }
 
 function headOf(line: string, toks: readonly NcToken[], mainPrefix: string | undefined, byText: boolean, keyOfDigits: (d: string) => string | null): Head | null {

@@ -183,7 +183,7 @@ describe('Sinumerik and Okuma', () => {
     const d = draftOf('okuma-osp', 'okuma', ['N0100 G85 NAT01 D4 F0.3 U0.4 W0.2', '$ G84 XA=60 DA=2 FA=0.25', 'G181 X50 Z-12 C0 K3 F120 E0.5']);
     expect(d.body.split('\n')[0]).toBe('{{N}}G85 NAT01 D4 F0.3 U0.4 W0.2');
     const d4 = d.candidates.find((c) => c.address === 'D')!;
-    expect(d4.param).toMatchObject({ type: 'number', decimals: 'as-entered', label: 'Depth of cut' });
+    expect(d4.param).toMatchObject({ type: 'number', decimals: 'as-entered', label: 'Depth of cut, as a diameter and incremental' });
     expect(summary(d)).toContain('XA=60→xa');
     const t = draftToTemplate(d, all(d), META);
     expect(problemsOf(t)).toEqual([]);
@@ -275,11 +275,16 @@ describe('P3b fix NC: block numbers that the selection points at (NC-02)', () =>
     expect(problemsOf(t)).toEqual([]);
   });
 
-  it('a block number behind a block-delete slash stays as written and is said (the loader takes {{N}} only at a line start); a referenced one is a parameter', () => {
-    const d = draftOf('fanuc-gcode', 'fanuc', ['/N40 G98 G83 X1. Y1. Z-5. R2. Q3. F100.', 'N50 G80']);
-    expect(d.body.split('\n')).toEqual(['/N40 G98 G83 X1. Y1. Z-5. R2. Q3. F100.', '{{N}}G80']);
-    expect(d.notes).toEqual([{ key: 'templates.fromSelection.skipNumberKept', params: { words: '/N40' } }]);
-    expect(problemsOf(draftToTemplate(d, all(d), META))).toEqual([]);
+  it('T157: a block number behind a block-delete slash is numbered like any other (/{{N}}), the slash and its level kept; a referenced one is a parameter', () => {
+    const d = draftOf('fanuc-gcode', 'fanuc', ['/N40 G98 G83 X1. Y1. Z-5. R2. Q3. F100.', 'N50 G80', '/2 N60 M9']);
+    expect(d.body.split('\n')).toEqual(['/{{N}}G98 G83 X1. Y1. Z-5. R2. Q3. F100.', '{{N}}G80', '/2 {{N}}M9']);
+    expect(d.notes).toBeUndefined();
+    const t = draftToTemplate(d, all(d), META);
+    expect(problemsOf(t)).toEqual([]);
+    // Inserted behind N100 of a numbered program: the slash stays, the numbers continue.
+    const values = Object.fromEntries((t.params ?? []).map((p) => [p.id, String(p.default)]));
+    const r = renderTemplate(t, values, { cp: cpOf('fanuc-gcode'), prevBlockNumber: 100, numbered: true, sys: { date: '', time: '', file: '', stem: '' } });
+    expect(r.ok && r.text.split('\n')).toEqual(['/N110 G98 G83 X1. Y1. Z-5. R2. Q3. F100.', 'N120 G80', '/2 N130 M9']);
     const ref = draftOf('fanuc-gcode', 'fanuc', ['N10 GOTO 40', '/N40 G0 X1.']);
     expect(ref.body.split('\n')).toEqual(['{{N}}GOTO {{goto}}', '/N{{goto}} G0 X1.']);
     expect(problemsOf(draftToTemplate(ref, new Set(), META))).toEqual([]);
@@ -290,6 +295,42 @@ describe('P3b fix NC: block numbers that the selection points at (NC-02)', () =>
     expect(d.body).toBe('{{N}}G70 P100 Q200');
     expect(d.candidates).toEqual([]);
     expect(d.notes).toEqual([{ key: 'templates.fromSelection.referencedKept', params: { words: 'P100 Q200' } }]);
+  });
+
+  // v1.2.0 WX-NC-2: a word the profile keeps as written, or one naming a block of another program,
+  // is never the selection's block-number parameter, even where the selection has that block.
+  const kept = (words: string) => [{ key: 'templates.fromSelection.referencedKept', params: { words } }];
+
+  it('WX-NC-2: M99 P in a subprogram names a block of the caller, not the N30 of the selection', () => {
+    const d = draftOf('fanuc-gcode', 'fanuc', ['O2000', 'N30 G0 X0', 'N40 G1 X10. F100.', 'M99 P30']);
+    expect(d.body.split('\n')).toEqual(['O2000', '{{N}}G0 X0', '{{N}}G1 X10. F100.', 'M99 P30']);
+    expect(d.references).toBeUndefined();
+    expect(d.candidates.some((c) => c.address === 'P')).toBe(false);
+    expect(d.notes).toEqual(kept('P30'));
+    // Where a G71 of the selection makes N120 a parameter, an M99 P120 beside it still stays as written.
+    const both = draftOf('fanuc-lathe', 'fanuc-lathe', [...LATHE, 'M99 P120']);
+    expect(both.body.split('\n').slice(-3)).toEqual(['N{{q}} X34.', '{{N}}G70 P{{p}} Q{{q}}', 'M99 P120']);
+    expect(both.notes).toEqual(kept('P120'));
+  });
+
+  it('WX-NC-2: M98 P1000 Q10 names a block of the called program, not the N10 of the selection (lathe)', () => {
+    const d = draftOf('fanuc-lathe', 'fanuc-lathe', ['N10 G0 X50. Z2.', 'N20 M98 P1000 Q10', 'N30 G0 X100.']);
+    expect(d.body.split('\n')).toEqual(['{{N}}G0 X50. Z2.', '{{N}}M98 P1000 Q10', '{{N}}G0 X100.']);
+    expect(d.references).toBeUndefined();
+    expect(d.candidates.some((c) => c.address === 'Q')).toBe(false);
+    expect(d.notes).toEqual(kept('Q10'));
+  });
+
+  it('WX-NC-2: a peck depth and a dwell of a mill G73 are no block numbers, though N10 and N20 are selected', () => {
+    const d = draftOf('fanuc-gcode', 'fanuc', ['N10 G90 G54 G0 X0 Y0', 'N20 G98 G73 X10. Y10. Z-20. R2. Q10 P20 F100.', 'N30 G80']);
+    expect(d.body.split('\n')).toEqual(['{{N}}G90 G54 G0 X0 Y0', '{{N}}G98 G73 X10. Y10. Z-20. R2. Q10 P20 F100.', '{{N}}G80']);
+    expect(d.references).toBeUndefined();
+    expect(d.notes).toEqual(kept('Q10 P20'));
+    // The template inserted behind N500 keeps the peck and the dwell as written.
+    const t = draftToTemplate(d, new Set(), META);
+    expect(problemsOf(t)).toEqual([]);
+    const r = renderTemplate(t, {}, { cp: cpOf('fanuc-gcode'), prevBlockNumber: 500, numbered: true, sys: SYS });
+    expect(r.ok && r.text.split('\n')[1]).toBe('N520 G98 G73 X10. Y10. Z-20. R2. Q10 P20 F100.');
   });
 });
 
@@ -326,5 +367,80 @@ describe('B1 fix NC (NC-06): a count that is a real number', () => {
       codes: base.codes.map((e) => ({ ...e, params: e.params?.map((p) => (p.address === 'Q339' ? { ...p, decimals: true } : p)) })),
     };
     expect(q339(templateFromSelection(lines, cpOf('heidenhain-klartext'), real))).toMatchObject({ type: 'number' });
+  });
+});
+
+describe('v1.2.0 T160: Klartext labels in "from selection"', () => {
+  it('a label the selection defines is one parameter, at LBL and at every CALL LBL; LBL 0 is no label', () => {
+    const d = draftOf('heidenhain-klartext', 'heidenhain', ['5 CALL LBL 1 REP 2', '6 L Z+100 R0 FMAX', '7 LBL 1', '8 L X+10 R0 FMAX', '9 LBL 0']);
+    expect(d.body.split('\n')).toEqual(['{{N}}CALL LBL {{lbl}} REP 2', '{{N}}L Z+100 R0 FMAX', '{{N}}LBL {{lbl}}', '{{N}}L X+10 R0 FMAX', '{{N}}LBL 0']);
+    expect(d.references).toEqual([expect.objectContaining({ id: 'lbl', type: 'integer', required: true, min: 1, max: 65535, default: '1' })]);
+    expect(d.notes).toBeUndefined();
+    // The label number is no candidate, and the REP count stays text.
+    expect(d.candidates.some((c) => c.written === '1' || c.written === '2')).toBe(false);
+    const t = draftToTemplate(d, new Set(), META);
+    expect(problemsOf(t)).toEqual([]);
+    const r = renderTemplate(t, { lbl: '7' }, { cp: cpOf('heidenhain-klartext'), prevBlockNumber: 20, numbered: true, sys: { date: '', time: '', file: '', stem: '' } });
+    expect(r.ok && r.text.split('\n')).toEqual(['21 CALL LBL 7 REP 2', '22 L Z+100 R0 FMAX', '23 LBL 7', '24 L X+10 R0 FMAX', '25 LBL 0']);
+  });
+
+  it('two labels are two parameters; a label behind a block-delete slash is one too', () => {
+    const d = draftOf('heidenhain-klartext', 'heidenhain', ['1 LBL 3', '2 / LBL 4', '3 CALL LBL 4', '4 CALL LBL 3']);
+    expect(d.body.split('\n')).toEqual(['{{N}}LBL {{lbl}}', '{{N}}/ LBL {{lbl_2}}', '{{N}}CALL LBL {{lbl_2}}', '{{N}}CALL LBL {{lbl}}']);
+    expect(d.references?.map((p) => [p.id, p.default])).toEqual([
+      ['lbl', '3'],
+      ['lbl_2', '4'],
+    ]);
+  });
+
+  it('leaves as written, and says so: a label name, a call to a label outside the selection, a label a contour list names', () => {
+    const named = draftOf('heidenhain-klartext', 'heidenhain', ['1 LBL "CONTOUR"', '2 CALL LBL 5']);
+    expect(named.body.split('\n')).toEqual(['{{N}}LBL "CONTOUR"', '{{N}}CALL LBL 5']);
+    expect(named.references).toBeUndefined();
+    expect(named.notes).toEqual([{ key: 'templates.fromSelection.labelsKept', params: { words: 'LBL "CONTOUR", CALL LBL 5' } }]);
+    const contour = draftOf('heidenhain-klartext', 'heidenhain', ['1 CYCL DEF 14.0 CONTOUR', '2 CYCL DEF 14.1 CONTOUR LABEL 1', '3 LBL 1', '4 L X+0 Y+0 RL', '5 LBL 0']);
+    expect(contour.body.split('\n')[2]).toBe('{{N}}LBL 1');
+    expect(contour.references).toBeUndefined();
+    expect(contour.notes).toEqual([{ key: 'templates.fromSelection.labelsKept', params: { words: 'LBL 1' } }]);
+  });
+
+  // v1.2.0 WX-NC-1: every number behind `14.1` names a label, however the contour list is spelled.
+  const labelsKept = (words: string) => [{ key: 'templates.fromSelection.labelsKept', params: { words } }];
+  const CONTOURS = ['4 LBL 1', '5 L X+0 Y+0 RL', '6 LBL 0', '7 LBL 2', '8 L X+5 Y+0 RL', '9 LBL 0', '10 LBL 3', '11 L X+9 RL', '12 LBL 0', '13 LBL 4', '14 L X+20', '15 LBL 0', '16 CALL LBL 4'];
+
+  for (const [list, named] of [
+    ['KONTURLABEL1', 'LBL 1'],
+    ['KONTURLABEL1/2', 'LBL 1, LBL 2'],
+    ['CONTOUR LABEL1 /2', 'LBL 1, LBL 2'],
+    ['KONTURLABEL 1/2/3', 'LBL 1, LBL 2, LBL 3'],
+  ]) {
+    it(`WX-NC-1: a contour list written "${list}" keeps the labels it names`, () => {
+      const d = draftOf('heidenhain-klartext', 'heidenhain', ['1 CYCL DEF 14.0 KONTUR', `2 CYCL DEF 14.1 ${list}`, '3 CYCL DEF 22 RAEUMEN', ...CONTOURS]);
+      const body = d.body.split('\n');
+      const numbers = named.split(', ').map((w) => w.slice(4));
+      for (const n of numbers) expect(body).toContain(`{{N}}LBL ${n}`);
+      // A label the list does not name (LBL 4 always) is still one parameter, with its CALL LBL.
+      const free = ['1', '2', '3', '4'].filter((n) => !numbers.includes(n));
+      expect(d.references?.map((p) => p.default)).toEqual(free);
+      const last = d.references?.at(-1)?.id;
+      expect(body.at(-1)).toBe(`{{N}}CALL LBL {{${last}}}`);
+      expect(d.notes).toEqual(labelsKept(named));
+    });
+  }
+
+  it('WX-NC-1: a label number in a comment behind the contour list is not named by it', () => {
+    const d = draftOf('heidenhain-klartext', 'heidenhain', ['1 CYCL DEF 14.1 KONTURLABEL 3 ; LBL 1', '2 LBL 1', '3 L X+0', '4 LBL 0', '5 LBL 3', '6 L X+5', '7 LBL 0']);
+    expect(d.body.split('\n')).toEqual(['{{N}}CYCL DEF 14.1 KONTURLABEL 3 ; LBL 1', '{{N}}LBL {{lbl}}', '{{N}}L X+0', '{{N}}LBL 0', '{{N}}LBL 3', '{{N}}L X+5', '{{N}}LBL 0']);
+    expect(d.references?.map((p) => [p.id, p.default])).toEqual([['lbl', '1']]);
+    expect(d.notes).toEqual(labelsKept('LBL 3'));
+  });
+
+  it('WX-NC-1: a contour list that cannot be read keeps every label of the selection', () => {
+    for (const list of ['2 CYCL DEF 14.1', '2 CYCL DEF 14.1 KONTURLABEL Q+1']) {
+      const d = draftOf('heidenhain-klartext', 'heidenhain', ['1 CYCL DEF 14.0 KONTUR', list, '3 LBL 7', '4 L X+0 RL', '5 LBL 0', '6 CALL LBL 7']);
+      expect(d.body.split('\n').slice(2), list).toEqual(['{{N}}LBL 7', '{{N}}L X+0 RL', '{{N}}LBL 0', '{{N}}CALL LBL 7']);
+      expect(d.references, list).toBeUndefined();
+      expect(d.notes, list).toEqual(labelsKept('LBL 7, CALL LBL 7'));
+    }
   });
 });

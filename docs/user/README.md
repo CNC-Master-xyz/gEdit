@@ -18,6 +18,7 @@ the machine, not for the person who builds the editor — the build and design n
 | [Your own profiles and code files](profiles.md) | Profiles for one shop, machine or folder, and your own G and M codes in the help; the Profiles page; when a profile of yours is used |
 | [Understanding a block](inspector.md) | The code inspector (what each word means on your machine and what is in force at the cursor, and changing a value from it), the hover with a cycle's parameters, and the motion colours |
 | [Writing with templates](templates.md) | The Insert tab: program starts, tool changes and cycles from a form, templates in completion, Edit Cycle, formulas, favourites, the template manager, New Template from Selection, and where your templates are kept |
+| [Editing comfort](editing.md) | Auto Space, the automatic block number, bookmark names and the bookmark panel, Select and Delete Block Range, Insert and Append File, Print and Export as HTML |
 | [Transformations](transformations.md) | The NC tab: renumbering, removing block numbers, the five cleanups, block skip and selecting a tool's lines |
 | [Channels](channels.md) | Twin-turret and multi-path programs: finding the channels, the wait codes, and checking that the waits fit |
 | [Scripts](scripts.md) | Running Python scripts, the nine that ship (feeds, speeds, tool list, program checks, extents, address arithmetic, translate, rotate, mirror), and how to write one |
@@ -39,8 +40,8 @@ Across the top is the **ribbon**, with seven tabs:
 
 | Tab | What it holds |
 |---|---|
-| **File** | New, Open, Save, Save As, Save All, Close, **Reload** (read the file again from disk, [below](#reload-from-disk)) · the recent-files list |
-| **Edit** | Undo, redo, find, replace, comment, duplicate, move, delete line, select all, upper and lower case (plain text commands; on a program use **Convert Case…** on the NC tab) · **Find All…**, **Replace All…**, **Find Whole Address…** ([Searching](#searching)) · **Go to Line or Block…** (group *Go To*) · **Typing**: **Upper-Case Typing** switches [upper case while you type](#typing-forced-upper-case-and-no-accidental-joins) off or on for this session |
+| **File** | New, Open, Save, Save As, Save All, Close, **Reload** (read the file again from disk, [below](#reload-from-disk)) · the recent-files list · **Insert File** and **Append File** (group *Insert*), **Print** and **Export as HTML** (group *Print*) — see [Editing comfort](editing.md) |
+| **Edit** | Undo, redo, find, replace, comment, duplicate, move, delete line, select all, upper and lower case (plain text commands; on a program use **Convert Case…** on the NC tab) · **Find All…**, **Replace All…**, **Find Whole Address…** ([Searching](#searching)) · **Go to Line or Block…** (group *Go To*) · **Typing**: **Upper-Case Typing** switches [upper case while you type](#typing-forced-upper-case-and-no-accidental-joins) off or on for this session, **Auto Space** and **Automatic Block Number** do the same for the [two helps of Editing comfort](editing.md#auto-space) · **Bookmarks** (Name Bookmark, Bookmark All Matches, Bookmark Panel; [Bookmarks](editing.md#bookmarks)) · **Block Range** (Select and Delete; [Block Range](editing.md#select-and-delete-block-range)) |
 | **Insert** | The **templates** of the active program — **Program start** (the first lines of a program, in the dialect's own style) and end, tool change, drilling, tapping, turning and threading cycles, for all six dialects — as buttons and lists, **Favorites** first; **Edit Cycle…** for the cycle at the cursor; **Manage Templates…** and **New Template from Selection…** for your own. See [Writing with templates](templates.md) |
 | **NC** | Renumbering, removing block numbers, the cleanups, block skip and selecting a tool segment — see [Transformations](transformations.md) · group **Channels**: the sync-point keys, **Channels Side by Side**, **Split into Channel Documents**, **Merge Channels Back** — see [Channels](channels.md) |
 | **Tools** | Compare ([Comparing two programs](#comparing-two-programs)) · the scripts that come with gEdit, in the **Built-in Scripts** group — **Program checks**, **Scale feed rates**, **Scale spindle speeds**, **Tool list**, **Extents**, **Address arithmetic**, **Translate**, **Rotate**, **Mirror** (see [Scripts](scripts.md)) · **Check Wait Codes** for [channels](channels.md#check-wait-codes) · **Test Profile on Document** for [profiles of your own](profiles.md#testing-a-profile-on-a-program) |
@@ -550,7 +551,8 @@ is that program.
 | Change one value of a cycle in a form | **Edit Cycle…** on the Insert tab — see [Edit Cycle](templates.md#edit-cycle) |
 | What each word of this block means, and what is in force here | The inspector (`Cmd/Ctrl+Alt+A`) — see [Understanding a block](inspector.md) |
 | Which lines are rapids, straight moves, arcs, threads or cycles | The coloured mark beside the line numbers — see [Motion colours](inspector.md#motion-colours) |
-| A place you keep coming back to | A bookmark: `Cmd/Ctrl+F2` to set or clear it, `F2` and `Shift+F2` to step through them |
+| A place you keep coming back to | A bookmark: `Cmd/Ctrl+F2` to set or clear it, `F2` and `Shift+F2` to step through them. Names, the panel of all bookmarks and Bookmark All Matches: [Bookmarks](editing.md#bookmarks) |
+| The lines from one block to another, selected or deleted | **Select Block Range** / **Delete Block Range** on the Edit tab — see [Block Range](editing.md#select-and-delete-block-range) |
 | Text | `Cmd/Ctrl+F`, the editor's own find and replace |
 | Every hit of an address, a value or some text, in a list | `Cmd/Ctrl+Shift+F` (Find All…) — see [Searching](#searching) |
 | A section, collapsed | `View ▸ Fold All` / `Unfold All`, and the sticky heading at the top of the editor |
@@ -570,7 +572,7 @@ On a program of a machine with [channels](channels.md), the map groups its tools
 codes by channel, the status bar says which channel the cursor is in, and `Alt+F7` /
 `Shift+Alt+F7` step through the wait codes of that channel.
 
-Bookmarks live in gEdit, not in the program — see
+Bookmarks live in gEdit, not in the program — see [Bookmarks](editing.md#bookmarks) and
 [Coming back where you left off](#coming-back-where-you-left-off), which is also where you
 turn that off.
 
@@ -626,9 +628,9 @@ Tick *Match case* to tell `Home` from `HOME`. A hit that falls in a comment is d
 unless you tick *Also in comments* (this box is for text searches only); a Fanuc program name in `<…>` is not a comment. Tick
 *Regular expression* for a pattern: see [Regular expressions](regex.md). If you tick both
 *Whole address* and *Regular expression*, the word wins. A pattern that can only match
-nothing (`$`, `^`) changes nothing: empty matches are skipped. gEdit cannot stop a
-pattern that runs away (see [When a pattern is slow](regex.md#when-a-pattern-is-slow)), so
-save your work first.
+nothing (`$`, `^`) changes nothing: empty matches are skipped. A pattern that runs away is
+stopped after 2 seconds and reported, and nothing is found or changed (see
+[When a pattern is slow](regex.md#when-a-pattern-is-slow)).
 
 ### Where it looks, and what you get
 
@@ -947,6 +949,27 @@ A copy is one undo step in the document that received it. Copying into the other
 document; the version on disk is not edited this way, and a locked document refuses a
 copy like any other change. Review mode is for reading: switch to raw or to the aligned view to merge.
 
+**A copy that may mean something else where it lands.** A line means what the modes in force
+at that place make of it: absolute or incremental (`G90`, `G91`), inch or millimetre, the plane
+(`G17`, `G18`, `G19`) and the work offset (`G54`, `G55` and so on). After a copy gEdit therefore
+compares these four in front of the copied text, on the side it came from and on the side it
+went into, and says it in the status bar when they differ: *Copied, but the two programs are in
+different modes at this place: G91 in the original, G90 in the current document. Check what
+the copied text means here.* Three details:
+
+- A work offset `G54.1` is compared with its `P` too: `G54.1 P1` against `G54.1 P2` differ.
+- A mode that **one side knows and the other does not** counts as a difference. The program
+  that has not written the code yet, and whose control has no power-on value for it, is
+  *not known*: *G90 in the original, absolute/incremental mode not known in the current
+  document.* Two sides that both do not know a mode are not a difference.
+- The lines **below** the copy are checked as well. If the copy changes the modes they run
+  in, the message says *the lines below the copy now run in G91 instead of G90*, or *instead
+  of an unknown absolute/incremental mode*, and asks you to check them.
+
+It is a warning after the copy, never a refusal, and the copy is one undo step as usual. The
+check reads the program as far as the copy once per file and keeps the result, so a long
+program is not read again from its first line for every copy.
+
 ### Exporting the differences
 
 **Export Differences…** writes the differences as a standard unified diff, with three lines
@@ -986,7 +1009,7 @@ The manifest and the report are described in [tests/real/README.md](../../tests/
 
 ## Typing: forced upper case and no accidental joins
 
-Two options of the dialect change what a key does while you type. Both are **on for all six
+Two options of the dialect change what a key does while you type. (Two more helps, Auto Space and the automatic block number, are off unless you switch them on: see [Editing comfort](editing.md).) Both are **on for all six
 shipped dialects**, and both can be changed per profile in a
 [profile of your own](profiles.md#typing-options-in-a-profile).
 

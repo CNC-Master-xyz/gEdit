@@ -574,6 +574,47 @@ describe('the preview', () => {
     expect(m.preview(key)).toMatchObject({ kind: 'errors', key: 'templateManager.preview.problems' });
   });
 
+  it('T150: shows every problem of a template at once, not the first one only', async () => {
+    const m = await open(world());
+    m.add();
+    const key = stateOf(m).selected as string;
+    m.setBody(key, 'G81 Z{{depth}} {{missing}}');
+    m.addParam(key);
+    m.setParam(key, 0, 'id', 'depth');
+    m.setParam(key, 0, 'label', 'Depth');
+    m.setParam(key, 0, 'min', 5);
+    m.setParam(key, 0, 'max', 1);
+    m.setField(key, 'group', '');
+    const row = stateOf(m).rows.find((r) => r.key === key);
+    expect(row?.problems.map((p) => p.path)).toEqual(['.group', '.params[0].min', '.body']);
+  });
+
+  it('T154, T155: edits the unit of a number and the length and characters of a text, each offered only where the loader takes it', async () => {
+    const m = await open(world());
+    m.add();
+    const key = stateOf(m).selected as string;
+    m.setBody(key, 'O{{name}} F{{f}}');
+    m.addParam(key);
+    m.setParam(key, 0, 'id', 'name');
+    m.setParamType(key, 0, 'text');
+    m.setParam(key, 0, 'maxLength', 4);
+    m.setParam(key, 0, 'charset', 'letters-digits');
+    m.setParam(key, 0, 'unit', 'mm');
+    m.addParam(key);
+    m.setParam(key, 1, 'id', 'f');
+    m.setParam(key, 1, 'unit', 'mm/min');
+    m.setParam(key, 1, 'maxLength', 4);
+    const row = stateOf(m).rows.find((r) => r.key === key);
+    expect(row?.problems).toEqual([]);
+    expect(row?.def?.params?.[0]).toMatchObject({ type: 'text', maxLength: 4, charset: 'letters-digits' });
+    expect(row?.def?.params?.[0].unit).toBeUndefined();
+    expect(row?.def?.params?.[1]).toMatchObject({ unit: 'mm/min' });
+    expect(row?.def?.params?.[1].maxLength).toBeUndefined();
+    // A number turned into a text loses its unit, the other way round its length and charset.
+    m.setParamType(key, 0, 'number');
+    expect(stateOf(m).rows.find((r) => r.key === key)?.def?.params?.[0]).not.toHaveProperty('charset');
+  });
+
   it('refuses a starting value the engine refuses, with the parameter’s name', async () => {
     const m = await open(world());
     m.add();
@@ -844,8 +885,9 @@ describe('pure helpers', () => {
   });
 
   it('has a message for every name the dialog and the problems use', () => {
-    const fields = ['id', 'label', 'group', 'description', 'body', 'machineType', 'toolbar', 'snippet', 'review', 'params', 'paramId', 'type', 'help', 'required', 'min', 'max', 'default', 'choices', 'prefix', 'suffix', 'decimals', 'digits', 'plusSign', 'uppercase', 'comment', 'remember', 'formula', 'hidden'];
+    const fields = ['id', 'label', 'group', 'description', 'body', 'machineType', 'toolbar', 'snippet', 'review', 'params', 'paramId', 'type', 'help', 'required', 'min', 'max', 'default', 'choices', 'prefix', 'suffix', 'decimals', 'digits', 'plusSign', 'uppercase', 'comment', 'remember', 'formula', 'hidden', 'unit', 'maxLength', 'charset'];
     const missing = [
+      ...['any', 'noSpaces', 'lettersDigits', 'name'].map((c) => `templateManager.charset.${c}`),
       ...fields.map((f) => `templateManager.field.${f}`),
       ...PARAM_TYPES.map((p) => `templateManager.type.${p}`),
       ...['required', 'plusSign', 'uppercase', 'comment', 'remember', 'hidden', 'toolbar', 'snippet'].map((f) => `templateManager.flag.${f}`),

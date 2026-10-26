@@ -43,6 +43,24 @@ describe('budget', () => {
     expectWithin(ms, 2000, `100,000 changed pairs: ${ms.toFixed(0)} ms`);
   });
 
+  // Most of it is reading the 200,000 long lines (about 1.1 s); the parts add a few microseconds a
+  // pair, because only the stretch where the two calls differ is compared.
+  it('marks the changed parts of 100,000 changed cycle calls in three seconds (review NC-8)', () => {
+    const call = (i: number, angle: number) => `N${i} CYCLE800(1,"TABLE",0,57,0,0,0,${angle},0,0,0,0,0,-1,100,1) ;TILT ${i % 7}`;
+    const a = Array.from({ length: LINES }, (_, i) => call(i, -30));
+    const b = Array.from({ length: LINES }, (_, i) => call(i, -45));
+    const cp = cpOf('sinumerik');
+    const sideOf = (lines: string[]): PairSide => ({ cp, line: (n) => lines[n - 1] });
+    const block = [{ originalStartLineNumber: 1, originalEndLineNumber: LINES, modifiedStartLineNumber: 1, modifiedEndLineNumber: LINES }];
+    for (const _ of wordMarkPairs([{ ...block[0], originalEndLineNumber: 1000, modifiedEndLineNumber: 1000 }], sideOf(a), sideOf(b))) void _;
+    const started = performance.now();
+    let parts = 0;
+    for (const pair of wordMarkPairs(block, sideOf(a), sideOf(b))) parts += pair.marks.parts?.original.length ?? 0;
+    const ms = performance.now() - started;
+    expect(parts).toBe(LINES);
+    expectWithin(ms, 3000, `100,000 changed cycle calls with parts: ${ms.toFixed(0)} ms`);
+  });
+
   it('marks 200 pairs of lines at the word cap in two seconds (the table at its largest)', () => {
     const line = Array.from({ length: WORD_DIFF_MAX_WORDS }, (_, i) => `X${i}.`);
     // Every word differs: the alignment table is the whole 500 x 500.

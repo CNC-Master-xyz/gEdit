@@ -60,12 +60,9 @@ scenario('m2-recent-restart-1', { timeout: 180, vars: { HOME: HOME_1 } }, async 
   h.check('the file carries its version and nothing about the window', state.$version === 1 && state.width === undefined && state.x === undefined, Object.keys(state))
 
   // A clean exit, so run 2 starts from a settled state file.
-  h.expectExit({ within: 15000 })
-  // `h.expectExit` only *queues* its record for the runner; the flush is an IPC round
-  // trip of its own. Under load the window can be gone before it lands, and the run is
-  // then judged as "the scenario never finished" (seen once in a full suite). A moment
-  // here is enough — see the h2 hand-off.
-  await h.sleep(500)
+  // `h.nativeKeys` hands the record to Rust first while an exit is expected (T189, T196): the
+  // window can no longer be gone before it lands, which a sleep here used to guess at.
+  await h.expectExit({ within: 15000 })
   await h.nativeKeys([{ key: 'w', mods: ['cmd', 'shift'] }])
 })
 

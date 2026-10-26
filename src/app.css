@@ -99,6 +99,11 @@
 
   font-family: var(--font-ui);
   color-scheme: dark;
+  /* The print sheet (components/print): paper is white and ink is black whatever the theme,
+     so these are the same in both blocks. */
+  --print-paper: #fff;
+  --print-ink: #000;
+  --print-ink-muted: #555;
 }
 
 /* The light theme: the same names, one level more specific, so `data-theme="light"` wins
@@ -162,6 +167,11 @@
   --scrollbar-thumb-hover: #b3a9aa;
 
   color-scheme: light;
+  /* The print sheet (components/print): paper is white and ink is black whatever the theme,
+     so these are the same in both blocks. */
+  --print-paper: #fff;
+  --print-ink: #000;
+  --print-ink-muted: #555;
 }
 
 body {

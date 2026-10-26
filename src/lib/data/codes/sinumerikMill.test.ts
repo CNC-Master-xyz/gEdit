@@ -50,16 +50,24 @@ const MILLING = [
 const AXIS_WORDS = {
   machine: ['G153', 'G53', 'G74', 'G75', 'SUPA'],
   // G25 and G26 (M9 review F10): with axis words they limit the working area.
-  data: ['AMIRROR', 'AROT', 'ASCALE', 'ATRANS', 'G25', 'G26', 'MIRROR', 'ROT', 'SCALE', 'TRANS'],
+  // v1.2.0 manual-check fix round (D6-1): the rotations by solid angles take angles too.
+  data: ['AMIRROR', 'AROT', 'AROTS', 'ASCALE', 'ATRANS', 'CROTS', 'G25', 'G26', 'MIRROR', 'ROT', 'ROTS', 'SCALE', 'TRANS'],
 };
 const FRAME = {
   // P10 (decision of 2026-10-04): TRAORI is tool centre point control, not a frame; TRAFOOF
   // keeps its close for TRANSMIT, TRACYL and TRAANG.
-  open: ['AMIRROR', 'AROT', 'ASCALE', 'CYCLE800', 'MIRROR', 'ROT', 'SCALE', 'TRAANG', 'TRACYL', 'TRANSMIT'],
-  close: ['TRAFOOF'],
+  // v1.2.0 manual-check fix round (D6-1): the rotations by solid angles, along the tool and on
+  // the workpiece; TOROTOF ends the frames along the tool, PAROTOF ends PAROT.
+  open: [
+    'AMIRROR', 'AROT', 'AROTS', 'ASCALE', 'CROTS', 'CYCLE800', 'MIRROR', 'PAROT', 'ROT', 'ROTS', 'SCALE',
+    'TOFRAME', 'TOFRAMEX', 'TOFRAMEY', 'TOFRAMEZ', 'TOROT', 'TOROTX', 'TOROTY', 'TOROTZ', 'TRAANG', 'TRACYL', 'TRANSMIT',
+  ],
+  close: ['PAROTOF', 'TOROTOF', 'TRAFOOF'],
 };
 /** P10: the codes that switch tool centre point control (`sets.tcp`). */
 const TCP = { on: ['TRAORI'], off: ['TRAFOOF'] };
+/** Fix batch 5 (v1.2.0): the codes that move at a speed of their own, not the motion code in force (`sets.motion`). */
+const RAPID = ['G74', 'G75'];
 
 describe('the milling and 5-axis entries', () => {
   it('load without a problem, the flags included', () => {
@@ -83,7 +91,9 @@ describe('the milling and 5-axis entries', () => {
     for (const code of MILLING) {
       const e = entry(code);
       // P10: tool centre point control is the one thing two of them switch.
-      const tcp = TCP.on.includes(code) ? { tcp: 'on' } : TCP.off.includes(code) ? { tcp: 'off' } : undefined;
+      // Fix batch 5: G74 and G75 move on their own (G75 each axis at its highest speed, G74 to
+      // the reference point at the machine's speeds), never at the programmed feed.
+      const tcp = TCP.on.includes(code) ? { tcp: 'on' } : TCP.off.includes(code) ? { tcp: 'off' } : RAPID.includes(code) ? { motion: 'rapid' } : undefined;
       expect(e?.sets, code).toEqual(tcp);
       expect(e?.verify, code).toBeUndefined();
       expect(e?.modal, code).toBeUndefined();

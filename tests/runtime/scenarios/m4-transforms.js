@@ -161,15 +161,22 @@ scenario('m4-transforms', { timeout: 420 }, async (h) => {
   // M10 (WP10.1) adds Insert and Remove Block Skip to the tab, in a group of their own; the
   // seven transforms of M4 keep their commands and their order, which is what this counts.
   const BLOCK_SKIP = ['nc.blockSkip.add', 'nc.blockSkip.remove']
-  const ncButtons = allNcButtons.filter((id) => !BLOCK_SKIP.includes(id ?? ''))
+  // P4d (`contrib/renumberOthers.ts`) added Update References in Other Documents between
+  // Renumber Blocks and Remove Block Numbers. It is enabled only while a renumber has left
+  // references to update (`m4`'s transforms do not drive it; `p4-renumber-others` does), so
+  // it is counted and placed here but kept out of NC_COMMANDS, which the enabled check uses.
+  const UPDATE_REFS = 'nc.updateOtherReferences'
+  const TAB_ORDER = [NC_COMMANDS[0], UPDATE_REFS, ...NC_COMMANDS.slice(1)]
+  const ncButtons = allNcButtons.filter((id) => !BLOCK_SKIP.includes(id ?? '') && id !== UPDATE_REFS)
   h.check('the NC tab shows all seven transform commands', NC_COMMANDS.every((id) => ncButtons.includes(id)) && ncButtons.length === NC_COMMANDS.length, ncButtons)
-  h.check('and the two block-skip commands M10 added (the scenario m10-blockskip drives them)', BLOCK_SKIP.every((id) => allNcButtons.includes(id)) && allNcButtons.length === NC_COMMANDS.length + BLOCK_SKIP.length, allNcButtons)
+  h.check('and Update References in Other Documents, which P4d added (the scenario p4-renumber-others drives it)', allNcButtons.includes(UPDATE_REFS), allNcButtons)
+  h.check('and the two block-skip commands M10 added (the scenario m10-blockskip drives them)', BLOCK_SKIP.every((id) => allNcButtons.includes(id)) && allNcButtons.length === TAB_ORDER.length + BLOCK_SKIP.length, allNcButtons)
   // Numbering before Cleanup, and each group in its own contribution order. Both used to
   // start at order 10, so `ribbonModel.groupsOf` broke the tie by first appearance — the
   // alphabetical load order of the two contribution files — and Cleanup came first by
   // accident; `contrib/ncNumbering.ts` now says 5/15 so the tab does not depend on a
-  // filename. `NC_COMMANDS` is that order.
-  h.check('the NC tab draws Numbering before Cleanup, each group in its contribution order', JSON.stringify(ncButtons) === JSON.stringify(NC_COMMANDS), ncButtons)
+  // filename. `TAB_ORDER` is that order.
+  h.check('the NC tab draws Numbering before Cleanup, each group in its contribution order', JSON.stringify(allNcButtons.filter((id) => !BLOCK_SKIP.includes(id ?? ''))) === JSON.stringify(TAB_ORDER), allNcButtons)
   const captions = [...document.querySelectorAll('.group-label')].map((e) => e.textContent?.trim())
   h.check('the two group captions are translated', captions.includes('Numbering') && captions.includes('Cleanup'), captions)
   h.check(

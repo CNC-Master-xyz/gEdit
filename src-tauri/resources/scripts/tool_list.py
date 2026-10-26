@@ -53,7 +53,9 @@ fixed Fanuc table:
 ``toolCall.tool``
     the tool itself, in the named group ``tool``. With ``toolFrom = "same-line-or-last"``
     a trigger without a `T` on its own line takes the last `T` seen before it, which is
-    how `T1 M6` … `M06` reads on a mill.
+    how `T1 M6` … `M06` reads on a mill. With ``toolFrom = "last-before"`` (a Fanuc mill
+    whose `T` on the `M6` line preselects the next tool) the trigger always takes the last
+    `T` written before its line; a `T` on the line itself is the next tool.
 ``toolList.description``
     ``trailing``, ``above``, ``below`` or ``auto`` (trailing, then above, then below).
 ``toolList.commentFilter``
@@ -190,7 +192,11 @@ class Spec:
         tool_call = as_dict(profile.get("toolCall"))
         addresses = as_dict(profile.get("addresses"))
 
-        self.tool_from_last = tool_call.get("toolFrom") == "same-line-or-last"
+        tool_from = tool_call.get("toolFrom")
+        #: D3-4c ``last-before``: the tool line loads the `T` written before it.
+        self.tool_from_before = tool_from == "last-before"
+        #: Every line's `T` word is read (``same-line-or-last`` and ``last-before``).
+        self.tool_from_last = tool_from == "same-line-or-last" or self.tool_from_before
         #: A turning profile changes tool with a bare `T` word and has no `M6` (plan §7.4).
         self.lathe = gedit_nc.machine_type_of(profile) == "lathe"
         #: Klartext `{'FU': 'per-rev'}`: a word that says what unit its own value is in.
@@ -491,7 +497,9 @@ def classify(line: str, cp: gedit_nc.CompiledProfile, spec: Spec) -> Optional[Ma
     # every retract.
     ignore = cp.patterns.get("tool_ignore")
     ignored = ignore is not None and ignore.search(masked) is not None
-    is_tool = cp.patterns["tool_trigger"].search(masked) is not None and not ignored
+    # D3-4c ``last-before``: the ignore rule only marks the line's `T` as an unload (`M6 T0`
+    # loads the tool selected before it and preselects the unload).
+    is_tool = cp.patterns["tool_trigger"].search(masked) is not None and (not ignored or spec.tool_from_before)
     tool: Optional[str] = None
     offset: Optional[str] = None
     axis = False
@@ -799,6 +807,8 @@ def build(
     last_tool: Optional[str] = None
     #: That `T` word unloads the spindle (`T0`, `Mark.unload`).
     last_unload = False
+    #: The offset digits of that `T` word, for ``last-before`` (D3-4c).
+    last_offset: Optional[str] = None
     current: Optional[Row] = None
     unnamed = 0
     #: Tool words seen anywhere, and the first line one stood on. A program full of them
@@ -856,6 +866,7 @@ def build(
                 current = None
                 last_tool = None
                 last_unload = False
+                last_offset = None
                 called = Row(label=start, number=None, line=number_line)
                 called_rows.append(called)
 
@@ -863,9 +874,12 @@ def build(
             # The tool in the spindle before this line, for `is_speed_only` — a Klartext
             # `TOOL CALL` that repeats it without an axis is a speed change, not a new call.
             previous_tool = last_tool
+            previous_unload = last_unload
+            previous_offset = last_offset
             if mark.tool is not None:
                 last_tool = mark.tool
                 last_unload = mark.unload
+                last_offset = mark.offset
                 tool_words += 1
                 if first_tool_word == 0:
                     first_tool_word = number_line
@@ -880,9 +894,17 @@ def build(
 
             # `T0` preselected, then `M6` alone: the tool change loads the pending `T0`, so
             # it unloads the spindle and is no tool change, as `M6 T0` on one line is not.
-            unloads = mark.tool is None and spec.tool_from_last and last_unload
+            # D3-4c ``last-before``: the change loads the `T` written before its line, whatever
+            # the line writes itself (that one is the next tool).
+            if spec.tool_from_before:
+                unloads = previous_tool is not None and previous_unload
+            else:
+                unloads = mark.tool is None and spec.tool_from_last and last_unload
             if mark.is_tool and not unloads and not is_speed_only(mark, previous_tool, spec):
-                tool = mark.tool if mark.tool is not None else (last_tool if spec.tool_from_last else None)
+                if spec.tool_from_before:
+                    tool = previous_tool
+                else:
+                    tool = mark.tool if mark.tool is not None else (last_tool if spec.tool_from_last else None)
                 if tool is None:
                     findings.append(
                         {
@@ -904,7 +926,7 @@ def build(
                         by_key[key] = row
                         rows.append(row)
                     row.calls += 1
-                    row.add_offset(mark.offset)
+                    row.add_offset(previous_offset if spec.tool_from_before else mark.offset)
                     if row.description is None:
                         row.description = describe_tool(marks, i + 1, number, from_list, spec)
                     # What was written since the last move was written for this tool.

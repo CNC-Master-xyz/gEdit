@@ -719,3 +719,48 @@ describe('P3b fix code: the engine’s edges', () => {
     expect(r).toEqual({ ok: true, text: 'N20 G1 (ab.nc)', blocks: 1 });
   });
 });
+
+describe('v1.2.0 T155: names checked for length and characters, never changed', () => {
+  it('refuses a name longer than maxLength, and takes one that fits', () => {
+    expect(error({ type: 'text', maxLength: 4 }, 'PART1')).toEqual({ key: 'templates.value.tooLong', params: { max: 4 } });
+    expect(error({ type: 'text', maxLength: 4 }, 'PRT1')).toBeUndefined();
+    expect(word({ type: 'text', maxLength: 4, prefix: 'O' }, 'PRT1')).toBe('OPRT1');
+  });
+
+  it('refuses a character the charset does not allow, each with its own message', () => {
+    expect(error({ type: 'text', charset: 'no-spaces' }, 'MY PART')?.key).toBe('templates.value.charsetNoSpaces');
+    expect(error({ type: 'text', charset: 'no-spaces' }, 'MY_PART-2')).toBeUndefined();
+    expect(error({ type: 'text', charset: 'letters-digits' }, 'AB-1')?.key).toBe('templates.value.charsetLettersDigits');
+    expect(error({ type: 'text', charset: 'letters-digits' }, '12AB')).toBeUndefined();
+    expect(error({ type: 'text', charset: 'name' }, '1AB')?.key).toBe('templates.value.charsetName');
+    expect(error({ type: 'text', charset: 'name' }, 'A1B2')).toBeUndefined();
+    // An empty optional value is not checked: it drops its word.
+    expect(error({ type: 'text', charset: 'name', maxLength: 2 }, '')).toBeUndefined();
+  });
+});
+
+describe('v1.2.0 T154: the unit goes beside the field, not into the program', () => {
+  it('templateFields hands the unit of a number and of a shown formula to the form', () => {
+    const t = def('F{{f}} S{{s}}', [
+      { id: 's', label: 'Speed', type: 'integer', unit: '1/min', default: 1000 },
+      { id: 'f', label: 'Feed', type: 'formula', formula: 's * 0.1', unit: 'mm/min' },
+    ]);
+    expect(templateFields(t).map((f) => [f.id, f.unit])).toEqual([
+      ['s', '1/min'],
+      ['f', 'mm/min'],
+    ]);
+    expect(text(t, { s: '1000' }, envOf(FANUC))).toBe('F100 S1000');
+  });
+});
+
+describe('v1.2.0 T157: {{N}} behind a block-delete slash', () => {
+  it('numbers /{{N}} like {{N}}, keeps the slash, and drops a line left with only the slash and its number', () => {
+    const t = def('/{{N}}G1 {{x}}\n/1 {{N}}{{y}}\n{{N}}M30', [
+      { id: 'x', label: 'X', type: 'number', prefix: 'X' },
+      { id: 'y', label: 'Y', type: 'number', prefix: 'Y' },
+    ]);
+    expect(text(t, { x: '1.', y: '2.' }, envOf(FANUC, { prev: 100, numbered: true }))).toBe('/N110 G1 X1.\n/1 N120 Y2.\nN130 M30');
+    expect(text(t, { x: '1.' }, envOf(FANUC, { prev: 100, numbered: true }))).toBe('/N110 G1 X1.\nN120 M30');
+    expect(text(t, { x: '1.' }, envOf(FANUC))).toBe('/G1 X1.\nM30');
+  });
+});

@@ -103,6 +103,15 @@ golden and every owner-public extents run stays byte for byte the same (AD-48).
   as numbers where it was defined or called with them (:attr:`PathTracker.cycle_levels`,
   :func:`empty_levels`: the ``MCALL`` line, a Klartext definition's ``Q203``; NCR-9).
 
+* **v1.2.0, P4.7b (found by P4.7).** A cycle written as a word reads its words as the control
+  does (:meth:`PathTracker.cycle_words`): under incremental distance its tool-axis word is the
+  depth from the R point, which is measured from the initial level, so it is no point the path
+  reaches (a ``'cycle'`` event, where the tracker took it for an increment from the start); the
+  repeat count (the parameter with ``expandRole: 'repeat'``) drills that many holes, under
+  incremental distance each one the plane increment further, each a point reached, and the tool
+  ends at the last (the tracker moved it by one hole); ``K0`` drills none and moves nothing.
+  ``Step.reads`` is unchanged.
+
 Standard library only, Python 3.9 and newer. A bundled script imports this module by name
 (``import _nc_path``); it imports ``gedit_nc`` and is never imported by it (plan §7 #292).
 """
@@ -148,6 +157,10 @@ VALUE_FUNCTIONS = {"AC": "absolute", "IC": "incremental"}
 PLANE_AXES = {"XY": ("X", "Y"), "ZX": ("Z", "X"), "YZ": ("Y", "Z")}
 #: A plane -> the axis normal to it, the tool axis of a drilling plane.
 PLANE_NORMAL = {"XY": "Z", "ZX": "Y", "YZ": "X"}
+
+#: v1.2.0 fix batch 1 (CODE-1): the highest repeat count of a cycle block walked as holes; a
+#: higher one leaves an incremental position not known (``_nc_cycles.MAX_REPEAT``, the same).
+MAX_REPEAT = 9999
 
 #: How far an arc's radius may fall short of half its chord before the arc counts as one the
 #: control would refuse (a post rounds both end points), in the program's units. The same
@@ -1077,6 +1090,15 @@ class _Flow:
             if self.untilted(entry, code, block or step.entries):
                 continue
             params = entry.get("params") if isinstance(entry.get("params"), list) else []
+            # v1.2.0 manual-check fix round (D6-6): a code that turns the rotary axes only in a
+            # block that writes one of these parameters (Klartext cycle 19: the feed or the
+            # set-up clearance of its 19.1 makes the machine position them itself).
+            turning = [str(p["address"]).upper() for p in params if isinstance(p, dict) and p.get("turnsRotary") is True and isinstance(p.get("address"), str)]
+            if turning:
+                written = {(t.address or "").upper() for t in step.tokens if t.kind == "word" and t.address and (t.value_text or "")}
+                if any(address in written for address in turning):
+                    return True
+                continue
             keep = [i for i, p in enumerate(params) if isinstance(p, dict) and p.get("keepsRotary") is True]
             if not keep:
                 return True
@@ -1097,7 +1119,9 @@ class _Flow:
         group = entry.get("group")
         if not isinstance(group, str) or not group:
             return False
-        if not any(c != code and e.get("group") == group and gedit_nc.frame_of(e) in ("open", "close") for e, c, _ in block):
+        # D6-5, D6-6: the code itself may be that frame code (an all-zero `CYCLE800`, a zero
+        # `CYCL DEF 19.1 … F…`): a code without a frame of its own (`TURN`) never is.
+        if not any(e.get("group") == group and gedit_nc.frame_of(e) in ("open", "close") for e, c, _ in block):
             return False
         interp = self.t.interp
         for frame in interp.open_frames:
@@ -1374,6 +1398,12 @@ class PathTracker:
         #: column value, while no other move has written that axis since.
         self.pass_lengths: Dict[str, Tuple[Optional[Decimal], str, Optional[str], Any]] = {}
         self.pass_end: Dict[str, Decimal] = {}
+        #: Manual-check fix D5-2: an arc-centre word a single pass does not describe (`G90 X50.
+        #: Z-30. I-2.5`, the taper of the Series 15 tape format), by the axis it offsets, as the
+        #: word and its line. The cut may start off the end point along that axis, which gEdit
+        #: does not compute: the taper start stays not resolved while the passes keep their
+        #: values (cleared with them, :meth:`clear_passes`).
+        self.pass_foreign: Dict[str, str] = {}
         #: v1.2.0 (NCR-2): why the values the single passes share are not known, or ``None``:
         #: after :meth:`forget_all` (a program after the first, a macro or data block that may
         #: set anything) and after a subprogram call, a taper the passes run with is not known
@@ -1506,9 +1536,12 @@ class PathTracker:
         entries = [e for e, _, _ in written.entries]
         axes = self.axes
 
-        # The words that move an axis, in written order.
+        # The words that move an axis, in written order. NC-6: a letter the single pass in
+        # force declares as no position (`position: 'none'`: the phase shift `C` of the Okuma
+        # thread cycles) is a value of the pass in its block, not a move of that axis.
         moves: List[Tuple[str, Any]] = []
         words: Dict[str, Any] = {}
+        held_values = self.pass_values(interp.state, entries)
         for token in tokens:
             if token.kind != "word" or not token.address:
                 continue
@@ -1517,7 +1550,7 @@ class PathTracker:
                 continue
             words[address] = token
             axis = axes.axis_of(address)
-            if axis is not None and (token.value_text or "") != "":
+            if axis is not None and (token.value_text or "") != "" and address not in held_values:
                 moves.append((axis, token))
         step.moves = moves
         step.words = words
@@ -1630,6 +1663,8 @@ class PathTracker:
         else:
             self.last_polar = None
         arc = self.arc(words, written, start, targets, line, units, entries, plane, state, moves)
+        if moves and self.word_cycle(state, moves):
+            self.cycle_words(state, words, targets, start, line, plane)
         for axis, value in targets.items():
             if value is not None:
                 self._reach(axis, value)
@@ -1691,6 +1726,19 @@ class PathTracker:
         motion = self.interp.entry(code) if isinstance(code, str) and code != "" else None
         return motion if isinstance(motion, dict) else None
 
+    def pass_values(self, state: Dict[str, Any], entries: Sequence[Dict[str, Any]]) -> FrozenSet[str]:
+        """NC-6: the addresses the single pass a block runs declares as no position
+        (`position: 'none'`), which are values of the pass even where they name an axis (the
+        phase shift `C` of the Okuma `G31`-`G33`)."""
+        motion = self.pass_motion(state, entries)
+        if not isinstance(motion, dict) or as_dict(motion.get("sets")).get("path") != "cycle":
+            return _NO_AXES
+        return frozenset(
+            str(p.get("address")).upper()
+            for p in motion.get("params") or []
+            if isinstance(p, dict) and isinstance(p.get("address"), str) and gedit_nc.position_of(p) == "none"
+        )
+
     def pass_lengths_of(self, motion: Optional[Dict[str, Any]]) -> Dict[str, str]:
         """The length parameters of a single pass and the axis each lies along
         (`CodeParam.lengthAlong`: the taper `R`, along X for `G90`/`G92`, along Z for `G94`)."""
@@ -1710,8 +1758,31 @@ class PathTracker:
         runs the pass again with it."""
         if not words:
             return False
-        lengths = self.pass_lengths_of(self.pass_motion(self.interp.state, ()))
-        return any((words[a].value_text or "") != "" for a in lengths if a in words)
+        motion = self.pass_motion(self.interp.state, ())
+        lengths = self.pass_lengths_of(motion)
+        if any((words[a].value_text or "") != "" for a in lengths if a in words):
+            return True
+        return bool(self.pass_foreign_words(motion, words))
+
+    def pass_foreign_words(self, motion: Optional[Dict[str, Any]], words: Dict[str, Any]) -> Dict[str, Any]:
+        """D5-2: the arc-centre words (``addresses.arcCenter``) a block of a single pass writes
+        that the pass's code does not describe, by the axis each offsets (`I-2.5` of `G90`: X).
+        The native format has no such word; the Series 15 tape format writes its taper so."""
+        out: Dict[str, Any] = {}
+        if not isinstance(motion, dict) or as_dict(motion.get("sets")).get("path") != "cycle":
+            return out
+        described = {
+            str(p.get("address")).upper() for p in motion.get("params") or [] if isinstance(p, dict) and isinstance(p.get("address"), str)
+        }
+        for word in sorted(self.axes.centre_words):
+            token = words.get(word)
+            axis = CENTRE_AXIS.get(word)
+            if token is None or word in described or axis not in self.axes.known:
+                continue
+            if (token.value_text or "") == "" or gedit_nc.is_assignment(token):
+                continue
+            out[axis] = token
+        return out
 
     def clear_passes(self, entries: Sequence[Dict[str, Any]], moves: Sequence[Any]) -> None:
         """A one-shot code other than a dwell, or a plane code, clears the values the single
@@ -1719,7 +1790,7 @@ class PathTracker:
         word forgets the end point the passes keep along its axis: a pass block that resolves it
         writes it again (:meth:`single_pass`); after any other move (a rapid, a frame, a word
         not resolved) the control may read that word as the pass's own, which is not certain."""
-        if not self.pass_lengths and not self.pass_end and self.pass_unknown is None:
+        if not self.pass_lengths and not self.pass_end and self.pass_unknown is None and not self.pass_foreign:
             return
         for axis, _ in moves:
             self.pass_end.pop(axis, None)
@@ -1730,6 +1801,7 @@ class PathTracker:
                 self.pass_lengths = {}
                 self.pass_end = {}
                 self.pass_unknown = None
+                self.pass_foreign = {}
                 return
 
     def single_pass(self, words, targets, entries, state, units, line: int) -> None:
@@ -1758,6 +1830,52 @@ class PathTracker:
                 self.pass_end.pop(axis, None)
             else:
                 self.pass_end[axis] = value
+        for axis, token in self.pass_foreign_words(motion, words).items():
+            self.pass_foreign[axis] = "%s (line %d)" % (token.text, line)
+        for axis, word in sorted(self.pass_foreign.items()):
+            # D5-2: a taper in a tape format gEdit does not read (Series 15: `I` for G90/G92,
+            # `K` for G94); the cut starts somewhere along this axis that is not computed.
+            self._miss(
+                [axis],
+                "cycle",
+                "the taper start of %s (line %d): %s is no word of %s in the format gEdit reads (a taper in the Series 15 format?)"
+                % (code, line, word, code),
+                key=code,
+                names=self.axes.label(axis),
+            )
+        # Manual-check fix D5-6 (handed over by batch B3): the start rule above is the single
+        # passes' `R` (end plus the taper, FANUC). A whole pass whose taper is another word (Okuma
+        # `G31`-`G33`: `I`/`K`, signed as rising or falling, or the angle `A`) starts where gEdit
+        # does not work out: such a word written as other than 0 leaves the start not resolved.
+        # NC-6: a length word moves the start along its own axis (the taper `I` of `G33` along
+        # X, its start shift `K` along Z); a taper angle may move it along any axis a length of
+        # the pass lies along. An angle that is no position (the phase shift `C`,
+        # `position: 'none'`) moves no start.
+        other = [address for address in lengths if address != "R"]
+        if other:
+            angles = [
+                str(p.get("address")).upper()
+                for p in as_dict(motion).get("params") or []
+                if isinstance(p, dict)
+                and p.get("unit") == "angle"
+                and isinstance(p.get("address"), str)
+                and gedit_nc.position_of(p) != "none"
+            ]
+            moved: Dict[str, str] = {}
+            for address in other + angles:
+                token = words.get(address)
+                if token is None or (token.value_text or "") == "" or gedit_nc.is_assignment(token):
+                    continue
+                literal, _ = literal_of(token)
+                if literal is not None and gedit_nc.decimal_of(literal) == 0:
+                    continue
+                for along in [lengths[address]] if address in lengths else sorted(set(lengths.values())):
+                    moved.setdefault(along, token.text)
+            for along, word in sorted(moved.items()):
+                self._miss(
+                    [along], "cycle", "the start of %s (line %d), moved by %s" % (code, line, word), key=code, names=self.axes.label(along)
+                )
+            lengths = {address: along for address, along in lengths.items() if address == "R"}
         for address, along in lengths.items():
             found = self.pass_lengths.get(address)
             if found is None:
@@ -2157,6 +2275,76 @@ class PathTracker:
         entry = self.interp.entry(running)
         return entry is not None and as_dict(entry.get("sets")).get("cycle") == "start"
 
+    def cycle_words(self, state: Dict[str, Any], words: Dict[str, Any], targets: Dict[str, Optional[Decimal]], start: Dict[str, Optional[Decimal]], line: int, plane: str) -> None:
+        """v1.2.0 (P4.7b): the words of a block that runs a cycle written as a word, as the
+        control reads them (FANUC 30i machining centre manual, the canned cycles; the expansion,
+        ``_nc_cycles``, reads them the same way).
+
+        * Under incremental distance the tool-axis word is the depth measured from the R point,
+          and the R point is measured from the initial level: it is no move from where the tool
+          stands. It is not a point the path reaches, and the depth is not known here (a
+          ``'cycle'`` event; ``extents.py`` reads the levels of the holes from
+          ``_nc_cycles.holes_of``). Under absolute distance the word is the bottom, reached.
+        * The repeat count (the parameter whose ``expandRole`` is ``repeat``, data) drills that
+          many holes in the block: under incremental distance each one the plane increment
+          further, so the tool ends that many increments away, each hole a point reached; a
+          count of 0 drills none and moves nothing. A count that is not a whole number of 0 or
+          more (a variable) leaves an incremental plane position not known."""
+        running = as_dict(state.get("block")).get("cycle") or self.interp.active_cycle
+        if not isinstance(running, str):
+            return
+        entry = self.interp.entry(running)
+        reads = {r.axis: r for r in self._step.reads}
+        normal = PLANE_NORMAL.get(plane)
+        label = "%s (line %d)" % (running, line)
+        repeat = next(
+            (
+                str(p.get("address")).upper()
+                for p in (entry or {}).get("params") or []
+                if isinstance(p, dict) and p.get("expandRole") == "repeat" and isinstance(p.get("address"), str)
+            ),
+            None,
+        )
+        token = words.get(repeat) if repeat is not None else None
+        count: Optional[int] = 1
+        if token is not None:
+            number = gedit_nc.decimal_of(token.value) if token.value is not None else None
+            count = int(number) if number is not None and number >= 0 and number == number.to_integral_value() else None
+            if count is not None and count > MAX_REPEAT:
+                # Fix batch 1 (CODE-1): a count nobody meant is no position known, never millions
+                # of holes walked (the expansion refuses it, `_nc_cycles.MAX_REPEAT`).
+                count = None
+        pair = PLANE_AXES.get(plane) or ()
+        if count == 0:
+            # Drills nothing and moves nothing: neither to the position nor down the tool axis
+            # (fix batch 1, CODE-5: the depth under absolute distance is no level reached).
+            for axis in tuple(pair) + ((normal,) if normal is not None else ()):
+                targets.pop(axis, None)
+            return
+        read = reads.get(normal) if normal is not None else None
+        if read is not None and read.incremental and targets.get(normal) is not None:
+            targets[normal] = None
+            self._miss([normal], "cycle", label, key=running, names=self.axes.label(normal))
+        if count == 1:
+            return
+        blind: List[str] = []
+        for axis in pair:
+            r = reads.get(axis)
+            value = targets.get(axis)
+            base = start.get(axis)
+            if r is None or not r.incremental or value is None or base is None:
+                continue
+            if count is None:
+                targets[axis] = None
+                blind.append(axis)
+                continue
+            step_by = value - base
+            for i in range(1, count):
+                self._reach(axis, base + step_by * i)
+            targets[axis] = base + step_by * count
+        if blind:
+            self._miss(blind, "cycle", label, key=running, names=" and ".join(self.axes.label(a) for a in blind))
+
     def _arc_miss(self, pair, word: str) -> None:
         self._miss(list(pair or ("X", "Y")), "arc", word)
 
@@ -2328,6 +2516,7 @@ __all__ = [
     "FLOW_EVENTS",
     "FlowEvent",
     "INCH",
+    "MAX_REPEAT",
     "NOT_A_COORDINATE",
     "PLANE_AXES",
     "PLANE_NORMAL",

@@ -129,6 +129,26 @@ export interface CodeParam {
    */
   keepsRotary?: boolean;
   /**
+   * v1.2.0 manual-check fix round (D6-6). On a code with `positionsRotary`: the code turns the
+   * rotary axes only in a block that writes this parameter (Klartext cycle 19: the feed `F` or
+   * the set-up clearance `ABST` of its 19.1 make the machine position them itself). Read by the
+   * scripts (`_nc_path` `turns_rotary`).
+   */
+  turnsRotary?: boolean;
+  /**
+   * v1.2.0 manual-check fix round (D6-5; the call twin of `frameZeroWords`). On a call code that
+   * opens a frame: the call reads as no frame, and closes the frames of its group instead, when
+   * every argument with this mark is written at its value — `'zero'` a plain 0, `'onesDigit'` a
+   * whole number whose ones digit is 0 (Sinumerik `CYCLE800` `_ST`). A variable, an empty
+   * argument or anything else keeps the frame open.
+   */
+  frameZero?: 'zero' | 'onesDigit';
+  /**
+   * D6-5. On a call code that opens a frame: this argument, written as exactly this text, closes
+   * the frames of the code's group whatever else the call writes (`CYCLE800` `_TC` `"0"`).
+   */
+  frameCloses?: string;
+  /**
    * P4a fix B1 (NC-8; plan §7 #316). The sign of this value is a **direction**: the direction of
    * the move that follows along the other axis of the plane (Okuma `G75`/`G76` `L`, the chamfer
    * and the corner round at the end of a `G01` move). A mirror would have to change it in some
@@ -181,6 +201,174 @@ export interface CodeParam {
    * parameter has no twin, and an empty one reads as 0 on its own.
    */
   twin?: string;
+  /**
+   * Phase 4 (P4b prelude; Phase 4 plan §6.3, AD-45). What this parameter is to the expansion
+   * of a drilling cycle into plain moves (`expand_cycles.py`) and to the time estimate
+   * (`time_estimate.py`). Only on an entry with `expand` (`core/codes/load.ts` drops it
+   * otherwise). A parameter of such an entry **without** a role is not understood: a cycle
+   * block that writes it is refused, never expanded with the value ignored. The meaning of
+   * each role is the table of §6.3; `'default'` is understood only at the value
+   * `CodeExpand.defaults` gives it. Read by `_nc_cycles.expand_role_of`; nothing in the app
+   * reads it.
+   */
+  expandRole?: ExpandRole;
+}
+
+/**
+ * Phase 4 (P4b prelude; plan §6.3, AD-45). The roles a cycle parameter can have in an
+ * expansion; the list and its order are `EXPAND_ROLES` in `core/codes/load.ts` and
+ * `_nc_cycles.EXPAND_ROLES` (held equal by `tests/python/test_nc_cycles.py`).
+ *
+ * Levels are positions on the tool axis (Z under `G17`). The in-feed goes toward the
+ * material (−Z); "above" is away from it.
+ */
+export type ExpandRole =
+  /** A hole position in the working plane, written in the cycle block (Fanuc `X`, `Y`). */
+  | 'position'
+  /** Absolute level where the feed starts; under incremental distance mode the signed distance from the start level (Fanuc `R`). */
+  | 'r-plane'
+  /** Absolute level of the workpiece surface or reference plane (Klartext `Q203`, Sinumerik `RFP`). */
+  | 'surface'
+  /** Unsigned distance above `surface` where the feed starts and a full retract returns to (Klartext `Q200`, Sinumerik `SDIS`). */
+  | 'clearance'
+  /** Absolute level of the bottom; under incremental distance mode the signed distance from the r-plane (Fanuc `Z`, Sinumerik `DP`). */
+  | 'depth'
+  /** T108: the bottom measured from `surface`, read as `ExpandSchema.relativeDepth` says (Klartext `Q201` signed, Sinumerik `DPR` unsigned). */
+  | 'depth-relative'
+  /** Absolute level the tool goes to after the hole (Sinumerik `RTP`). */
+  | 'return'
+  /** The level after the hole as an unsigned distance above `surface` (Klartext `Q204`). */
+  | 'return-relative'
+  /** The length of each peck (Fanuc `Q`, Klartext `Q202`). */
+  | 'peck'
+  /** Absolute level where the first peck ends (Sinumerik `FDEP`). */
+  | 'first-peck'
+  /** Where the first peck ends, measured from `surface` like `depth-relative` (Sinumerik `FDPR`). */
+  | 'first-peck-relative'
+  /** How much shorter each further peck is (Klartext `Q212`, Sinumerik `_DAM`). */
+  | 'peck-decrement'
+  /** The shortest peck (Klartext `Q205`, Sinumerik `_MDEP`). */
+  | 'peck-minimum'
+  /** The chip breaks before a full retract (Klartext `Q213`). */
+  | 'chip-breaks'
+  /** The retract of a chip break (Klartext `Q256`, Sinumerik `_VRT`). */
+  | 'chip-retract'
+  /** After a full retract, the distance above the last bottom down to which the tool comes back at rapid (Sinumerik `_DIS1`). */
+  | 'advance'
+  /** The dwell at the bottom (Fanuc `P`, Klartext `Q211`, Sinumerik `DTB`). */
+  | 'dwell'
+  /** The dwell at the top: after each full retract, or at the start (Klartext `Q210`, Sinumerik `DTS`). */
+  | 'dwell-top'
+  /** The in-feed (Fanuc `F`, Klartext `Q206`, Sinumerik `FFR`). Absent from the entry: the feed in force. */
+  | 'feed'
+  /** The feed on the way out (Klartext `Q208`, Sinumerik `RFF`). */
+  | 'feed-out'
+  /** The repeat count (Fanuc `K`). */
+  | 'repeat'
+  /** Its value picks one case of a `CodeExpandCases` (Sinumerik `VARI`). */
+  | 'variant'
+  /** The spindle direction the cycle leaves running (Sinumerik `SDIR`). */
+  | 'spindle-direction'
+  /** The angle of an oriented spindle stop (Sinumerik `POSS`). */
+  | 'orient-angle'
+  /** The lift-off from the wall: along the first and the second axis of the plane, and along the tool axis (Sinumerik `RPA`, `RPO`, `RPAP`). */
+  | 'lift-off-first'
+  | 'lift-off-second'
+  | 'lift-off-axis'
+  /** Understood only at the value (or one of the values) `ExpandSchema.defaults` gives it (or empty, or left out); any other value refuses the block. */
+  | 'default';
+
+/** P4b (plan §6.3). A level a step moves to; how each is computed is §6.3, "Levels". */
+export type ExpandLevel = 'start' | 'r-plane' | 'clearance' | 'depth' | 'return';
+
+/**
+ * P4b (plan §6.3). Where a value of a step comes from: a parameter of the cycle by its role,
+ * or a field of the run's form (the two machine-dependent peck values of Q4-9, prefilled
+ * from `MachineConfig.params.motion`).
+ */
+export type ExpandValue = { role: ExpandRole } | { form: 'peckRetract' | 'peckClearance' };
+
+/** P4b (plan §6.3, "Steps"). One step of one hole, in the order the control runs it. */
+export type ExpandStep =
+  /** At rapid along the tool axis to a level. A `return` that is not above the tool writes nothing. */
+  | { step: 'rapid'; to: ExpandLevel }
+  /** At a feed along the tool axis to a level; `feed` names the role (default `'feed'`). */
+  | { step: 'feed'; to: ExpandLevel; feed?: 'feed' | 'feed-out' }
+  /**
+   * The in-feed from where the tool stands to `depth` in pecks. `chip-break`: after each peck
+   * but the last, back by `retract`; `full-retract`: back to `back`, then at rapid down to
+   * `reentry` above the last bottom; `universal`: `chip-breaks` chip breaks, then a full
+   * retract. `retractAt`: how a retract moves (default rapid).
+   */
+  | {
+      step: 'pecks';
+      mode: 'chip-break' | 'full-retract' | 'universal';
+      retract?: ExpandValue;
+      back?: ExpandLevel;
+      reentry?: ExpandValue;
+      retractAt?: 'rapid' | 'feed-out';
+    }
+  /** A dwell for the `dwell` (bottom) or `dwell-top` (top) value; nothing when it is absent or 0. */
+  | { step: 'dwell'; at: 'bottom' | 'top' }
+  /** The entry of the database with `sets.spindle: 'off'` in the spindle's group. */
+  | { step: 'spindle-stop' }
+  /** The spindle code in force before the cycle, or the one `spindle-direction` names. */
+  | { step: 'spindle-restore' }
+  /** An oriented spindle stop at `orient-angle`. */
+  | { step: 'orient' }
+  /** At rapid by the lift-off values (`back`: the same move the other way). */
+  | { step: 'lift-off'; back?: boolean };
+
+/** P4b (plan §6.3). How one drilling cycle runs, in steps the expansion knows. */
+export interface ExpandSchema {
+  /** What the message and the statistics call the cycle. */
+  kind: 'drill' | 'peck' | 'bore';
+  /** One hole, from the position above it to the return level; the position move itself is §6.3 rule 4. */
+  steps: ExpandStep[];
+  /** Where `return` is: by the cycle-return code in force (`CodeSets.cycleReturn`) or by the `return`/`return-relative` role. */
+  returnBy: 'code' | 'role';
+  /** How a `depth-relative` or `first-peck-relative` value is read: `'signed'` surface + value; `'into-material'` surface − value, the value without a sign. */
+  relativeDepth?: 'signed' | 'into-material';
+  /** What the blocks after the cycle find in force: `'before'`, what was in force before the cycle (written back, §6.3 rule 7); `'cycle'`, what the expansion left. */
+  leaves: { motion: 'before' | 'cycle'; feed: 'before' | 'cycle' };
+  /**
+   * The `'default'` parameters by address: the value besides empty and absent that the expansion
+   * understands, or a list of values the manuals prove equivalent (Sinumerik `_AXN`: 0 and 3 both
+   * name the third axis of the plane); compared as numbers.
+   */
+  defaults?: Record<string, string | string[]>;
+  /**
+   * What a `feed-out` value of 0 means, where the manual gives it a meaning (the owner,
+   * 2026-10-20; Klartext 201: `Q208=0` retracts at the plunging feed `Q206`): `'feed'`, the
+   * moves at `feed-out` run at the `feed` value. Without it, as for every other feed, a value of
+   * 0 or less refuses the block (`value-missing`). Needs the roles `feed` and `feed-out`.
+   */
+  feedOutZero?: 'feed';
+}
+
+/** P4b (plan §6.3). A cycle whose way of running one parameter picks (Sinumerik `CYCLE83` `VARI`). */
+export interface CodeExpandCases {
+  /** The address of the parameter with `expandRole: 'variant'`. */
+  by: string;
+  /** Its value as written (`"0"`, `"1"`) → the schema; any other value refuses the block. */
+  cases: Record<string, ExpandSchema>;
+}
+
+/** P4b (plan §6.3, AD-45). `CodeEntry.expand`. */
+export type CodeExpand = ExpandSchema | CodeExpandCases;
+
+/**
+ * P4b (plan §6.3). How the expansion writes a dwell with this code, and how the statistics
+ * read one: the address that takes seconds, the one that takes the machine's least time
+ * increments (Fanuc `P`), the one that takes spindle revolutions (Sinumerik `S`), or, where a
+ * dwell is more than one word, the lines it is written as with `{s}` for the seconds (Klartext
+ * cycle 9). The addresses are parameters of the entry.
+ */
+export interface DwellForm {
+  seconds?: string;
+  increments?: string;
+  revolutions?: string;
+  lines?: string[];
 }
 
 /**
@@ -317,6 +505,14 @@ export interface CodeSets {
   exitSpeed?: 'zero';
   /** M10 (WP10.2). From this code on the control reads its ISO dialect (`'iso'`, Sinumerik `G291`) or its own language (`'native'`, `G290`). */
   language?: 'iso' | 'native';
+  /**
+   * Phase 4 (P4b prelude; plan §6.3). The level a drilling cycle returns to after each hole
+   * while this code is in force: `'initial'` the level the tool stood at when the cycle
+   * started (Fanuc `G98`), `'r-plane'` the level where the feed starts (Fanuc `G99`). Read by
+   * the expansion and the statistics for a schema with `returnBy: 'code'`; nothing in the app
+   * reads it.
+   */
+  cycleReturn?: 'initial' | 'r-plane';
 }
 
 /** One G/M code, address keyword or cycle. */
@@ -493,7 +689,8 @@ export interface CodeEntry {
   /**
    * M10 (WP10.2, the program checks; plan §7.16). The states in which the control refuses
    * this code, each one of `tcp`, `radiusComp`, `lengthComp`, `cycle` (a modal cycle or call),
-   * `surfaceSpeed`, `feedNotPerMinute`, or `frame:<group>` (an open frame of that group); a
+   * `surfaceSpeed`, `feedNotPerMinute`, `frame:<group>` (an open frame of that group), or
+   * `code:<code>` (that one code in force, manual-check fix D6-3: `G43.4` refuses `G68`); a
    * leading `!` turns one round ("refused unless"): Fanuc `G53.1` is `['!frame:frame']`. Read
    * by `program_checks.py` (`stateConflicts`).
    */
@@ -535,8 +732,23 @@ export interface CodeEntry {
    * absolute positions of this program (a probing or protected move), so address arithmetic
    * refuses and lists a block whose call writes a chosen address with a number. Only `true`;
    * usually together with `wordsAreData`.
+   *
+   * P4b fix batch 3 (review NC-1): also every other code that runs another program or a
+   * section of this one and comes back, where no parameter names the program by number
+   * (`programNumber`): Klartext `CALL LBL`, `CALL PGM`; Sinumerik `CALL`, `PCALL`, `EXTCALL`;
+   * Okuma `CALL`, `MODIN`. Expand Drilling Cycles refuses such a block while a modal cycle is
+   * in force (`_nc_cycles.call_of`), and the time estimate leaves it out; a cycle entry
+   * (`sets.cycle`) is never read as a call.
    */
   call?: boolean;
+  /**
+   * P4b fix batch 3 (review NC-6). The feed word of a block with this code is the feed of that
+   * block only (Klartext `CYCL CALL POS X… Y… Z… F300`: the feed of the move to the cycle's
+   * start). The modal interpreter (rule 17, both languages) reads it as the block's feed and
+   * puts the feed in force before the block back when the next block starts, so a later move
+   * without a feed word runs at the program's feed again. Only `true`.
+   */
+  blockFeed?: boolean;
   /**
    * M10 review (NC-7). The axis words of this code shift or set the program's coordinate
    * system (Fanuc `G52`, `G92`, the lathe `G50`, `G10`; Sinumerik `TRANS`, `ATRANS`; Okuma
@@ -596,6 +808,35 @@ export interface CodeEntry {
    * Only `true`.
    */
   positionsRotary?: boolean;
+  /**
+   * Phase 4 (P4b prelude; plan §6.3, AD-45). How this drilling cycle runs, as steps the
+   * expansion knows; only a cycle with a schema is expanded, every other one is refused and
+   * listed. Only on an entry with `sets.cycle` `'start'` or `'define'`, never on a tapping or
+   * thread entry (`tapping`, `pitchFeed`, `pitchFeedAmbiguous`); `core/codes/load.ts` drops a
+   * schema that breaks a rule of §6.3 whole and reports it, so a broken schema is no schema.
+   * Written by P4.6 from the manuals, each one `review: 'pending'` until G10. Read by
+   * `_nc_cycles.expand_of`; nothing in the app reads it.
+   */
+  expand?: CodeExpand;
+  /** Phase 4 (P4b prelude; plan §6.3). On a dwell code: how a dwell is written with it. */
+  dwell?: DwellForm;
+  /**
+   * Phase 4 (P4b prelude; plan §6.3). The code or word stops the spindle at an angle, its own
+   * value the angle (Sinumerik `SPOS=`): what the `orient` step of an expansion writes. Only
+   * `true`.
+   */
+  orient?: boolean;
+  /**
+   * v1.2.0 T144. The machine type the code is for, where one database serves both (Sinumerik:
+   * only the turning cycles `CYCLE93`, `CYCLE95`, … are marked `lathe`; the milling cycles
+   * `POCKET3`, `SLOT1`, … stay unmarked, because a lathe with driven tools runs them too — the
+   * owner, 2026-10-22). Its one reader is the cycle form's `cycleEntries`
+   * (`core/templates/cycleForm.ts`), which offers a marked entry only to a program of that
+   * machine type (the rule of the templates' `machineType`) and an unmarked one, such as a
+   * drilling cycle, to every program. Hover, checks and the scripts never read it. Only
+   * `'mill'` or `'lathe'`.
+   */
+  machineType?: 'mill' | 'lathe';
 }
 
 /** One dialect's database, as stored in JSON. */

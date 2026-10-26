@@ -12,7 +12,8 @@ const completionDisposed: string[] = [];
 vi.mock('$lib/monaco/providers/hover', () => ({ registerHover: (m: unknown, id: string) => hover(m, id) }));
 vi.mock('$lib/monaco/providers/completion', () => ({ registerCompletion: (m: unknown, id: string) => completion(m, id) }));
 vi.mock('$lib/monaco/setup', () => ({ getMonaco: () => Promise.resolve({ fake: true }) }));
-vi.mock('$lib/monaco/editorService', () => ({ editor: { updateOptions: () => {}, ready: Promise.resolve() } }));
+const updateOptions = vi.hoisted(() => vi.fn());
+vi.mock('$lib/monaco/editorService', () => ({ editor: { updateOptions, ready: Promise.resolve() } }));
 
 import assistant from './assistant';
 import { profiles } from '$lib/stores/profiles';
@@ -21,6 +22,7 @@ import { profiles } from '$lib/stores/profiles';
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 afterEach(() => {
+  updateOptions.mockClear();
   profiles.reload([]);
   hover.mockClear();
   completion.mockClear();
@@ -66,5 +68,17 @@ describe('the providers of the assistant', () => {
     const calls = hover.mock.calls.length;
     profiles.reload([{ name: 'other.json', text: JSON.stringify({ id: 'other', name: 'Other', shortName: 'Other', extends: 'fanuc-gcode' }) }]);
     expect(hover.mock.calls).toHaveLength(calls);
+  });
+});
+
+// T214: Enter-accepts-a-suggestion is the setting `assist.acceptOnEnter`, mapped by
+// `monaco/editorOptions.ts`. The contribution used to force it off itself, which a user who
+// turned the setting on would have seen undone at the next start.
+describe('Enter and suggestions', () => {
+  it('leaves acceptSuggestionOnEnter to the setting', async () => {
+    const stop = assistant.activate();
+    await settle();
+    expect(updateOptions.mock.calls.flatMap((call) => Object.keys(call[0] as object))).not.toContain('acceptSuggestionOnEnter');
+    stop();
   });
 });

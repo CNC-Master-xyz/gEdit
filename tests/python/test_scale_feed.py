@@ -1373,7 +1373,8 @@ class TestLathe(unittest.TestCase):
         unresolved = [f for f in payload["findings"] if f["message"].startswith("F250 is scaled")]
         self.assertEqual(len(unresolved), 1)
         self.assertIn("depends on the machine (250 (As written", unresolved[0]["message"])
-        self.assertIn("2.5 (Increments of 0.001 mm (IS-B)", unresolved[0]["message"])
+        # Manual-check fix D4-1: the lathe's increment presets count it in 0.0001 mm/rev.
+        self.assertIn("0.025 (Increments of 0.001 mm (IS-B)", unresolved[0]["message"])
         self.assertIn("No machine: profile defaults assumed.", payload["message"])
 
     def test_a_feed_in_another_unit_is_scaled_but_never_limited(self):
@@ -1621,6 +1622,32 @@ class TestTurningDialects(unittest.TestCase):
             scale_feed.lead_carriers(["F100", "G84 Z-10"], gedit_nc.compile_profile(fanuc), helpers.load_codes(fanuc), scale_feed.Params({}, fanuc), None, 1),
             {},
         )
+
+    def test_a_thread_code_word_starts_no_second_walk_t178(self):
+        # T178: `G33` and `G331` carry their lead in F as well, but a code word is never written
+        # as a call, so its presence in the text must not tokenize the whole program a second
+        # time (21 s on 100,000 lines with G33 before the fix). Only a name such as `CYCLE840`
+        # can be a call and start the walk.
+        from unittest import mock
+
+        helpers.import_gedit_nc()
+        import gedit_nc
+        import scale_feed
+
+        profile = helpers.load_profile("sinumerik")
+        cp = gedit_nc.compile_profile(profile)
+        codes = helpers.load_codes(profile)
+        params = scale_feed.Params({"percent": 80}, profile)
+        lines = ["N10 G95 F0.2", "N20 G33 Z-20 K1.5", "N30 G1 X10 F100", "N40 G331 Z-12 K1", "N50 G332 Z2 K1"]
+        real = gedit_nc.tokenize_line
+        with mock.patch.object(gedit_nc, "tokenize_line", side_effect=real) as counter:
+            self.assertEqual(scale_feed.lead_carriers(lines, cp, codes, params, None, 1), {})
+        self.assertEqual(counter.call_count, 0)
+        # A program that names the tapping call is still walked, line by line.
+        with mock.patch.object(gedit_nc, "tokenize_line", side_effect=real) as counter:
+            carriers = scale_feed.lead_carriers(lines + ["N60 CYCLE840(5,0,2,-15,,0,3,3,1,,1)"], cp, codes, params, None, 1)
+        self.assertEqual(carriers, {(2, 11): ("CYCLE840", 6, "in-force")})
+        self.assertEqual(counter.call_count, 6)
 
     def test_the_lead_change_of_a_variable_lead_thread_is_never_scaled(self):
         payload = self.output("sinumerik-variable-lead")
@@ -2012,6 +2039,30 @@ class TestValuesReadRight(unittest.TestCase):
         limit = next(param for param in meta["params"] if param["id"] == "limitUnit")
         self.assertEqual(limit["default"], "auto")
         self.assertEqual([choice["value"] for choice in limit["choices"]], ["auto", "per-minute", "per-rev"])
+
+
+class TestPointlessFeedsT084(unittest.TestCase):
+    """T084: a machine whose point-less feed per minute counts in 0.001 mm/min. The limits
+    compare the feed's value, so the same F2000 is 2000 mm/min on the documented default
+    (and lowered to the largest feed) and 2 mm/min on such a machine (and left as it is).
+    Since the manual-check fix D4-2 that choice is the lathe's (parameter 1404 bit 2), so the
+    program is a lathe one in G-code system A, where G98 is the feed per minute."""
+
+    TEXT = "G98\nG1 X10. F2000\n"
+    PARAMS = {"percent": 100, "maxFeed": 1000, "limitUnit": "per-minute"}
+
+    def run_with(self, context):
+        context["params"] = dict(self.PARAMS)
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": 2}
+        result = helpers.run_script(SCRIPT, stdin=self.TEXT, context=context)
+        self.assertTrue(result.ok, result.stderr)
+        return result.json()["text"].split("\n")
+
+    def test_the_limit_reads_the_feed_with_the_machine_choice(self):
+        plain = helpers.effective_context("fanuc-lathe", preset="is-b")
+        self.assertIn("G1 X10. F1000", self.run_with(dict(plain)))
+        fine = helpers.with_pointless_feeds(plain, "per-minute")
+        self.assertIn("G1 X10. F2000", self.run_with(fine))
 
 
 class TestM13ReviewUnreadable(unittest.TestCase):

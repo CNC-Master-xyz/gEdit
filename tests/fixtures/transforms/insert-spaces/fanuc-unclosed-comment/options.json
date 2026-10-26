@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Fanuc: an unclosed ( runs to the end of the line, so nothing inside it is touched.",
+  "profile": "fanuc-gcode",
+  "options": {}
+}

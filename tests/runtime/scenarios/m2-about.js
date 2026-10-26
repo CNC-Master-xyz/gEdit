@@ -41,7 +41,11 @@ scenario('m2-about', { timeout: 180 }, async (h) => {
   h.click(h.q('about-notices'))
   await h.waitFor(() => h.qa('license-entry').length > 0, { timeout: 20000 })
   const entries = h.qa('license-entry')
-  h.check('pressing it loads every package', entries.length > 100, entries.length)
+  // T219: the list is drawn a page (50) at a time; "Show more packages" adds the next page.
+  h.check('pressing it draws the first page of the packages', entries.length === 50 && !!h.q('about-notices-more'), entries.length)
+  h.click(h.q('about-notices-more'))
+  await h.waitFor(() => h.qa('license-entry').length === 100, { timeout: 5000 })
+  h.check('and each press of Show more adds the next page', h.qa('license-entry').length === 100, h.qa('license-entry').length)
   h.check('each one names its package', entries.every((e) => (e.dataset.package ?? '').length > 0) && entries[0]?.dataset.open === '0', entries[0]?.outerHTML?.slice(0, 160))
   h.check('no license text is expanded yet', h.qa('license-text').length === 0)
 

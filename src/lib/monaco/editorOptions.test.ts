@@ -70,6 +70,14 @@ describe('editorOptionsFor', () => {
     expect(off.wordBasedSuggestions).toBe('off');
   });
 
+  // T214: this was hard-coded in `contrib/assistant.ts`; it is the setting `assist.acceptOnEnter`.
+  it('maps assist.acceptOnEnter onto acceptSuggestionOnEnter, off by default', () => {
+    expect(DEFAULTS['assist.acceptOnEnter']).toBe(false);
+    expect(editorOptionsFor(DEFAULTS).acceptSuggestionOnEnter).toBe('off');
+    expect(editorOptionsFor(withSettings({ 'assist.acceptOnEnter': true })).acceptSuggestionOnEnter).toBe('on');
+    expect(editorOptionsFor(withSettings({ 'assist.acceptOnEnter': false })).acceptSuggestionOnEnter).toBe('off');
+  });
+
   it('copies the rulers instead of handing out the settings array', () => {
     const values = withSettings({ 'editor.rulers': [80] });
     const options = editorOptionsFor(values);

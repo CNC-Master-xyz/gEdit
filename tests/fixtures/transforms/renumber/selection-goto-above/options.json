@@ -1,5 +1,5 @@
 {
-  "note": "G8 M4: the selection holds the jump target N100 but not the \"GOTO 100\" above it. The preflight used to scan only the selected lines, find nothing, and let the run rewrite the target in silence. It now scans the document; the jump is outside the lines this run may return, so it cannot be rewritten either, and the line is reported. M13 review NC-8: N100 is N20 after the run and no block N100 is left, which the second row on line 2 says.",
+  "note": "G8 M4: the selection holds the jump target N100 but not the \"GOTO 100\" above it. The preflight used to scan only the selected lines, find nothing, and let the run rewrite the target in silence. It now scans the document; the jump is outside the lines this run may return, so it cannot be rewritten either, and the line is reported. M13 review NC-8: N100 is N20 after the run and no block N100 is left, which the second row on line 2 says. P4d review NC-4: the selection writes N10, which line 2 above it carries as well, so the program has two N10 blocks now; the run warns and puts a row on both lines (it does not refuse).",
   "profile": "fanuc-gcode",
   "scope": {
     "startLine": 3,
@@ -21,9 +21,18 @@
       {
         "line": 2,
         "severity": "warning"
+      },
+      {
+        "line": 2,
+        "severity": "warning"
+      },
+      {
+        "line": 3,
+        "severity": "warning"
       }
     ],
     "warnings": [
+      "ncNumbering.renumber.duplicatesMade",
       "ncNumbering.renumber.referencesUnresolved"
     ],
     "preflight": "ncNumbering.renumber.references"

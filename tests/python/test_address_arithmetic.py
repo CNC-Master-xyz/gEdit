@@ -144,9 +144,9 @@ def case_named(name):
     raise AssertionError("no case %s" % name)
 
 
-def run(text, profile="fanuc-gcode", preset=None, name=None, **params):
+def run(text, profile="fanuc-gcode", preset=None, name=None, variant=None, **params):
     """Runs the script on a program written inline, with the given form values."""
-    context = helpers.effective_context(profile, preset=preset) if preset else helpers.effective_context(profile)
+    context = helpers.effective_context(profile, preset=preset, variant=variant) if preset or variant else helpers.effective_context(profile)
     if name is not None:
         context["machine"]["id"] = name.lower()
         context["machine"]["name"] = name
@@ -156,6 +156,31 @@ def run(text, profile="fanuc-gcode", preset=None, name=None, **params):
     if not result.ok:
         raise AssertionError(result.stderr)
     return result.json()
+
+
+class TestPointlessFeedsT084(unittest.TestCase):
+    """T084: a feed word chosen as an address is read with the machine's "Point-less feeds"
+    choice. Adding 10 mm/min to F200 is F210 on the documented default (1 mm/min steps) and
+    F10200 on a machine that counts the feed per minute in 0.001 mm/min (0.2 + 10 = 10.2)."""
+
+    def run_on(self, context, text, **params):
+        context = dict(context)
+        context["params"] = dict({"operation": "add", "operand": 10, "addresses": ["F"]}, **params)
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(text.split("\n"))}
+        result = helpers.run_script(SCRIPT, stdin=text, context=context)
+        self.assertTrue(result.ok, result.stderr)
+        return result.json()
+
+    def test_the_feed_is_read_with_the_machine_choice(self):
+        # Manual-check fix round (D4-2): the per-minute thousandths (parameter 1404 bit 2) are a
+        # choice of the lathe now; the mill offers standard and per-revolution thousandths.
+        text = "G98 G1 X10. F200\n"
+        plain = helpers.effective_context("fanuc-lathe", preset="is-b")
+        self.assertEqual(lines_of(self.run_on(plain, text))[0], "G98 G1 X10. F210")
+        fine = helpers.with_pointless_feeds(plain, "per-minute")
+        self.assertEqual(lines_of(self.run_on(fine, text))[0], "G98 G1 X10. F10200")
+        # A factor is unit-free: both machines write the same count.
+        self.assertEqual(lines_of(self.run_on(fine, text, operation="multiply", operand=0.9))[0], "G98 G1 X10. F180")
 
 
 class TestFkContour(unittest.TestCase):
@@ -536,8 +561,11 @@ class TestRules(unittest.TestCase):
         self.assertEqual(run(program, profile="sinumerik-mill", addresses=["X"])["findings"], [])
 
     def test_a_lathe_cycle_is_refused_and_listed(self):
-        payload = run("G18 G90\nG83 X0 Z-20. R2. Q5000 F0.1\nG80\n", profile="fanuc-lathe")
-        self.assertEqual(reasons(payload), ["cycle-not-reviewed"])
+        # Manual-check fix round (D5-8, B2): the lathe's drilling cycles are reviewed now, and in
+        # G-code system B the R word follows G90/G91 (other), so the cycle is refused for its
+        # positions and listed.
+        payload = run("G18 G90\nG83 X0 Z-20. R2. Q5000 F0.1\nG80\n", profile="fanuc-lathe", variant=("gcodeSystem", "B"))
+        self.assertEqual(reasons(payload), ["cycle-position"])
 
     def test_the_x_operand_as_a_radius_doubles_on_a_diameter_word(self):
         payload = run("G18 G90\nG0 X50. Z2.\n", profile="fanuc-lathe", addresses=["X"], xOperand="radius")
@@ -1278,9 +1306,10 @@ LENGTHS_ALONG = {
     "okuma": {
         "G2": {"L": "plane"},
         "G3": {"L": "plane"},
-        "G31": {"I": "X", "L": "plane"},
-        "G32": {"K": "Z", "L": "plane"},
-        "G33": {"I": "X", "L": "plane"},
+        # Review round NC-6: the start shift K of G31/G33 (along Z) and I of G32 (along X).
+        "G31": {"I": "X", "K": "Z", "L": "plane"},
+        "G32": {"K": "Z", "I": "X", "L": "plane"},
+        "G33": {"I": "X", "K": "Z", "L": "plane"},
         "G75": {"L": "plane"},
         "G76": {"L": "plane"},
         "G102": {"L": "plane"},
@@ -1891,4 +1920,216 @@ class TestNcr7ApproachSizes(unittest.TestCase):
         self.assertEqual(lines_of(payload)[6], "6 APPR LN X+15 Y+0 LEN15 RL")
         self.assertEqual(payload["findings"], [])
         payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["Z"])
+        self.assertEqual(payload["findings"], [])
+
+
+class TestFb2ToolDirection(unittest.TestCase):
+    """v1.2.0 review round X, FB-2 (WX-CODE-4, WX-NC-5): under Fanuc `G43.5` (and `G41.6`,
+    `G42.6`) I, J and K are the tool direction, also in the blocks that do not write the code
+    again. A multiply or divide must leave them as written: scaled, the tool would tilt."""
+
+    PROGRAM = "\n".join([
+        "O1000", "G90 G17 G54 G0 X0 Y0", "G43.5 X0 Y0 Z10. I0 J0 K1. H1", "G1 X10. Y5. I1. J0 K1. F500",
+        "X20. I0.5 J0 K0.866", "G49", "G2 X30. Y5. I5. J0", "M30",
+    ])
+
+    def test_a_multiply_of_x_and_y_leaves_the_tool_direction_with_a_count_note(self):
+        payload = run(self.PROGRAM, operation="multiply", operand=2, addresses=["X", "Y"])
+        lines = lines_of(payload)
+        self.assertEqual(lines[3], "G1 X20. Y10. I1. J0 K1. F500")
+        self.assertEqual(lines[4], "X40. I0.5 J0 K0.866")
+        for line in (4, 5):
+            found = [f for f in payload["findings"] if f["line"] == line]
+            self.assertEqual({f["reason"] for f in found}, {"count"}, found)
+            self.assertIn("a parameter of G43.5, not an arc centre", found[0]["message"])
+        # After G49 the same words are an arc centre again, scaled with the end point.
+        self.assertEqual(lines[6], "G2 X60. Y10. I10. J0")
+
+    def test_a_multiply_of_z_leaves_k(self):
+        payload = run(self.PROGRAM, operation="multiply", operand=2, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[3], "G1 X10. Y5. I1. J0 K1. F500")
+        self.assertEqual(lines_of(payload)[4], "X20. I0.5 J0 K0.866")
+        self.assertEqual([f["reason"] for f in payload["findings"] if f["line"] in (4, 5)], ["count", "count"])
+
+    def test_the_same_under_g41_6(self):
+        text = "\n".join(["O1000", "G90 G17 G54 G0 X0 Y0", "G41.6 X5. Y5. I0 J0 K1. D1", "G1 X10. I1. J0 K0", "G40 G1 X20.", "M30"])
+        payload = run(text, operation="multiply", operand=2, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[3], "G1 X20. I1. J0 K0")
+        found = [f for f in payload["findings"] if f["line"] == 4]
+        self.assertEqual({f["reason"] for f in found}, {"count"}, found)
+        self.assertIn("a parameter of G41.6", found[0]["message"])
+
+
+class TestManualCheckD43OnlyPositionsNeedTheDistanceMode(unittest.TestCase):
+    """Manual-check fix round, D4-3: G90/G91 govern where the axes go, not the feed. Only a
+    position word (an axis, its incremental twin, an arc centre, `R` and the other position
+    words) waits for an absolute distance mode; a feed, a dwell, a speed or a count is the
+    same number in either mode, so a shift of it does not ask for G90."""
+
+    PROGRAMS = ["G90 G94 G1 X10. F200", "G94 G1 X10. F200", "G1 X10. F200", "G91 G94 G1 X10. F200"]
+
+    def run_on(self, context, text, **params):
+        context = dict(context)
+        context["params"] = dict({"operation": "add", "operand": 10, "addresses": ["F"]}, **params)
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(text.split("\n"))}
+        result = helpers.run_script(SCRIPT, stdin=text, context=context)
+        self.assertTrue(result.ok, result.stderr)
+        return result.json()
+
+    def test_a_feed_moves_in_every_distance_mode_with_a_machine_and_without(self):
+        for context in (helpers.effective_context("fanuc-gcode", preset="is-b"), helpers.effective_context("fanuc-gcode")):
+            for program in self.PROGRAMS:
+                with self.subTest(program=program, machine=context["machine"].get("id")):
+                    payload = self.run_on(context, program + "\n")
+                    self.assertEqual(lines_of(payload)[0], program.replace("F200", "F210"))
+                    self.assertEqual(payload["findings"], [])
+
+    def test_a_count_moves_under_g91(self):
+        payload = run("G17\nG91 G83 X10. Y10. Z-5. R2. Q1. F100. K3\nG90 G80\n", operand=1, addresses=["K"])
+        self.assertEqual(lines_of(payload)[1], "G91 G83 X10. Y10. Z-5. R2. Q1. F100. K4")
+
+    def test_every_position_word_still_waits_for_an_absolute_distance_mode(self):
+        context = helpers.effective_context("fanuc-gcode", preset="is-b")
+        for program, addresses in (
+            ("G91 G94 G1 X10. Y5. Z5. F200", ["X", "Y", "Z", "F"]),
+            ("G94 G1 X10. Y5. Z5. F200", ["X", "Y", "Z", "F"]),
+            ("G91 G94 G1 A30. C45. F200", ["A", "C", "F"]),
+            ("G94 G1 A30. C45. F200", ["A", "C", "F"]),
+        ):
+            with self.subTest(program=program):
+                payload = self.run_on(context, program + "\n", addresses=addresses)
+                self.assertEqual(lines_of(payload)[0], program.replace("F200", "F210"))
+                self.assertEqual(reasons(payload), ["incremental"] * (len(addresses) - 1))
+        # The R plane and an arc centre (multiply includes the centres) of a known mode only.
+        payload = run("G17\nG91 G81 X10. Z-7. R-48. F100.\nG90 G80\n", addresses=["R"])
+        self.assertEqual(lines_of(payload)[1], "G91 G81 X10. Z-7. R-48. F100.")
+        self.assertEqual(reasons(payload), ["incremental"])
+        payload = run("G17 G2 X10. Y0 I5. J0 F100\n", addresses=["X", "Y"], arcCentres="yes")
+        self.assertEqual(lines_of(payload)[0], "G17 G2 X10. Y0 I5. J0 F100")
+        self.assertEqual(set(reasons(payload)), {"incremental"})
+        # The lathe's incremental twins stay left in every mode.
+        payload = run("G1 U10. W5. F0.2\n", profile="fanuc-lathe", operand=0.1, addresses=["U", "W", "F"])
+        self.assertEqual(lines_of(payload)[0], "G1 U10. W5. F0.3")
+        self.assertEqual(reasons(payload), ["incremental", "incremental"])
+
+
+class TestManualCheckD45RoundedBack(unittest.TestCase):
+    """Manual-check fix round, D4-5: a change too small for the form a word is written in
+    rounds back to the value as written. The word stays, and the run says so: before, it said
+    "Changed nothing" with no note, as if the word had not been asked for."""
+
+    def test_a_feed_that_rounds_back_is_noted(self):
+        payload = run("G98 G1 X10. F200\n", profile="fanuc-lathe", preset="is-b", operand=0.01, addresses=["F"])
+        self.assertEqual(lines_of(payload)[0], "G98 G1 X10. F200")
+        self.assertEqual([(f["line"], f["reason"], f["severity"]) for f in payload["findings"]], [(1, "rounded", "info")])
+        self.assertEqual(
+            payload["findings"][0]["message"],
+            "F200: the change is smaller than this word's form can hold; rounded half away from zero, it stays F200.",
+        )
+        self.assertTrue(payload["message"].startswith("Changed nothing: 1 word rounded back to the value it is written with."), payload["message"])
+
+    def test_a_point_less_position_that_rounds_back_is_noted(self):
+        payload = run("G90 G1 X10000 Y5000\n", preset="is-b", operand=0.0001, addresses=["X", "Y"])
+        self.assertEqual(lines_of(payload)[0], "G90 G1 X10000 Y5000")
+        self.assertEqual(reasons(payload), ["rounded", "rounded"])
+        self.assertTrue(payload["message"].startswith("Changed nothing: 2 words rounded back to the value they are written with."), payload["message"])
+
+    def test_a_change_that_rounds_to_a_new_value_keeps_its_note(self):
+        payload = run("G98 G1 X10. F200\n", profile="fanuc-lathe", preset="is-b", operand=0.5, addresses=["F"])
+        self.assertEqual(lines_of(payload)[0], "G98 G1 X10. F201")
+        self.assertEqual(reasons(payload), ["rounded"])
+        self.assertIn("written as F201", payload["findings"][0]["message"])
+        self.assertIn("1 rounded to the form it is written in", payload["message"])
+
+    def test_a_rounded_back_word_next_to_a_changed_one(self):
+        payload = run("G90 G1 X10000 Z10.\n", preset="is-b", operand=0.0001, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[0], "G90 G1 X10000 Z10.0001")
+        self.assertEqual(reasons(payload), ["rounded"])
+        self.assertTrue(payload["message"].startswith("Added 0.0001 to X and Z in 1 word on 1 block, 1 more rounded back to the value it is written with."), payload["message"])
+
+
+class TestManualCheckD51AxisPointsOfACode(unittest.TestCase):
+    """Manual-check fix round, D5-1 (the code side; the data is the Okuma database's): a
+    parameter that is a coordinate of an axis (`CodeParam.axis`) and belongs to no arc, such
+    as the change points `XA=`/`ZA=` of an Okuma LAP `G84`, moves with its axis like the
+    contour around it, also in a block that writes no axis word; it is left and said so where
+    the distance mode is incremental, and a value that cannot be computed refuses the block.
+    The database is marked here, so the test does not wait for the data."""
+
+    LAP = "\n".join([
+        "G90 G00 X100. Z5.", "G85 NAT01 D4. F0.3 U0.4 W0.2", "$ G84 XA=60. ZA=-20. DA=2. FA=0.2", "NAT01 G81",
+        "G01 X40. Z0.", "Z-30.", "X80.", "G80", "G00 X200. Z100.", "M30",
+    ])
+
+    def run_lap(self, text, **params):
+        context = helpers.effective_context("okuma-osp", preset="okuma-1mm")
+        codes = json.loads(json.dumps(context["codes"]))
+        for entry in codes:
+            if entry.get("code") == "G84" and any(p.get("address") == "ZA" for p in entry.get("params") or []):
+                for param in entry["params"]:
+                    if param["address"] in ("XA", "XB", "ZA", "ZB"):
+                        param["axis"] = param["address"][0]
+        context["codes"] = codes
+        context["params"] = dict({"operation": "add", "operand": -10, "addresses": ["Z"]}, **params)
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(text.split("\n"))}
+        result = helpers.run_script(SCRIPT, stdin=text, context=context)
+        self.assertTrue(result.ok, result.stderr)
+        return result.json()
+
+    def test_the_change_points_move_with_their_axis(self):
+        payload = self.run_lap(self.LAP)
+        self.assertEqual(lines_of(payload)[2], "$ G84 XA=60. ZA=-30. DA=2. FA=0.2")
+        self.assertEqual(lines_of(payload)[4], "G01 X40. Z-10.")
+        payload = self.run_lap(self.LAP, operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[2], "$ G84 XA=62. ZA=-20. DA=2. FA=0.2")
+        payload = self.run_lap(self.LAP, operation="multiply", operand=2)
+        self.assertEqual(lines_of(payload)[2], "$ G84 XA=60. ZA=-40. DA=2. FA=0.2")
+
+    def test_an_incremental_distance_mode_leaves_them_and_says_so(self):
+        payload = self.run_lap(self.LAP.replace("G90 G00 X100. Z5.", "G91 G00 X0 Z0"))
+        self.assertEqual(lines_of(payload)[2], "$ G84 XA=60. ZA=-20. DA=2. FA=0.2")
+        self.assertIn((3, "incremental"), [(f["line"], f["reason"]) for f in payload["findings"]])
+
+    def test_a_change_point_that_cannot_be_computed_refuses_its_block(self):
+        payload = self.run_lap(self.LAP.replace("ZA=-20.", "ZA=V1"))
+        self.assertEqual(lines_of(payload)[1:3], ["G85 NAT01 D4. F0.3 U0.4 W0.2", "$ G84 XA=60. ZA=V1 DA=2. FA=0.2"])
+        finding = finding_at(payload, 2)
+        self.assertEqual(finding["reason"], "cycle-expression")
+        self.assertIn("ZA=V1 is a position of G84 on Z that cannot be computed", finding["message"])
+
+
+class TestReviewRoundCodeValueOnAnAxisAddress(unittest.TestCase):
+    """Manual-check integration (follow-up of review batch L, NC-6): the `C` of the Okuma
+    fixed thread cycles `G31`-`G33` is the phase shift of the thread start (`position:
+    'none'`), not the C axis. A run on C moves the C axis words around it and leaves that `C`
+    as written, listed as a value of the code; so does any word on an axis address that a code
+    of its block, or the motion code in force, declares as no position."""
+
+    def okuma(self, body, **params):
+        text = "G50 S2000\nG0 X50. Z5. C0.\n" + body + "\nG0 X80.\nM02"
+        return run(text, profile="okuma-osp", preset="okuma-1mm", **dict({"operand": 10, "addresses": ["C"]}, **params))
+
+    def test_the_phase_shift_of_a_fixed_thread_cycle_is_left(self):
+        for code in ("G31", "G32", "G33"):
+            with self.subTest(code=code):
+                payload = self.okuma("G0 C10.\n%s X40. Z-20. F1.5 C90.\nX39.\nG0 C30." % code)
+                self.assertEqual(
+                    lines_of(payload)[1:6],
+                    ["G0 X50. Z5. C10.", "G0 C20.", "%s X40. Z-20. F1.5 C90." % code, "X39.", "G0 C40."],
+                )
+                finding = finding_at(payload, 4)
+                self.assertEqual(finding["reason"], "data")
+                self.assertEqual(finding["message"], "C90.: a value of %s, not a position of this program." % code)
+
+    def test_a_later_pass_under_the_cycle_leaves_its_c_too(self):
+        payload = self.okuma("G33 X40. Z-20. F1.5 C90.\nX39. C180.")
+        self.assertEqual(lines_of(payload)[2:4], ["G33 X40. Z-20. F1.5 C90.", "X39. C180."])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "data"), (4, "data")])
+
+    def test_a_multiply_of_c_leaves_it_and_x_and_z_still_move(self):
+        payload = self.okuma("G33 X40. Z-20. F1.5 C90.", operation="multiply", operand=2)
+        self.assertEqual(lines_of(payload)[2], "G33 X40. Z-20. F1.5 C90.")
+        self.assertEqual(reasons(payload), ["data"])
+        payload = self.okuma("G33 X40. Z-20. F1.5 C90.", addresses=["Z"], operand=-1)
+        self.assertEqual(lines_of(payload)[2], "G33 X40. Z-21. F1.5 C90.")
         self.assertEqual(payload["findings"], [])

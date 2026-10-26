@@ -236,7 +236,20 @@ interface KeywordEntry {
   parts: string[];
   /** A one-letter keyword (`L`, `C`) needs whitespace or the line end behind it. */
   single: boolean;
+  /**
+   * What the character behind the first one has to be, so most entries of a group are ruled out
+   * with one comparison (T170): the upper-cased second letter of the first part, `AFTER_SPACE`
+   * where the first part is one letter and more parts follow (`F TCP`), `ANY_NEXT` where the
+   * entry is that one letter (nothing to rule out). Only a necessary condition: `matchLiteral`
+   * still decides.
+   */
+  second: number;
 }
+
+/** `KeywordEntry.second`: the entry is a single letter, any character may follow. */
+const ANY_NEXT = -1;
+/** `KeywordEntry.second`: the first part is one letter, and a blank has to follow. */
+const AFTER_SPACE = -2;
 
 /** Everything the scanner needs from a profile, derived once per `CompiledProfile`. */
 interface LexSpec {
@@ -251,6 +264,8 @@ interface LexSpec {
   blockNumberStarts: string[];
   skip: { codes: number[]; before: boolean; after: boolean; levels: boolean } | null;
   keywords: Map<number, KeywordEntry[]>;
+  /** `keywords` for the first characters below 128 (a table read instead of a map lookup), the hot path of `matchKeyword`. */
+  keywordsAscii: (KeywordEntry[] | undefined)[];
   /** `syntax.variables`, sticky, so it can be tried at a position without slicing. */
   variables: RegExp | null;
   /** The literal first character of `syntax.variables`, for the Fanuc `#[…]` form. */
@@ -445,10 +460,13 @@ function buildSpec(cp: CompiledProfile): LexSpec {
     if (parts.length === 0) continue;
     const code = toUpper(keyword.charCodeAt(0));
     const group = keywords.get(code);
-    const entry: KeywordEntry = { canonical: parts.join(' '), parts, single: keyword.length === 1 };
+    const second = parts[0].length > 1 ? toUpper(parts[0].charCodeAt(1)) : parts.length > 1 ? AFTER_SPACE : ANY_NEXT;
+    const entry: KeywordEntry = { canonical: parts.join(' '), parts, single: keyword.length === 1, second };
     if (group) group.push(entry);
     else keywords.set(code, [entry]);
   }
+  const keywordsAscii: (KeywordEntry[] | undefined)[] = new Array<KeywordEntry[] | undefined>(128).fill(undefined);
+  for (const [code, group] of keywords) if (code < 128) keywordsAscii[code] = group;
 
   const blockSkip = syntax.blockSkip;
   const position = blockSkip?.position ?? 'either';
@@ -522,6 +540,7 @@ function buildSpec(cp: CompiledProfile): LexSpec {
     blockNumberStarts: mainStart === null ? prefixes : [...prefixes, mainStart],
     skip,
     keywords,
+    keywordsAscii,
     variables: cp.re.variables ? new RegExp(cp.re.variables.source, `${cp.flags}y`) : null,
     variableLead: lead,
     continuation: cp.re.continuation ?? null,
@@ -618,7 +637,7 @@ export function lexSpec(cp: CompiledProfile): LexSpec {
   return spec;
 }
 
-export type { CommentMarker, LexSpec };
+export type { CommentMarker, KeywordEntry, LexSpec };
 
 /** Compares `literal` against the line at `p`, honouring the profile's case rule. */
 function matchLiteral(line: string, p: number, literal: string, caseSensitive: boolean): boolean {
@@ -1120,12 +1139,18 @@ function pushSkips(tokens: NcToken[], line: string, p: number, limit: number, sp
   }
 }
 
-/** The keyword that starts at `p`, with the position behind it. */
-function matchKeyword(line: string, p: number, limit: number, spec: LexSpec): { end: number; entry: KeywordEntry } | null {
-  const group = spec.keywords.get(toUpper(line.charCodeAt(p)));
+/** The keyword that starts at `p`, with the position behind it (exported for `tokenizer.keywords.test.ts`). */
+export function matchKeyword(line: string, p: number, limit: number, spec: LexSpec): { end: number; entry: KeywordEntry } | null {
+  const first = toUpper(line.charCodeAt(p));
+  const group = first < 128 ? spec.keywordsAscii[first] : spec.keywords.get(first);
   if (!group) return null;
+  const next = p + 1 < limit ? line.charCodeAt(p + 1) : -1;
+  const nextUpper = toUpper(next);
 
   for (const entry of group) {
+    // One comparison rules out most of the group (`LBL`, `LP` and `LN` against `L X+5`).
+    const second = entry.second;
+    if (second >= 0 ? nextUpper !== second : second === AFTER_SPACE && !isSpace(next)) continue;
     let q = p;
     let ok = true;
     for (let i = 0; i < entry.parts.length; i++) {

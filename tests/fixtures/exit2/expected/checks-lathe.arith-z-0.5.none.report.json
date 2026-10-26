@@ -8,7 +8,7 @@
     ]
   },
   "machine": null,
-  "message": "Subtracted 0.5 from Z in 15 words on 15 blocks. Left 2 blocks and 5 words as written: 1 inside a frame, 1 cycle not reviewed, 1 word that cannot be read, 1 data word, 2 incremental words, 1 word whose reading depends on the machine. No machine chosen: words whose reading depends on the machine are left alone.",
+  "message": "Subtracted 0.5 from Z in 16 words on 16 blocks. Left 1 block and 5 words as written: 1 inside a frame, 1 word that cannot be read, 1 data word, 2 incremental words, 1 word whose reading depends on the machine. No machine chosen: words whose reading depends on the machine are left alone.",
   "findings": [
     {
       "line": 4,
@@ -25,7 +25,7 @@
     {
       "line": 27,
       "severity": "info",
-      "message": "Z2000: the reading depends on the machine (2000 mm under \"As written\", 2 mm under \"Increments of 0.001 mm (IS-B)\" or 0.2 mm under \"Increments of 0.0001 mm (IS-C)\"); choose a machine.",
+      "message": "Z2000: the reading depends on the machine (2000 mm under \"As written\", 20 mm under \"Increments of 0.01 mm (IS-A)\", 2 mm under \"Increments of 0.001 mm (IS-B)\" or 0.2 mm under \"Increments of 0.0001 mm (IS-C)\"); choose a machine.",
       "reason": "machine-dependent"
     },
     {
@@ -39,12 +39,6 @@
       "severity": "info",
       "message": "W-2.: W moves Z by a distance, so a shift does not apply to it.",
       "reason": "incremental"
-    },
-    {
-      "line": 49,
-      "severity": "warning",
-      "message": "G84 Z-12. F1.25: nobody reviewed the positions of G84 (roadmap R8).",
-      "reason": "cycle-not-reviewed"
     },
     {
       "line": 76,

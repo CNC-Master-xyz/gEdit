@@ -24,6 +24,8 @@ export default {
     modal: 'modal',
     pitchFeed: 'The feed carries the thread pitch here, so changing it changes the thread.',
     required: 'Required: {list}',
+    requiredFirst: 'Required in the first block: {list}',
+    requiredSecond: 'Required in the second block: {list}',
     variable: 'Variable',
     variableValue: 'Only the control knows the value; the editor does not calculate it.',
     incremental: 'Incremental: the value is measured from the current position.',
@@ -142,6 +144,8 @@ export default {
     mirror: 'Mirror image',
     /** P4a integration: Klartext cycle 10, apart from the mirror of cycle 8, so that its reset (ROT+0) ends the rotation only. */
     rotation: 'Coordinate rotation',
+    /** Manual-check fix round (D6-1): Sinumerik TOFRAME/TOROT and TOROTOF, a frame along the tool. */
+    toolFrame: 'Frame along the tool',
     polar: 'Polar coordinate interpolation',
     cylindrical: 'Cylindrical interpolation',
     /** B1 (NC-02): Fanuc lathe G68/G69, a modal group of its own apart from G68.1/G69.1. */

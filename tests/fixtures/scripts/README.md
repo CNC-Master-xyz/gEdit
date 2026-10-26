@@ -87,3 +87,21 @@ wording is the WP's and its goldens pin it; the example cases carry the prelude'
 | `rotate/fanuc-mill-90` | Fanuc mill, no machine | a rotation by 90° about X0 Y0, exact: points and the centre vector turned, `G3` kept, a `G91` block that wrote only `X` writes `X` and `Y` |
 | `mirror/lathe-z-counter-spindle` | Fanuc lathe, system A, no machine | the Z mirror about Z0: `Z` and `W` and `K` change sign (so do `Y` and `J` about the turning axis), `X`, `U`, `I`, `R` stay, `G2`↔`G3` and `G41`↔`G42` swap from the data, the tool-nose warning |
 | `mirror/lathe-thread-refused` | Fanuc lathe, system A | a refused run: a `G76` thread (`thread`) and a `G71` roughing cycle (`roughing-cycle`) listed, nothing written |
+
+## The drilling and time goldens: expand_cycles, statistics (Phase 4, P4b)
+
+Written as a contract by the P4b prelude (Phase 4 plan §6.3 rule 14, §6.4 rule 6). P4.7 owns
+`expand_cycles/`, P4.9 owns `statistics/`; the prelude left no example case, because both
+need the hand computation of the work package that writes the script.
+
+- `expand_cycles/<case>/` is a geometry golden (above): `input.nc`, `params.json` (`peckRetract`,
+  `peckClearance`), optional `case.json` and `preceding.nc`, then `expected.nc` with
+  `envelope.json`, or `refused.json`; a refused run hands the input back byte for byte and
+  lists one error per refused block, `reason` one id of `_nc_cycles.REASONS` or of the frame
+  (`no-database`, `selection-unprimed`). Every written case also holds X23: the extents of
+  `expected.nc` equal the extents of `input.nc` (the cycle's), T108 included.
+- `statistics/<case>/`: `input.nc`, `params.json` (the form of §6.4 rule 6, `format: "csv"`),
+  optional `case.json`, `expected.csv` (lengths to 0.01 mm, times to 0.1 s) and
+  `envelope.json` (`message`, `findings`: the "not estimated" rows with their lines). The
+  first line of `expected.csv` is the header; each case's computation by hand is written in
+  a `README.md` of its folder.

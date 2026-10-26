@@ -15,7 +15,10 @@
         "mode": "calculator"
       },
       "units": "mm",
-      "variants": {}
+      "variants": {
+        "counterSpindleY": "turns",
+        "toolChange": "t"
+      }
     },
     "source": {
       "diameter": "profile",
@@ -26,7 +29,10 @@
       },
       "numberInput": "machine",
       "units": "profile",
-      "variants": {}
+      "variants": {
+        "counterSpindleY": "profile",
+        "toolChange": "profile"
+      }
     }
   },
   "profile": {
@@ -199,7 +205,11 @@
               "syncMarks": [
                 {
                   "id": "waitm",
-                  "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                  "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                  "markValues": {
+                    "max": 99,
+                    "min": 0
+                  },
                   "match": {
                     "kind": "regex",
                     "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -216,9 +226,10 @@
                   "blocking": false,
                   "id": "setm",
                   "label": "SETM: sets a mark without waiting; it answers a WAITM of that mark in another channel",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -228,9 +239,10 @@
                   "blocking": false,
                   "id": "clearm",
                   "label": "CLEARM: clears a mark without waiting; it answers nothing",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -262,7 +274,11 @@
               "syncMarks": [
                 {
                   "id": "waitm",
-                  "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                  "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                  "markValues": {
+                    "max": 99,
+                    "min": 0
+                  },
                   "match": {
                     "kind": "regex",
                     "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -279,9 +295,10 @@
                   "blocking": false,
                   "id": "setm",
                   "label": "SETM: sets a mark without waiting; it answers a WAITM of that mark in another channel",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -291,9 +308,10 @@
                   "blocking": false,
                   "id": "clearm",
                   "label": "CLEARM: clears a mark without waiting; it answers nothing",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -324,7 +342,11 @@
               "syncMarks": [
                 {
                   "id": "waitm",
-                  "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                  "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                  "markValues": {
+                    "max": 99,
+                    "min": 0
+                  },
                   "match": {
                     "kind": "regex",
                     "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -341,9 +363,10 @@
                   "blocking": false,
                   "id": "setm",
                   "label": "SETM: sets a mark without waiting; it answers a WAITM of that mark in another channel",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -353,9 +376,10 @@
                   "blocking": false,
                   "id": "clearm",
                   "label": "CLEARM: clears a mark without waiting; it answers nothing",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -387,7 +411,11 @@
               "syncMarks": [
                 {
                   "id": "waitm",
-                  "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                  "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                  "markValues": {
+                    "max": 99,
+                    "min": 0
+                  },
                   "match": {
                     "kind": "regex",
                     "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -404,9 +432,10 @@
                   "blocking": false,
                   "id": "setm",
                   "label": "SETM: sets a mark without waiting; it answers a WAITM of that mark in another channel",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -416,9 +445,10 @@
                   "blocking": false,
                   "id": "clearm",
                   "label": "CLEARM: clears a mark without waiting; it answers nothing",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -456,7 +486,58 @@
           }
         ]
       },
-      "units": "mm"
+      "units": "mm",
+      "variants": [
+        {
+          "choices": [
+            {
+              "detect": [
+                {
+                  "pattern": "^(?:N\\d+[ \\t]+)?T(?:(?!0+(?![\\d.]))\\d+|\\d*[ \\t]*=[ \\t]*(?:\"[^\"]*\"|(?!0+(?![\\d.]))\\d+))(?:[ \\t]+D\\d+)?$",
+                  "weight": 3
+                }
+              ],
+              "label": "T changes the tool, no M6 (a turret; MD22550 = 0, default, verify)",
+              "value": "t"
+            },
+            {
+              "detect": [
+                {
+                  "pattern": "^(?:[^\"]*\"[^\"]*\")*[^\"]*?(?<![A-Z0-9_$])M0*6(?![\\d.]|\\s*=)",
+                  "weight": 5
+                }
+              ],
+              "label": "M6 loads the tool selected with T (a magazine; MD22550 = 1)",
+              "overlay": {
+                "toolCall": {
+                  "ignore": "^(?:[^\"]*\"[^\"]*\")*[^\"]*?(?<![A-Z0-9_$])T(?:\\d*\\s*=\\s*)?0+(?![\\d._])(?!\\s*=)",
+                  "toolFrom": "same-line-or-last",
+                  "trigger": "^(?:[^\"]*\"[^\"]*\")*[^\"]*?(?<![A-Z0-9_$])M0*6(?![\\d.]|\\s*=)"
+                }
+              },
+              "value": "m6"
+            }
+          ],
+          "default": "t",
+          "id": "toolChange",
+          "label": "Tool change"
+        },
+        {
+          "choices": [
+            {
+              "label": "Y turns with Z: the Z mirror for the counter spindle changes the sign of Y too (default, verify)",
+              "value": "turns"
+            },
+            {
+              "label": "Y stays: the Z mirror for the counter spindle leaves Y as written",
+              "value": "stays"
+            }
+          ],
+          "default": "turns",
+          "id": "counterSpindleY",
+          "label": "Counter spindle"
+        }
+      ]
     },
     "machineType": "lathe",
     "modal": {
@@ -593,6 +674,7 @@
       ],
       "exponentMarker": "EX",
       "header": "^;?%(?:_N_)?\\w+_(?:MPF|SPF)",
+      "incrementTravelsShift": true,
       "keywords": [
         "IF",
         "ELSE",
@@ -647,10 +729,25 @@
         "ASCALE",
         "MIRROR",
         "AMIRROR",
+        "ROTS",
+        "AROTS",
+        "CROTS",
+        "TOFRAME",
+        "TOFRAMEZ",
+        "TOFRAMEY",
+        "TOFRAMEX",
+        "TOROT",
+        "TOROTZ",
+        "TOROTY",
+        "TOROTX",
+        "TOROTOF",
+        "PAROT",
+        "PAROTOF",
         "SUPA",
         "DIAMON",
         "DIAMOF",
         "DIAM90",
+        "DIAMCYCOF",
         "SOFT",
         "BRISK",
         "FFWON",

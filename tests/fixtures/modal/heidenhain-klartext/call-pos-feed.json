@@ -1,0 +1,18 @@
+{
+  "about": "P4b fix batch 3 (review NC-6, plan 7.4 rule 17): the F of CYCL CALL POS (blockFeed) is the feed of the move to the cycle's start, for that block only. After the block it is the feed in force; the next block starts with the feed, and the feed unit word, in force before it again.",
+  "input": "call-pos-feed.h",
+  "states": [
+    { "line": 5, "about": "The path feed of the program.", "after": { "feed": { "valueText": "500", "line": 5 }, "feedUnit": "per-minute" } },
+    { "line": 16, "about": "CYCL CALL POS … F300: the block's own feed, and the cycle it runs.", "after": { "feed": { "valueText": "300", "line": 16 }, "definedCycle": "CYCL DEF 200", "block": { "cycle": "CYCL DEF 200" } } },
+    { "line": 17, "about": "The next block moves at the feed in force before the call.", "after": { "feed": { "valueText": "500", "line": 5 }, "feedUnit": "per-minute" } },
+    { "line": 18, "about": "A call without a feed word changes nothing.", "after": { "feed": { "valueText": "500", "line": 5 } } },
+    { "line": 19, "after": { "feed": { "valueText": "0.05", "line": 19 }, "feedUnit": "per-tooth" } },
+    { "line": 20, "about": "A plain F on the call is per minute in its own block…", "after": { "feed": { "valueText": "300", "line": 20 }, "feedUnit": "per-minute" } },
+    { "line": 21, "about": "…and the feed per tooth is back after it, its unit word included.", "after": { "feed": { "valueText": "0.05", "line": 19 }, "feedUnit": "per-tooth" } },
+    { "line": 22, "about": "FMAX is no feed word.", "after": { "feed": { "valueText": "0.05", "line": 19 }, "feedUnit": "per-tooth" } },
+    { "line": 23, "after": { "feed": { "valueText": "600", "line": 23 }, "feedUnit": "per-minute" } },
+    { "line": 24, "after": { "feed": { "valueText": "200", "line": 24 } } },
+    { "line": 25, "about": "Two calls in a row: each feed is its own block's.", "after": { "feed": { "valueText": "250", "line": 25 } } },
+    { "line": 26, "about": "Back to the feed in force before the first of them.", "after": { "feed": { "valueText": "600", "line": 23 }, "feedUnit": "per-minute" } }
+  ]
+}

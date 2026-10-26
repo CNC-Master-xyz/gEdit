@@ -1,0 +1,39 @@
+{
+  "title": "Program checks",
+  "columns": [
+    {
+      "key": "line",
+      "label": "Line"
+    },
+    {
+      "key": "check",
+      "label": "Check"
+    },
+    {
+      "key": "severity",
+      "label": "Severity"
+    },
+    {
+      "key": "message",
+      "label": "Finding"
+    }
+  ],
+  "rows": [
+    {
+      "line": 5,
+      "check": "Spindle speed limit",
+      "checkId": "speedLimit",
+      "severity": "warning",
+      "message": "G50 S5000: the speed clamp is above the top speed of this machine, 4000 rpm"
+    },
+    {
+      "line": 12,
+      "check": "Travel",
+      "checkId": "travelLimit",
+      "severity": "error",
+      "message": "Z1. (25.4 mm) is outside the travel of this machine, Z -800 to 0 mm (in machine coordinates, G53)"
+    }
+  ],
+  "message": "2 findings in 2 checks. Machine 'Lathe 2': where the presets read a number differently, the finding lists every reading.",
+  "findings": []
+}

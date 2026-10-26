@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Fanuc, defaults: the program name comment stays, the others go, a block emptied by the removal keeps its number (N30 is a jump target) and a skip mark stays.",
+  "profile": "fanuc-gcode",
+  "options": {}
+}

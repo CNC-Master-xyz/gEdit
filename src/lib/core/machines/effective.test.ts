@@ -29,6 +29,41 @@ const LATHE = profile('fanuc-lathe');
 const MILL = profile('fanuc-gcode');
 const KLARTEXT = profile('heidenhain-klartext');
 
+// v1.2.0 manual-check fix round (D5-3): in G-code system B the U/W choice defaults to
+// "none" (G91 only), wherever the default applies; a machine's own choice stays.
+describe('a default that follows another variant (defaultBy, D5-3)', () => {
+  it('gives system B no incremental addresses, detected or chosen, unless the machine says otherwise', () => {
+    expect(effectiveMachine(LATHE, null, 'none', { gcodeSystem: { value: 'B', margin: 5 } }).params.variants.incrementalAddresses).toBe('none');
+    const chosenB = effectiveMachine(LATHE, machine({ params: { variants: { gcodeSystem: 'B' } } }), 'document', {});
+    expect(chosenB.params.variants.incrementalAddresses).toBe('none');
+    expect(chosenB.source.variants.incrementalAddresses).toBe('profile');
+    const kept = effectiveMachine(LATHE, machine({ params: { variants: { gcodeSystem: 'B', incrementalAddresses: 'uw' } } }), 'document', {});
+    expect(kept.params.variants.incrementalAddresses).toBe('uw');
+    expect(effectiveMachine(LATHE, machine({ params: { variants: { gcodeSystem: 'A' } } }), 'document', {}).params.variants.incrementalAddresses).toBe('uw');
+    // The overlay of "none" applies: U and W are no incremental addresses in system B.
+    const applied = applyMachine(LATHE, chosenB).profile;
+    expect(applied.addresses?.incremental?.U).toBeUndefined();
+    expect(applyMachine(LATHE, noMachine(LATHE)).profile.addresses?.incremental?.U).toBe('X');
+  });
+
+  it('is refused by the validator when it names no variant, itself, a chain or a value that is no choice', () => {
+    const base = structuredClone(BUILTIN_PROFILE_JSON.find((raw) => (raw as { id?: string }).id === 'fanuc-lathe')) as Record<string, any>;
+    const at = (patch: (v: Record<string, any>[]) => void): string[] => {
+      const copy = structuredClone(base);
+      patch(copy.machineParams.variants);
+      const checked = validateProfile(copy);
+      return checked.ok ? [] : checked.errors.filter((e: string) => e.includes('defaultBy'));
+    };
+    const inc = (v: Record<string, any>[]) => v.find((x) => x.id === 'incrementalAddresses') as Record<string, any>;
+    expect(at(() => {})).toEqual([]);
+    expect(at((v) => { inc(v).defaultBy = { variant: 'nope', values: { B: 'none' } }; }).length).toBe(1);
+    expect(at((v) => { inc(v).defaultBy = { variant: 'incrementalAddresses', values: { uw: 'none' } }; }).length).toBe(1);
+    expect(at((v) => { inc(v).defaultBy = { variant: 'gcodeSystem', values: { C: 'none' } }; }).length).toBe(1);
+    expect(at((v) => { inc(v).defaultBy = { variant: 'gcodeSystem', values: { B: 'nothing' } }; }).length).toBe(1);
+    expect(at((v) => { (v.find((x) => x.id === 'toolWord') as Record<string, any>).defaultBy = { variant: 'incrementalAddresses', values: { none: 'offset2' } }; }).length).toBe(1);
+  });
+});
+
 describe('defaultParams', () => {
   it('takes the declared default preset, the units and the diameter parameter', () => {
     const params = defaultParams(LATHE);
@@ -36,7 +71,7 @@ describe('defaultParams', () => {
     expect(params.numberInput?.mode).toBe('calculator');
     expect(params.units).toBe('mm');
     expect(params.diameter).toBe('on');
-    expect(params.variants).toEqual({ gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength' });
+    expect(params.variants).toEqual({ gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength', toolChange: 'turret', counterSpindleY: 'turns' });
     expect(defaultParams(MILL).numberInput?.mode).toBe('increment');
     expect(defaultParams(MILL).diameter).toBeNull();
   });
@@ -95,7 +130,7 @@ describe('effectiveMachine', () => {
       params: { variants: { gcodeSystem: 'Z', nosuch: 'x' }, modalInitial: { feedmode: 'G95', coolant: 'M8' } },
     });
     const eff = effectiveMachine(LATHE, odd, 'document', {});
-    expect(eff.params.variants).toEqual({ gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength' });
+    expect(eff.params.variants).toEqual({ gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength', toolChange: 'turret', counterSpindleY: 'turns' });
     expect(eff.params.modalInitial).toEqual({ feedmode: 'G95' });
   });
 

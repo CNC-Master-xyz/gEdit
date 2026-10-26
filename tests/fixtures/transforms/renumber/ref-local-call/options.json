@@ -1,0 +1,18 @@
+{
+  "note": "P4.19 (plan 6.6 rule 9, 7 row): M98 Q100 without a program number runs N100 of its own program as a subprogram (the local call), so the program is its own caller and the M99 P20 that ends that part returns into it. Both the Q (own) and the P (caller) follow their blocks: Q50, P30.",
+  "profile": "fanuc-gcode",
+  "options": {},
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.referencesRewritten"
+    ],
+    "preflight": null
+  }
+}

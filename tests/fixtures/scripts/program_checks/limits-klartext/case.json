@@ -1,0 +1,9 @@
+{
+  "profile": "heidenhain-klartext",
+  "machineName": "Mill 2",
+  "limits": {
+    "units": "mm",
+    "spindle": { "main": 10000 },
+    "travel": { "X": { "min": -500, "max": 500 }, "Y": { "min": -300, "max": 300 }, "Z": { "min": -500, "max": 0 } }
+  }
+}

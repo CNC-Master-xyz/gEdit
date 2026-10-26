@@ -111,10 +111,25 @@
       "ASCALE",
       "MIRROR",
       "AMIRROR",
+      "ROTS",
+      "AROTS",
+      "CROTS",
+      "TOFRAME",
+      "TOFRAMEZ",
+      "TOFRAMEY",
+      "TOFRAMEX",
+      "TOROT",
+      "TOROTZ",
+      "TOROTY",
+      "TOROTX",
+      "TOROTOF",
+      "PAROT",
+      "PAROTOF",
       "SUPA",
       "DIAMON",
       "DIAMOF",
       "DIAM90",
+      "DIAMCYCOF",
       "SOFT",
       "BRISK",
       "FFWON",
@@ -158,7 +173,8 @@
     ],
     "labelAfter": ["GOTO", "GOTOF", "GOTOB", "GOTOC"],
     "declareAfter": ["DEF"],
-    "maxLineLength": 512
+    "maxLineLength": 512,
+    "incrementTravelsShift": true
   },
   "addresses": {
     "tool": "T",
@@ -242,6 +258,47 @@
     "units": "mm",
     "diameter": "on",
     "modalGroups": ["feedmode", "plane", "distance"],
+    "variants": [
+      {
+        "id": "toolChange",
+        "label": "Tool change",
+        "default": "t",
+        "choices": [
+          {
+            "value": "t",
+            "label": "T changes the tool, no M6 (a turret; MD22550 = 0, default, verify)",
+            "detect": [{ "pattern": "^(?:N\\d+[ \\t]+)?T(?:(?!0+(?![\\d.]))\\d+|\\d*[ \\t]*=[ \\t]*(?:\"[^\"]*\"|(?!0+(?![\\d.]))\\d+))(?:[ \\t]+D\\d+)?$", "weight": 3 }]
+          },
+          {
+            "value": "m6",
+            "label": "M6 loads the tool selected with T (a magazine; MD22550 = 1)",
+            "detect": [{ "pattern": "^(?:[^\"]*\"[^\"]*\")*[^\"]*?(?<![A-Z0-9_$])M0*6(?![\\d.]|\\s*=)", "weight": 5 }],
+            "overlay": {
+              "toolCall": {
+                "trigger": "^(?:[^\"]*\"[^\"]*\")*[^\"]*?(?<![A-Z0-9_$])M0*6(?![\\d.]|\\s*=)",
+                "ignore": "^(?:[^\"]*\"[^\"]*\")*[^\"]*?(?<![A-Z0-9_$])T(?:\\d*\\s*=\\s*)?0+(?![\\d._])(?!\\s*=)",
+                "toolFrom": "same-line-or-last"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "counterSpindleY",
+        "label": "Counter spindle",
+        "default": "turns",
+        "choices": [
+          {
+            "value": "turns",
+            "label": "Y turns with Z: the Z mirror for the counter spindle changes the sign of Y too (default, verify)"
+          },
+          {
+            "value": "stays",
+            "label": "Y stays: the Z mirror for the counter spindle leaves Y as written"
+          }
+        ]
+      }
+    ],
     "channels": {
       "waitLetters": [
         "M"
@@ -267,7 +324,11 @@
             "syncMarks": [
               {
                 "id": "waitm",
-                "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                "markValues": {
+                  "min": 0,
+                  "max": 99
+                },
                 "match": {
                   "kind": "regex",
                   "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -286,8 +347,9 @@
                 "answers": true,
                 "match": {
                   "kind": "regex",
-                  "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                  "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                 },
+                "markSeparator": ",",
                 "partners": {
                   "kind": "all"
                 }
@@ -298,8 +360,9 @@
                 "blocking": false,
                 "match": {
                   "kind": "regex",
-                  "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                  "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                 },
+                "markSeparator": ",",
                 "partners": {
                   "kind": "all"
                 }
@@ -330,7 +393,11 @@
             "syncMarks": [
               {
                 "id": "waitm",
-                "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                "markValues": {
+                  "min": 0,
+                  "max": 99
+                },
                 "match": {
                   "kind": "regex",
                   "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -349,8 +416,9 @@
                 "answers": true,
                 "match": {
                   "kind": "regex",
-                  "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                  "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                 },
+                "markSeparator": ",",
                 "partners": {
                   "kind": "all"
                 }
@@ -361,8 +429,9 @@
                 "blocking": false,
                 "match": {
                   "kind": "regex",
-                  "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                  "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                 },
+                "markSeparator": ",",
                 "partners": {
                   "kind": "all"
                 }
@@ -392,7 +461,11 @@
             "syncMarks": [
               {
                 "id": "waitm",
-                "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                "markValues": {
+                  "min": 0,
+                  "max": 99
+                },
                 "match": {
                   "kind": "regex",
                   "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -411,8 +484,9 @@
                 "answers": true,
                 "match": {
                   "kind": "regex",
-                  "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                  "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                 },
+                "markSeparator": ",",
                 "partners": {
                   "kind": "all"
                 }
@@ -423,8 +497,9 @@
                 "blocking": false,
                 "match": {
                   "kind": "regex",
-                  "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                  "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                 },
+                "markSeparator": ",",
                 "partners": {
                   "kind": "all"
                 }
@@ -455,7 +530,11 @@
             "syncMarks": [
               {
                 "id": "waitm",
-                "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                "markValues": {
+                  "min": 0,
+                  "max": 99
+                },
                 "match": {
                   "kind": "regex",
                   "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -474,8 +553,9 @@
                 "answers": true,
                 "match": {
                   "kind": "regex",
-                  "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                  "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                 },
+                "markSeparator": ",",
                 "partners": {
                   "kind": "all"
                 }
@@ -486,8 +566,9 @@
                 "blocking": false,
                 "match": {
                   "kind": "regex",
-                  "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                  "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                 },
+                "markSeparator": ",",
                 "partners": {
                   "kind": "all"
                 }

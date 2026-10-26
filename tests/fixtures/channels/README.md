@@ -66,7 +66,7 @@ paths as **digits of `P`** (`P12`, `P21`, `P13`), packed (`M901P12`) and spaced
 
 | File | Contents |
 |---|---|
-| `o10-two-turret.MIN` | Two turrets in one program, read by the preset `okuma-osp/okuma-2turret`: alternating `G13`/`G14` sections (the aliases of turrets `a` and `b`), the header lines outside; the **ordered** `P` codes `P5`, `P15`, `P35` on turret A against `P5`, `P25`, `P35` on turret B (a number on one side only is legal: the clean case); the **counted** `M100` twice on each side. |
+| `o10-two-turret.MIN` | Two turrets in one program, read by the preset `okuma-osp/okuma-2turret`: alternating `G13`/`G14` sections (the aliases of turrets `a` and `b`), the header lines outside; the **ordered** `P` codes `P5`, `P15`, `P35` on turret A against `P5`, `P25`, `P35` on turret B (a number on one side only is legal: the clean case); the **counted** `M100` twice on each side, the second one before the next `P` code on both turrets and after `G40` (manual check 2026-10-25: an `M100` that meets a `P` code on the other turret is a warning). |
 | `o11-count-mismatch.MIN` | The same program with one `M100` fewer on turret B: the counts differ (one finding). |
 
 ### `nc/sinumerik/`

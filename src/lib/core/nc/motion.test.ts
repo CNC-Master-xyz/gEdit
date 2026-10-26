@@ -194,6 +194,15 @@ describe('the rules a golden cannot show', () => {
     expect(kindsOf('fanuc-gcode', ['G1 X1. F100.', 'G4 X1.', 'G4 P500', 'G10 L2 P1 X5.', 'G92 X0', 'G53 G0 Z0'])).toEqual(['linear', null, null, null, null, 'rapid']);
   });
 
+  it('paints a Sinumerik fixed-point approach as a rapid and G53 in the mode in force', () => {
+    // Fix batch 5: G74 and G75 carry `sets.motion: 'rapid'` (G75: each axis at its highest speed;
+    // G74: the reference approach at the machine's own speeds, not the programmed feed). G75
+    // written with the axis names (`X0 Z0`) is a rapid under G1; written with machine axes
+    // (`X1=0`) it names no position, so it gets no mark, nor does G74. G53 only leaves the
+    // offsets out: the block moves at the motion code in force.
+    expect(kindsOf('sinumerik-mill', ['G1 X1 F100', 'G75 X0 Z0 FP=1', 'G74 X1=0 Z1=0', 'G75 FP=2 X1=0 Y1=0', 'G53 Z0', 'X2'])).toEqual(['linear', 'rapid', null, null, 'linear', 'linear']);
+  });
+
   it('marks the first line of a block continued over several lines and not its tail', () => {
     expect(kindsOf('heidenhain-klartext', ['1 L X+10 F100 ~', '   M3', '2 L X+20 FMAX ~', '   Y+5 F200'])).toEqual(['linear', null, 'rapid', null]);
   });

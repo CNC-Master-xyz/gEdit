@@ -36,7 +36,7 @@
 //                      split refuses the merge in plain words and changes nothing.
 
 import { scenario } from '../lib/index.js'
-import { hoverAt } from './m3-common.js'
+import { hoverAllAt } from './m3-common.js'
 import { read } from './m5-common.js'
 import { openCompare, closeCompare, monacoRegistry } from './m11-common.js'
 import { NC_DIR, REPO_FILE, blockOf, channelMachines, goto, keys, presetBlock, open, press, waitChannel } from './m12-common.js'
@@ -216,12 +216,14 @@ scenario('p4-channels', { timeout: 900, files: REPO_FILE }, async (h) => {
     const view = read(ctx.channelPanes.state)
     h.check('the view is open: two panes of one program, one pane per channel in the machine\'s order', view.open && view.layout === 'single-file' && view.panes.length === 2 && sameJson(view.panes.map((p) => p.channelId), ['1', '2']) && view.panes.every((p) => p.docId === id), view)
     h.check('the groups are panes of the program, named after the channels', groups.length === 2 && groups.every((g) => g.kind === 'pane' && g.docId === id) && sameJson(groups.map((g) => g.channel), ['1', '2']) && sameJson(h.qa('editor-group-header').map((x) => x.querySelector('.title')?.textContent?.trim()), ['Channel 1', 'Channel 2']), groups.map((g) => `${g.id}:${g.kind}:${g.channel}`))
+    h.check('each pane\'s close button names its channel (T030)', sameJson(h.qa('editor-group-close').map((b) => b.getAttribute('aria-label')), [ctx.t('channelPanes.closePane', { channel: 'Channel 1' }), ctx.t('channelPanes.closePane', { channel: 'Channel 2' })]), h.qa('editor-group-close').map((b) => b.getAttribute('aria-label')))
+    h.check('the bar is a group, and its one live region is the hidden announcement (T031)', h.q('channel-view-bar')?.getAttribute('role') === 'group' && h.qa('channel-view-announce').length === 1, h.q('channel-view-bar')?.getAttribute('role'))
     h.check('the status bar says how many channels are shown', openedStatus === ctx.t('channelPanes.status.opened', { count: 2 }), openedStatus)
     h.check('the pane of the channel at the cursor (line 130 is channel 2) has the keyboard', focusedGroup(h) === ids[1] && (await waitFocus(h, ids[1])), { focused: focusedGroup(h), ids })
 
     const bar = barState(h)
-    h.check('the bar: one program with sections, nothing not shown, 2 lines in no channel (the closing % and the empty line after it), 4 of 5 waits lined up and 1 without a partner', bar !== null && bar.layout === 'single-file' && bar.notShown === '' && bar.outside === '2' && bar.matched === '4' && bar.unmatched === '1', bar)
-    h.check('and says so in words', bar !== null && bar.layoutText === ctx.t('channelPanes.bar.layoutSections') && bar.marks === `${ctx.t('channelPanes.bar.marks', { matched: 4, total: 5 })}, ${ctx.t('channelPanes.bar.unmatched', { count: 1 })}` && bar.outsideText === ctx.t('channelPanes.bar.outside', { count: 2 }) && bar.notShownText === '', bar)
+    h.check('the bar: one program with sections, nothing not shown, 1 line in no channel (the closing %; the empty line after the last line break is the end of the text, T036), 4 of 5 waits lined up and 1 without a partner', bar !== null && bar.layout === 'single-file' && bar.notShown === '' && bar.outside === '1' && bar.matched === '4' && bar.unmatched === '1', bar)
+    h.check('and says so in words', bar !== null && bar.layoutText === ctx.t('channelPanes.bar.layoutSections') && bar.marks === `${ctx.t('channelPanes.bar.marks', { matched: 4, total: 5 })}, ${ctx.t('channelPanes.bar.unmatched', { count: 1 })}` && bar.outsideText === ctx.t('channelPanes.bar.outside', { count: 1 }) && bar.notShownText === '', bar)
     h.check('Split Editor is not offered while the view is open; Close Split, F6 and Shift+F6 are', (await ribbonTab(h, 'view'), ribbonDisabled(h, 'view.splitEditor') && ribbonDisabled(h, 'view.splitEditorDown') && ribbonEnabled(h, 'view.closeSplit') && ctx.commands.isEnabled('view.focusNextPane') && ctx.commands.isEnabled('view.focusPreviousPane')))
 
     const [a, b] = views(h).map((v) => v.editor)
@@ -245,13 +247,17 @@ scenario('p4-channels', { timeout: 900, files: REPO_FILE }, async (h) => {
     ctx.editor.reveal(id, 80, 1)
     await h.waitFor(() => groupsOnScreen(h)[0]?.el.querySelector('.gedit-wait-unmatched'), { timeout: 5000 })
     const root = groupsOnScreen(h)[0].el
-    const matchedColour = getComputedStyle(root.querySelector('.gedit-wait-matched') ?? root).backgroundColor
+    // T029 (v1.2.0): a matched wait is a solid bar (`background-color`), an unmatched one a dashed bar (`background-image`, a
+    // repeating gradient, no background colour), so the two are told apart by shape and not by colour alone.
     const unmatched = root.querySelector('.gedit-wait-unmatched')
-    const unmatchedColour = unmatched ? getComputedStyle(unmatched).backgroundColor : ''
-    h.check('the unmatched mark is drawn on screen, in another colour than a matched one', !!unmatched && unmatchedColour !== matchedColour && unmatchedColour !== 'rgba(0, 0, 0, 0)', { matchedColour, unmatchedColour })
-    const hover = await hoverAt(h, id, 80, 1)
+    const unmatchedStyle = unmatched ? getComputedStyle(unmatched) : null
+    const matchedColour = getComputedStyle(document.documentElement).getPropertyValue('--gedit-wait-matched').trim()
+    const unmatchedColour = getComputedStyle(document.documentElement).getPropertyValue('--gedit-wait-unmatched').trim()
+    h.check('the unmatched mark is drawn on screen, as a dashed bar in another colour than a matched one', !!unmatchedStyle && /repeating-linear-gradient/.test(unmatchedStyle.backgroundImage) && unmatchedStyle.width === '4px' && matchedColour !== '' && unmatchedColour !== '' && unmatchedColour !== matchedColour, { matchedColour, unmatchedColour, image: unmatchedStyle?.backgroundImage, width: unmatchedStyle?.width })
+    // The hover has two rows since the manual-check round: what the code is on this machine (D2), then the wait mark's sentence.
+    const hover = await hoverAllAt(h, id, 80, 1)
     h.check('the hover on line 80 says which channel has no matching wait, and for which wait', hover.includes('Channel 2') && hover.includes('M920P12') && /no matching wait/i.test(hover), hover)
-    const hoverMatched = await hoverAt(h, id, 9, 1)
+    const hoverMatched = await hoverAllAt(h, id, 9, 1)
     h.check('the hover on the matched wait on line 9 names the partner: Channel 2, line 103 (the program\'s line)', hoverMatched.includes('Channel 2, line 103'), hoverMatched)
     ctx.editor.triggerAction('editor.action.hideHover')
   })
@@ -466,7 +472,7 @@ scenario('p4-channels', { timeout: 900, files: REPO_FILE }, async (h) => {
     const heights = views(h).map((v) => v.editor.getScrollHeight())
     h.check('and all three panes are equally tall', Math.max(...heights) - Math.min(...heights) <= 1, heights)
     h.check('marks: M901P12 and M910P123 matched in paths 1 and 2; in path 3 M910P123 matched and M920P13 unmatched (path 1 has none)', sameJson(marksOf(views(h)[0].editor), [[9, 'matched'], [15, 'matched']]) && sameJson(marksOf(views(h)[1].editor), [[7, 'matched'], [18, 'matched']]) && sameJson(marksOf(views(h)[2].editor), [[12, 'matched'], [16, 'unmatched']]), views(h).map((v) => marksOf(v.editor)))
-    const hover = await hoverAt(h, fileIds[2], 16, 1)
+    const hover = await hoverAllAt(h, fileIds[2], 16, 1)
     h.check('the hover on path 3\'s unmatched wait says Path 1 has no matching wait for it', hover.includes('Path 1') && hover.includes('M920P13') && /no matching wait/i.test(hover), hover)
     ctx.editor.triggerAction('editor.action.hideHover')
     views(h)[2].editor.setScrollTop(40)

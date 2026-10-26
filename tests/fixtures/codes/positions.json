@@ -31,9 +31,24 @@
       { "code": "G73", "params": [["U", null], ["W", null], ["R", "none"], ["P", "none"], ["Q", "none"], ["U", null], ["W", null], ["F", "none"], ["S", "none"], ["T", "none"]] },
       { "code": "G74", "params": [["R", "none"], ["X", null], ["U", null], ["Z", null], ["W", null], ["P", "none"], ["Q", "none"], ["R", "none"], ["F", "none"]] },
       { "code": "G75", "params": [["R", "none"], ["X", null], ["U", null], ["Z", null], ["W", null], ["P", "none"], ["Q", "none"], ["R", "none"], ["F", "none"]] },
-      { "code": "G76", "params": [["P", "none"], ["Q", "none"], ["R", "none"], ["X", null], ["U", null], ["Z", null], ["W", null], ["R", "none"], ["P", "none"], ["Q", "none"], ["F", "none"]] }
+      { "code": "G76", "params": [["P", "none"], ["Q", "none"], ["R", "none"], ["X", null], ["U", null], ["Z", null], ["W", null], ["R", "none"], ["P", "none"], ["Q", "none"], ["F", "none"]] },
+      { "code": "G78", "params": [["X", null], ["Z", null], ["R", null], ["F", null], ["Q", "none"]] },
+      { "code": "G83", "params": [["Z", null], ["R", "none"], ["Q", "none"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G84", "params": [["Z", null], ["R", "none"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G85", "params": [["Z", null], ["R", "none"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G87", "params": [["X", null], ["R", "none"], ["Q", "none"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G88", "params": [["X", null], ["R", "none"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G89", "params": [["X", null], ["R", "none"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G92", "params": [["X", null], ["Z", null], ["R", null], ["F", null], ["Q", "none"]] }
     ],
     "fanuc-lathe-b": [
+      { "code": "G78", "params": [["X", null], ["Z", null], ["R", null], ["F", null], ["Q", "none"]] },
+      { "code": "G83", "params": [["Z", null], ["R", "other"], ["Q", "none"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G84", "params": [["Z", null], ["R", "other"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G85", "params": [["Z", null], ["R", "other"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G87", "params": [["X", null], ["R", "other"], ["Q", "none"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G88", "params": [["X", null], ["R", "other"], ["P", "none"], ["F", "none"], ["K", "none"]] },
+      { "code": "G89", "params": [["X", null], ["R", "other"], ["P", "none"], ["F", "none"], ["K", "none"]] }
     ],
     "heidenhain": [
       { "code": "CYCL DEF 19", "params": [["F", "none"], ["ABST", "none"]] },
@@ -65,10 +80,13 @@
       { "code": "CYCL DEF 25", "params": [["Q1", "none"], ["Q3", "none"], ["Q5", "tool-axis"], ["Q7", "tool-axis"], ["Q10", "none"], ["Q11", "none"], ["Q12", "none"], ["Q15", "none"], ["Q18", "none"], ["Q446", "none"], ["Q447", "none"], ["Q448", "none"]] }
     ],
     "okuma": [
+      { "code": "G31", "params": [["X", null], ["Z", null], ["F", null], ["I", null], ["A", null], ["E", null], ["K", null], ["L", null], ["J", null], ["C", "none"]] },
+      { "code": "G32", "params": [["X", null], ["Z", null], ["F", null], ["K", null], ["A", null], ["E", null], ["I", null], ["L", null], ["J", null], ["C", "none"]] },
+      { "code": "G33", "params": [["X", null], ["Z", null], ["F", null], ["I", null], ["A", null], ["E", null], ["K", null], ["L", null], ["J", null], ["C", "none"]] }
     ],
     "sinumerik": [
       { "code": "CYCLE81", "params": [["RTP", "tool-axis"], ["RFP", "tool-axis"], ["SDIS", "none"], ["DP", "tool-axis"], ["DPR", "none"], ["DTB", "none"], ["_GMODE", "mode"], ["_DMODE", "mode"], ["_AMODE", "mode"]] },
-      { "code": "CYCLE82", "params": [["RTP", "tool-axis"], ["RFP", "tool-axis"], ["SDIS", "none"], ["DP", "tool-axis"], ["DPR", "none"], ["DTB", "none"], ["_GMODE", "mode"], ["_DMODE", "mode"], ["_AMODE", "mode"]] },
+      { "code": "CYCLE82", "params": [["RTP", "tool-axis"], ["RFP", "tool-axis"], ["SDIS", "none"], ["DP", "tool-axis"], ["DPR", "none"], ["DTB", "none"], ["_GMODE", "mode"], ["_DMODE", "mode"], ["_AMODE", "mode"], ["_VARI", "mode"], ["S_ZA", "mode"], ["S_FA", "mode"], ["S_ZD", "mode"], ["S_FD", "mode"]] },
       { "code": "CYCLE83", "params": [["RTP", "tool-axis"], ["RFP", "tool-axis"], ["SDIS", "none"], ["DP", "tool-axis"], ["DPR", "none"], ["FDEP", "tool-axis"], ["FDPR", "none"], ["_DAM", "none"], ["DTB", "none"], ["DTS", "none"], ["FRF", "none"], ["VARI", "none"], ["_AXN", "mode"], ["_MDEP", "none"], ["_VRT", "none"], ["_DTD", "none"], ["_DIS1", "none"], ["_GMODE", "mode"], ["_DMODE", "mode"], ["_AMODE", "mode"]] },
       { "code": "CYCLE84", "params": [["RTP", "tool-axis"], ["RFP", "tool-axis"], ["SDIS", "none"], ["DP", "tool-axis"], ["DPR", "none"], ["DTB", "none"], ["SDAC", "none"], ["MPIT", "none"], ["PIT", "none"], ["POSS", "none"], ["SST", "none"], ["SST1", "none"], ["_AXN", "mode"], ["_PITA", "none"], ["_TECHNO", "none"], ["_VARI", "none"], ["_DAM", "none"], ["_VRT", "none"], ["_PITM", "none"], ["_PTAB", "none"], ["_PTABA", "none"], ["_GMODE", "mode"], ["_DMODE", "mode"], ["_AMODE", "mode"]] },
       { "code": "CYCLE840", "params": [["RTP", "tool-axis"], ["RFP", "tool-axis"], ["SDIS", "none"], ["DP", "tool-axis"], ["DPR", "none"], ["DTB", "none"], ["SDR", "none"], ["SDAC", "none"], ["ENC", "none"], ["MPIT", "none"], ["PIT", "none"], ["_AXN", "mode"], ["_PITA", "none"], ["_TECHNO", "none"], ["_PITM", "none"], ["_PTAB", "none"], ["_PTABA", "none"], ["_GMODE", "mode"], ["_DMODE", "mode"], ["_AMODE", "mode"]] },

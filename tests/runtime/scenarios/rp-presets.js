@@ -14,7 +14,8 @@ import { saveMachineForm, startAdd } from './m8-common.js'
 import { closeSettings, machineAction, machinesFile, openMachinesPage, sameJson } from './m6-common.js'
 import { presetBlock, ready } from './m12-common.js'
 
-const LATHE_PRESETS = ['fanuc-2path', 'fanuc-2path-digits', 'fanuc-3path-digits', 'fanuc-3path-bitmask', 'fanuc-2path-nop', 'fanuc-3path-digits-nop12', 'fanuc-2head-m100']
+// Manual check D2-7 (2026-10-25): the Nakamura-Tome and Star presets follow.
+const LATHE_PRESETS = ['fanuc-2path', 'fanuc-2path-digits', 'fanuc-3path-digits', 'fanuc-3path-bitmask', 'fanuc-2path-nop', 'fanuc-3path-digits-nop12', 'fanuc-2head-m100', 'fanuc-nakamura-2unit', 'fanuc-nakamura-3unit-digits', 'fanuc-star-2head']
 const SINUMERIK_PRESETS = ['sinumerik-2channel', 'sinumerik-2channel-archive', 'sinumerik-2channel-c', 'sinumerik-tagged']
 
 scenario('rp-presets', { timeout: 420 }, async (h) => {
@@ -29,7 +30,7 @@ scenario('rp-presets', { timeout: 420 }, async (h) => {
 
   // =============================================================== A. the lathe
   await startAdd(h, 'fanuc-lathe')
-  h.check('the Fanuc lathe offers its seven presets, in the order of the plan', JSON.stringify(options().map((o) => o.value)) === JSON.stringify(LATHE_PRESETS), options().map((o) => o.value))
+  h.check('the Fanuc lathe offers its ten presets, in the order of the plan', JSON.stringify(options().map((o) => o.value)) === JSON.stringify(LATHE_PRESETS), options().map((o) => o.value))
   h.check('each is marked "verify"', options().every((o) => /verify/i.test(o.textContent ?? '')), options().map((o) => o.textContent))
   h.check('and the builder-range presets say whose range it is, not that it is the standard one', options().filter((o) => /M900-M999/.test(o.textContent ?? '')).every((o) => /one builder/i.test(o.textContent ?? '')), options().map((o) => o.textContent))
   setField(h, 'name', 'Three-path lathe')

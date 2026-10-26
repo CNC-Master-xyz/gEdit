@@ -21,6 +21,17 @@
 //  - One machine decides a check: every member is read with the initiating document's
 //    machine, and a sibling that is set to another machine is named, not mixed in.
 //
+// T171: when the machine's channel rules hold a regular expression of the user's, the
+// expensive part never runs a pattern first on the editor's thread. `deps.guard` hands a
+// background reader (a Web Worker, `core/regexGuard`); every resolution asks it to run the
+// patterns over the lines first (2 s after a machine change or on opening a program, 0.5 s
+// over the edited lines after an edit). A pattern that runs out of time is stopped there: the
+// document gets "no channels" with a problem that names the pattern, and no retry. Only then
+// does the plain synchronous reading run, on patterns that have run to the end once. So with
+// a guard, the first answer for a program is "none" until the reader has finished (the
+// revision bumps then), and `fresh` answers from the last set instead of reading at once until the first reading is in (after it, `fresh` reads a pending change in place again: the channel view needs the sections right after its own edit).
+// Without `deps.guard` (the unit tests, a machine with only generated matchers) nothing changes.
+//
 // `createChannelService(deps)` plus the singleton wired to the real modules (AD-2), so a
 // unit test drives it with fakes.
 
@@ -28,12 +39,16 @@ import { derived, writable, type Readable } from 'svelte/store';
 import { checkSyncMarksReport } from '$lib/core/channels/check';
 import { waitCodeRuleOf } from '$lib/core/channels/codes';
 import { channelAt, channelRefs, resolveChannelToken } from '$lib/core/channels/resolve';
+import { sameChannelSet } from '$lib/core/channels/sameSet';
 import { mergeDirty, patchResolution, type DirtySpan } from '$lib/core/channels/incremental';
-import { findMarks, resolveDocument, sectionOwners } from '$lib/core/channels/marks';
+import { findMarks, guardChannelPatterns, macroCallCodes, maskForMarks, resolveDocument, sectionOwners, userPatterns, type MacroCalls } from '$lib/core/channels/marks';
 import { documentChannel, fileChannel, siblingNames } from '$lib/core/channels/siblings';
 import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE } from '$lib/core/channels/types';
 import type { ChannelBudget, ChannelMember, ChannelParams, ChannelProblem, ChannelRef, ChannelSet, SyncFinding, SyncHit } from '$lib/core/channels/types';
 import { channelBlock, type ChannelBlock } from '$lib/core/machines/validate';
+import { appGuardRunner } from '$lib/core/regexGuard/app';
+import { GUARD_BUDGET_MS } from '$lib/core/regexGuard/guard';
+import type { GuardRunner } from '$lib/core/regexGuard/runner';
 import type { MachineConfig } from '$lib/core/machines/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import { editor as appEditor } from '$lib/monaco/editorService';
@@ -58,6 +73,8 @@ export interface EffectiveView {
   machineName: string | null;
   /** The profile's `machineParams.channels.waitLetters`. */
   waitLetters?: readonly string[];
+  /** T172: the effective code database's macro-call codes (`macroCallCodes`): a wait code after one is an argument. */
+  calls?: readonly string[];
 }
 
 /** Lines the written order may not be carried across, per channel (WP12.5 computes them, see `outlineService`). */
@@ -74,6 +91,10 @@ export interface ChannelServiceDeps {
   siblingInfo(path: string, names: string[]): Promise<SiblingInfo[]>;
   schedule(fn: () => void, ms: number): Disposable;
   now(): number;
+  /** T171: the background reader of the user's patterns (`appGuardRunner`); absent or null: patterns are read in place, as before. */
+  guard?: () => Promise<GuardRunner | null>;
+  /** Budgets of the background reader; default 2 s (opening, machine change) and 0.5 s (the edited lines). */
+  guardMs?: { full?: number; edit?: number };
   /** Names and stems compare ignoring case (macOS and Windows, as `docs.byPath`). */
   caseInsensitive: boolean;
   delayMs: number;
@@ -109,6 +130,15 @@ interface Base {
   lineCount: number;
 }
 
+/** The lines of a document read once, and the masked-line memo, for the background reader and the reading after it (T171). */
+interface SharedLines {
+  lines: string[];
+  masked: (index: number) => string;
+}
+
+/** The budget of the background reader over the lines an edit touched (T171). */
+const EDIT_GUARD_MS = 500;
+
 /** How long an abandoned resolution waits before its one retry (M12 fix F4). */
 const RETRY_MS = 1000;
 
@@ -119,7 +149,6 @@ interface Entry {
   /** `none` until the base is known to be a layout. */
   set: ChannelSet;
   world: number;
-  signature: string;
   timer: Disposable | null;
   /** The machine block was present and broken. */
   broken: boolean;
@@ -136,20 +165,14 @@ interface Entry {
    * next edit that ran out of time was never retried).
    */
   retryPending: boolean;
+  /** Content changes seen since this entry was made; a background reading that started before one is dropped. */
+  edits: number;
+  /** A user pattern was stopped in the background reader (T171); edits wait longer before the next try. */
+  stopped: boolean;
 }
 
-function signatureOf(set: ChannelSet): string {
-  return JSON.stringify([
-    set.layout,
-    set.self?.id ?? null,
-    set.members.map((m) => (m.kind === 'section' ? [m.channel.id, m.ranges] : [m.channel.id, m.name, m.exists, m.docId, m.by])),
-    set.missing.map((c) => c.id),
-    set.outside,
-    set.marks.map((h) => [h.ruleId, h.mark, h.line, h.channel, h.partners]),
-    set.problems.map((p) => [p.path, p.message]),
-    set.truncated,
-  ]);
-}
+/** How long a program whose pattern was stopped waits after an edit before the reader tries again. */
+const STOPPED_RETRY_MS = 3000;
 
 function dirOf(path: string): { dir: string; sep: string } {
   const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
@@ -157,11 +180,11 @@ function dirOf(path: string): { dir: string; sep: string } {
   return { dir: path.slice(0, slash), sep: path[slash] };
 }
 
-/** `M101` and `M0101` are the same mark; anything else is compared as written. */
+/** `M101` and `M0101` are the same mark, and so are `P-010` and `P-10` (the Okuma negative P, manual check D2-1); anything else is compared as written. */
 export function sameMarkId(a: string, b: string): boolean {
   if (a === b) return true;
-  const ma = /^([A-Za-z]*)0*(\d+)$/.exec(a);
-  const mb = /^([A-Za-z]*)0*(\d+)$/.exec(b);
+  const ma = /^([A-Za-z]*-?)0*(\d+)$/.exec(a);
+  const mb = /^([A-Za-z]*-?)0*(\d+)$/.exec(b);
   return ma !== null && mb !== null && ma[1].toUpperCase() === mb[1].toUpperCase() && Number(ma[2]) === Number(mb[2]);
 }
 
@@ -249,7 +272,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
    * The base after an edit, from the previous one, when the edit allows it (`patchResolution`);
    * null means "resolve the whole document".
    */
-  function patched(id: DocId, prev: Entry | undefined, key: string, budget: ChannelBudget): Base | null {
+  function patched(id: DocId, prev: Entry | undefined, key: string, budget: ChannelBudget & MacroCalls): Base | null {
     if (prev === undefined || prev.key !== key || prev.base === null || prev.dirty === null || prev.dirty === 'full') return null;
     const base = prev.base;
     const next = patchResolution(
@@ -275,12 +298,12 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     return { ...base, sections: next.sections, outside: next.outside, marks: next.marks, boundaries: next.boundaries, lineCount: next.lineCount };
   }
 
-  function compute(id: DocId, doc: DocMeta, prev?: Entry, retried = false): Entry {
+  function compute(id: DocId, doc: DocMeta, prev?: Entry, retried = false, shared?: SharedLines): Entry {
     const key = baseKey(id, doc);
-    const entry: Entry = { key, base: null, set: noChannels(), world, signature: '', timer: null, broken: false, dirty: null, retryPending: false };
+    const entry: Entry = { key, base: null, set: noChannels(), world, timer: null, broken: false, dirty: null, retryPending: false, edits: 0, stopped: false };
     // One budget for the patch and, when it declines or runs out of time, the full reading
     // (M12 perf review PERF-4: a large paste was patched with no deadline at all).
-    const budget: ChannelBudget = { deadline: deps.now() + CHANNEL_CAPS.resolveMs, now: deps.now };
+    const budget: ChannelBudget & MacroCalls = { deadline: deps.now() + CHANNEL_CAPS.resolveMs, now: deps.now, calls: deps.effective(id)?.calls };
     const quick = patched(id, prev, key, budget);
     if (quick !== null) {
       entry.base = quick;
@@ -304,9 +327,9 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
 
     const p = block.params;
     const cp = view.cp;
-    const lines = linesOf(id);
+    const lines = shared?.lines ?? linesOf(id);
     const base: Base = { params: p, cp, self: null, sections: [], outside: [], marks: [], problems: [], truncated: false, boundaries: [], lineCount: lines.length };
-    const res = resolveDocument(doc.path !== null ? baseName(doc.path) : '', lines, cp, p, { ...budget, assigned: assignedOf(doc) });
+    const res = resolveDocument(doc.path !== null ? baseName(doc.path) : '', lines, cp, p, { ...budget, assigned: assignedOf(doc), masked: shared?.masked });
     if (res.abandoned) {
       entry.set = { ...noChannels(), truncated: true, problems: [{ path: '', message: { key: 'channels.problems.tooSlow' } }] };
       // M12 fix F4: said (the status item reads the problem), and tried once more a moment
@@ -345,7 +368,6 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
   function finish(entry: Entry, id: DocId): Entry {
     if (entry.base !== null) entry.set = assembled(id, entry.base);
     entry.world = world;
-    entry.signature = signatureOf(entry.set);
     return entry;
   }
 
@@ -445,13 +467,19 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     let entry = entries.get(id);
     if (entry === undefined || entry.key !== baseKey(id, doc)) {
       entry?.timer?.();
-      entry = compute(id, doc);
-      entries.set(id, entry);
-      afterCompute(id, entry, doc);
+      if (guardedParams(id) !== null) {
+        // T171: no pattern of the user's runs on this thread before the background reader has
+        // read the program with it. The answer is "none" until then; the reading starts at once.
+        entry = waiting(id, doc);
+        entries.set(id, entry);
+      } else {
+        entry = compute(id, doc);
+        entries.set(id, entry);
+        afterCompute(id, entry, doc);
+      }
     } else if (entry.world !== world && entry.base !== null) {
       entry.set = assembled(id, entry.base);
       entry.world = world;
-      entry.signature = signatureOf(entry.set);
     }
     return entry;
   }
@@ -503,15 +531,85 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     if (again && entry !== undefined && doc !== undefined) afterCompute(id, entry, doc); // asks again for the new path
   }
 
+  // --- the background reader (T171) --------------------------------------------
+
+  /** The channel block of the document's machine when it holds a pattern the user wrote, a guard is wired and the model exists; else null. */
+  function guardedParams(id: DocId): ChannelParams | null {
+    if (deps.guard === undefined || !deps.editor.hasModel(id)) return null;
+    const found = blockOf(id);
+    if (found === null || found.block.state !== 'valid' || found.block.params.layout === 'none') return null;
+    return userPatterns(found.block.params).length > 0 ? found.block.params : null;
+  }
+
+  /** An entry for a document whose first reading is with the background reader: nothing found yet, the reading scheduled now. */
+  function waiting(id: DocId, doc: DocMeta): Entry {
+    const entry: Entry = { key: baseKey(id, doc), base: null, set: noChannels(), world, timer: null, broken: false, dirty: null, retryPending: false, edits: 0, stopped: false };
+    entry.timer = deps.schedule(() => rerun(id, entry), 0);
+    return entry;
+  }
+
+  /**
+   * `rerun` with the background reader in front: the user's patterns run over the program there
+   * first (the whole program, or only the lines the edit touched when the resolution can be
+   * patched), and only a program they came through is read by the plain code. A change made
+   * while the reader was busy drops the answer: its own reading is already scheduled.
+   */
+  async function rerunGuarded(id: DocId, entry: Entry, retried: boolean): Promise<void> {
+    const doc = deps.docs.get(id);
+    const found = blockOf(id);
+    if (doc === undefined || found === null || found.block.state !== 'valid' || deps.guard === undefined) return;
+    const { view, block } = found;
+    const p = block.params;
+    const key = baseKey(id, doc);
+    const edits = entry.edits;
+    const span = entry.key === key && entry.base !== null && entry.dirty !== null && entry.dirty !== 'full' ? entry.dirty : null;
+    let runner: GuardRunner | null = null;
+    try {
+      runner = await deps.guard();
+    } catch {
+      runner = null; // no reader: read in place, as without a guard
+    }
+    let shared: SharedLines | undefined;
+    let verdict: Awaited<ReturnType<typeof guardChannelPatterns>>;
+    if (span !== null) {
+      const count = deps.editor.getLineCount(id);
+      const edited = count < 1 ? [] : deps.editor.getLines(id, Math.min(span.startLine, count), Math.min(span.endLineNew, count));
+      verdict = await guardChannelPatterns(runner, edited, view.cp, p, { budgetMs: deps.guardMs?.edit ?? EDIT_GUARD_MS });
+    } else {
+      const lines = linesOf(id);
+      const cache: (string | undefined)[] = new Array(lines.length);
+      const masked = (i: number): string => (cache[i] ??= maskForMarks(lines[i], view.cp));
+      shared = { lines, masked };
+      verdict = await guardChannelPatterns(runner, lines, view.cp, p, { masked, budgetMs: deps.guardMs?.full ?? GUARD_BUDGET_MS });
+    }
+    const now = deps.docs.get(id);
+    if (entries.get(id) !== entry || entry.edits !== edits || now === undefined || baseKey(id, now) !== key) return;
+    const before = entry.set;
+    if (!verdict.ok) {
+      const stopped: Entry = { key, base: null, set: { ...noChannels(), problems: [verdict.problem] }, world, timer: null, broken: false, dirty: null, retryPending: false, edits, stopped: true };
+      entries.set(id, stopped);
+      if (!sameChannelSet(before, stopped.set)) bump();
+      return;
+    }
+    const next = compute(id, now, entry, retried, shared);
+    entries.set(id, next);
+    afterCompute(id, next, now);
+    if (!sameChannelSet(before, next.set)) bump();
+  }
+
   /** Resolves `entry`'s document again (patched when the edits allow) and tells the readers if it changed. */
   function rerun(id: DocId, entry: Entry, retried = false): void {
     entry.timer = null;
     const doc = deps.docs.get(id);
     if (doc === undefined || entries.get(id) !== entry) return;
-    const before = entry.signature;
+    if (guardedParams(id) !== null) {
+      void rerunGuarded(id, entry, retried).catch(() => undefined);
+      return;
+    }
+    const before = entry.set;
     const next = compute(id, doc, entry, retried);
     entries.set(id, next);
-    if (next.signature !== before) bump();
+    if (!sameChannelSet(before, next.set)) bump();
   }
 
   function onContentChange(id: DocId, change: ContentChange): void {
@@ -521,7 +619,8 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     entry.dirty = change.flush || entry.dirty === 'full' ? 'full' : mergeDirty(entry.dirty, change);
     entry.timer?.();
     entry.retryPending = false;
-    entry.timer = deps.schedule(() => rerun(id, entry), deps.delayMs);
+    entry.edits++;
+    entry.timer = deps.schedule(() => rerun(id, entry), entry.stopped ? Math.max(deps.delayMs, STOPPED_RETRY_MS) : deps.delayMs);
   }
 
   function install(): void {
@@ -563,14 +662,20 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
   function fresh(id: DocId): ChannelSet {
     const entry = entryOf(id);
     const doc = deps.docs.get(id);
-    if (entry?.timer != null && doc !== undefined) {
+    // With a background reader (T171) the first reading of a program, and one that stopped a pattern, is not made here:
+    // the answer is the last set. A program the reader has let through (it has a base) is read in place for a pending
+    // change, as before: the channel view asks for the sections right after every edit it maps (`freshSet`), and the
+    // last set is the one from before that edit, so a line break it typed was judged against sections that had not
+    // moved (the edit was taken back) and a section start typed over against sections that were still there (it stayed).
+    const held = entry !== null && entry.base === null && guardedParams(id) !== null;
+    if (entry?.timer != null && doc !== undefined && !held) {
       entry.timer();
       entry.timer = null;
-      const before = entry.signature;
+      const before = entry.set;
       const next = compute(id, doc, entry, entry.retryPending);
       entries.set(id, next);
       afterCompute(id, next, doc);
-      if (next.signature !== before) bump();
+      if (!sameChannelSet(before, next.set)) bump();
     }
     return forDoc(id);
   }
@@ -663,12 +768,14 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
       // One budget for reading every other open channel (the pattern is the user's own).
       const siblingDeadline = deps.now() + CHANNEL_CAPS.resolveMs;
       const initiating = deps.effective(id)?.machineId ?? null;
+      const calls = deps.effective(id)?.calls;
 
       // This document is read afresh (the cached marks may be one debounce old).
       const own = resolveDocument(doc.path !== null ? baseName(doc.path) : '', linesOf(id), cp, p, {
         deadline: deps.now() + CHANNEL_CAPS.resolveMs,
         now: deps.now,
         assigned: assignedOf(doc),
+        calls,
       });
       if (own.abandoned) return { ...empty, truncated: true, abandoned: true };
       if (p.layout === 'single-file') {
@@ -687,7 +794,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
           const ch = m.channel.id;
           if (m.docId === id) perChannel[ch] = own.marks;
           else {
-            const read = findMarks(linesOf(m.docId), cp, p, { channelOf: () => ch, deadline: siblingDeadline, now: deps.now });
+            const read = findMarks(linesOf(m.docId), cp, p, { channelOf: () => ch, deadline: siblingDeadline, now: deps.now, calls });
             perChannel[ch] = read.marks;
             if (read.abandoned) siblingsLate = true;
             if ((read.longLines ?? 0) > 0) longLines.push({ channel: ch, count: read.longLines ?? 0 });
@@ -745,6 +852,7 @@ export const channels: ChannelServiceInternals = createChannelService({
       machineId: view.machine.id,
       machineName: view.machine.name,
       waitLetters: view.profile.machineParams?.channels?.waitLetters,
+      calls: macroCallCodes(view.codes),
     };
   },
   machine: (id) => appMachines.get(id),
@@ -757,6 +865,7 @@ export const channels: ChannelServiceInternals = createChannelService({
     return () => clearTimeout(handle);
   },
   now: () => performance.now(),
+  guard: appGuardRunner,
   caseInsensitive: isMacPlatform() || isWindowsPlatform(),
   delayMs: 150,
 });

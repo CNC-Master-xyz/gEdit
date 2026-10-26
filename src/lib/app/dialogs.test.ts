@@ -217,6 +217,25 @@ describe('file pickers', () => {
     expect(recorded[0].options).toEqual({ title: t('files.saveAsTitle'), defaultPath: 'program.nc' });
   });
 
+  it('saves with the filters the caller names, on every platform (P4.15, Export as HTML)', async () => {
+    const html = [{ name: 'HTML', extensions: ['html', 'htm'] }];
+    for (const filtersSupported of [true, false]) {
+      const { dialogs, recorded, answers } = setup({ filtersSupported });
+      answers.save.push('/out/a.html');
+      expect(await dialogs.saveFile({ defaultPath: 'a.html', filters: html })).toBe('/out/a.html');
+      expect(recorded[0].options.filters).toEqual(html);
+    }
+  });
+
+  it('prefers the caller\'s filters to the profile\'s, and keeps the profile\'s without them', async () => {
+    const { dialogs, recorded, answers } = setup({ filtersSupported: true });
+    answers.save.push(null, null);
+    await dialogs.saveFile({ defaultPath: 'a.html', profileId: 'fanuc-gcode', filters: [{ name: 'HTML', extensions: ['html'] }] });
+    await dialogs.saveFile({ defaultPath: 'a.nc', profileId: 'fanuc-gcode' });
+    expect(recorded[0].options.filters).toEqual([{ name: 'HTML', extensions: ['html'] }]);
+    expect((recorded[1].options.filters as { name: string }[]).length).toBeGreaterThan(1);
+  });
+
   it('answers cancelled outside Tauri instead of reaching for the plugin', async () => {
     const { dialogs, recorded } = setup({ isTauri: false });
     expect(await dialogs.openFiles()).toEqual([]);

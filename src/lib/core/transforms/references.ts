@@ -14,10 +14,17 @@
 //      stands in and nothing else. A number that occurs twice in one program is not an
 //      answer, it is an ambiguity, and the caller reports it instead of guessing.
 //   3. **May this reference be rewritten at all?** `numbering.references[].rewrite`
-//      (§7.1). Fanuc's `M99 P` returns to a block of the **caller** (F42), which a
-//      renumber of this file cannot see: rewriting it with a number out of this program
-//      would send the return somewhere else. Such a rule is `rewrite: false` and the
-//      value is reported, never touched.
+//      (§7.1). `false` means "report, never touch": Fanuc's `M98 P… Q…`, whose Q names a
+//      block of the called program in a way a parameter decides (the owner, P4d), and the
+//      milling `G73 P… Q…`, which is a peck cycle and names no block at all.
+//   4. **Which program's block does it name?** `numbering.references[].program` (P4d, plan
+//      §6.6 rule 8; [`ReferenceWord.program`]): the program it stands in (`own`), the one
+//      its line calls (`called`), or the one that calls its program (`caller`: Fanuc's
+//      `M99 P` returns to a block of the **caller**, F42). Which program of the file that
+//      is, or why it cannot be told (no call, not in the file, twice in the file, no
+//      caller, several callers), is `programs.ts`'s answer (`targetProgramOf`); a value is
+//      rewritten only when that program is found and its block is unique in it, and
+//      reported with the reason otherwise — per reference, never all or nothing.
 //
 // ## Two halves, and both are needed
 //
@@ -63,7 +70,7 @@ import { tokenizeLine } from '$lib/core/nc/tokenizer';
 import { documentOf } from './fragment';
 import type { Msg } from '$lib/app/types';
 import type { LineState, NcToken } from '$lib/core/nc/types';
-import type { CompiledProfile } from '$lib/core/profiles/types';
+import type { CompiledProfile, ReferenceProgram } from '$lib/core/profiles/types';
 import type { TransformContext } from './types';
 
 /** Digits a block number may have before this module refuses to read it as one. */
@@ -132,6 +139,25 @@ function ruleRewrites(cp: CompiledProfile, index: number): boolean {
   return cp.profile.numbering?.references?.[index]?.rewrite !== false;
 }
 
+/**
+ * P4d (plan §6.6 rule 8): which program's block rule `index` names; `own` by default.
+ * Read from the profile at the same index, as `rewrite` is.
+ */
+export function ruleProgram(cp: CompiledProfile, index: number): ReferenceProgram {
+  const program = cp.profile.numbering?.references?.[index]?.program;
+  return program === 'called' || program === 'caller' ? program : 'own';
+}
+
+/**
+ * P4d (§6.6 rule 8): the program of a word several rules fire on. Rules that agree give
+ * their program; rules that disagree give `own` and take the rewrite away, so the word is
+ * reported and never rewritten (refuse rather than guess).
+ */
+function agreedProgram(programs: ReadonlySet<ReferenceProgram>): { program: ReferenceProgram; agreed: boolean } {
+  if (programs.size <= 1) return { program: programs.values().next().value ?? 'own', agreed: true };
+  return { program: 'own', agreed: false };
+}
+
 /** One word whose value is a block number. */
 export interface ReferenceWord {
   /** `'P'`, `'Q'`, `'GOTO'`. */
@@ -150,8 +176,17 @@ export interface ReferenceWord {
    * `target` is.
    */
   key: BlockKey | null;
-  /** False when a rule that fires on this word says `rewrite: false` (`M99 P`, F42). */
+  /**
+   * False when a rule that fires on this word says `rewrite: false` (`M99 P`, F42), or when
+   * the rules that fire on it name different programs (P4d, §6.6 rule 8).
+   */
   rewrite: boolean;
+  /**
+   * P4d (§6.6 rule 8): which program's block the value names — the program the word stands
+   * in (`own`), the one its line calls (`called`, `M98 P1000 Q30`) or the one that calls the
+   * program it stands in (`caller`, `M99 P30`).
+   */
+  program: ReferenceProgram;
   /**
    * True when the block carries more than one word with this address, so which of them
    * the rule is about cannot be told from the line (G8 M6).
@@ -277,14 +312,17 @@ export function referencesOn(
   for (const { address, start, end, text } of carried) {
     let fired = false;
     let rewrite = true;
+    const programs = new Set<ReferenceProgram>();
     for (let i = 0; i < cp.re.references.length; i++) {
       const rule = cp.re.references[i];
       if (!rule.addresses.includes(address)) continue;
       if (!rule.trigger.test(masked)) continue;
       fired = true;
       if (!ruleRewrites(cp, i)) rewrite = false;
+      programs.add(ruleProgram(cp, i));
     }
     if (!fired) continue;
+    const { program, agreed } = agreedProgram(programs);
     found.push({
       address,
       start,
@@ -292,7 +330,8 @@ export function referencesOn(
       text,
       target: targetOf(text),
       key: blockKeyOf(text, byText),
-      rewrite,
+      rewrite: rewrite && agreed,
+      program,
       ambiguous: twice.has(address),
     });
   }
@@ -333,6 +372,12 @@ export function mainKeyOf(main: string, digits: string, byText: boolean): BlockK
  * rules' own triggers) cannot be a label, so its colon is the main prefix and the digits
  * name a main block, exactly as with the blank (M9 NC review F2: renumbering moved `:20`
  * and left `GOTOB:20` pointing at nothing, and Remove Block Numbers dropped the `:20`).
+ *
+ * T222 (P4d): since bug-fix round B1 a `syntax.labelAfter` jump is never a label, so the
+ * shipped Sinumerik profile reads `GOTOB:20` as the jump, an operator and a word, and no
+ * built-in profile reaches the label branch. It is kept for a profile with main blocks
+ * and without `labelAfter`, and proved by one (`references.test.ts`, "a main-block jump
+ * read as a label").
  */
 function mainJumpsOn(tokens: NcToken[], main: string, isJump: (name: string) => boolean): NcToken[] {
   const out: NcToken[] = [];
@@ -355,7 +400,7 @@ function mainJumpsOn(tokens: NcToken[], main: string, isJump: (name: string) => 
 /** The reference rules that name ordinary blocks, which are the ones that name main blocks. */
 interface MainRules {
   main: string;
-  rules: { trigger: RegExp; rewrite: boolean }[];
+  rules: { trigger: RegExp; rewrite: boolean; program: ReferenceProgram }[];
 }
 
 const MAIN_RULES = new WeakMap<CompiledProfile, MainRules | null>();
@@ -370,7 +415,7 @@ function mainRulesOf(cp: CompiledProfile): MainRules | null {
     const rules: MainRules['rules'] = [];
     cp.re.references.forEach((rule, index) => {
       if (!rule.addresses.includes(blockPrefix)) return;
-      rules.push({ trigger: rule.trigger, rewrite: ruleRewrites(cp, index) });
+      rules.push({ trigger: rule.trigger, rewrite: ruleRewrites(cp, index), program: ruleProgram(cp, index) });
     });
     if (rules.length > 0) result = { main, rules };
   }
@@ -392,12 +437,16 @@ export function mainReferencesOn(tokens: NcToken[], line: string, cp: CompiledPr
   const masked = maskedOf(line, tokens);
   let fired = false;
   let rewrite = true;
+  const programs = new Set<ReferenceProgram>();
   for (const rule of rules) {
     if (!rule.trigger.test(masked)) continue;
     fired = true;
     if (!rule.rewrite) rewrite = false;
+    programs.add(rule.program);
   }
   if (!fired) return [];
+  const { program, agreed } = agreedProgram(programs);
+  if (!agreed) rewrite = false;
   const byText = comparesByText(cp);
   return jumps.map((value) => {
     const text = value.valueText ?? '';
@@ -410,6 +459,7 @@ export function mainReferencesOn(tokens: NcToken[], line: string, cp: CompiledPr
       target,
       key: target === null ? null : mainKeyOf(main, text, byText),
       rewrite,
+      program,
       // Two of them on one line: which one the rule is about cannot be told (G8 M6).
       ambiguous: jumps.length > 1,
     };
@@ -496,12 +546,12 @@ function blockKeyOfTokens(tokens: NcToken[], byText: boolean): BlockKey | null {
  * Walks the program: every reference, and every block number indexed per program.
  *
  * The index is **per program**, not per file, whatever `restartAtProgramStart` says. A
- * block-number reference never leaves its own program — `GOTO`, `M98 Q` and the turning
- * cycles all name a block of the program they stand in — so a file that holds a main
- * program and a subprogram, each with its own `N100`, has two unambiguous answers and not
- * one ambiguous one. (`M99 P` is the exception that proves it: it names a block of the
- * *caller*, which is why its rule is `rewrite: false` and nothing here tries to resolve
- * it.)
+ * block-number reference names a block of one program — `GOTO`, `M98 Q` and the turning
+ * cycles one of the program they stand in — so a file that holds a main program and a
+ * subprogram, each with its own `N100`, has two unambiguous answers and not one ambiguous
+ * one. Which program that is for a `called` or `caller` value (`M98 P2000 Q50`, `M99 P30`)
+ * is not decided here: `programs.ts` (`indexPrograms`, `targetProgramOf`, P4d) picks the
+ * segment, and the caller looks the key up in that segment's index.
  *
  * Blocks are indexed by their [`BlockKey`], so on a dialect whose sequence numbers are
  * names `N0100` and `N100` are two entries, and a jump to one never finds the other.

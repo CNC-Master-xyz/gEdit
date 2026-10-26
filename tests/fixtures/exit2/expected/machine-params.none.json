@@ -40,13 +40,23 @@
         "source": "profile"
       },
       {
+        "key": "variant counterSpindleY",
+        "value": "turns",
+        "source": "profile"
+      },
+      {
         "key": "variant gcodeSystem",
         "value": "B",
         "source": "detected"
       },
       {
         "key": "variant incrementalAddresses",
-        "value": "uw",
+        "value": "none",
+        "source": "profile"
+      },
+      {
+        "key": "variant toolChange",
+        "value": "turret",
         "source": "profile"
       },
       {

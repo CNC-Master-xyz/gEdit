@@ -18,12 +18,14 @@ import {
   blockKeyOf,
   comparesByText,
   labelsOf,
+  mainReferencesOn,
   maskedOf,
   referenceAddresses,
   referencePreflight,
   referencesOn,
   scanProgram,
 } from './references';
+import { renumber } from './renumber';
 import type { CodeDb } from '$lib/core/codes/types';
 import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
 import type { TransformContext } from './types';
@@ -337,5 +339,49 @@ describe('jump targets read as labels (M12.5)', () => {
     const tokens = tokenizeLine(line, sinumerik).tokens;
     expect(referencesOn(tokens, line, sinumerik, referenceAddresses(sinumerik), new Set()).map((w) => [w.text, w.target])).toEqual([['DEST', null]]);
     expect(referencesOn(tokens, line, sinumerik, referenceAddresses(sinumerik), new Set(['DEST']))).toEqual([]);
+  });
+});
+
+// T222 (plan §6.6, the v1.2.0 triage A9): since bug-fix round B1 a `syntax.labelAfter` jump is
+// never a label definition, so Sinumerik reads `GOTOB:20` as the jump, an operator and a word,
+// and the label branch of `mainJumpsOn` is reached by no built-in profile. A profile with main
+// blocks (`mainPrefix`) and without `labelAfter` still reads `GOTOB:` at the head of a block as
+// a label; the branch is what makes that a jump to the main block `:20`. Kept, and proved here:
+// without it the renumber moves `:20` and leaves the jump pointing at nothing.
+describe('a main-block jump read as a label (T222)', () => {
+  function withoutLabelAfter(): CompiledProfile {
+    const cp = compiled('sinumerik');
+    const syntax = { ...cp.profile.syntax };
+    delete syntax.labelAfter;
+    const checked = validateProfile({ ...cp.profile, syntax });
+    if (!checked.ok) throw new Error(checked.errors.join('; '));
+    return compileProfile(checked.profile);
+  }
+
+  it('is still how a profile with main blocks and without labelAfter tokenizes the jump', () => {
+    const cp = withoutLabelAfter();
+    expect(cp.profile.syntax.blockNumber.mode === 'prefix' && cp.profile.syntax.blockNumber.mainPrefix).toBe(':');
+    const line = 'N40 GOTOB:20';
+    const tokens = tokenizeLine(line, cp).tokens;
+    expect(tokens.find((token) => token.kind === 'label')).toMatchObject({ text: 'GOTOB:', address: 'GOTOB' });
+    expect(mainReferencesOn(tokens, line, cp).map((w) => [w.address, w.text, w.key, w.rewrite])).toEqual([[':', '20', ':20', true]]);
+    // The shipped profile reads the same line as a jump keyword and an operator.
+    const shipped = compiled('sinumerik');
+    expect(tokenizeLine(line, shipped).tokens.some((token) => token.kind === 'label')).toBe(false);
+    expect(mainReferencesOn(tokenizeLine(line, shipped).tokens, line, shipped).map((w) => w.key)).toEqual([':20']);
+  });
+
+  it('follows the renumbered main block', () => {
+    const cp = withoutLabelAfter();
+    const lines = ['%_N_MAIN_MPF', 'N10 G90 G54', ':20 T="DRILL" M6', 'N30 G0 X10 Y10', 'N40 GOTOB:20', 'N50 M30'];
+    const result = renumber.run(lines, {
+      cp,
+      codes: NO_CODES,
+      options: { start: 100, step: 10 },
+      firstLine: 1,
+      machine: noMachine(cp.profile),
+    });
+    expect(result.lines).toEqual(['%_N_MAIN_MPF', 'N100 G90 G54', ':110 T="DRILL" M6', 'N120 G0 X10 Y10', 'N130 GOTOB:110', 'N140 M30']);
+    expect(result.warnings.map((w) => w.key)).toEqual(['ncNumbering.renumber.referencesRewritten']);
   });
 });

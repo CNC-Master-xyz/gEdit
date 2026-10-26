@@ -1,0 +1,61 @@
+/* The hover's parameter table (P3.3, `core/codes/hoverText.ts` `cycleTable`). Owner: T139.
+
+   Imported by `providers/hover.ts`, so the hover carries its own styles. Monaco renders the
+   hover's markdown table with no cell spacing at all, so a long meaning ran straight into the
+   value written behind it ("… (G99 returns here)2."), and its loose rows made a cycle with
+   many parameters taller than the room Monaco gives the hover, which then cut it short and
+   wanted a scroll for the last rows (`F` of `G81`).
+
+   What these rules do, and nothing else:
+   - every cell gets a gap on both sides, and the table's first and last column sit flush with
+     the hover's own padding;
+   - the word and the value written for it never wrap (`R`, `2.`, `[#1*2]`): only the meaning
+     wraps, so the value column stays readable at a glance;
+   - the rows are compact (the table's own line height, no paragraph margins), so a table of a
+     dozen parameters fits where it scrolled before;
+   - the header row is set apart by a line in the brand's border colour, so the table reads as
+     one in both themes without a box around it.
+
+   Scoped to `.monaco-hover .markdown-hover`, so no other markdown in the app is touched; the
+   colours are the tokens of `src/app.css`, so the table follows the theme. */
+
+.monaco-hover .markdown-hover table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  margin: 4px 0 0;
+  line-height: 1.35;
+}
+
+.monaco-hover .markdown-hover th,
+.monaco-hover .markdown-hover td {
+  padding: 1px 10px 1px 0;
+  vertical-align: top;
+  text-align: left;
+}
+
+.monaco-hover .markdown-hover th:last-child,
+.monaco-hover .markdown-hover td:last-child {
+  padding-right: 0;
+}
+
+.monaco-hover .markdown-hover th {
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 3px;
+}
+
+.monaco-hover .markdown-hover tr:first-child td {
+  padding-top: 3px;
+}
+
+.monaco-hover .markdown-hover td:first-child,
+.monaco-hover .markdown-hover td:last-child {
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.monaco-hover .markdown-hover td p,
+.monaco-hover .markdown-hover th p {
+  margin: 0;
+}

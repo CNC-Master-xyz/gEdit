@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be written out as plain moves: 1 cycle whose return level is not stated. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "N40 G81 X10. Y10. Z-5. R2. F150.: the return level (initial level or R point) is only assumed from the profile, not set by the program or the machine.",
+      "reason": "return-assumed"
+    }
+  ]
+}

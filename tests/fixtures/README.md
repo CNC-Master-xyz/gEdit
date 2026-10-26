@@ -412,17 +412,22 @@ its `output` (`src-tauri/resources/scripts/README.md`):
   `expected.*` per folder, which `envelope.json` does not disturb; both test modules assert
   the full stdout all the same (`sorted(payload) == ["findings", "message", "text"]`).
 
-`options.json` comes in two shapes, and the reading test knows which it expects:
+`options.json` has one shape for every transform: it wraps the run, `{ note, profile, options }`
+plus the optional members below. `note` says why the case exists, `profile` is the built-in
+dialect id the case is read with, and `options` is the bare `TransformContext.options` (`{}`
+for the defaults). One reader serves all eight transform tests, `tests/unit/helpers/
+transformCases.ts`, and it refuses a key it does not know and a case without a note or a
+profile; `tests/unit/transformCases.test.ts` walks every folder, checks the profile ids and
+the layout, and holds the harness's own reader (`caseOptions` and `caseProfile` in
+`tests/runtime/scenarios/m4-common.js`) to the same answer.
 
-- **`renumber` and `remove-block-numbers`** wrap the run: `{ note, profile, options,
-  expect }` plus an optional `scope` or `firstLine`. `expect` may name the `summary` key,
+- **`mode`** (`block-skip` only): `add` or `remove`, which of its two transforms runs.
+- **`expect`** (`renumber`, `remove-block-numbers`, `block-skip`) may name the `summary` key,
   the `skipped` lines with their severity, the `warnings` keys and the `preflight`; what it
   does not list is not checked.
-
-  How a case places its input inside a document is part of what it tests:
-
-  - **neither** — `input.nc` is a bare fragment with no document, starting at line 1: the
-    shape most cases use.
+- How a case places its input inside a document is part of what it tests:
+  - **neither `scope` nor `firstLine`** — `input.nc` is a bare fragment with no document,
+    starting at line 1: the shape most cases use.
   - **`scope: { startLine, endLine }`** — `input.nc` and `expected.nc` are the whole
     program, and the transform is handed the slice *plus the document*, exactly as
     `app/transforms.ts` does it for a selection. The test also asserts that the lines
@@ -432,18 +437,14 @@ its `output` (`src-tauri/resources/scripts/README.md`):
   - **`firstLine`** — a bare fragment and no document that starts at that line, which is
     what a headless caller hands over. Such a run must say that it could not look outside
     its own lines rather than report that it found nothing.
-- **The five cleanup transforms** hold the bare `TransformContext.options` (`{}` when there
-  are none). The dialect comes from the case folder name — `klartext-…` is
-  `heidenhain-klartext`, anything else `fanuc-gcode` — and `firstLine` is 1.
 
-The two shapes, and the loader that `renumber.test.ts` and `removeBlockNumbers.test.ts`
-each carry, are known duplication; unifying them on the `renumber` shape rewrites every
-cleanup case's `options.json`. The `renumber` and `remove-block-numbers` cases are
-additionally asserted **idempotent** (running the transform on its own `expected.nc`
-changes nothing) and to return an identity `lineMap`.
+The `renumber` and `remove-block-numbers` cases are additionally asserted **idempotent**
+(running the transform on its own `expected.nc` changes nothing) and to return an identity
+`lineMap`.
 
-74 transform cases: `renumber` 41, `remove-block-numbers` 11, `remove-comments` 7,
-`insert-spaces` 5, `convert-case` 4, `remove-empty-lines` 3, `remove-spaces` 3.
+129 transform cases: `renumber` 75, `block-skip` 18, `remove-block-numbers` 13,
+`remove-comments` 8, `insert-spaces` 5, `convert-case` 4, `remove-empty-lines` 3,
+`remove-spaces` 3.
 111 script cases: `scale_feed` 53, `scale_speed` 31, `tool_list` 27. The tests discover the
 folders, so `ls tests/fixtures/transforms/*/ tests/fixtures/scripts/*/` is the authority.
 

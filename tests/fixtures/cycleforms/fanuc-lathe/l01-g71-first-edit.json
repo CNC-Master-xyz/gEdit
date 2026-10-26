@@ -1,0 +1,23 @@
+{
+  "$format": 1,
+  "about": "v1.2.0 T119: the first block of the two-block G71 opens the form of that block (U depth of cut, R retract; CodeParam.block). The retract changes, U and the second block stay.",
+  "input": "../../nc/fanuc-lathe/l01-turning-a.nc",
+  "line": 15,
+  "form": {
+    "values": {
+      "U": "2.",
+      "R": "0.5"
+    },
+    "kept": []
+  },
+  "values": {
+    "R": "0.8"
+  },
+  "expected": {
+    "first": 15,
+    "last": 15,
+    "lines": [
+      "G71 U2. R0.8"
+    ]
+  }
+}

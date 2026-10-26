@@ -18,11 +18,15 @@ unless an extra folder holds one too (Phase 1 plan §3, AD-13).
 | `_nc_machine.py` | the machine parameters, and what a written number is worth on one |
 | `_nc_path.py` | Phase 4 (P4a): the path tracker — where the tool is before and after each block, the arcs with their centres, the polar moves; read by `extents.py` and the geometry scripts |
 | `_nc_geom.py` | Phase 4 (P4a): the transform rules — the role of each word, how translate, rotate and mirror move it, and why a block is refused |
+| `_nc_run.py` | Phase 4 (P4b prelude): the run the transforms share — the form and context checks, the scope and the lines above a selection, the machine sentence, writing edits into a line, and the plane run of rotate and mirror |
+| `_nc_cycles.py` | Phase 4 (P4b): the drilling cycles as plain moves, read from the expansion schemas of the code database, and the machine's motion data and limits; read by the cycle expansion, the time estimate, the extents (the depths of the holes) and the program checks |
 | `tool_list.py` | tools in order of first use, with descriptions and call counts — `output = "report"` |
 | `scale_feed.py` | multiply `F` values by a percentage — `output = "replace"` |
 | `scale_speed.py` | multiply `S` values by a percentage — `output = "replace"` |
-| `program_checks.py` | M10 (WP10.2): what a program does that the control or the machine will not like — `output = "report"` |
-| `extents.py` | M10 (WP10.3): the smallest and largest value of every axis, per offset, tool and program — `output = "report"` |
+| `program_checks.py` | M10 (WP10.2): what a program does that the control or the machine will not like; since P4b (P4.10) also a spindle speed above the machine's top speed and a position outside its travel — `output = "report"` |
+| `extents.py` | M10 (WP10.3): the smallest and largest value of every axis, per offset, tool and program; since P4b (P4.7b) a drilling cycle counts at the depths the expansion writes — `output = "report"` |
+| `expand_cycles.py` | Phase 4 (P4b, P4.7): replace the drilling, peck drilling and boring cycles of a milling program with the plain moves they make; all or nothing — `output = "replace"` |
+| `time_estimate.py` | Phase 4 (P4b, P4.9): **Statistics and Time** — feed and rapid lengths per tool and a time estimate from the machine's motion data (a lower bound, every block it cannot time listed); not named `statistics.py`, which would hide the standard library's module of that name — `output = "new-document"` |
 | `address_arithmetic.py` | M10 (WP10.4): add, subtract, multiply or divide the values of chosen addresses; a shift of the tool axis moves the cycle positions that hold one (roadmap R8) — `output = "replace"` |
 | `translate.py` | Phase 4 (P4a, P4.3): move the path by a shift in X, Y and Z — absolute positions, arc centres, the Klartext pole and cycle positions; on a lathe `X` as the machine reads it; all or nothing — `output = "replace"` |
 | `rotate.py` | Phase 4 (P4a, P4.4): turn a milling program in the XY plane about a point by an angle; exact at multiples of 90°, otherwise rounded with every arc checked; all or nothing — `output = "replace"` |
@@ -32,10 +36,11 @@ unless an extra folder holds one too (Phase 1 plan §3, AD-13).
 a script**: discovery skips them, because they are library code, not commands. The `_nc_*`
 modules are the internals of `gedit_nc`, which re-exports everything that is public — a
 script imports `gedit_nc` and nothing else, so the split can move without breaking anyone.
-Two helpers sit **above** `gedit_nc` instead of inside it: `_nc_path` and `_nc_geom` import
-`gedit_nc` and are not re-exported by it. The bundled geometry scripts and `extents.py`
-import them by name (`import _nc_path`); they are internal, and a script of your own that
-imports them may break when they change.
+Four helpers sit **above** `gedit_nc` instead of inside it: `_nc_path`, `_nc_geom`, `_nc_run`
+and `_nc_cycles` import `gedit_nc` and are not re-exported by it. The bundled geometry
+scripts, `extents.py`, `expand_cycles.py`, `time_estimate.py` and `program_checks.py` import
+them by name (`import _nc_path`); they are internal, and a
+script of your own that imports them may break when they change.
 
 ---
 

@@ -27,13 +27,22 @@ import { hasKey, t } from '$lib/i18n';
 import type { ChannelParams } from '$lib/core/channels/types';
 import type { CodeDb, CodeEntry } from '$lib/core/codes/types';
 import type { FieldChoice, FieldSpec } from '$lib/core/forms/types';
-import type { MachineParamsDecl, NumberInputPreset, VariantDecl } from '$lib/core/profiles/types';
+import type {
+  MachineParamsDecl,
+  NumberInputPreset,
+  PointlessFeedChoice,
+  PointlessFeedsDecl,
+  VariantDecl,
+} from '$lib/core/profiles/types';
 import { MAX_NAME_LENGTH, MAX_NOTES_LENGTH } from './validate';
+import { variantDefaultOf } from './effective';
 import type { EffectiveMachine, MachineConfig, MachineParams, NumberInput, ParamSource } from './types';
 
 /** Field ids. They are stable: the runtime scenarios read `data-field` (§7.9). */
 export const FIELD_NAME = 'name';
 export const FIELD_NUMBER_INPUT = 'numberInput';
+/** T084: how a feed without a point counts, an option on top of the number-input preset. */
+export const FIELD_POINTLESS_FEEDS = 'pointlessFeeds';
 export const FIELD_UNITS = 'units';
 export const FIELD_DIAMETER = 'diameter';
 export const FIELD_NOTES = 'notes';
@@ -57,6 +66,43 @@ export function modalFieldId(group: string): string {
 /** The variant id of `variant.<id>`, or null for any other field. */
 export function variantIdOf(fieldId: string): string | null {
   return fieldId.startsWith(VARIANT_PREFIX) ? fieldId.slice(VARIANT_PREFIX.length) : null;
+}
+
+/**
+ * D5-3: after the form's variant field `changedId` moved from `before` to `after`, a
+ * variant whose default follows it (`defaultBy`) and still stands at its old default takes
+ * the new one; a value chosen by hand stays. Returns the field ids it moved.
+ */
+export function followVariantDefaults(
+  decl: MachineParamsDecl | undefined,
+  changedId: string,
+  before: Readonly<Record<string, unknown>>,
+  after: Record<string, unknown>,
+): string[] {
+  const changed = variantIdOf(changedId);
+  if (changed === null) return [];
+  const standingOf = (values: Readonly<Record<string, unknown>>): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const variant of variantsOf(decl)) {
+      const value = values[variantFieldId(variant.id)];
+      out[variant.id] = typeof value === 'string' && value !== '' ? value : variant.default;
+    }
+    return out;
+  };
+  const was = standingOf(before);
+  const now = standingOf(after);
+  const moved: string[] = [];
+  for (const variant of variantsOf(decl)) {
+    if (variant.defaultBy?.variant !== changed) continue;
+    const field = variantFieldId(variant.id);
+    const old = variantDefaultOf(variant, was);
+    const next = variantDefaultOf(variant, now);
+    if (old !== next && (after[field] === undefined || after[field] === old)) {
+      after[field] = next;
+      moved.push(field);
+    }
+  }
+  return moved;
 }
 
 /** The modal group of `modal.<group>`, or null for any other field. */
@@ -94,14 +140,90 @@ const variantsOf = (decl: MachineParamsDecl | undefined): VariantDecl[] =>
 const groupsOf = (decl: MachineParamsDecl | undefined): string[] =>
   Array.isArray(decl?.modalGroups) ? decl.modalGroups : [];
 
-/** The preset whose rules are exactly `value`, or null — which is what "Custom" means. */
+/** T084: the profile's point-less-feeds option, or undefined when it declares none. */
+function feedsDeclOf(decl: MachineParamsDecl | undefined): PointlessFeedsDecl | undefined {
+  const feeds = decl?.numberInput?.pointlessFeeds;
+  return isRecord(feeds) && Array.isArray(feeds.choices) && feeds.choices.length > 0 ? feeds : undefined;
+}
+
+/** The choices of the option, the default first (the one a plain preset matches). */
+function feedChoicesOf(feeds: PointlessFeedsDecl): PointlessFeedChoice[] {
+  const list = feeds.choices.filter((choice): choice is PointlessFeedChoice => isRecord(choice) && typeof choice.value === 'string');
+  return [...list.filter((choice) => choice.value === feeds.default), ...list.filter((choice) => choice.value !== feeds.default)];
+}
+
+/** The feed classes the option can change. */
+const POINTLESS_FEED_CLASSES = ['feedPerMin', 'feedPerRev'] as const;
+
+/** Whether `value` counts a feed of this class in increments when it is written without a point. */
+function countsFeed(value: NumberInput, cls: (typeof POINTLESS_FEED_CLASSES)[number]): boolean {
+  return (value.classes?.[cls]?.mode ?? value.mode) === 'increment';
+}
+
+/**
+ * T084: the number rules of a preset with the steps of a point-less-feeds choice over them.
+ *
+ * A choice changes a feed class only where the preset counts that class in increments: with
+ * calculator-type input every feed is read as written, whatever the feed parameters say. An
+ * inch step the choice does not name is not kept from the preset either (it belonged to the
+ * old step); the class then falls back to a tenth of the metric one, as an increment does.
+ * The machine stores the result whole, like a preset, so nothing has to read the option
+ * itself: `numbers.ts`, `_nc_machine.py` and every script read the classes they always read.
+ */
+export function withPointlessFeeds(value: NumberInput, choice: PointlessFeedChoice | undefined): NumberInput {
+  const out = clone(value);
+  for (const cls of POINTLESS_FEED_CLASSES) {
+    const step = choice?.classes?.[cls];
+    if (!isRecord(step) || typeof step.increment !== 'string' || !countsFeed(out, cls)) continue;
+    const next: { mode?: NumberInput['mode']; increment?: string; incrementInch?: string } = {
+      ...(out.classes?.[cls] ?? {}),
+      increment: step.increment,
+    };
+    if (typeof step.incrementInch === 'string') next.incrementInch = step.incrementInch;
+    else delete next.incrementInch;
+    out.classes = { ...(out.classes ?? {}), [cls]: next };
+  }
+  return out;
+}
+
+/** The preset and the point-less-feeds choice whose rules are exactly `value`, or null. */
+function matchOf(
+  decl: MachineParamsDecl | undefined,
+  value: NumberInput | null | undefined,
+): { preset: NumberInputPreset; feeds: PointlessFeedChoice | null } | null {
+  if (!isRecord(value)) return null;
+  const wanted = canonical(value);
+  const feeds = feedsDeclOf(decl);
+  const choices: (PointlessFeedChoice | undefined)[] = feeds ? feedChoicesOf(feeds) : [undefined];
+  for (const preset of presetsOf(decl)) {
+    if (!isRecord(preset?.value)) continue;
+    for (const choice of choices) {
+      if (canonical(withPointlessFeeds(preset.value, choice)) === wanted) return { preset, feeds: choice ?? null };
+    }
+  }
+  return null;
+}
+
+/**
+ * The preset whose rules are exactly `value`, or null — which is what "Custom" means. T084:
+ * a preset with a point-less-feeds choice over it is still that preset.
+ */
 export function presetOf(
   decl: MachineParamsDecl | undefined,
   value: NumberInput | null | undefined,
 ): NumberInputPreset | null {
-  if (!isRecord(value)) return null;
-  const wanted = canonical(value);
-  return presetsOf(decl).find((preset) => canonical(preset?.value) === wanted) ?? null;
+  return matchOf(decl, value)?.preset ?? null;
+}
+
+/**
+ * T084: the point-less-feeds choice a machine's stored rules amount to, or the declared
+ * default; '' when the profile declares no such option.
+ */
+export function pointlessFeedsIdOf(decl: MachineParamsDecl | undefined, current?: MachineConfig): string {
+  const feeds = feedsDeclOf(decl);
+  if (feeds === undefined) return '';
+  const fallback = feedChoicesOf(feeds)[0]?.value ?? '';
+  return matchOf(decl, current?.params?.numberInput)?.feeds?.value ?? fallback;
 }
 
 /** The preset id a machine's stored rules amount to: a preset, `custom`, or the default. */
@@ -203,6 +325,24 @@ export function machineFields(
       choices,
       default: chosen,
     });
+
+    // T084: the option is offered beside the preset it modifies. A "Custom" rule set is
+    // edited in the file, so the form leaves its feeds alone too.
+    const feeds = feedsDeclOf(decl);
+    if (feeds !== undefined && chosen !== CUSTOM_PRESET) {
+      const unconfirmed = feeds.verify === true;
+      fields.push({
+        id: FIELD_POINTLESS_FEEDS,
+        type: 'choice',
+        label: t('machines.param.pointlessFeeds'),
+        help: t('machines.param.pointlessFeedsHelp'),
+        choices: feedChoicesOf(feeds).map((choice) => ({
+          label: unconfirmed ? `${choice.label} (${t('machines.value.unconfirmed')})` : choice.label,
+          value: choice.value,
+        })),
+        default: pointlessFeedsIdOf(decl, current),
+      });
+    }
   }
 
   fields.push({
@@ -227,6 +367,13 @@ export function machineFields(
     });
   }
 
+  // D5-3: what every variant stands at on this machine, for a default that follows another.
+  const standing: Record<string, string> = {};
+  for (const variant of variantsOf(decl)) {
+    if (typeof variant?.id !== 'string') continue;
+    const stored = current?.params?.variants?.[variant.id];
+    standing[variant.id] = typeof stored === 'string' && stored !== '' ? stored : variant.default;
+  }
   for (const variant of variantsOf(decl)) {
     if (typeof variant?.id !== 'string' || variant.id === '') continue;
     const choices = (Array.isArray(variant.choices) ? variant.choices : [])
@@ -234,7 +381,7 @@ export function machineFields(
       .map((choice) => ({ label: choice.label ?? choice.value, value: choice.value }));
     if (choices.length === 0) continue;
     const stored = current?.params?.variants?.[variant.id];
-    const chosen = choices.some((choice) => choice.value === stored) ? (stored as string) : variant.default;
+    const chosen = choices.some((choice) => choice.value === stored) ? (stored as string) : variantDefaultOf(variant, standing);
     fields.push({
       id: variantFieldId(variant.id),
       type: 'choice',
@@ -301,7 +448,11 @@ export function machineFromValues(
     const preset = presetsOf(decl).find((entry) => entry?.id === presetId);
     // The machine stores the **whole** rule set of the preset it was given, so a later
     // change to the profile's preset data never changes a machine under the user's hands.
-    if (preset?.value) params.numberInput = clone(preset.value);
+    // T084: with the point-less-feeds choice over it, written into the same rules.
+    const feeds = feedsDeclOf(decl);
+    const wanted = values[FIELD_POINTLESS_FEEDS];
+    const choice = feeds?.choices.find((entry) => isRecord(entry) && entry.value === wanted);
+    if (preset?.value) params.numberInput = withPointlessFeeds(preset.value, choice);
   }
 
   const units = values[FIELD_UNITS];
@@ -404,14 +555,21 @@ export function machineSummaryLines(
   const params = eff.params;
 
   if (decl?.numberInput !== undefined) {
-    const preset = presetOf(decl, params.numberInput);
+    const match = matchOf(decl, params.numberInput);
     lines.push(
       line(
         t('machines.param.numberInput'),
-        preset?.label ?? t('machines.value.custom'),
+        match?.preset.label ?? t('machines.value.custom'),
         eff.source.numberInput,
       ),
     );
+    // T084: how a point-less feed counts, where the preset counts feeds at all.
+    const feeds = feedsDeclOf(decl);
+    const counts = match !== null && POINTLESS_FEED_CLASSES.some((cls) => countsFeed(match.preset.value, cls));
+    if (feeds !== undefined && counts) {
+      const choice = match.feeds ?? feedChoicesOf(feeds)[0];
+      if (choice !== undefined) lines.push(line(t('machines.param.pointlessFeeds'), choice.label, eff.source.numberInput));
+    }
   }
   lines.push(
     line(

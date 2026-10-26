@@ -166,10 +166,15 @@ scenario('m10-arith', { timeout: 720 }, async (h) => {
     h.check('and two G83 drilling cycles', drills.length === 2, drills)
     const ambiguous = original.map((line, i) => (/ C90/.test(line) ? i + 1 : 0)).filter((n) => n > 0)
 
+    // Manual-check fix round (D5-8, B2): a Fanuc lathe's drilling cycles G83 to G89 have a Z (the depth) that is a position
+    // on the tool axis and moves with the shift, like the Z of a mill's cycle; R is incremental in G-code system A, and Q and K
+    // are counts, so they stay. With no machine the point-less cycle (Z-15 R2 Q6000 K3) cannot be read as a whole and stays,
+    // listed as `cycle-unresolved`; its pointed twin is clear and moves.
+    const DRILL = { pointless: 'G83 Z-15 R2 Q6000 K3 F0.1', pointed: 'G83 Z-15. R2. Q6. K3 F0.1' }
     /** @type {{ name: string | null, words: Record<string, string>, sentence: RegExp }[]} */
     const machines = [
-      { name: 'Lathe IS-B', words: { [L.pointless]: 'G00 X50 Z500', [L.pointlessCut]: 'G01 Z-510 F155' }, sentence: /Machine 'Lathe IS-B'/ },
-      { name: 'Lathe calc', words: { [L.pointless]: 'G00 X50 Z999.5', [L.pointlessCut]: 'G01 Z-10.5 F155' }, sentence: /Machine 'Lathe calc'/ },
+      { name: 'Lathe IS-B', words: { [L.pointless]: 'G00 X50 Z500', [L.pointlessCut]: 'G01 Z-510 F155', [DRILL.pointless]: 'G83 Z-515 R2 Q6000 K3 F0.1' }, sentence: /Machine 'Lathe IS-B'/ },
+      { name: 'Lathe calc', words: { [L.pointless]: 'G00 X50 Z999.5', [L.pointlessCut]: 'G01 Z-10.5 F155', [DRILL.pointless]: 'G83 Z-15.5 R2 Q6000 K3 F0.1' }, sentence: /Machine 'Lathe calc'/ },
       { name: null, words: {}, sentence: /No machine/ },
     ]
     for (const { name, words, sentence } of machines) {
@@ -183,13 +188,18 @@ scenario('m10-arith', { timeout: 720 }, async (h) => {
         ...words,
         [L.pointed]: 'G00 X50. Z999.5',
         [L.pointedCut]: 'G01 Z-10.5 F155.',
+        [DRILL.pointed]: 'G83 Z-15.5 R2. Q6. K3 F0.1',
         [L.far]: 'G00 X100. Z99.5 T0100',
         [L.home]: 'G00 X100. Z99.5 T0500',
       }
       const wanted = original.map((line, i) => (ambiguous.includes(i + 1) ? after[i] : (map[line] ?? line)))
       const wrong = differences(original, after, wanted)
       h.check(`${label}: Z less 0.5 - Z1000 is ${words[L.pointless] ?? 'left alone'}, Z10. is Z9.5, the rest as the plan says`, wrong.length === 0, wrong.slice(0, 6))
-      h.check(`${label}: both G83 face-drilling cycles are left as written and listed: a lathe's own cycle has no tool-axis role`, drills.every((n) => after[n - 1] === original[n - 1] && findings.some((f) => f.line === n)), drills.map((n) => ({ n, got: after[n - 1], reasons: reasonsAt(findings, n) })))
+      h.check(
+        `${label}: both G83 face-drilling cycles move on their Z and keep R, Q and K${name === null ? ', except the point-less one, which stays and is listed (cycle-unresolved)' : ''}`,
+        drills.every((n) => after[n - 1] === (map[original[n - 1]] ?? original[n - 1]) && (name !== null || original[n - 1] !== DRILL.pointless || reasonsAt(findings, n).includes('cycle-unresolved'))),
+        drills.map((n) => ({ n, got: after[n - 1], reasons: reasonsAt(findings, n) })),
+      )
       h.check(`${label}: the report ends with the machine: ${sentence}`, sentence.test(message), message)
       if (name === null) {
         const pointless = [at.pointless, at.pointlessCut]

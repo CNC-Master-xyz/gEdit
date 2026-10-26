@@ -358,13 +358,13 @@ scenario('m8-okuma', { timeout: 540, files: REPO_FILE }, async (h) => {
   h.check('with the 1 mm system picked, the documented default', defaultPreset !== undefined && numberInput.selected === shownPreset(h, defaultPreset), numberInput.selected)
   h.check('each label says that the unit scales every number, a decimal point included', presets.slice(1).every((preset) => /every number scaled, point or not/.test(preset.label)), presets.map((preset) => preset.label))
   h.check('and X is a diameter unless the machine says otherwise', ticked(h, 'diameter') === true, ticked(h, 'diameter'))
-  // M9 (WP9.4, R6): the one variant of an Okuma machine is how the `T` word splits. There is
-  // still no G-code system to choose.
+  // M9 (WP9.4, R6): the first variant of an Okuma machine is how the `T` word splits. There is
+  // still no G-code system to choose. Review round D5-7: the counter spindle (Y turns with Z, or stays) is the other.
   const toolWordDecl = profile.machineParams?.variants?.find((variant) => variant.id === 'toolWord')
   const toolWord = choiceOf(h, 'variant.toolWord')
   h.check(
-    'an Okuma machine has no G-code system to choose; its only variant is the tool word',
-    fields.includes('numberInput') && JSON.stringify(fields.filter((field) => field?.startsWith('variant.'))) === JSON.stringify(['variant.toolWord']),
+    'an Okuma machine has no G-code system to choose; its variants are the tool word and the counter spindle',
+    fields.includes('numberInput') && JSON.stringify(fields.filter((field) => field?.startsWith('variant.'))) === JSON.stringify(['variant.toolWord', 'variant.counterSpindleY']),
     fields,
   )
   h.check(

@@ -16,6 +16,7 @@ import { get, writable, type Readable } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFileTracker, createSessionService, editorPositionDeps, snapshotOf, statSessionPaths } from './session';
 import { createFileMemory } from '$lib/stores/fileMemory';
+import { memoWaiting } from '$lib/app/memoWaiting';
 import { t } from '$lib/i18n';
 import type { Disposable, DocId, FileMemo, FileMemoryStore } from '$lib/app/types';
 import type { FileStat, SessionState } from '$lib/platform/commands';
@@ -724,10 +725,12 @@ interface TrackerHarness {
   /** Where the cursor is in the document on screen. */
   at: { line: number; column: number; top: number };
   marks: Map<DocId, number[]>;
+  /** The names of the bookmarks, by document (P4c, §6.5 rule 4). */
+  names: Map<DocId, { line: number; name: string }[]>;
   /** Documents the editor has a model for; empty before Monaco flushes the pending ones. */
   models: Set<DocId>;
-  /** What `bookmarks.set` was handed, per document. */
-  restoredMarks: { id: DocId; lines: number[] }[];
+  /** What `bookmarks.restore` was handed, per document. */
+  restoredMarks: { id: DocId; lines: number[]; names: { line: number; name: string }[] }[];
   /** What `reveal` was handed, per document. */
   restoredAt: { id: DocId; line: number; column: number; top: number }[];
   /** False while Monaco is not up: `reveal` and `set` would silently do nothing. */
@@ -771,6 +774,7 @@ function trackerHarness(
     },
     at: { line: 1, column: 1, top: 1 },
     marks: new Map<DocId, number[]>(),
+    names: new Map<DocId, { line: number; name: string }[]>(),
     models: new Set<DocId>(),
     restoredMarks: [],
     restoredAt: [],
@@ -836,10 +840,19 @@ function trackerHarness(
     memory: state.memory,
     enabled: () => enabled,
     hasModel: (id) => state.models.has(id),
-    bookmarkLines: (id) => state.marks.get(id) ?? [],
-    setBookmarks: (id, lines) => {
-      state.restoredMarks.push({ id, lines });
+    bookmarkMarks: (id) => {
+      const names = new Map((state.names.get(id) ?? []).map((entry) => [entry.line, entry.name]));
+      return (state.marks.get(id) ?? []).map((line) => {
+        const name = names.get(line);
+        return name === undefined ? { line } : { line, name };
+      });
+    },
+    restoreBookmarks: (id, marks) => {
+      const lines = marks.map((mark) => mark.line);
+      const named = marks.flatMap((mark) => (mark.name === undefined ? [] : [{ line: mark.line, name: mark.name }]));
+      state.restoredMarks.push({ id, lines, names: named });
       state.marks.set(id, lines);
+      state.names.set(id, named);
     },
     position: (id) => (get(activeId) === id ? { ...state.at } : null),
     applyPosition: (id, at) => {
@@ -966,6 +979,21 @@ describe('per-file memory: what is written', () => {
 });
 
 describe('per-file memory: what is restored', () => {
+  it('restores the waiting memo\'s bookmarks when the document has no path to read the memo again by (CODE-14)', async () => {
+    const h = trackerHarness({
+      files: { '/a.nc': { line: 42, column: 7, top: 30, bookmarks: [12, 40], at: 1 } },
+      ready: false,
+    });
+    h.editorUp = false;
+    h.open('a', '/a.nc');
+    (h.docs.find((doc) => doc.id === 'a') as { path: string | null }).path = null;
+    h.editorUp = true;
+    await h.becomeReady();
+    h.createModel('a');
+    expect(h.restoredMarks).toEqual([{ id: 'a', lines: [12, 40], names: [] }]);
+    h.stop();
+  });
+
   it('puts the cursor and the bookmarks back when a remembered file is opened', async () => {
     const h = trackerHarness({
       files: { '/a.nc': { line: 42, column: 7, top: 30, bookmarks: [12, 40], at: 1 } },
@@ -974,7 +1002,152 @@ describe('per-file memory: what is restored', () => {
     h.open('a', '/a.nc');
 
     expect(h.restoredAt).toEqual([{ id: 'a', line: 42, column: 7, top: 30 }]);
-    expect(h.restoredMarks).toEqual([{ id: 'a', lines: [12, 40] }]);
+    expect(h.restoredMarks).toEqual([{ id: 'a', lines: [12, 40], names: [] }]);
+    h.stop();
+  });
+
+  // P4c (plan §6.5 rule 4): the names of the bookmarks go to the memo and come back with the lines.
+  it('writes the names of the bookmarks beside the lines when a file is closed', async () => {
+    const h = trackerHarness();
+    await h.becomeReady();
+    h.open('a', '/a.nc');
+    h.marks.set('a', [12, 40]);
+    h.names.set('a', [{ line: 40, name: 'Finish' }]);
+
+    h.close('a');
+    expect(h.memory.get('/a.nc')).toMatchObject({ bookmarks: [12, 40], bookmarkNames: [{ line: 40, name: 'Finish' }] });
+    h.stop();
+  });
+
+  it('writes no names member for bookmarks that have none, and drops one that had names', async () => {
+    const h = trackerHarness({
+      files: { '/a.nc': { line: 42, column: 1, top: 40, bookmarks: [5], bookmarkNames: [{ line: 5, name: 'old' }], at: 1 } },
+    });
+    await h.becomeReady();
+    h.open('a', '/a.nc');
+    h.names.set('a', []);
+
+    h.close('a');
+    expect(h.memory.get('/a.nc')?.bookmarks).toEqual([5]);
+    expect('bookmarkNames' in (h.memory.get('/a.nc') ?? {})).toBe(false);
+    h.stop();
+  });
+
+  it('puts the names back with the lines when a remembered file is opened', async () => {
+    const h = trackerHarness({
+      files: {
+        '/a.nc': { line: 42, column: 7, top: 30, bookmarks: [12, 40], bookmarkNames: [{ line: 40, name: 'Finish' }], at: 1 },
+      },
+    });
+    await h.becomeReady();
+    h.open('a', '/a.nc');
+
+    expect(h.restoredMarks).toEqual([{ id: 'a', lines: [12, 40], names: [{ line: 40, name: 'Finish' }] }]);
+    h.stop();
+  });
+
+  it('hands the editor only the names it can use: a name of a line that is no bookmark, or a bad name, is left out', async () => {
+    const h = trackerHarness({
+      files: {
+        '/a.nc': {
+          line: 42,
+          column: 1,
+          top: 30,
+          bookmarks: [12, 40],
+          bookmarkNames: [
+            { line: 12, name: 'x'.repeat(61) },
+            { line: 13, name: 'orphan' },
+            { line: 40, name: ' ok ' },
+          ],
+          at: 1,
+        },
+      },
+    });
+    await h.becomeReady();
+    h.open('a', '/a.nc');
+    expect(h.restoredMarks).toEqual([{ id: 'a', lines: [12, 40], names: [{ line: 40, name: 'ok' }] }]);
+    h.stop();
+  });
+
+  it('applies the memo as it is when the tab is shown, not as it was when the file opened (the panel can change it)', async () => {
+    // A tab nobody has shown yet: the bookmark panel deletes a bookmark from its waiting memo.
+    const h = trackerHarness({
+      files: { '/a.nc': { line: 42, column: 1, top: 40, bookmarks: [5, 9], bookmarkNames: [{ line: 9, name: 'nine' }], at: 1 } },
+      ready: false,
+    });
+    h.editorUp = false;
+    h.open('a', '/a.nc');
+    h.memory.remember('/a.nc', { bookmarks: [5], bookmarkNames: undefined });
+
+    h.editorUp = true;
+    await h.becomeReady();
+    h.createModel('a');
+    expect(h.restoredMarks).toEqual([{ id: 'a', lines: [5], names: [] }]);
+    h.stop();
+  });
+
+  it('says which documents still wait for their memo: from the open of a remembered file until its tab is in front (the bookmark panel lists those from the memo)', async () => {
+    const h = trackerHarness({
+      files: {
+        '/a.nc': { line: 3, column: 1, top: 1, bookmarks: [5], at: 1 },
+        '/b.nc': { line: 2, column: 1, top: 1, bookmarks: [7], at: 1 },
+      },
+      ready: false,
+    });
+    // The session comes back while Monaco is still loading: each file has its document at once, the last one opened is in front.
+    h.editorUp = false;
+    h.open('a', '/a.nc');
+    h.open('b', '/b.nc');
+    expect(['a', 'b'].map((id) => memoWaiting.has(id))).toEqual([true, true]);
+
+    h.editorUp = true;
+    await h.becomeReady();
+    h.createModel('b');
+    expect(h.restoredMarks).toEqual([{ id: 'b', lines: [7], names: [] }]);
+    expect(['a', 'b'].map((id) => memoWaiting.has(id))).toEqual([true, false]);
+
+    h.createModel('a');
+    h.activate('a');
+    expect(h.restoredMarks.map((entry) => entry.id)).toEqual(['b', 'a']);
+    expect(memoWaiting.has('a')).toBe(false);
+    h.stop();
+  });
+
+  it('forgets a waiting document when it is closed, and all of them when the tracker stops', async () => {
+    const h = trackerHarness({
+      files: {
+        '/a.nc': { line: 3, column: 1, top: 1, bookmarks: [5], at: 1 },
+        '/b.nc': { line: 2, column: 1, top: 1, bookmarks: [7], at: 1 },
+        '/c.nc': { line: 2, column: 1, top: 1, bookmarks: [7], at: 1 },
+      },
+      ready: false,
+    });
+    h.editorUp = false;
+    h.open('a', '/a.nc');
+    h.open('b', '/b.nc');
+    h.open('c', '/c.nc');
+    expect(['a', 'b', 'c'].map((id) => memoWaiting.has(id))).toEqual([true, true, true]);
+    h.close('a');
+    expect(memoWaiting.has('a')).toBe(false);
+    expect(memoWaiting.has('b')).toBe(true);
+    h.stop();
+    expect(['b', 'c'].map((id) => memoWaiting.has(id))).toEqual([false, false]);
+  });
+
+  it('applies no bookmark when the waiting memo was cleared down to nothing and forgotten', async () => {
+    const h = trackerHarness({
+      files: { '/a.nc': { line: 1, column: 1, top: 1, bookmarks: [5, 9], at: 1 } },
+      ready: false,
+    });
+    h.editorUp = false;
+    h.open('a', '/a.nc');
+    h.memory.remember('/a.nc', { bookmarks: [], bookmarkNames: undefined });
+    expect(h.memory.get('/a.nc')).toBeUndefined();
+
+    h.editorUp = true;
+    await h.becomeReady();
+    h.createModel('a');
+    expect(h.restoredMarks).toEqual([{ id: 'a', lines: [], names: [] }]);
     h.stop();
   });
 

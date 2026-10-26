@@ -3,7 +3,7 @@
 // Per-model whole-line decorations with a codicon in the glyph margin and a mark in the
 // overview ruler. The decorations are the live copy; the session service keeps them per
 // file in `state.json` (`files.rememberPerFile`, `stores/fileMemory.ts`) and hands them back
-// when the file is opened again, clamped to its line count.
+// when the file is opened again; a remembered line past the end of the file is dropped.
 //
 // The decoration options that matter:
 //
@@ -19,8 +19,8 @@
 // **Monaco's decorations are the storage.** There is no second list of line numbers to
 // keep in step: `lines()` reads the decoration ranges back out of the model every time,
 // so an edit, an undo and a transform all move the bookmarks for free. The map below
-// holds only decoration *ids*, together with the model they belong to, so a document
-// whose model was replaced (reload from disk, a reopened tab) drops its stale ids instead
+// holds only decoration *ids* and their names (below), together with the model they belong to, so a
+// document whose model was replaced (reload from disk, a reopened tab) drops its stale ids instead
 // of reporting lines from a model nobody can see.
 //
 // **Per editor (P4e, Phase 4 plan §6.7 rule 6).** As model decorations of the document the bookmarks
@@ -31,6 +31,15 @@
 // document does not have: it is read from `lines()` and thrown away with the pane. Toggling in a
 // pane toggles the document's bookmark at the cursor's document line (`EditorService.cursor()`
 // answers document lines), and the glyph margin stays one shared option.
+//
+// **Names (P4c, plan §6.5 rule 4).** A bookmark's name belongs to its decoration: `Entry.names`
+// maps a decoration id to the name, so the name moves with the line through edits, undo and
+// transforms exactly as the bookmark does. Deleting a bookmarked line does not delete its bookmark:
+// the decoration stays and sits on the line that follows (owner decision, 2026-10-19), name included.
+// When an edit puts several bookmarks on one line (a delete of a range, a join), the line keeps one
+// bookmark whose name is the upper one's, else the first name among them (owner, 2026-10-20); the
+// others are gone from `marksOf` and go with the next write. Every write replaces the decorations
+// in one `deltaDecorations` call, names included.
 //
 // Monaco is reached through `$lib/monaco/editorService`; nothing here may statically
 // import `$lib/monaco/core`, or Monaco would land in the initial bundle and be evaluated
@@ -46,15 +55,28 @@
 
 import './bookmarks.css';
 import type * as MonacoApi from 'monaco-editor/esm/vs/editor/editor.api.js';
-import { stepBookmark, toggleBookmark } from '$lib/core/nav/bookmarks';
+import {
+  MAX_BOOKMARKS,
+  bookmarkText,
+  cleanBookmarkName,
+  planMatches,
+  stepBookmark,
+  toggleBookmark,
+  bookmarkLimitReached,
+  type BookmarkToggle,
+  type BookmarkMark,
+} from '$lib/core/nav/bookmarks';
 import { editor as appEditor } from '$lib/monaco/editorService';
 import { docs as appDocs } from '$lib/stores/documents';
 import type {
+  BookmarkInfo,
+  BookmarkMatchesAnswer,
   BookmarkService,
   Disposable,
   DocId,
   DocumentStore,
   EditorService,
+  PaneSource,
 } from '$lib/app/types';
 
 /**
@@ -65,6 +87,8 @@ export interface BookmarkMonaco {
   editor: {
     TrackedRangeStickiness: typeof MonacoApi.editor.TrackedRangeStickiness;
     OverviewRulerLane: typeof MonacoApi.editor.OverviewRulerLane;
+    /** Only Bookmark All Matches' "whole word" reads it (the editor's word separators); the real Monaco has it. */
+    EditorOption?: Pick<typeof MonacoApi.editor.EditorOption, 'wordSeparators'>;
   };
 }
 
@@ -78,12 +102,30 @@ export interface BookmarkMonaco {
  */
 const RULER_COLOR = '#F25C19';
 
-/** What `lines()` and `setLines()` remember about one document. */
+/** What `lines()` and `setMarks()` remember about one document. */
 interface Entry {
   /** The model the ids belong to; a replaced model invalidates them. */
   model: MonacoApi.editor.ITextModel;
   ids: string[];
+  /** The names, by decoration id (§6.5 rule 4). */
+  names: Map<string, string>;
 }
+
+/** What the focused find widget holds; the slice of `FindReplaceState` Bookmark All Matches reads. */
+interface FindWidgetState {
+  searchString: string;
+  isRegex: boolean;
+  matchCase: boolean;
+  wholeWord: boolean;
+  /** Monaco 0.55: the ranges of "find in selection" while it is on, else null. */
+  searchScope: MonacoApi.IRange[] | MonacoApi.IRange | null;
+}
+
+/** Monaco's own default word separators, for "whole word" when the editor does not say. */
+const DEFAULT_WORD_SEPARATORS = '`~!@#$%^&*()-=+[{]}\\|;:\'",.<>/?';
+
+/** Matches scanned at most: far above what any answer needs, bounded so a one-letter search stays cheap. */
+const SCAN_LIMIT = 200_000;
 
 export interface BookmarkDeps {
   editor: EditorService;
@@ -92,6 +134,8 @@ export interface BookmarkDeps {
 
 /** `BookmarkService` plus the one-time wiring `contrib/bookmarks.ts` does. */
 export interface BookmarkApi extends BookmarkService {
+  /** The bookmarks of `id` with their names (no line text): what the per-file memory writes (`app/session.ts`). */
+  marks(id: DocId): BookmarkMark[];
   /**
    * Hands the service the Monaco enums and starts watching for replaced models.
    * The disposer removes every decoration it put on a model and goes back to no-op.
@@ -101,6 +145,7 @@ export interface BookmarkApi extends BookmarkService {
 
 export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
   const entries = new Map<DocId, Entry>();
+  const listeners = new Set<(id: DocId) => void>();
   /** The mirror decorations on each pane model: their ids and the pane lines they were set at. */
   const mirrors = new Map<MonacoApi.editor.ITextModel, { ids: string[]; lines: number[] }>();
   let mirrorScheduled = false;
@@ -151,8 +196,7 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
    * `EditorOptions.glyphMargin.defaultValue = false`), and a margin that is off renders no
    * glyph at all: `GlyphMarginWidgets.prepareRender` returns before it looks at a single
    * decoration. Asking for it here rather than in `EDITOR_OPTIONS` keeps the option where
-   * the reason for it is — the same call `contrib/assistant.ts` makes for
-   * `acceptSuggestionOnEnter` — and keeps it *conditional*: an empty margin is 21px of
+   * the reason for it is and keeps it *conditional*: an empty margin is 21px of
    * gutter (one line height per lane) that a window without bookmarks should not pay for.
    *
    * `EditorService.updateOptions` remembers the payload, so the setting survives the
@@ -170,6 +214,42 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
     if (wanted === glyphMarginOn) return;
     glyphMarginOn = wanted;
     deps.editor.updateOptions({ glyphMargin: wanted });
+  }
+
+  /** Tells every listener that the bookmarks of `id` changed (a write, a name, an edit, a new model). */
+  function emit(id: DocId): void {
+    for (const cb of [...listeners]) {
+      try {
+        cb(id);
+      } catch (err) {
+        console.error('a bookmark listener failed', err);
+      }
+    }
+  }
+
+  /**
+   * The bookmarks of `id` as the decorations hold them now, ascending, one per line. Decorations that
+   * share a line (an edit joined them) are one bookmark whose name is the upper one's, else the first
+   * name among them (§6.5 rule 4, owner Q3).
+   */
+  function marksOf(id: DocId): BookmarkMark[] {
+    const entry = entryFor(id);
+    if (!entry) return [];
+    const byLine = new Map<number, BookmarkMark>();
+    for (const decorationId of entry.ids) {
+      const range = entry.model.getDecorationRange(decorationId);
+      // A decoration whose text an edit removed entirely comes back as null.
+      if (!range) continue;
+      const name = entry.names.get(decorationId);
+      const have = byLine.get(range.startLineNumber);
+      if (have === undefined) {
+        byLine.set(range.startLineNumber, name === undefined ? { line: range.startLineNumber } : { line: range.startLineNumber, name });
+      } else if (have.name === undefined && name !== undefined) {
+        // Several bookmarks on one line keep one name: the upper's, else the first name among them (owner Q3).
+        have.name = name;
+      }
+    }
+    return [...byLine.values()].sort((a, b) => a.line - b.line);
   }
 
   function linesOf(id: DocId): number[] {
@@ -237,31 +317,99 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
     });
   }
 
-  /** Replaces the bookmarks of `id` with `lines`, in one `deltaDecorations` call. */
-  function setLines(id: DocId, lines: number[]): void {
+  /** Replaces the bookmarks of `id` with `marks` (ascending, one per line), in one `deltaDecorations` call. */
+  function setMarks(id: DocId, marks: readonly BookmarkMark[]): void {
     const model = deps.editor.model(id);
     if (!model || !api) return;
     const decoration = (options ??= decorationOptions(api));
     const old = entryFor(id)?.ids ?? [];
     const ids = model.deltaDecorations(
       old,
-      lines.map((line) => ({
+      marks.map((mark) => ({
         // `isWholeLine` makes the columns irrelevant; an empty range keeps the decoration
         // anchored to the line's start, which is what has to move when text is inserted.
-        range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
+        range: { startLineNumber: mark.line, startColumn: 1, endLineNumber: mark.line, endColumn: 1 },
         options: decoration,
       })),
     );
     if (ids.length === 0) entries.delete(id);
-    else entries.set(id, { model, ids });
+    else {
+      const names = new Map<string, string>();
+      marks.forEach((mark, i) => {
+        if (mark.name !== undefined) names.set(ids[i], mark.name);
+      });
+      entries.set(id, { model, ids, names });
+    }
     syncGlyphMargin();
     scheduleMirrors();
+    emit(id);
+  }
+
+  /** `lines` as marks that keep the name the document's bookmark on that line has now. */
+  function withNames(id: DocId, lines: readonly number[]): BookmarkMark[] {
+    const names = new Map(marksOf(id).map((mark) => [mark.line, mark.name]));
+    return lines.map((line) => {
+      const name = names.get(line);
+      return name === undefined ? { line } : { line, name };
+    });
   }
 
   /** The cursor's line, but only when `id` is the document the cursor is in. */
   function cursorLineOf(id: DocId): number | undefined {
     if (deps.docs.getActiveId() !== id) return undefined;
     return deps.editor.cursor()?.line;
+  }
+
+  /** The focused editor and what its lines are: a group's document, or a channel pane's (§6.7 rule 3). */
+  function findView(): { editor: MonacoApi.editor.IStandaloneCodeEditor; docId: DocId; pane: PaneSource | null } | undefined {
+    const focused = deps.editor.groupViews().find((view) => view.focused);
+    if (focused) return { editor: focused.editor, docId: focused.docId, pane: focused.pane };
+    const editor = deps.editor.editorInstance();
+    const docId = deps.docs.getActiveId();
+    return editor && docId !== null ? { editor, docId, pane: null } : undefined;
+  }
+
+  /** The search of the editor's find widget, read from its controller; undefined when there is none. */
+  function findState(editor: MonacoApi.editor.IStandaloneCodeEditor): FindWidgetState | undefined {
+    const controller = editor.getContribution('editor.contrib.findController') as unknown as {
+      getState?: () => FindWidgetState;
+    } | null;
+    return controller?.getState?.();
+  }
+
+  /**
+   * Every line the widget's search finds in the editor's model, as document lines: the find-in-selection
+   * scope when it is on, case, whole word and regular expression as the widget has them. A pattern that
+   * does not compile finds nothing. Several matches on a line are one line.
+   */
+  function matchedLines(
+    view: { editor: MonacoApi.editor.IStandaloneCodeEditor; pane: PaneSource | null },
+    model: MonacoApi.editor.ITextModel,
+    state: FindWidgetState,
+  ): number[] {
+    const scope = Array.isArray(state.searchScope) ? state.searchScope : state.searchScope ? [state.searchScope] : [];
+    const separators = state.wholeWord
+      ? api?.editor.EditorOption
+        ? view.editor.getOption(api.editor.EditorOption.wordSeparators)
+        : DEFAULT_WORD_SEPARATORS
+      : null;
+    let found: MonacoApi.editor.FindMatch[];
+    try {
+      // `false` is "the whole model"; a list of ranges is the find-in-selection scope.
+      found =
+        scope.length > 0
+          ? model.findMatches(state.searchString, scope, state.isRegex, state.matchCase, separators, false, SCAN_LIMIT)
+          : model.findMatches(state.searchString, false, state.isRegex, state.matchCase, separators, false, SCAN_LIMIT);
+    } catch {
+      return [];
+    }
+    const pane = view.pane;
+    const lines = new Set<number>();
+    for (const match of found) {
+      const line = pane ? pane.docLine(match.range.startLineNumber) : match.range.startLineNumber;
+      lines.add(line);
+    }
+    return [...lines];
   }
 
   function step(dir: 1 | -1): void {
@@ -273,12 +421,16 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
   }
 
   return {
-    toggle(id?: DocId, line?: number): void {
+    /** A document keeps at most `MAX_BOOKMARKS`: a new bookmark past that is refused (`full`), removing one never is. */
+    toggle(id?: DocId, line?: number): BookmarkToggle {
       const docId = id ?? deps.docs.getActiveId();
-      if (docId === null) return;
+      if (docId === null) return 'none';
       const at = line ?? cursorLineOf(docId);
-      if (at === undefined) return;
-      setLines(docId, toggleBookmark(linesOf(docId), at));
+      if (at === undefined) return 'none';
+      const lines = linesOf(docId);
+      if (bookmarkLimitReached(lines, at)) return 'full';
+      setMarks(docId, withNames(docId, toggleBookmark(lines, at)));
+      return lines.includes(at) ? 'removed' : 'set';
     },
 
     next(): void {
@@ -292,11 +444,15 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
     clear(id?: DocId): void {
       const docId = id ?? deps.docs.getActiveId();
       if (docId === null) return;
-      setLines(docId, []);
+      setMarks(docId, []);
     },
 
     lines(id: DocId): number[] {
       return linesOf(id);
+    },
+
+    marks(id: DocId): BookmarkMark[] {
+      return marksOf(id);
     },
 
     /**
@@ -312,7 +468,92 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
     set(id: DocId, lines: number[]): void {
       const count = deps.editor.model(id)?.getLineCount() ?? 0;
       const wanted = lines.filter((line) => Number.isInteger(line) && line >= 1 && line <= count);
-      setLines(id, [...new Set(wanted)].sort((a, b) => a - b));
+      setMarks(id, [...new Set(wanted)].sort((a, b) => a - b).map((line) => ({ line })));
+    },
+
+    // P4c (plan §6.5; P4.13): the names, the panel's rows and Bookmark All Matches.
+    list(id: DocId): BookmarkInfo[] {
+      const entry = entryFor(id);
+      if (!entry) return [];
+      const count = entry.model.getLineCount();
+      return marksOf(id)
+        .filter((mark) => mark.line <= count)
+        .map((mark) => {
+          const info: BookmarkInfo = { docId: id, line: mark.line, text: bookmarkText(entry.model.getLineContent(mark.line)) };
+          if (mark.name !== undefined) info.name = mark.name;
+          return info;
+        });
+    },
+
+    setName(id: DocId, line: number, name: string | null): string | null {
+      const model = deps.editor.model(id);
+      if (!model || !api) return null;
+      if (!Number.isInteger(line) || line < 1 || line > model.getLineCount()) return null;
+      const marks = marksOf(id);
+      const at = marks.findIndex((mark) => mark.line === line);
+      if (name === null) {
+        // Clearing keeps the bookmark; a line without one has nothing to clear.
+        if (at < 0 || marks[at].name === undefined) return null;
+        setMarks(id, marks.map((mark, i) => (i === at ? { line: mark.line } : mark)));
+        return null;
+      }
+      const clean = cleanBookmarkName(name);
+      if (clean === null) return null;
+      if (at < 0) {
+        // The bookmark is set when the line has none (§6.5 rule 4), unless the document is full.
+        if (bookmarkLimitReached(marks.map((mark) => mark.line), line)) return null;
+        setMarks(id, [...marks, { line, name: clean }].sort((a, b) => a.line - b.line));
+      } else {
+        setMarks(id, marks.map((mark, i) => (i === at ? { line: mark.line, name: clean } : mark)));
+      }
+      return clean;
+    },
+
+    remove(id: DocId, line: number): boolean {
+      const marks = marksOf(id);
+      if (!marks.some((mark) => mark.line === line)) return false;
+      setMarks(id, marks.filter((mark) => mark.line !== line));
+      return true;
+    },
+
+    /**
+     * Like `set`, with the names (a remembered file is reopened; the memo is untrusted): lines
+     * outside the document, repeated lines and everything past `MAX_BOOKMARKS` are dropped, a name
+     * that is not a name is dropped and its bookmark stays.
+     */
+    restore(id: DocId, marks: readonly { line: number; name?: string }[]): void {
+      const count = deps.editor.model(id)?.getLineCount() ?? 0;
+      const byLine = new Map<number, BookmarkMark>();
+      for (const mark of marks) {
+        if (typeof mark !== 'object' || mark === null) continue;
+        if (!Number.isInteger(mark.line) || mark.line < 1 || mark.line > count || byLine.has(mark.line)) continue;
+        const name = mark.name === undefined ? null : cleanBookmarkName(mark.name);
+        byLine.set(mark.line, name === null ? { line: mark.line } : { line: mark.line, name });
+      }
+      const wanted = [...byLine.values()].sort((a, b) => a.line - b.line).slice(0, MAX_BOOKMARKS);
+      setMarks(id, wanted);
+    },
+
+    addAllMatches(): BookmarkMatchesAnswer {
+      const view = findView();
+      if (!view || !api) return { ok: false, reason: 'noDocument' };
+      const model = view.editor.getModel();
+      if (!model || !deps.editor.model(view.docId)) return { ok: false, reason: 'noDocument' };
+      const state = findState(view.editor);
+      if (!state || state.searchString === '') return { ok: false, reason: 'noSearch' };
+      const matched = matchedLines(view, model, state);
+      const plan = planMatches(matched, linesOf(view.docId));
+      if (!plan.ok) return { ok: false, reason: plan.reason, matches: plan.matches };
+      // One write: the bookmarks that are there keep their names, the new ones have none.
+      setMarks(view.docId, withNames(view.docId, plan.lines));
+      return { ok: true, marked: plan.marked, already: plan.already };
+    },
+
+    onDidChange(cb: (id: DocId) => void): Disposable {
+      listeners.add(cb);
+      return () => {
+        listeners.delete(cb);
+      };
     },
 
     install(monaco: BookmarkMonaco): Disposable {
@@ -321,7 +562,10 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
       // A document that gets a fresh model (reload from disk, a reopened tab) starts
       // without bookmarks: the old ids belong to a model that is being thrown away.
       const stopCreate = deps.editor.onDidCreateModel((id) => {
-        if (entries.delete(id)) syncGlyphMargin();
+        if (entries.delete(id)) {
+          syncGlyphMargin();
+          emit(id);
+        }
       });
       // Closing the last bookmarked tab has to take the margin away too, and there is no
       // "model disposed" event to hang that on. `fileOps.drop` disposes the model and
@@ -332,8 +576,10 @@ export function createBookmarks(deps: BookmarkDeps): BookmarkApi {
       // re-projected, so its lines move). Nothing to do while no pane is open.
       const stopAttach = deps.editor.onDidAttach(scheduleMirrors);
       const stopGroups = deps.editor.groups.subscribe(scheduleMirrors);
-      const stopContent = deps.editor.onDidChangeContent(() => {
+      const stopContent = deps.editor.onDidChangeContent((id) => {
         if (hasPanes) scheduleMirrors();
+        // An edit moves the bookmarks of its document and changes the text the panel shows.
+        if (listeners.size > 0 && entries.has(id)) emit(id);
       });
       let disposed = false;
       return () => {

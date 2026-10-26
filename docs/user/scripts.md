@@ -2,7 +2,8 @@
 
 A script is a small Python program that reads your NC code and gives something back: new
 code, or a table. Scripts are how gEdit is extended. Scaling feeds, scaling spindle speeds,
-listing tools, checking a program, finding its extents, doing arithmetic on address
+listing tools, checking a program, finding its extents, writing drilling cycles out as plain
+moves, estimating the running time, doing arithmetic on address
 values and moving, turning or mirroring the path are done by scripts that ship with the app, and they use exactly the same contract
 as one you write yourself — so if a bundled script is nearly what you need, copy it and
 change the part that is not.
@@ -459,11 +460,15 @@ data the dialect does not have is not run; the general checks run on every diale
 | **Spindle** | warning | A cut while the spindle is stopped (the row names the code that stopped it; a Klartext `L` with no coordinate word is no cut, and the words of a cycle definition written behind a bare `L`, such as `L CYCL DEF 32.1 T0.05`, are not read as a move), or a cut before the program starts a spindle. The second is reported only in a program that starts a spindle somewhere, because a subprogram runs under its caller's spindle |
 | **Spindle after tool change** | warning | The first cut after a tool change with no spindle start in between. Only on a machining centre, whose tool change stops the spindle; a turret does not |
 | **Tool change in a cycle** | warning | A tool change while a modal cycle, or a modal call such as `MCALL` or Klartext `M89`, is in force |
+| **Pass repeated** | warning | Fanuc lathe, G-code system A or B: a block that moves nothing while a single pass (`G90`, `G92`, `G94`; system B `G77`, `G78`, `G79`) is in force. The control runs that pass again in such a block: an empty block, a line with a comment only, a block with only `M`, `S` or `T` words, a block with only an `F` word or only a modal `G` code (`G40`, `G97`, `G99`, `G96 S200`). A blank line counts as an empty block. A dwell (`G04`), a one-shot code (`G50 S`, `G28`) and a block with a word gEdit does not know do not. Not checked on an Okuma, whose fixed thread cycles `G31` to `G33` are not run again by a block without a move. Write `G00` or `G01` first. |
+| **G-code system** | warning | Fanuc lathe: a block written the way G-code system C writes it (`G70` or `G71` alone for inch or metric input, `G20`, `G21` or `G24` with a position and a feed). gEdit reads systems A and B only, so the check says once per program that the program may be written in system C. It is a hint in this check and not a choice of the machine: gEdit has no system C to choose, so it cannot say so when the file is opened |
 | **Offset cancel** | warning | Lathe: a cut after a lone tool word that cancels the offset (`T0100`) and before the next tool call |
 | **Speed after tapping** | error | Sinumerik: a cut after leaving a tapping move that sets the speed to zero (`G331`, `G332`) with no new speed |
 | **Speed clamp** | warning | Constant surface speed with no spindle-speed limit earlier in the program (once per program) |
+| **Spindle speed limit** | warning | A spindle speed above the top speed set for the machine, or a speed clamp (`G50 S`, `LIMS=`) above it. Needs the machine's **Top spindle speed** (Motion and limits, [Machines](machines.md#motion-and-limits)). See below |
+| **Travel** | error, warning | An absolute axis position outside the travel set for the machine: an error in machine coordinates; a warning, once per axis, when the positions in work coordinates span more than the travel. Needs the machine's **Travel**. See below |
 | **Thread under surface speed** | warning | A thread cut under constant surface speed (once per stretch of it) |
-| **Refused in this state** | warning | A code written in a state the control refuses it in. Examples: `G28` or `G53` under tool centre point control, a tilted working plane under compensation or inside another frame, Klartext `TOOL CALL` or `M91` while `M128` is on, Sinumerik `G75` under radius compensation, Okuma `G140` under constant surface speed |
+| **Refused in this state** | warning | A code written in a state the control refuses it in. Examples: `G28` or `G53` under tool centre point control, a tilted working plane under compensation or inside another frame, Klartext `TOOL CALL` or `M91` while `M128` is on, Sinumerik `G75` under radius compensation, Okuma `G140` under constant surface speed, Okuma `M100` while radius compensation (`G41`, `G42`) is on |
 | **Missing word** | error | A code whose block lacks the word the control needs with it: Klartext `PLANE` without `MOVE`, `TURN` or `STAY`, Okuma `G96` without `S`. Not on a line your machine's channel settings count as a wait code: a wait such as `M198` written without `P` is judged by the Channels settings, not here |
 | **Alone in its block** | error | A code that has to stand in a block of its own does not: Fanuc `G53.1` and a `G65` macro call (its arguments may follow it, nothing may stand in front), Okuma `M110`. Not on a wait-code line of the machine's channels either |
 | **Rigid tapping** | error | A speed word or a move between the rigid-tapping call (`M29`) and its cycle, or the call inside a running tapping cycle. `M29` counts as a tapping call only when a tapping cycle follows it, so on a lathe where that M number means something else nothing is reported |
@@ -475,7 +480,7 @@ data the dialect does not have is not run; the general checks run on every diale
 | **Jump target** | error, warning | A jump to a block or label that is not in the program; a target written on two lines; `GOTOF` to a label above, `GOTOB` to one below. A jump to a name that no label has but that begins labels which exist (`GOTOF TOOL` over `TOOL_1_0:`) is a string variable the check cannot see, and is not reported. A target that is worked out while the program runs (`GOTOF "STEP_"<<COUNTER`, `GOTOF R10`) is not judged either |
 | **DO and END** | error | Loop numbers outside 1 to 3, an `END` with no `DO`, loops that cross, a `DO` never ended |
 | **Words in a block** | error | Two speed words or two tool words in one block; more M codes than the control takes (Okuma: eight). Two `T` words with an `M6` (`N20 T7 T8 M6`, the tool in the spindle and the one to fetch) are fine on a milling profile, and so are the words of a message |
-| **Tool word** | warning | A tool word the machine's tool-word format does not describe, and tool words of different lengths in one file. Only where the machine itself states the format |
+| **Tool word** | warning | A tool word the machine's tool-word format does not describe, and tool words of different lengths in one file. Only where the machine itself states the format. An Okuma machine set to *Three-digit offsets* states it, so a six-digit `T010101` is reported there: it is no tool change under that reading |
 | **Program name** | error | A program name that shares its block with other words |
 | **Sequence name** | error | A sequence name or block number with no space or tab behind it |
 | **Digits** | error | A word with more digits than the control stores (Fanuc: eight), once converted to increments, under every reading the machine or the presets allow |
@@ -506,7 +511,36 @@ not cuts.
   says "No machine chosen" and the way out is to choose one.
 
 It is information and not a warning, so that a post which writes no points does not drown
-the report.
+the report. The tool direction `I`, `J`, `K` under Fanuc `G43.5`, `G41.6` and `G42.6` (until
+`G49` or `G40`) is a count that every machine reads alike, so it is not read as a length and
+gets no row.
+
+**The machine's limits.** Spindle speed limit and Travel read the **Limits** of the machine
+([Machines](machines.md#motion-and-limits)) and nothing else: no machine, or no limit set,
+and they say nothing, like every check whose data is missing. Where a machine is chosen but
+lacks a value the program needs (no top speed for a spindle it uses, no travel for an axis it
+positions), the report says so once in a note instead of guessing.
+
+- **Spindle speed limit** compares a speed in rpm with the top speed of its spindle: the
+  plain `S` word with the main spindle's, `S2=` and the like with their own, and a clamp
+  above it. A speed under constant surface speed is no rpm and is not compared; neither is
+  a dwell's number of revolutions. Where the dialect has a code for rpm (`G97` on Fanuc), a speed written before the program says which unit it is in is read as rpm, and its
+  row says so. A dialect with no such code (Klartext, where the speed is always rpm) has no
+  such row. The control would hold the spindle at its top
+  speed or stop; the check names what you wrote.
+- **Travel** compares an absolute position with the lowest and highest position of its
+  axis. A word in machine coordinates (`G53`, `G28`, `SUPA`, `M91`) is an **error**: the
+  control will refuse it. The work offset of a word in work coordinates is not known, so one
+  position says nothing: it may be fine. What can be told is the **span**. If the lowest and
+  the highest position of an axis in the program are further apart than the travel of that axis,
+  no work offset brings them all inside, and the check gives one **warning** for the axis, on the
+  line where the span first grows past the travel. The message names the lowest and the highest
+  position with their lines. A
+  position is converted to the unit of the travel. On a lathe, the travel of **X is a
+  diameter**, as the program writes it. Incremental words, words the machine reads
+  differently, positions under a tilted or turned frame or tool centre point control, and the
+  blocks of a contour definition are not compared; a stretch where the distance mode is not
+  known is compared only where the program sets it, and a note says so.
 
 **A selection** is read together with the lines above it, so the spindle, the cycle and the
 other state at its first line are right. Some checks need the whole program, the program
@@ -521,7 +555,9 @@ you run on a selection.
 - A code a Heidenhain TNC 640 refuses (`M104`, `FN 15`, cycles 1 to 6): which codes it
   refuses depends on a setting of the control generation, which the machine configuration
   does not have.
-- The two-turret spindle rule of Okuma: a two-turret program is two channels.
+- The two-turret rules of Okuma (the `P` codes, `M100`, the spindle commands at a `P` code): a
+  two-turret program is two channels, and
+  [Check Wait Codes](channels.md#the-okuma-p-codes-and-m100) judges them.
 - The Fanuc lathe's `G69` ending a tilted plane instead of `G69.1`, and `G53.1` standing
   directly after `G68.2`.
 
@@ -590,9 +626,12 @@ findings under the table say which and why, once per kind:
   machine position, a cycle, a shift or a value that was not resolved. A Fanuc `G10 L1`,
   `L10` to `L13` writes a tool offset and no coordinate system, so the positions stay known
   after it; any other `G10` (a work offset `L2`, `L20`, or one without `L`) is a setting.
-- **Cycle depths** of Klartext and Sinumerik cycles: the depth is a distance from another
-  parameter, and where both are written the control takes one of them, so a depth would
-  show a place the cycle never reaches.
+- **A cycle that [Expand Drilling Cycles](#expand-drilling-cycles) refuses**, and a cycle
+  gEdit has no description of (Klartext `203`, a tapping cycle): a depth that is a distance
+  from another parameter would show a place the cycle may never reach, so it is counted
+  as not resolved. On Fanuc such a cycle's bottom is its `Z` word under `G90`; under `G91`
+  that word is measured from the R point, so it is not resolved. A cycle that expands is not
+  in this list: see below.
 - **Lathe roughing passes** (`G71` to `G73`): the control works the passes out.
 - An **arc it cannot compute** (Klartext `CT`, `CIP`, a centre written as a variable, a
   radius shorter than half the chord, an Okuma arc by radius `L`).
@@ -616,10 +655,244 @@ chosen, a variable) is counted as not resolved, and so is the taper start of a p
 does not write `R` after a subprogram call (`M98`), a macro call (`G65`) or the start of a
 second program in the file: the called program may have written a taper. Whether a `G00` or
 `G01` ends them on your control is not known yet; the extents keep `R` and do not trust the
-end point.
+end point. A pass that carries an `I` or a `K` (the taper of the older Series 15 tape
+format, or the thread taper of an Okuma `G31` to `G33`) is not read for its taper: the
+start of such a pass is counted as not resolved.
+
+**Okuma `G31`, `G32` and `G33`** are fixed thread cycles: one block cuts one pass and the
+tool returns to where it started, as for the Fanuc single passes, and a block with a new `X`
+cuts the next pass. Their end point is in the ranges; the tapered start is not worked out
+(the sign of `I` says rising or falling on an Okuma, and the Fanuc rule for `R` does not
+apply). `K` (`G31`, `G33`) and `I` (`G32`) shift the start of the thread along its own axis,
+and only that axis is counted as not resolved; the start shift is read for the block it is
+written in. `E` is the change of the lead. `C` is the phase shift of the start for a thread
+with several starts: it is an angle and no move of the C axis, so the extents do not move
+the tool for it.
+
+**Drilling cycles reach their depths.** A drilling, peck or boring cycle that [Expand
+Drilling Cycles](#expand-drilling-cycles) can write out is read the way it would be written:
+the depth is measured **from the surface**, so a Klartext `200` with `Q203` and `Q201`, or
+a Sinumerik `CYCLE81` with `RFP` and `DPR`, reaches the place the drill reaches. So do the
+set-up clearance, the return level, every hole of a repeat count and the point of a
+`CYCL CALL POS`. The extents of a program and of its expansion are the same. On **Fanuc**
+under `G91`, the `Z` word of a cycle block is the depth from the R point, and the R point
+is measured from the initial level, so the word is no step from where the tool stood: the
+depth is worked out from the holes. `K` is the number of holes, each one the plane
+increment further under `G91`; `K0` drills none and moves nothing. The two peck values do not matter here, because they shape the moves between the
+R point and the bottom and never a level outside them: the extents do not ask for them.
 
 A subprogram call is not followed: the called blocks are read where they stand in the
 file. A selection is read with the lines above it, as in the program checks.
+
+### Expand Drilling Cycles
+
+Replaces the drilling, peck drilling and boring cycles of a **milling** program with the
+plain moves they make, so that the program can be read, checked, timed or run on a control
+that does not have the cycle. For each hole it writes the rapid move to the start, the feed
+move to the depth (in one go or in pecks), the dwell, and the way out. It is **all or
+nothing**: if one cycle cannot be written out safely, nothing is changed and every cycle
+that stopped it is listed with its line and its reason.
+
+| Dialect | Cycles it writes out |
+|---|---|
+| **Fanuc mill** | `G73`, `G81`, `G82`, `G83`, `G85`, `G86`, `G89` |
+| **Heidenhain Klartext** | cycles `200` (drilling) and `201` (reaming), called with `M99`, `CYCL CALL` or `CYCL CALL POS` |
+| **Sinumerik** | `CYCLE81`, `CYCLE82`, `CYCLE83` (with `VARI=1`), `CYCLE85`, `CYCLE86`, `CYCLE89`, also under `MCALL` |
+
+**What it writes.** On Fanuc, a cycle block and every block that runs the cycle again
+become the moves of the hole: the rapid to the position, the move to the R point, the
+feed to the bottom and the way out. A word of the block that is not the cycle's (an `M`, an
+`S`, a comment, the block number) stays on the first written block. `G80`, `G98` and
+`G99` stay as written, and the next block that needs the feed or the motion mode the cycle
+left in force gets it written back. A block that moves on its own whatever the mode in force
+(Fanuc `G28` and `G53`, Sinumerik `G74` and `G75`) does not get it; the next block that moves
+does. On Klartext the cycle definition stays as written (it
+does nothing without a call) and the call is replaced by the moves; the program is
+renumbered from there to `END PGM`, because Klartext numbers every block. On Sinumerik
+the `CYCLE…(…)` line becomes the moves; under `MCALL` the positions stay and the moves follow
+each, and the `MCALL CYCLE…` line itself leaves. A motion code (`G0`, `G1`) is written only
+where the mode in force is not the one the move needs, moves follow the distance mode in
+force (`G90`/`G91`), and a number is written the way the cycle writes its own words. A
+computed number gets the decimals of the longest word of the cycle. Nothing is rounded: a
+value that does not fit its word refuses the cycle.
+
+**The pecks.** A peck depth is measured from the surface of the hole, which on Fanuc is the
+R point, in Klartext `Q203` and on Sinumerik the reference plane. Two values of a
+peck cycle are settings of the control and not of the program: how far a high-speed peck
+cycle (`G73`) pulls back between pecks, and how far above the last depth a deep peck cycle
+(`G83`) comes back down at rapid. The form asks for both. They are **prefilled from the
+machine's Motion data** ([Machines](machines.md#motion-and-limits)) and you can change them
+for the run. A program with such a cycle and an empty field is refused.
+
+The field **Units of the peck values** (mm or inch) says in which unit the two values are
+written. It is prefilled from the machine's units in Motion data. When the unit differs from
+the unit of the program at the cycle, the values are converted (by 25.4, exactly). A value
+that does not convert to a number the cycle's words can hold is refused, never rounded.
+Left empty, the values are read in the units of the program.
+
+**What it refuses**, each with a reason in the finding:
+
+- **Tapping and thread cycles**, an oriented bore `G76`, a back bore `G87`, a manual-return
+  `G88`, and any cycle gEdit has no description of. Klartext `203` (its full retract runs at
+  its own feed) and `CYCLE83` with `VARI=0` are two of these on purpose: their moves are
+  not plain ones.
+- **A word the cycle does not know.** A Fanuc cycle block is refused when it carries an
+  address word that is not a code, an `M`, `S`, `T` or `F` word, a block number or a
+  parameter of that very cycle. Writing it out would put the stray word on a rapid move.
+  Two cases are known: the `I` of the small-hole peck mode of `G83` (a mode set by an M code
+  of the machine), and the `,D` of `G73` and `G83`, the clearance of newer controls (`G83 …
+  Q5. ,D1.5`). gEdit does not read `,D` yet, so the block is refused and the value from the
+  form is never used instead.
+- **A return level that is only assumed.** A Fanuc cycle returns to the initial level
+  after `G98` and to the R point after `G99`. If neither the program nor the machine's power-on
+  codes say which is in force, the cycle is refused as *the return level is only assumed*:
+  the two write different moves, and a wrong guess would put the tool somewhere else. Write
+  `G98` or `G99`, or set the machine's power-on codes.
+- **An unknown distance mode** for the same reason, a cycle under radius compensation, in
+  another plane than XY, or in a tilted or turned frame, and a tool level that is not
+  known where the cycle starts.
+- **A value the cycle needs that is missing.** On Sinumerik an argument left empty is
+  refused (*a value the cycle needs is not written and has no default*), although the control
+  would read the empty argument as 0: gEdit does not guess on a cycle that moves a tool. A
+  Klartext `201` with a retract feed `Q208` of 0 is read as the plunging feed `Q206`, as the
+  manual says; a plunging feed `Q206` of 0 (a feed of 0 or less) is refused.
+- **A value that is a variable or a calculation**, a value that changes how the cycle moves
+  beyond its default (a feed factor, a display mode), and a value whose reading depends on the
+  machine when no machine is chosen.
+- **A call, a jump, a loop or a pattern while a cycle is in force.** A subprogram call
+  (`M98`, `G65`, `CALL`, `CALL LBL`), a jump or a loop (`GOTO`, `IF`, `WHILE`) or a pattern
+  cycle such as `HOLES1(…)` in a block that runs a cycle, or in a block under a cycle that
+  stays in force (a Fanuc cycle, a Sinumerik `MCALL`, a Klartext `M89`): the control would run
+  the cycle at the places the subprogram or the pattern gives, which gEdit does not follow.
+- **Blocks under `MCALL` that run the cycle without a position.** A block that writes only a
+  feed or a spindle speed while `G0` or `G1` is in force, or only `G0`/`G1`, runs the cycle
+  again on the control; written out, the hole would be missing.
+- **A block skip (`/`)** on a cycle block, on a line that holds cycle data (a definition, a
+  Fanuc drilling-data line), on a cancel or return mode while a cycle is in force, or on a block
+  that gets the motion code or the feed back from the cycle. Written out, the plain moves would
+  not be skipped the same way.
+- **`K0` with a position** (Fanuc): the manual does not say whether the control still goes to
+  the position. `K0` without a position is not refused: the control stores the values and
+  drills nothing, so the block stays as written, block number and all, and an information row
+  says so. The first move written after it carries `G0` and the feed, which ends the cycle on
+  the control as `G80` does.
+  A **repeat count above 9999** is refused as well.
+- **`G86` under any spindle code but `M3`.** The manual does not say which way the spindle
+  restarts after the stop, so `G86` is written out only while the clockwise spindle code
+  (`M3`) is in force. Under `M4`, or any other running-spindle code, it is refused
+  (*variant-unknown*, "M4 in force"), and so it is when no spindle direction is known at the
+  cycle (*value missing*, "the spindle direction in force").
+- **`G43`, `G44` or `G49` in a cycle block.** A tool length offset in the block of the cycle
+  is refused, because it changes the levels the cycle uses.
+- **Levels and depths that cannot be right.** A set-up clearance or a return distance below
+  0; a return level that is not above the surface; a depth of 0 and no other depth; a signed
+  relative depth above 0 (the bottom would not be below the start); a missing `SDIR` on a
+  Sinumerik `CYCLE86`.
+- **A motion code that is not known before the cycle.** If the code in force before the cycle
+  is not known, it could not be written back after it.
+- **A Klartext call on a pattern** (`CYCL CALL PAT`) and a call from below the surface
+  (the control would go to a safe height first, which the cycle does not give). `CYCL CALL POS`
+  from above the surface is written out: the tool goes to the point of the call in the plane
+  first, and a tool-axis value in the call shifts the surface of the cycle. The `F` of a
+  `CYCL CALL POS` is the feed of the move to that point for **its own block only**: the next
+  block runs at the feed in force before the call.
+- **A selection that cuts a cycle** (its values above the selection, or blocks that run it
+  below), a cycle whose mode would have to be restored below the selection, and a Klartext
+  selection that does not reach `END PGM` (the blocks below would need new numbers).
+
+**Turning programs** are refused whole: the drilling cycles are written out on milling
+programs only.
+
+**Undo.** The program is replaced in one step, so one undo takes it back.
+
+Under `CYCLE83` a further-peck reduction `_DAM` of 0 is read as no reduction. A
+`CYCLE83` whose first retract `_DIS1` is 0 (the control works the distance out itself) is
+refused. The newer arguments of `CYCLE82` (`_VARI`, `S_ZA`, `S_FA`, `S_ZD`, `S_FD`) are
+accepted only when they are 0 or left out; any other value is refused until gEdit knows
+what they do.
+
+**The way out of `CYCLE86`.** The control brings the tool back to the centre of the hole
+as part of its move up to the return plane. gEdit writes the move to the centre at the
+safety distance above the surface first and then the rapid up to the return plane. Both
+end at the same point, so the program is the same where it counts; the path between is not
+the control's, so do not use the written-out moves to judge clearance beside a wall.
+
+The expansion is also what the other scripts read: the [time estimate](#statistics-and-time)
+times the same moves, and [Extents](#extents) counts the depths of the holes.
+
+### Statistics and Time
+
+How long a program runs and how far it moves: the feed length and the rapid length per tool
+(per channel where the program has channels), the tool changes, and a time estimate from
+the machine's **Motion data** ([Machines](machines.md#motion-and-limits)). It opens a table
+in a new document, or comma-separated values for a spreadsheet, and changes nothing. The
+form takes the rapid rates of X, Y and Z (and A, B, C in degrees per minute where the
+program turns them at rapid), the kind of rapid move, the top cutting feed, the tool-change
+time and the two peck values; every field is prefilled from the machine and can be changed
+for one run.
+
+| Column | |
+|---|---|
+| **Feed length**, **Rapid length** | Always given, in the program's units |
+| **Tool changes** | One per tool the program loads |
+| **Feed time**, **Rapid time**, **Dwell time**, **Tool-change time** | The time of each kind; a dwell counts as written (seconds, revolutions at the speed in force, or the lines of a Klartext dwell) |
+| **Total time** | The four times together |
+| **Not estimated** | The blocks the estimate leaves out, with their lines |
+
+**Never a number gEdit made up.** The lengths are always there. A time needs a value of the
+machine: a rapid time needs the rapid rates of the axes that move, a tool-change time the
+tool-change time. Where the machine does not give it, the cell says **not set**, a finding
+names the missing value, and the total says **not set** too. A field left empty is never
+replaced by a typical one. Fill the machine's Motion data in once and the form is ready.
+
+**How a move is timed.**
+
+- A **feed move** takes its length divided by its feed, at 100 %. A feed above the top
+  cutting feed is timed at the top feed, and the message counts those moves. A feed per
+  revolution is multiplied by the spindle speed in force. Under **constant surface speed**
+  (`G96`) the speed follows the diameter along the move, held by the clamp in force
+  (`G50 S`, `LIMS=`) or else by the machine's top spindle speed; the move is split where the
+  clamp starts to hold. A move in inverse time (`G93`) takes 1 / F minutes. On Sinumerik `G931`
+  (a feed given as the **travel time**) a block takes F seconds as written; if the length
+  divided by that time is above the top feed, the move takes the length divided by the top
+  feed instead.
+- A **rapid move**, "Straight", moves all axes on one line at the rate of the slowest axis that
+  moves: the longer, safer estimate. "Each axis at its own rate" takes the longest of
+  each axis's distance divided by its rate. A rapid kind left empty is read as straight, and
+  the message says so.
+- A **drilling cycle** is timed move by move, the very moves [Expand Drilling Cycles](#expand-drilling-cycles)
+  would write, so the estimate of a program and the estimate of its expansion agree. The two
+  peck values and their units come from the form.
+
+**Not estimated.** A block the estimate cannot time is never guessed: it is counted with its
+line, in the table and as a finding. The kinds: a cycle the control works out the passes of
+(the Fanuc lathe `G71` to `G73` and their contour blocks, a multi-pass thread cycle), a
+thread, a Klartext free contour (FK), a cycle called on a pattern, an Okuma LAP block,
+a feed per tooth, a subprogram call, a jump or a loop (each block counts once and is not
+followed; the same detector as the expansion's, so it also covers `CALL LBL`, `CALL PGM`,
+`PCALL`, `EXTCALL`), a move of a rotary axis without its rate, a cycle gEdit has no description of or
+whose holes it refuses (the block is named by the reason the expansion gives, and a block under a
+cycle that stays in force, such as a feed alone under `MCALL`, by that cycle), a peck cycle
+without its peck value, a move whose start or end is not
+known (the first move of an axis, or the first after a move to a machine position), a feed
+move whose feed cannot be read, and a dwell whose time cannot be read. A **dwell** that
+cannot be read in a drilling cycle leaves out
+that dwell only: the moves of the holes are still counted.
+
+**Block skip.** A block with a block skip (`/`) is timed like any other: the estimate is for a
+run with the block skip **off**. If you run with it on, skipped blocks do not run and the
+real time is shorter by what they take.
+
+**The estimate is a lower bound**, and the message says so: it counts 100 % feed and rapid
+override, no acceleration, no time to read a block and no look-ahead. A real cycle time is
+longer, and longer still by what the listed blocks add. Use the figure to compare two
+versions of a program or two tools, or to see roughly what a program costs, not to quote
+a cycle time.
+
+**Channels.** A program with channels is reported per channel. The channels run at the same
+time, so the message names the longest channel's time and never adds the channels up.
+
+**A selection** is read together with the lines above it, as in the program checks.
 
 ### Address arithmetic
 
@@ -640,10 +913,22 @@ what it left, so read the message.
 It never guesses what a number is worth. Each word's value is read the way **the
 machine** reads it ([Machines](machines.md)) and the result is written back in the word's
 own form: a point stays a point, and a word without a point stays a whole number of
-increments, rounded half away from zero and reported when it had to round. With **no
+increments, rounded half away from zero and reported when it had to round. A change too
+small for the form of its word rounds back to the value the word had: the word stays, a
+*rounded* row says so, and the message begins *Changed nothing: 1 word rounded back to the
+value it is written with* (`F200` plus 0.01 on an IS-B lathe stays `F200`). With **no
 machine chosen**, a word whose value depends on the machine is left as written and listed,
 unless every preset of the dialect would write the same result. A count (a repeat count
 `K`, a dwell, a block number) changes only when you choose its address.
+
+**The tool direction is not an arc centre.** On a Fanuc mill, `I`, `J` and `K` under `G43.5`,
+`G41.6` or `G42.6` are the direction of the tool, not the centre of an arc, and they stay so
+in the blocks that follow until `G49` or `G40` ends the mode, also when those blocks do not
+write the code again. A multiply or divide leaves them as written, even with the arc-centre
+option on, and says so with a note (*… a parameter of G43.5, not an arc centre*); scaled,
+the tool would tilt. After `G49` or `G40` the same words are arc centres again and are
+scaled with the end point as before. Only the three words are read this way: the `Q` of a
+modal `G83` under `G43.5` is still a length.
 
 Examples: `Z1000` minus 0.5 is `Z500` on an increment machine (IS-B) and `Z999.5` on a
 calculator-type one, and is left with no machine; `Z10.` becomes `Z9.5` on all three. On an
@@ -771,12 +1056,20 @@ per refused block, with the block as written and the reason in plain words.
 - **A machine position**: `G53`, `G28`, `G30`, `M91`, `M92`, `SUPA`. A place on the
   machine, not on the part.
 - **Inside a frame**: a tilted plane, a rotation, a mirror, a scaling, polar coordinates
-  (`G16`), `CYCLE800`, `G68`. The numbers there are not the part's coordinates. A frame
+  (`G16`), `CYCLE800`, `G68`, and on a Sinumerik also `ROTS`, `AROTS` and `CROTS` (a rotation
+  by solid angles), `TOFRAME` and `TOROT` with their `X`, `Y` and `Z` forms (the coordinate
+  system turned along the tool) and `PAROT` (turned with the workpiece). A bare `ROT` or
+  `TRANS` ends the first group, `TOROTOF` the second and `PAROTOF` the third. The numbers there are not the part's coordinates. A frame
   that is closed again (`G69`, `G15`, `PLANE RESET`, `CYCLE800()`) ends it, and so does a
   Klartext cycle 19 or `PLANE SPATIAL`, `PROJECTED` or `EULER` with every angle at zero, and a `CYCL DEF 19.1` that names no angle.
 - **A rotary axis without tool centre point control**, see the next section.
-- **A cycle it has no role for**: every Okuma cycle and every lathe cycle but the Fanuc
-  multiple repetitive cycles `G70` to `G76` (their contour blocks and end points are moved,
+- **A cycle it has no role for**: every Okuma cycle (but the change points `XA=`, `XB=`, `ZA=`, `ZB=` of the LAP code `G84`: they move with their axis, `X` as a diameter, while the mode is known to be absolute) and every lathe cycle but the Fanuc
+  drilling cycles `G83` to `G89` (their `Z`, and `X` for `G87` to `G89`, move with a shift; the
+  `R` is a distance from the start level in system A and is left (on a machine set to the
+  *Series 15 format* it can be an absolute position, parameter 5102 bit 6, and Translate says
+  so in an information row), and in system B it can be
+  absolute or incremental, so a block with `R` is refused there) and the multiple repetitive
+  cycles `G70` to `G76` (their contour blocks and end points are moved,
   and their depths, allowances, the relief `R` of `G74` and `G75`, the taper `R` of `G76`, and
   counts are left as written **and listed** as values of the cycle), a Fanuc `G65` that hands a
   chosen address a number, a Sinumerik or Klartext cycle the database has not reviewed, and
@@ -807,8 +1100,11 @@ per refused block, with the block as written and the reason in plain words.
 - **A pole and the moves around it, or an arc whose centre cannot be moved with its end
   point**, see "The Klartext pole and arc geometry" below.
 - **A distance mode that is not known**: nothing before the block says `G90` or `G91`.
-  Adding to an incremental word would add the offset twice, so a word is moved only while
-  the mode is known to be absolute. A program that never writes `G90` falls under this
+  Adding to an incremental word would add the offset twice, so a position word (an axis, its
+  incremental twin, an arc centre, `R`) is moved only while the mode is known to be absolute.
+  A feed, a dwell, a count or another word that is not a position does not depend on the
+  mode and changes in any: `F200` plus 10 is `F210` under `G90`, under `G91` and with no
+  distance mode written. A program that never writes `G90` falls under this
   unless the machine says what the control starts in
   ([Machines](machines.md#the-power-on-distance-mode)).
 - **A code the database does not know** under the move letter (a `G` code), in a block it
@@ -823,6 +1119,10 @@ word whose reading **depends on the machine**; and a **value of a cycle** of a c
 (the depths, allowances and taper of a Fanuc lathe cycle, which are not positions). A count you
 choose on purpose still changes (`K` of `G83`). A Sinumerik `Z=AC(3.25)` is an absolute
 position and is moved; `Z=IC(2)` is an incremental distance and is left.
+
+A word that is no position of the chosen axis is never changed, whatever its letter. With the
+address C chosen, the phase shift `C` of an Okuma thread cycle `G31` to `G33` is an angle, not
+a move of the C axis, and stays as written.
 
 At most 500 rows are listed, and the message says how many more there were. Its last
 sentence names the machine ("Machine 'Lathe 2': numbers without a point are increments of
@@ -964,9 +1264,30 @@ whether the machine reads `X` as a diameter or a radius.
 **A rotary axis.** A rotary move by a value other than 0 from a position gEdit does not know
 counts as turned, like an absolute one, and with tool centre point control off a shift is
 refused while the axis stands turned. A block that tilts the plane (`PLANE … TURN`, `MOVE`,
-`G53.1`, `CYCLE800`) leaves the rotary axes not known until the program writes them. On a
-5-axis machine with tool centre point control, where the program coordinates turn with the
-table, a shift stays allowed with the table turned.
+`G53.1`, `G53.6`, `CYCLE800`) leaves the rotary axes not known until the program writes
+them. A Sinumerik `CYCLE800` with every angle at 0 (the swivel to the home position, which
+many programs start with) ends the tilt and leaves the axes as gEdit knew them. A Klartext
+`CYCL DEF 19` turns the rotary axes only when its `19.1` writes a feed `F` or a clearance
+`ABST`; with angles alone gEdit takes the axes as they were. On a 5-axis machine with tool
+centre point control, where the program coordinates turn with the table, a shift stays
+allowed with the table turned. On a Fanuc mill that holds for the table coordinate system
+(parameter 19696 bit 5 = 0), which gEdit assumes; check your machine. Translate says so once per
+run, at the first block it moves under tool centre point control: an information row (*Block
+under tool centre point control*) and a sentence at the end of the message, *Tool centre point
+control: the shift assumes the table coordinate system (parameter 19696 bit 5 = 0). Check your
+machine.* Nothing is refused for it.
+
+**A Sinumerik incremental move after a shift.** With the control's setting `SD42440` at 1, an
+incremental move also travels the change of the zero point that a `TRANS`, an `ATRANS` or a
+work offset (`G54` to `G57`, `G500`) made since the axis was last written absolutely. A turn
+or a mirror cannot carry that over, so Rotate and Mirror refuse such a move (*shift-increment*)
+until the program writes the axis absolutely. gEdit does not know your setting and takes the
+safe side. Two cases decide it block by block. A block that changes the work offset and moves
+to an absolute position on an axis in the same block (`G54 G0 X0 Y0 Z100`) has taken the
+change along on those axes, so the incremental moves after it are turned or mirrored as
+written. A block that changes the work offset and moves incrementally itself (`G55 G91 G1 X5
+Y5`) is refused, because its own increments travel the change of the offset too. A `TRANS`
+written as data is no move and makes no axis absolute.
 
 **Jumps** (all three). A jump, a loop or a block marked with `/` can reach a block with another distance
 mode, plane, unit, frame or cycle than the lines above it have. Where it does, the block is
@@ -1009,9 +1330,11 @@ written yet) refuses the run.
 
 **A rotary axis.** A rotary word that leaves its axis at 0 is accepted. A rotary axis that
 moves to another angle, or stands at one, refuses the move. After a block that tilts the
-plane (`PLANE … TURN`, `MOVE`, `G53.1`, `CYCLE800`) the rotary axes count as not known until
-the program writes them. A `PLANE` with every angle at 0, and `PLANE RESET`, turns no
-axis and leaves them as they were.
+plane (`PLANE … TURN`, `MOVE`, `G53.1`, `G53.6`, `CYCLE800`) the rotary axes count as not
+known until the program writes them. A `PLANE` with every angle at 0, and `PLANE RESET`,
+turn no axis for gEdit: it keeps what it knew about the rotary axes and does not assume the
+home position the control turns them to (that depends on `M138` and the settings of the
+machine).
 
 **The workpiece blank.** A Klartext `BLK FORM` is left as written, with one information row
 per run. Check the blank in the control's graphics.
@@ -1071,7 +1394,7 @@ selects another plane is refused.
 | | |
 |---|---|
 | **Flips** | Every absolute `Z` about **Mirror Z**; an incremental `Z` and `W` change sign; the arc centre word along Z (`K`) changes sign |
-| **Changes sign** | `Y`, about the turning axis (`Y' = −Y`, whatever **Mirror Z** is), and so do an incremental `Y` and the arc centre word `J` |
+| **Changes sign** | `Y`, about the turning axis (`Y' = −Y`, whatever **Mirror Z** is), and so do an incremental `Y` and the arc centre word `J`. This is the default, *Y turns with Z*; with the machine setting *Counter spindle: Y stays* ([Machines](machines.md#defining-a-machine)) `Y`, an incremental `Y` and `J` are left as written, and `Z`, `W` and `K` still turn. Lathes of Fanuc, Okuma and Sinumerik have the setting |
 | **Stays** | `X`, `U` and `I`, and the radii |
 | **Swaps** | `G2` and `G3`, `G41` and `G42`, from the code database as above |
 
@@ -1116,7 +1439,9 @@ the numbers would make the cycle cut the wrong way:
   taper: one that cannot be read, and any after a subprogram or macro call. A one-shot code
   other than a dwell (`G04`), or a plane code, ends the taper. `R0` is no taper, and a
   turning taper (`G90`, `G77`, along X) in force does not change sign under the Z mirror. The
-  same pass without a taper is points and is mirrored. A tapered threading pass (`G92`,
+  same pass without a taper is points and is mirrored. (Kept refused in this version. A later
+  one may let `R` of `G90` and `G92` stay and change the sign of `R` of `G94` and `G79`; `G92`
+  would stay refused as a thread.) A tapered threading pass (`G92`,
   `G78`) is not listed here: it is refused as a thread above, with that one reason.
 
 The Z mirror is for turning programs only. A milling program is mirrored about a line in the
@@ -1176,6 +1501,7 @@ words some of them in its own terms, for example for a cycle call with a positio
 | All three | `intermediate-point` | The return to the reference point goes through this absolute intermediate point, which the transform would move; write it as an incremental zero return or check it by hand. |
 | Rotate and mirror | `rotary-word` | A rotary axis moves to an angle other than 0 here, or stands at one; turning or mirroring the path would need its angle changed too, which gEdit does not do. |
 | Translate | `rotary-turned` | A rotary axis stands turned here and tool centre point control is off, so a shift of the program is not a shift of these machine axes. |
+| Rotate and mirror | `shift-increment` | An incremental move along an axis the program has not written absolutely since the zero point was shifted or the work offset changed (`TRANS`, `ATRANS`, `G54` to `G57`, `G500`); with the control's setting `SD42440` at 1 such a move also travels the change of the shift, which a turn or a mirror cannot carry over. Write the axis absolutely first. |
 
 **The program around the block**
 
@@ -1189,7 +1515,7 @@ words some of them in its own terms, for example for a cycle call with a positio
 | Translate | `axis-unwritten` | The shift moves an axis the program has not written before this block, so where a cut starts is not known. |
 | Rotate and mirror | `position-unknown` | gEdit does not know where the tool stands at the start of this block (an axis not written yet, a machine position, a calculation, a jump, a tilted plane) and the transform needs that point. A cut that starts from an axis the program has not written yet is the same case. |
 | All three | `unknown-code` | A code the database for this control does not know; it may change how the positions after it are read. |
-| All three | `word-unknown` | A word gEdit cannot place: it may be a position, an angle or a direction, and it would be left as written. |
+| All three | `word-unknown` | A word gEdit cannot place: it may be a position, an angle or a direction, and it would be left as written. Rotate and mirror also give it for the **tool direction** `I`, `J`, `K` under Fanuc `G43.5`, `G41.6` or `G42.6` (until `G49` or `G40`), in the block that writes the code and in the blocks it governs, when the component lies along an axis the operation moves and is not 0: the path would turn and the direction would not. Translate leaves the direction as written, as a shift does not change it. |
 
 **Selections**
 
@@ -1254,6 +1580,8 @@ words some of them in its own terms, for example for a cycle call with a positio
 |---|---|
 | Machine position | A position in machine coordinates or an incremental return to the reference point; left as written |
 | Word left | Translate only: a word gEdit cannot place; left as written (a shift does not change angles or lengths) |
+| Block under tool centre point control | Translate on a Fanuc mill: the shift assumes the table coordinate system (parameter 19696 bit 5 = 0). One row per run, at the first block the shift moves under tool centre point control |
+| Drilling R point (Series 15 format) | Translate on a Fanuc lathe set to the *Series 15 format*: the `R` of a drilling cycle is left as written, but on such a machine it can be an absolute position (parameter 5102 bit 6). If yours reads it as absolute, shift it too. Also when only X is shifted |
 | Rounded | Rotate and mirror: **one row per run**, at the first block with a rounded word, with the count of rounded blocks |
 | Blank | Rotate and mirror, Klartext: the workpiece blank (`BLK FORM`) is left as written. It only sets the blank that the control's graphics show. Check it there. One row per run |
 

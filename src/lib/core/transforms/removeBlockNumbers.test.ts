@@ -5,10 +5,11 @@
 // a folder. `options` is the one option this transform has (M6, WP6.3): `keepReferenced`,
 // which is on wherever the profile knows what a block-number reference looks like.
 
-import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readTransformCases } from '../../../../tests/unit/helpers/transformCases';
+import type { CaseMeta } from '../../../../tests/unit/helpers/transformCases';
 import { noMachine } from '$lib/core/machines/effective';
 import { BUILTIN_PROFILE_JSON } from '$lib/data/profiles';
 import { compileProfile } from '$lib/core/profiles/compile';
@@ -47,22 +48,6 @@ function context(
   return { cp, codes: NO_CODES, options, firstLine, document, machine: noMachine(cp.profile) };
 }
 
-interface CaseMeta {
-  note: string;
-  profile?: string;
-  /** A real selection run: `input.nc` is the whole program and this is the scope. */
-  scope?: { startLine: number; endLine: number };
-  /** A bare fragment with no document behind it. */
-  firstLine?: number;
-  options?: Record<string, unknown>;
-  expect?: {
-    summary?: string;
-    skipped?: { line: number; severity: string }[];
-    warnings?: string[];
-    preflight?: string | null;
-  };
-}
-
 interface GoldenCase {
   name: string;
   meta: CaseMeta;
@@ -74,28 +59,15 @@ interface GoldenCase {
 }
 
 function goldenCases(): GoldenCase[] {
-  return readdirSync(CASES_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()
-    .map((name) => {
-      const meta = JSON.parse(readFileSync(join(CASES_DIR, name, 'options.json'), 'utf8')) as CaseMeta;
-      const document = readFileSync(join(CASES_DIR, name, 'input.nc'), 'utf8').split('\n');
-      const expectedDocument = readFileSync(join(CASES_DIR, name, 'expected.nc'), 'utf8').split('\n');
-      if (meta.scope) {
-        const { startLine, endLine } = meta.scope;
-        return {
-          name,
-          meta,
-          input: document.slice(startLine - 1, endLine),
-          expected: expectedDocument.slice(startLine - 1, endLine),
-          firstLine: startLine,
-          document,
-          expectedDocument,
-        };
-      }
-      return { name, meta, input: document, expected: expectedDocument, firstLine: meta.firstLine ?? 1, document: undefined, expectedDocument };
-    });
+  return readTransformCases(CASES_DIR).map((golden) => ({
+    name: golden.name,
+    meta: golden.meta,
+    input: golden.input,
+    expected: golden.expected,
+    firstLine: golden.firstLine,
+    document: golden.scoped ? golden.document : undefined,
+    expectedDocument: golden.expectedDocument,
+  }));
 }
 
 const CASES = goldenCases();

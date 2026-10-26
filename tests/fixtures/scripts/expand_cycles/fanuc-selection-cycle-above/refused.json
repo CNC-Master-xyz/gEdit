@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be written out as plain moves: 1 cycle cut by the selection. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "N60 X20.: the selection cuts this cycle: its values, or blocks that run it, are outside the selection (G81 (line 7)).",
+      "reason": "selection-inside"
+    }
+  ]
+}

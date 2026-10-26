@@ -19,6 +19,7 @@
 // spelling and the duplicate check sees the same key the lookup will.
 
 import { normalizeCode } from './lookup';
+import { readDwell, readExpand, readExpandRole } from './expand';
 import { loadTemplates } from '$lib/core/templates/load';
 import type { CodeDb, CodeEntry, CodeParam, CodeSets } from './types';
 import type { NumberClass } from '$lib/core/machines/types';
@@ -62,6 +63,9 @@ const SETS_VALUES = {
   // member (`path: 'arc'`, `radiusComp: 'on'`), checked in `readSets`.
   arcDirection: ['cw', 'ccw'],
   compSide: ['left', 'right'],
+  // Phase 4 (P4b prelude, plan §6.3): the level a drilling cycle returns to while the code is
+  // in force (Fanuc `G98` initial, `G99` the R point).
+  cycleReturn: ['initial', 'r-plane'],
 } as const satisfies Record<string, readonly string[]>;
 
 /** P10: the `sets` members that are flags, `true` or absent (`false` is read as absent). */
@@ -85,6 +89,8 @@ const POSITIONS = ['tool-axis', 'none', 'other', 'mode'] as const;
 const IN_PLANE = ['angle', 'side'] as const;
 /** P4a fix B1 (NC-8, §7 #316): what the sign of a value is (`CodeParam.signOf`). */
 const SIGN_OF = ['next-move'] as const;
+/** D6-5: how an argument reads as no frame (`CodeParam.frameZero`). */
+const FRAME_ZERO = ['zero', 'onesDigit'] as const;
 /** P4a fix B1 (NC-5, §7 #312): what a code does to the order the blocks run in (`CodeEntry.flow`). */
 const FLOWS = ['jump', 'label', 'branch', 'else', 'branch-end', 'loop', 'loop-end', 'repeat'] as const;
 
@@ -97,11 +103,17 @@ const AXIS_WORDS = ['data', 'machine'] as const;
 const FRAMES = ['open', 'close'] as const;
 /** M10 review (NC-2): `CodeEntry.pole`. */
 const POLES = ['set', 'use'] as const;
+/** v1.2.0 T144: `CodeEntry.machineType` (read only by the cycle form's filter), the values of a profile's `machineType`. */
+const MACHINE_TYPES = ['mill', 'lathe'] as const;
 
 /** M10 (WP10.2). The states `CodeEntry.conflicts` may name, besides `frame:<group>`. */
 const CONFLICTS = ['tcp', 'radiusComp', 'lengthComp', 'cycle', 'surfaceSpeed', 'feedNotPerMinute'] as const;
 
-/** M10 (WP10.2). A list of conditions: one of `CONFLICTS` or `frame:<group>`, `!` in front to negate. */
+/**
+ * M10 (WP10.2). A list of conditions: one of `CONFLICTS`, `frame:<group>` or (manual-check fix
+ * D6-3) `code:<code>`, that one code in force (`G43.4` refuses `G68`, not `G68.2`, which shares
+ * its frame group); `!` in front to negate.
+ */
 function readConflicts(raw: unknown, path: string, report: (p: CodeDbProblem) => void): string[] | undefined {
   if (raw === undefined) return undefined;
   if (!Array.isArray(raw)) {
@@ -114,9 +126,9 @@ function readConflicts(raw: unknown, path: string, report: (p: CodeDbProblem) =>
     const name = text?.startsWith('!') ? text.slice(1) : text;
     const ok =
       name !== undefined &&
-      ((CONFLICTS as readonly string[]).includes(name) || /^frame:[A-Za-z][A-Za-z0-9]*$/.test(name));
+      ((CONFLICTS as readonly string[]).includes(name) || /^frame:[A-Za-z][A-Za-z0-9]*$/.test(name) || /^code:[A-Za-z][A-Za-z0-9.]*$/.test(name));
     if (ok && text !== undefined) out.push(text);
-    else report({ path: `${path}[${i}]`, message: `has to be one of ${CONFLICTS.join(', ')} or frame:<group>` });
+    else report({ path: `${path}[${i}]`, message: `has to be one of ${CONFLICTS.join(', ')}, frame:<group> or code:<code>` });
   });
   return out.length > 0 ? out : undefined;
 }
@@ -317,6 +329,15 @@ function readParams(
     const inPlane = oneOf(item.inPlane, IN_PLANE, `${at}.inPlane`, report);
     if (inPlane !== undefined) param.inPlane = inPlane;
     if (flag(item.keepsRotary, `${at}.keepsRotary`, report)) param.keepsRotary = true;
+    // v1.2.0 manual-check fix round (D6-5, D6-6).
+    if (flag(item.turnsRotary, `${at}.turnsRotary`, report)) param.turnsRotary = true;
+    const frameZero = oneOf(item.frameZero, FRAME_ZERO, `${at}.frameZero`, report);
+    if (frameZero !== undefined) param.frameZero = frameZero;
+    if (item.frameCloses !== undefined) {
+      const closes = typeof item.frameCloses === 'string' ? item.frameCloses : undefined;
+      if (closes === undefined || closes === '') report({ path: `${at}.frameCloses`, message: 'has to be the argument as written, such as "\"0\""' });
+      else param.frameCloses = closes;
+    }
     const signOf = oneOf(item.signOf, SIGN_OF, `${at}.signOf`, report);
     if (signOf !== undefined) param.signOf = signOf;
     // v1.2 NC fix round (T009, T012): the axis a length lies along, or the working plane. A
@@ -353,6 +374,10 @@ function readParams(
       if (twin !== undefined && twin.trim() !== '') param.twin = twin.trim().toUpperCase();
       else report({ path: `${at}.twin`, message: 'twin has to be the address of another parameter of this code' });
     }
+    // Phase 4 (P4b prelude, plan §6.3): what the parameter is to the expansion of a drilling
+    // cycle; kept only on an entry with `expand` (checked in `readEntry`).
+    const expandRole = readExpandRole(item.expandRole, `${at}.expandRole`, report);
+    if (expandRole !== undefined) param.expandRole = expandRole;
     // B1: the block of a two-block cycle this parameter belongs to; only on such an entry.
     if (item.block !== undefined) {
       if (item.block !== 1 && item.block !== 2) report({ path: `${at}.block`, message: 'block has to be 1 or 2' });
@@ -552,6 +577,9 @@ function readEntry(
   const pole = oneOf(raw.pole, POLES, `${path}.pole`, report);
   if (pole !== undefined) entry.pole = pole;
   if (flag(raw.call, `${path}.call`, report)) entry.call = true;
+  // P4b fix batch 3 (NC-6): a feed for this block only (`CYCL CALL POS … F300`); the modal
+  // interpreters read it from the loaded database (rule 17).
+  if (flag(raw.blockFeed, `${path}.blockFeed`, report)) entry.blockFeed = true;
   if (flag(raw.shift, `${path}.shift`, report)) entry.shift = true;
   // P4a integration (§7 #299): a shift whose all-zero block is the reset (`_nc_geom.py` reads it).
   // P4a fix B1 (CODE-13): only on a shift or a data code of the offset group, as types.ts says.
@@ -581,6 +609,15 @@ function readEntry(
         report({ path: `${path}.params[${i}].keepsRotary`, message: 'keepsRotary needs positionsRotary on the entry' });
         delete param.keepsRotary;
       }
+      if (param.turnsRotary && entry.positionsRotary !== true) {
+        report({ path: `${path}.params[${i}].turnsRotary`, message: 'turnsRotary needs positionsRotary on the entry' });
+        delete param.turnsRotary;
+      }
+      if ((param.frameZero !== undefined || param.frameCloses !== undefined) && entry.frame !== 'open') {
+        report({ path: `${path}.params[${i}].frameZero`, message: 'frameZero and frameCloses need "frame": "open" on the entry' });
+        delete param.frameZero;
+        delete param.frameCloses;
+      }
       // v1.2 NC fix round (T013): a tool-offset value only tells a shift code's blocks apart.
       if (param.toolOffsetValues !== undefined && entry.shift !== true) {
         report({ path: `${path}.params[${i}].toolOffsetValues`, message: 'toolOffsetValues needs shift on the entry' });
@@ -591,6 +628,26 @@ function readEntry(
   }
   const sets = readSets(raw.sets, `${path}.sets`, report);
   if (sets) entry.sets = sets;
+  // Phase 4 (P4b prelude, plan §6.3): the expansion schema (after the parameters and `sets` it
+  // refers to) and the dwell form. A role without a schema means nothing and is dropped.
+  const expand = readExpand(raw.expand, entry, `${path}.expand`, report);
+  if (expand !== undefined) entry.expand = expand;
+  else if (entry.params?.some((p) => p.expandRole !== undefined)) {
+    entry.params.forEach((param, i) => {
+      if (param.expandRole === undefined) return;
+      report({ path: `${path}.params[${i}].expandRole`, message: `expandRole needs a schema (expand) on ${entry.code}` });
+      delete param.expandRole;
+    });
+  }
+  const dwell = readDwell(raw.dwell, entry, `${path}.dwell`, report);
+  if (dwell !== undefined) entry.dwell = dwell;
+  if (flag(raw.orient, `${path}.orient`, report)) entry.orient = true;
+  // v1.2.0 T144: the machine type a code is for, where one database serves both. Its only
+  // reader is the cycle form's `cycleEntries`, once the templates work's filter is merged
+  // (until then nothing reads it); anything else is reported and dropped, so the entry is
+  // offered to every program, as an unmarked one is.
+  const machineType = oneOf(raw.machineType, MACHINE_TYPES, `${path}.machineType`, report);
+  if (machineType !== undefined) entry.machineType = machineType;
 
   if (raw.aliases !== undefined) {
     if (!Array.isArray(raw.aliases)) {

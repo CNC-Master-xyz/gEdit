@@ -222,7 +222,7 @@
       {
         "line": 12,
         "severity": "warning",
-        "message": "1 word, first X50 (line 12): the value depends on how the machine reads a number (is-b: 0.05 mm; is-c: 0.005 mm; calculator: 50 mm). Not resolved; choose a machine for this document to read them.",
+        "message": "1 word, first X50 (line 12): the value depends on how the machine reads a number (is-b: 0.05 mm; is-a: 0.5 mm; is-c: 0.005 mm; calculator: 50 mm). Not resolved; choose a machine for this document to read them.",
         "reason": "machine-dependent"
       },
       {

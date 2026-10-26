@@ -163,6 +163,21 @@ class TestSiemensMillToolChange(unittest.TestCase):
         self.assertTrue(result.ok, result.stderr)
         self.assertEqual([row["tool"] for row in result.json()["rows"]], ["T1", "T3"])
 
+    def test_d3_4a_a_tool_changer_lathe_changes_the_tool_at_m6(self):
+        # Manual-check fix D3-4a (5040#3 TCT): with a tool changer T selects, M6 changes; the
+        # turret (the default) changes at T. Both languages read one rule (r6Variants.test.ts).
+        program = "O1\nT0101\nG00 X50. Z2.\nM06\nG01 Z-10. F0.2\nT0202 M06\nT0300\nM06\nM30\n"
+        rows = {}
+        for choice in ("atc", "turret"):
+            context = helpers.effective_context(LATHE, variant=("toolChange", choice))
+            full = helpers.make_context(profile=context["profile"], codes=context["codes"])
+            full["machine"] = context["machine"]
+            result = helpers.run_script("tool_list.py", stdin=program, context=full)
+            self.assertTrue(result.ok, result.stderr)
+            rows[choice] = [(row["tool"], row["line"]) for row in result.json()["rows"]]
+        self.assertEqual(rows["atc"], [("T1", 4), ("T2", 6), ("T3", 8)])
+        self.assertEqual(rows["turret"], [("T1", 2), ("T2", 6)])
+
     def test_the_tool_list_of_a_three_digit_offset_okuma(self):
         context = helpers.effective_context(OKUMA, variant=("toolWord", "offset3"))
         full = helpers.make_context(profile=context["profile"], codes=context["codes"])
@@ -171,6 +186,19 @@ class TestSiemensMillToolChange(unittest.TestCase):
         result = helpers.run_script("tool_list.py", stdin=program, context=full)
         self.assertTrue(result.ok, result.stderr)
         self.assertEqual([row["tool"] for row in result.json()["rows"]], ["T2", "T1"])
+
+    def test_station_02_and_station_2_are_one_tool_on_a_three_digit_offset_okuma(self):
+        # T087: the seven-digit form names station 2 as ``02``, ``T2000`` as ``2``; the tool
+        # list counts them as one tool (its key is the number without leading zeros).
+        context = helpers.effective_context(OKUMA, variant=("toolWord", "offset3"))
+        full = helpers.make_context(profile=context["profile"], codes=context["codes"])
+        full["machine"] = context["machine"]
+        program = "O0103\nG00 T0102003\nG01 Z-20. F0.2\nG00 T2000\nG01 Z-30. F0.15\nM02\n"
+        result = helpers.run_script("tool_list.py", stdin=program, context=full)
+        self.assertTrue(result.ok, result.stderr)
+        rows = result.json()["rows"]
+        self.assertEqual([(row["tool"], row["calls"], row["line"]) for row in rows], [("T2", 2, 2)])
+        self.assertEqual(gedit_nc.tool_label("02", True), gedit_nc.tool_label("2", True))
 
 
 if __name__ == "__main__":

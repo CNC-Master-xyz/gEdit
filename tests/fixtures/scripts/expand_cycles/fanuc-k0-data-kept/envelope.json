@@ -1,0 +1,17 @@
+{
+  "message": "Expanded 2 cycles (2 holes) into 8 blocks. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "info",
+      "message": "N40 G81 Z-5. R2. K0: the block stores the cycle's values and drills nothing, so it is left as written (K0).",
+      "reason": "data-kept"
+    },
+    {
+      "line": 10,
+      "severity": "info",
+      "message": "N80 G81 Z-8. R2. F200. K0 M8: the block stores the cycle's values and drills nothing, so it is left as written (K0).",
+      "reason": "data-kept"
+    }
+  ]
+}

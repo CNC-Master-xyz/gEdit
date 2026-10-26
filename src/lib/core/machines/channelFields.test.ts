@@ -24,6 +24,7 @@ import {
   moveIn,
   newChannel,
   newRule,
+  removeRuleAt,
   ruleAdvancedFor,
   ruleFieldsFor,
   ruleFromValues,
@@ -229,6 +230,43 @@ describe('values and stored objects', () => {
     expect(applyLayoutEdit(p, CF.stopsAndEnds, false)!.stopsAndEndsWait).toBeUndefined();
     expect(applyLayoutEdit(p, CF.stopsAndEnds, true)!.stopsAndEndsWait).toBe(true);
     expect(applyLayoutEdit({ ...p, stopsAndEndsWait: true }, CF.stopsAndEnds, false)!.stopsAndEndsWait).toBe(false);
+  });
+});
+
+// Manual check fix round, integration: the members B4 gave the presets (D2-4, D2-5) are not
+// shown in the form; an edit of such a rule keeps them, and a rule removed takes its
+// shared-wait reference with it.
+describe('the preset members the form does not show', () => {
+  const sinumerik = (): ChannelParams =>
+    structuredClone(profiles.profile('sinumerik').machineParams!.channels!.presets.find((x) => x.id === 'sinumerik-2channel')!.value);
+
+  it('keeps withCodes, sharesWaitsWith, markSeparator and markValues through an edit', () => {
+    const o = okuma();
+    const p = o.syncMarks.findIndex((r) => r.id === 'p-code');
+    const edited = applyRuleEdit(o, p, CF.label, 'P codes');
+    expect(edited.syncMarks[p].label).toBe('P codes');
+    expect(edited.syncMarks[p].withCodes).toBe(o.syncMarks[p].withCodes);
+    expect(edited.syncMarks[p].sharesWaitsWith).toBe('m100');
+    const s = sinumerik();
+    for (const id of ['setm', 'waitm']) {
+      const i = s.syncMarks.findIndex((r) => r.id === id);
+      const after = applyRuleEdit(s, i, CF.label, 'x').syncMarks[i];
+      expect(after.markSeparator, id).toBe(s.syncMarks[i].markSeparator);
+      expect(after.markValues, id).toEqual(s.syncMarks[i].markValues);
+    }
+    expect(validateChannels(edited, 'c', null)).toEqual([]);
+  });
+
+  it('drops a shared-wait reference to a rule that is removed or no longer counts', () => {
+    const o = okuma();
+    const p = o.syncMarks.findIndex((r) => r.id === 'p-code');
+    const m = o.syncMarks.findIndex((r) => r.id === 'm100');
+    const removed = removeRuleAt(o, m);
+    expect(removed.syncMarks.find((r) => r.id === 'p-code')?.sharesWaitsWith).toBeUndefined();
+    expect(validateChannels(removed, 'c', null)).toEqual([]);
+    const changed = applyRuleEdit(o, m, CF.semantics, 'rendezvous');
+    expect(changed.syncMarks[p].sharesWaitsWith).toBeUndefined();
+    expect(validateChannels(changed, 'c', null)).toEqual([]);
   });
 });
 

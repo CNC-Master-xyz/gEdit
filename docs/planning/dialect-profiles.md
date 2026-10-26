@@ -4,7 +4,7 @@ A **profile** is everything gEdit knows about one kind of NC file: extensions an
 
 Tag format: `Priority · Size · Delivery`.
 
-> **Status.** Design note from 2026-09-19. What shipped is described in the user guide ([Dialects](../user/dialects.md), [Machines](../user/machines.md), [Your own profiles and code files](../user/profiles.md)); where this note and the guide differ, the guide is right. Status per section: the profile model, detection, the outline, numbering, the generated grammars, `extends`, user profiles with a lean editor (the JSON in a tab, a Profiles page, a test on the open program) and the editing options shipped; load and save formatting, per-profile colors, a form-generated editor with a live preview and per-profile `tabWidth`/`rulers`/`completion` did not (roadmap Phase 4 table or backlog). The JSON examples below are the Phase 1 shape: the shipped files carry more members (see `src/lib/data/profiles/`).
+> **Status.** Design note from 2026-09-19. What shipped is described in the user guide ([Dialects](../user/dialects.md), [Machines](../user/machines.md), [Your own profiles and code files](../user/profiles.md)); where this note and the guide differ, the guide is right. Status per section: the profile model, detection, the outline, numbering, the generated grammars, `extends`, user profiles with a lean editor (the JSON in a tab, a Profiles page, a test on the open program) and the editing options (including `autoSpace` and `autoNumber`, P4c) shipped; load and save formatting, per-profile colors, a form-generated editor with a live preview and per-profile `tabWidth`/`rulers`/`completion` did not (roadmap Phase 4 table or backlog). The JSON examples below are the Phase 1 shape: the shipped files carry more members (see `src/lib/data/profiles/`).
 
 ## Where the knowledge was, and where it is
 
@@ -53,7 +53,7 @@ JSON. The plan was to validate it against a JSON Schema (`schema/profile.schema.
 | `outline` | `[{kind, pattern}]` | [Program map](#outline-program-map) |
 | `numbering` | See [Numbering](#numbering) | Renumber, go to block, auto-number |
 | `numberFormat` | `decimals` (`keep` \| n), `trailingZeros`, `keepPoint`, `plusSign` | [Number formatting](nc-transformations.md#number-formatting) |
-| `editing` | `forceUppercase`, `preventLineJoin`, `autoSpace`, `autoIndent`, `tabWidth`, `rulers[]`, `completion` | [Typing behavior](editor-core.md#typing-behavior-for-nc-code) |
+| `editing` | `forceUppercase`, `preventLineJoin`, `autoSpace`, `autoNumber`, `autoIndent`, `tabWidth`, `rulers[]`, `completion` | [Typing behavior](editor-core.md#typing-behavior-for-nc-code) |
 | `onLoad` / `onSave` | See [Load and save formatting](#load-and-save-formatting) | File handling |
 | `compare` | `ignoreBlockNumbers`, `ignoreWhitespace`, `ignoreComments`, `ignoreCase`, `ignoreNumberFormat` (`tolerance` was cut, see [file-compare.md](file-compare.md#ignore-options)) | [File compare](file-compare.md#ignore-options) |
 | `toolList` | `description` (`above` \| `below` \| `trailing` \| `auto`), `commentFilter`, `extraFields[]`, `collapseOffsetDigits`, `dropLeadingZeros` | [Tool list](nc-transformations.md#tool-list) |
@@ -216,14 +216,14 @@ Replaced the branches of the old `gcodeParser.ts` with a generic runner. Tool en
 
 **Status:** shipped in Phase 1, with reference-aware renumbering added in M6 (`references[]`).
 
-`mode`: `free` (default: any start and step) or `consecutive` (Klartext: every logical block, from `start` in steps of 1, no gaps allowed). How a block number is recognized (`N` prefix or leading integer, and the `altPrefixes` a renumber rewrites to the prefix) comes from `syntax.blockNumber`. Built: `start`, `step`, `digits`, `max`, `onOverflow` (`wrap` \| `stop`), `spacesAfter`, `skipStartingWith[]`, `skipEmpty`, `onlyNumbered`, `restartAtProgramStart`, `references[]`. Not built (the advanced options of the roadmap's Phase 4, [plan P4d](phase-4-implementation.md#p4d-renumber-all-of-it), and the automatic number on Enter of P4c): `fitToMax`, `alignColumn`, `everyNth`, `skipContaining[]`, `skipFirst`, `skipLast`, `startTrigger` + `startAfterTrigger`, `autoNumberOnEnter`, `promptBeforeRenumber`.
+`mode`: `free` (default: any start and step) or `consecutive` (Klartext: every logical block, from `start` in steps of 1, no gaps allowed). How a block number is recognized (`N` prefix or leading integer, and the `altPrefixes` a renumber rewrites to the prefix) comes from `syntax.blockNumber`. Built: `start`, `step`, `digits`, `max`, `onOverflow` (`wrap` \| `stop`), `spacesAfter`, `skipStartingWith[]`, `skipEmpty`, `onlyNumbered`, `restartAtProgramStart`, `references[]`. Not built (the advanced options of the roadmap's Phase 4, [plan P4d](phase-4-implementation.md#p4d-renumber-all-of-it)): `fitToMax`, `alignColumn`, `everyNth`, `skipContaining[]`, `skipFirst`, `skipLast`, `startTrigger` + `startAfterTrigger`, `promptBeforeRenumber`. The automatic number on Enter is built in P4c, but as the member `editing.autoNumber`, not a `numbering` member (see [Editing](#editing)).
 
 ### Editing
 `P2 · S · Profile`
 
-**Status:** only `forceUppercase` and `preventLineJoin` are read (shipped in M13). `autoSpace`, `autoIndent`, `rulers` and a per-profile `tabWidth` and `completion` mode are not built (roadmap Phase 4 table); the global editor settings apply.
+**Status:** `forceUppercase` and `preventLineJoin` (M13) and `autoSpace` and `autoNumber` (P4c) are read. The two P4c members are optional booleans; **absent means off, in every built-in profile too** (no built-in profile file carries them), and a non-boolean is reported by path. See [Typing options in a profile](../user/profiles.md#typing-options-in-a-profile). `autoIndent`, `rulers` and a per-profile `tabWidth` and `completion` mode are not built (roadmap Phase 4 table); the global editor settings apply.
 
-`forceUppercase` (comments excluded), `preventLineJoin`, `autoSpace`, `autoIndent`, `tabWidth`, `rulers` (for example the control's maximum block length), `completion` (`auto` \| `manual` \| `off`). Values missing in a profile fall back to the global editor settings.
+`forceUppercase` (comments excluded), `preventLineJoin`, `autoSpace`, `autoNumber`, `autoIndent`, `tabWidth`, `rulers` (for example the control's maximum block length), `completion` (`auto` \| `manual` \| `off`). Values missing in a profile fall back to the global editor settings.
 
 ### Load and save formatting
 `P2 · S · Core`

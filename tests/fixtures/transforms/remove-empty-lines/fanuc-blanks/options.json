@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Fanuc: empty lines are removed.",
+  "profile": "fanuc-gcode",
+  "options": {}
+}

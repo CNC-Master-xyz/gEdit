@@ -68,7 +68,7 @@ scenario('m6-dock-quit-dirty', { timeout: 300 }, async (h) => {
   h.check('and the app is still running while the question is up', state.exists === true, state)
 
   await h.alert.click('Cancel')
-  await h.sleep(900)
+  await h.idle()
   const afterCancel = await h.window.state()
   h.check('Cancel keeps the app and both unsaved documents: a logout is interrupted, not obeyed', afterCancel.exists && JSON.stringify(dirtyTabs()) === JSON.stringify([fanuc, lathe]), {
     state: afterCancel,
@@ -87,7 +87,7 @@ scenario('m6-dock-quit-dirty', { timeout: 300 }, async (h) => {
   // ---------------------------------------------------------------- Discard All exits
   // This path runs `files.onWillQuit`, which sets the flag back to `false` before the
   // window is destroyed, so the guard is not re-entered on the way out.
-  h.expectExit({
+  await h.expectExit({
     files: [
       { path: fanuc, hex: fanucHex },
       { path: lathe, hex: latheHex },
@@ -95,7 +95,6 @@ scenario('m6-dock-quit-dirty', { timeout: 300 }, async (h) => {
     events: ['CloseRequested main', 'Exit'],
     within: 25000,
   })
-  await h.sleep(500)
   await h.alert.click('Discard All').catch(() => {})
 })
 
@@ -147,14 +146,10 @@ scenario('m6-dock-quit-clean-1', { timeout: 300 }, async (h) => {
   // **without** an alert. A guard that asked here would also stop a logout.
   const before = await h.alert.visible()
   h.check('no alert is up before the request', before === null, before)
-  h.expectExit({ events: ['Exit'], within: 25000 })
-  // `h.expectExit` only *queues* its record, behind the check records made just above, and
-  // each of them is an IPC round trip. `terminate` goes out on its own, so on a slower
-  // machine the app can be gone before the declaration lands, and the run is judged "the
-  // scenario ran to the end" although every check passed (seen on the hosted runner, first
-  // attempt of `m6-dock-quit-clean-1`; the retry passed). The same moment as in
-  // `m2-recent-restart-1` and `m6-dock-quit-dirty` lets the queue empty first.
-  await h.sleep(500)
+  // The record queue is handed to Rust before `terminate` goes out, behind the check records
+  // made just above (seen on the hosted runner, first attempt of `m6-dock-quit-clean-1`, when
+  // the app was gone before the declaration landed): that is `h.window.terminate`'s job now.
+  await h.expectExit({ events: ['Exit'], within: 25000 })
   await h.window.terminate()
 })
 

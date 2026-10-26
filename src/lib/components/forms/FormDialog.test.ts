@@ -9,8 +9,7 @@
 import { render } from 'svelte/server';
 import { describe, expect, it } from 'vitest';
 import FormDialog from './FormDialog.svelte';
-import type { FieldSpec } from '$lib/core/forms/types';
-import type { FormLiveResult } from '$lib/app/types';
+import type { FieldSpec, FormLiveAnswer } from '$lib/core/forms/types';
 
 interface Props {
   title: string;
@@ -18,7 +17,7 @@ interface Props {
   values?: Record<string, unknown>;
   okLabel?: string;
   context?: { addresses?: string[] };
-  live?: (values: Record<string, unknown>) => FormLiveResult;
+  live?: (values: Record<string, unknown>) => FormLiveAnswer;
   note?: string;
   marker?: { testid: string; data: Record<string, string> };
   close: (values?: Record<string, unknown>) => void;
@@ -61,9 +60,16 @@ describe('FormDialog markup', () => {
   });
 
   it('blocks OK and names the problem when a starting value is out of range', () => {
+    const html = markup({ values: { start: 0 } });
+    expect(html).toContain('data-error="forms.errors.range"');
+    expect(html).toMatch(/data-testid="modal-ok"[^>]*disabled/);
+  });
+
+  it('T147: an empty required field is not marked before it is touched, but OK stays disabled', () => {
     const required: FieldSpec[] = [{ id: 'name', type: 'text', label: 'Name', required: true }];
     const html = markup({ fields: required });
-    expect(html).toContain('data-error="forms.errors.required"');
+    expect(html).not.toContain('data-error=');
+    expect(html).not.toContain('This field is required.');
     expect(html).toMatch(/data-testid="modal-ok"[^>]*disabled/);
   });
 
@@ -147,6 +153,59 @@ describe('FormDialog with a live hook', () => {
     expect(cycle).toMatch(/data-testid="cycle-form"/);
     expect(cycle).toContain('data-cycle="G83"');
     expect(cycle).toContain('data-mode="edit"');
+  });
+
+  it('T147: a template form that opens with empty required fields marks none of them; the preview asks to fill them in', () => {
+    const html = markup({
+      fields: [
+        { id: 'n', type: 'text', label: 'Speed', required: true },
+        { id: 'm', type: 'text', label: 'Direction', required: true },
+      ],
+      live: () => ({ fieldErrors: { n: { key: 'templates.value.required' }, m: { key: 'cycleForm.refused.required' } } }),
+    });
+    expect(html).not.toMatch(/data-testid="form-field"[^>]*data-error/);
+    expect(html).toMatch(/data-testid="modal-ok"[^>]*disabled/);
+    expect(html).toMatch(/data-testid="template-preview"[^>]*data-error="templates.value.required"/);
+    expect(html).toContain('Fill in the required fields to see the text.');
+    // A value that is there and refused is marked from the start.
+    const filled = markup({ fields: [{ id: 'n', type: 'text', label: 'Speed', required: true }], values: { n: 'abc' }, live: () => ({ fieldErrors: { n: { key: 'templates.value.notANumber' } } }) });
+    expect(filled).toContain('data-error="templates.value.notANumber"');
+    expect(filled).toContain('Correct the marked values to see the text.');
+  });
+
+  it('T159: the hook’s note replaces the note the form opened with, and an empty one hides it', () => {
+    const html = markup({ fields: template, note: 'Opened with this.', live: () => ({ note: 'P130 on line 57 points at N130.' }) });
+    expect(html).toContain('P130 on line 57 points at N130.');
+    expect(html).not.toContain('Opened with this.');
+    expect(markup({ fields: template, note: 'Opened with this.', live: () => ({}) })).toContain('Opened with this.');
+    expect(markup({ fields: template, note: 'Opened with this.', live: () => ({ note: '' }) })).not.toContain('form-note');
+  });
+
+  it('T146: the hook’s help replaces a field’s help, and an empty one removes it', () => {
+    const fields: FieldSpec[] = [
+      { id: 'q', type: 'text', label: 'Peck', help: 'Written without a point: 4000 = 4 mm on this machine.' },
+      { id: 'z', type: 'text', label: 'Depth', help: 'Kept.' },
+    ];
+    const html = markup({ fields, live: () => ({ help: { q: 'Written without a point: 5000 = 5 mm on this machine.' } }) });
+    expect(html).toContain('5000 = 5 mm');
+    expect(html).not.toContain('4000 = 4 mm');
+    expect(html).toContain('Kept.');
+    expect(markup({ fields, live: () => ({ help: { q: '' } }) })).not.toContain('4000 = 4 mm');
+  });
+
+  it('T226: a field the hook names is greyed out, and keeps its value', () => {
+    const fields: FieldSpec[] = [
+      { id: 'word', type: 'bool', label: 'Whole address', default: false },
+      { id: 'inComments', type: 'bool', label: 'Also in comments', default: true },
+    ];
+    const grey = markup({ fields, live: () => ({ readOnly: ['inComments'] }) });
+    const row = (html: string, id: string) => html.slice(html.indexOf(`data-field="${id}"`)).split('</div>')[0];
+    expect(row(grey, 'inComments')).toContain('data-readonly="true"');
+    expect(row(grey, 'inComments')).toContain('disabled');
+    expect(row(grey, 'inComments')).toContain('checked');
+    expect(row(grey, 'word')).not.toContain('data-readonly');
+    const free = markup({ fields, live: () => ({}) });
+    expect(row(free, 'inComments')).not.toContain('data-readonly');
   });
 
   it('is the P2 form without any of them', () => {

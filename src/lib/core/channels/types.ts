@@ -176,8 +176,46 @@ export interface SyncRule {
    * `P` on the paths of one wait, or a `P`-less wait meeting one with `P`, is alarm 0160.
    * A difference is `partners-differ`. Off for Siemens `WAITM`, whose lists may differ
    * (the own channel is optional). Default false.
+   *
+   * Manual check D2-2 (2026-10-25): the sets are compared AS WRITTEN; the own channel is not
+   * added first (`M901 P2` in path 1 does not meet `M901 P3` in path 2: alarm 0160). A set
+   * written without the mark's own channel (`M901 P2` in path 1) is `own-channel-not-named`.
+   * D2-5: a wait of such a rule that shares its block with other words is `shares-block`
+   * (a warning; the Fanuc waiting M-code stands in a block of its own).
    */
   samePartners?: boolean;
+  /**
+   * Manual check D2-5: a `regex` rule whose `mark` capture is a LIST of marks (the Siemens
+   * `SETM(5,6)`, `CLEARM(1,2)`): the capture is split on this text, each piece trimmed, empty
+   * pieces dropped, and every piece is a mark of its own on that line, in written order.
+   * Ignored for other kinds and for `count`. Absent = one mark per line, as before.
+   */
+  markSeparator?: string;
+  /**
+   * Manual check D2-5: the values a mark written as a plain number may take (the Siemens
+   * `WAITM` marks 0 to 99). A number outside is `mark-out-of-range`, a warning; a mark that is
+   * not a plain number (a variable) is not judged.
+   */
+  markValues?: { min: number; max: number };
+  /**
+   * Manual check D2-4 (c): codes, in the plain list form of `match.codes`, that a channel may
+   * only run at a mark of this rule that every partner channel has too (Okuma: the spindle
+   * commands S, M00/M01, M03-M05, M41-M44 and G96 stand at a `P` code of the same number on
+   * both turrets). One written in the block of a mark that a partner channel lacks is
+   * `missing`. A block with one of them and no mark is NOT judged: the manual's own example
+   * writes the second turret's spindle command in the block after its `P` code. Read on the
+   * masked line like a wait code (`S1500.` with a point is not read). For an `ordered` rule.
+   */
+  withCodes?: string;
+  /**
+   * Manual check D2-4 (a): the id of a `count` rule whose marks are wait points of the same
+   * channels as this `ordered` rule's (the Okuma `M100` beside the `P` codes). When, walking
+   * both channels' waits in order, a mark of the one rule meets a mark of the other, neither
+   * waits: `meets-other-rule`, a warning, once per channel pair. Not judged when either channel
+   * has a jump line, nor when the two carry a different number of the `count` marks (that is
+   * already `count-mismatch`, and the walk would be out of step).
+   */
+  sharesWaitsWith?: string;
 }
 
 /** How a machine's channels are laid out. Stored in `MachineParams.channels` (§7.15). */
@@ -284,6 +322,12 @@ export interface SyncHit {
   /** M12 review fix NC-01: `true` when the line had no partner word (or an empty `channels`
    *  capture) and `partners` came from `whenAbsent`; absent otherwise. */
   absent?: true;
+  /** Manual check D2-5: a wait of a rule that asks for the same partners whose block holds
+   *  other words than the wait code, its partner word and a block number; absent otherwise. */
+  shared?: true;
+  /** Manual check D2-4 (c): the first code of the rule's `withCodes` on the mark's block, by
+   *  value (`M03`, `S1500`, `G96`); absent when there is none. */
+  withCode?: string;
 }
 
 /** One channel's lines inside a `single-file` document: a channel may have SEVERAL ranges, because
@@ -368,7 +412,17 @@ export type SyncFindingKind =
   /** M12 review fix NC-04: the two channels carry a different number of this mark, but a
    *  mark of it sits between jump lines (inside a loop or a `GOTO` loop) in its channel, so
    *  the written count says nothing about the count run. Info, instead of `count-mismatch`. */
-  | 'count-not-checked';
+  | 'count-not-checked'
+  /** Manual check D2-2: a `samePartners` mark whose partner word names other channels but not
+   *  its own (`M901 P2` in path 1): the word has to name every channel that waits. */
+  | 'own-channel-not-named'
+  /** Manual check D2-4 (a), a warning: a mark of an `ordered` rule meets a mark of the
+   *  `count` rule it `sharesWaitsWith` in the other channel (Okuma: `M100` against a `P`). */
+  | 'meets-other-rule'
+  /** Manual check D2-5, a warning: a `samePartners` wait shares its block with other words. */
+  | 'shares-block'
+  /** Manual check D2-5, a warning: a mark number outside the rule's `markValues`. */
+  | 'mark-out-of-range';
 
 export interface SyncFinding {
   kind: SyncFindingKind;
@@ -385,6 +439,9 @@ export interface SyncFinding {
   /** `Located.document` semantics (F58). */
   document?: string;
   otherLine?: number;
+  /** Manual check (2026-10-25): `warning` for a finding that is advice, not a fault the control
+   *  stops on (`meets-other-rule`, `shares-block`, `mark-out-of-range`); absent otherwise. */
+  severity?: 'warning';
   message: Msg;
 }
 

@@ -302,6 +302,46 @@ class TestRules(unittest.TestCase):
         w = walk("G21 G99\nG00 X62. Z2.\nG90 X56. Z-30. R-4. F0.25\nG00 X64.\nG90 Z-20.\nM30", "fanuc-lathe")
         self.assertEqual(extent(w, "X"), ("48", "64", 1))
 
+    def test_d5_2_a_series_15_taper_word_leaves_the_taper_start_not_resolved(self):
+        # Manual-check fix D5-2: the Series 15 tape format writes the taper of a single pass as
+        # I (G90, G92) or K (G94). gEdit reads the native format only, so the start of that cut
+        # is not resolved, where it used to show the end point alone as the whole range.
+        w = walk("G21 G99\nG00 X60. Z2.\nG90 X50. Z-30. I-2.5 F0.2\nG00 X100. Z50.\nM30", "fanuc-lathe", machine_leaf="calculator")
+        self.assertEqual(extent(w, "X"), ("50", "100", 1))
+        self.assertEqual(extent(w, "Z"), ("-30", "50", 0))
+        w = walk("G21 G99\nG00 X64. Z3.\nG94 X20. Z-1. K-5. F0.2\nM30", "fanuc-lathe", machine_leaf="calculator")
+        self.assertEqual(extent(w, "Z"), ("-1", "3", 1))
+        # The passes keep it: the next pass block, and a block with only I, are not resolved
+        # either, until a code clears the values the passes share.
+        w = walk("G21 G99\nG00 X60. Z2.\nG90 X50. Z-30. I-2.5 F0.2\nX48.\nI-3.\nG50 S2000\nG90 X46. Z-30.\nM30", "fanuc-lathe", machine_leaf="calculator")
+        self.assertEqual(extent(w, "X"), ("46", "60", 3))
+        # A native taper pass is unchanged.
+        w = walk("G21 G99\nG00 X62. Z2.\nG90 X56. Z-30. R-4. F0.25\nM30", "fanuc-lathe", machine_leaf="calculator")
+        self.assertEqual(extent(w, "X"), ("48", "62", 0))
+
+    def test_d5_6_a_whole_pass_tapered_by_another_word_leaves_its_start_not_resolved(self):
+        # Manual-check fix D5-6 (handed over by batch B3): the start rule (end plus the taper) is
+        # the single passes' R. A whole pass whose taper is another word (Okuma G31-G33: I or K,
+        # signed as rising or falling, or the angle A) starts where gEdit does not work out. Here
+        # a lathe G90 whose taper is declared as I, with an angle A, stands in for such a code.
+        codes = json.loads(json.dumps(helpers.resolved_codes("fanuc-lathe")))
+        for entry in codes:
+            if entry.get("code") == "G90":
+                entry["params"] = [
+                    {"address": "X", "label": "x"},
+                    {"address": "Z", "label": "z"},
+                    {"address": "I", "label": "taper", "lengthAlong": "X"},
+                    {"address": "A", "label": "angle", "unit": "angle"},
+                    {"address": "F", "label": "f"},
+                ]
+        for taper in ("I-1.", "I1.", "A10."):
+            with self.subTest(taper=taper):
+                w = walk("G21 G99\nG00 X60. Z2.\nG90 X50. Z-30. %s F0.2\nG00 X100.\nM30" % taper, "fanuc-lathe", codes=codes, machine_leaf="calculator")
+                self.assertEqual(extent(w, "X"), ("50", "100", 1))
+        # Written as 0 it is a straight pass: resolved.
+        w = walk("G21 G99\nG00 X60. Z2.\nG90 X50. Z-30. I0 F0.2\nG00 X100.\nM30", "fanuc-lathe", codes=codes, machine_leaf="calculator")
+        self.assertEqual(extent(w, "X"), ("50", "100", 0))
+
     def test_a_drilling_cycle_after_an_arc_is_no_arc(self):
         # v1.2.0 (FZ-4): the R of G81 is the retract plane, not the radius of a G3 still in force.
         w = walk("G21 G17 G90\nG0 X0. Y0. Z10.\nG3 X20. Y0. I10. J0. F100.\nG81 X20. Y10. Z-5. R5. F100.\nG80\nM30")
@@ -355,11 +395,20 @@ class TestRules(unittest.TestCase):
         self.assertEqual(extent(w, "A"), ("10", "10", 0))
 
     def test_a_cycle_whose_positions_are_its_parameters_is_counted_on_the_tool_axis(self):
-        w = walk("G17 G90 G0 X0 Y0 Z50\nCYCLE81(10,0,2,-20,,)\nM30", "sinumerik-mill")
+        # `CYCLE83` with `VARI=0` (left out: 0) has no description of its moves (plan §6.3, Q4-8):
+        # its depth is not resolved.
+        w = walk("G17 G90 G0 X0 Y0 Z50\nCYCLE83(10,0,2,-20,,5)\nM30", "sinumerik-mill")
         self.assertEqual(extent(w, "Z"), ("50", "50", 1))
         # `Z` after the cycle is where the cycle left it: an incremental move is not resolved.
-        w = walk("G17 G90 G0 X0 Y0 Z50\nCYCLE81(10,0,2,-20,,)\nG91 G0 Z5\nM30", "sinumerik-mill")
+        w = walk("G17 G90 G0 X0 Y0 Z50\nCYCLE83(10,0,2,-20,,5)\nG91 G0 Z5\nM30", "sinumerik-mill")
         self.assertEqual(extent(w, "Z"), ("50", "50", 2))
+        # v1.2.0 (P4.7b): `CYCLE81` is described, so its levels are read from its parameters:
+        # the bottom `DP`, the set-up clearance and the retraction plane; the tracker still
+        # leaves the tool axis not known after it.
+        w = walk("G17 G90 G0 X0 Y0 Z50\nCYCLE81(10,0,2,-20,,)\nM30", "sinumerik-mill")
+        self.assertEqual(extent(w, "Z"), ("-20", "50", 0))
+        w = walk("G17 G90 G0 X0 Y0 Z50\nCYCLE81(10,0,2,-20,,)\nG91 G0 Z5\nM30", "sinumerik-mill")
+        self.assertEqual(extent(w, "Z"), ("-20", "50", 1))
 
     def test_an_iso_cycle_has_its_depth_in_its_axis_words(self):
         w = walk("G90 G17 G0 X0. Y0. Z10.\nG81 X5. Y5. Z-12. R2. F100.\nX10.\nG80\nM30")
@@ -553,7 +602,7 @@ class TestWordsWithNoMachine(unittest.TestCase):
         machine = [f for f in findings if f["reason"] == "machine-dependent"]
         self.assertEqual(len(machine), 1)
         self.assertIn("600 words", machine[0]["message"])
-        self.assertIn("(is-b: 1 mm; is-c: 0.1 mm; calculator: 1000 mm)", machine[0]["message"])
+        self.assertIn("(is-b: 1 mm; is-a: 10 mm; is-c: 0.1 mm; calculator: 1000 mm)", machine[0]["message"])
         # One sentence for the one finding. Without the deferral it is built for every word.
         self.assertEqual(len(calls), 1)
 
@@ -624,3 +673,133 @@ class D2FixTest(unittest.TestCase):
         self.assertEqual(extent(w, "X")[2], 1)
         w = walk("G18 G21\nG0 X62. Z2.\nM98 P100\nG0 X62. Z2.\nG90 X56. Z-30. R0. F0.25\nG0 X80. Z50.\nM30", "fanuc-lathe")
         self.assertEqual(extent(w, "X"), ("56", "80", 0))
+
+
+class T108Test(unittest.TestCase):
+    """v1.2.0, P4.7b (T108; plan §6.3 rules 2 and 12, exit criterion X23): a drilling cycle the
+    code database describes is read the way the expansion writes it out (``_nc_cycles.holes_of``),
+    so its depth is measured from its surface where the roles say so, and a Fanuc cycle under
+    ``G91`` is read as the control reads it. Each test fails without its fix."""
+
+    KLARTEXT = "\n".join(
+        [
+            "TOOL CALL 1 Z S3000",
+            "L Z+100 R0 FMAX",
+            "CYCL DEF 200 DRILLING ~",
+            "  Q200=2 ;SET-UP CLEARANCE ~",
+            "  Q201=-12 ;DEPTH ~",
+            "  Q206=150 ;FEED RATE FOR PLNGNG ~",
+            "  Q202=12 ;PLUNGING DEPTH ~",
+            "  Q210=0 ;DWELL TIME AT TOP ~",
+            "  Q203=+5 ;SURFACE COORDINATE ~",
+            "  Q204=150 ;2ND SET-UP CLEARANCE ~",
+            "  Q211=0 ;DWELL TIME AT DEPTH ~",
+            "  Q395=0 ;DEPTH REFERENCE",
+            "L X+10 Y+10 R0 FMAX M99",
+            "L Z+100 R0 FMAX",
+        ]
+    )
+
+    def test_klartext_200_reaches_the_surface_plus_q201_and_its_return_level(self):
+        w = walk(self.KLARTEXT, "heidenhain-klartext")
+        # Q203 + Q201 = 5 - 12; Q203 + Q204 = 155, above every position the program writes.
+        self.assertEqual(extent(w, "Z"), ("-7", "155", 0))
+        self.assertEqual(w.findings.out(), [])
+
+    def test_klartext_203_has_no_description_and_stays_not_resolved(self):
+        text = self.KLARTEXT.replace("CYCL DEF 200 DRILLING", "CYCL DEF 203 UNIVERSAL DRILLING")
+        w = walk(text, "heidenhain-klartext")
+        self.assertEqual(extent(w, "Z"), ("100", "100", 1))
+        self.assertEqual(reasons({"findings": w.findings.out()}), ["cycle"])
+
+    def test_klartext_201_reads_its_depth_from_the_surface(self):
+        text = "\n".join(
+            [
+                "TOOL CALL 3 Z S800",
+                "L Z+50 R0 FMAX",
+                "CYCL DEF 201 REAMING ~",
+                "  Q200=2 ;SET-UP CLEARANCE ~",
+                "  Q201=-15 ;DEPTH ~",
+                "  Q206=100 ;FEED RATE FOR PLNGNG ~",
+                "  Q211=0 ;DWELL TIME AT DEPTH ~",
+                "  Q208=250 ;RETRACTION FEED RATE ~",
+                "  Q203=-2 ;SURFACE COORDINATE ~",
+                "  Q204=20 ;2ND SET-UP CLEARANCE",
+                "L X+0 Y+0 R0 FMAX M99",
+            ]
+        )
+        w = walk(text, "heidenhain-klartext")
+        self.assertEqual(extent(w, "Z"), ("-17", "50", 0))
+
+    def test_sinumerik_reads_rfp_minus_dpr_and_dp_where_dpr_is_zero(self):
+        # CYCLE81(RTP, RFP, SDIS, DP, DPR): DPR measures into the material from RFP and wins over
+        # DP unless it is 0.
+        w = walk("G17 G90 G0 X0 Y0 Z50\nCYCLE81(60,4,2,-5,8)\nM30", "sinumerik-mill")
+        self.assertEqual(extent(w, "Z"), ("-4", "60", 0))
+        w = walk("G17 G90 G0 X0 Y0 Z50\nCYCLE81(60,4,2,-5,0)\nM30", "sinumerik-mill")
+        self.assertEqual(extent(w, "Z"), ("-5", "60", 0))
+        # Under MCALL every positioning block drills: the depth of each hole.
+        w = walk("G17 G90 G0 X0 Y0 Z50\nMCALL CYCLE82(10,0,2,,12,1)\nX20\nX40 Y5\nMCALL\nM30", "sinumerik-mill")
+        self.assertEqual(extent(w, "Z"), ("-12", "50", 0))
+        self.assertEqual(extent(w, "X"), ("0", "40", 0))
+
+    def test_a_klartext_cycl_call_pos_reaches_its_point_and_shifts_the_surface(self):
+        text = self.KLARTEXT.replace("L X+10 Y+10 R0 FMAX M99", "CYCL CALL POS X+40 Y+30 Z-3 FMAX")
+        w = walk(text, "heidenhain-klartext")
+        # The call's Z adds to Q203: the bottom is 5 - 3 - 12.
+        self.assertEqual(extent(w, "Z"), ("-10", "152", 0))
+        self.assertEqual(extent(w, "X"), ("40", "40", 0))
+        self.assertEqual(extent(w, "Y"), ("30", "30", 0))
+
+    FANUC_G91 = "\n".join(
+        [
+            "G21 G17 G40 G80 G90 G94",
+            "G0 X0. Y0. S1000 M3",
+            "G43 H1 Z50.",
+            "G91 G98 G81 X10. Y0. Z-7. R-48. F100. K3",
+            "G80 G90",
+            "M30",
+        ]
+    )
+
+    def test_fanuc_g91_reads_r_from_the_initial_level_and_z_from_r(self):
+        # The initial level 50, the R point 50 - 48 = 2, the bottom 2 - 7 = -5 (FANUC 30i: under
+        # G91 R is the distance from the initial level, Z the distance from the R point); the
+        # tracker took Z for an increment from 50 (43).
+        w = walk(self.FANUC_G91)
+        self.assertEqual(extent(w, "Z"), ("-5", "50", 0))
+
+    def test_fanuc_g91_repeats_the_hole_k_times(self):
+        # K3 under G91: holes at X10, X20, X30; the tool ends at X30 (the tracker: one hole, X10).
+        w = walk(self.FANUC_G91 + "\nG91 G0 X1.")
+        self.assertEqual(extent(w, "X"), ("0", "31", 0))
+        w = walk(self.FANUC_G91.replace("K3", "K0") + "\nG91 G0 X1.")
+        # K0 drills no hole and moves nothing.
+        self.assertEqual(extent(w, "X"), ("0", "1", 0))
+
+    def test_a_refused_g91_cycle_leaves_its_depth_not_resolved_not_wrong(self):
+        # No G98/G99 in the program or the machine's power-on modes: the expansion refuses
+        # (`return-assumed`), so the tracker's reading is kept: the bottom is not known (never the
+        # increment from the start), the holes of the repeat count are where the control drills.
+        w = walk(self.FANUC_G91.replace("G98 ", "") + "\nG91 G0 X1.")
+        self.assertEqual(extent(w, "Z"), ("50", "50", 1))
+        self.assertEqual(extent(w, "X"), ("0", "31", 0))
+        self.assertEqual(reasons({"findings": w.findings.out()}), ["cycle"])
+
+    def test_a_peck_cycle_needs_no_peck_values_for_its_extents(self):
+        # The G83 clearance shapes only the moves between the R point and the bottom.
+        w = walk("G21 G17 G90\nG0 X0. Y0. Z20.\nG91 G98 G83 X5. Z-22. R-18. Q6. F100.\nG80 G90\nM30")
+        self.assertEqual(extent(w, "Z"), ("-20", "20", 0))
+        self.assertEqual(extent(w, "X"), ("0", "5", 0))
+
+    def test_an_absolute_fanuc_cycle_reads_as_before(self):
+        w = walk("G90 G17 G0 X0. Y0. Z10.\nG98 G81 X5. Y5. Z-12. R2. F100. K2\nX10.\nG80\nM30")
+        self.assertEqual(extent(w, "Z"), ("-12", "10", 0))
+        self.assertEqual(extent(w, "X"), ("0", "10", 0))
+
+    def test_a_turning_program_reads_no_holes(self):
+        # Drilling cycles are written out on milling programs only: a lathe program is read by
+        # the tracker alone, as before.
+        program = "G18 G21\nG0 X0. Z5.\nG83 X0. Z-20. R-3. Q5. F0.1\nG80\nM30"
+        w = walk(program, "fanuc-lathe")
+        self.assertFalse(w.holes_on)

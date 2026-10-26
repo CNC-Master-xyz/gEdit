@@ -20,7 +20,8 @@
 //    own prefix (`GOTOF :20`) and not by `N20` (M9, WP9.5b; see "Main blocks" below)
 //  - **guess** at a reference. `GOTO 100`, `M98 Q100` and `G71 P100 Q200` are rewritten
 //    only where the run can prove which block they name: one block with that number, in
-//    the same program, inside the lines this run rewrites, under a rule that allows it
+//    the program the value names a block of (§6.6 rule 10, `programs.ts`), inside the
+//    lines this run rewrites, under a rule that allows it
 //    (`numbering.references[].rewrite`, §7.1). Everything else is reported and left
 //    exactly as it is — a jump target written wrongly is worse than one left behind,
 //    because the program still runs and lands in the wrong place. The scan is over the
@@ -42,7 +43,9 @@
 //
 // Options (defaults from `profile.numbering`): `start`, `step`, `digits`, `max` with
 // `onOverflow` wrap or stop, `spacesAfter`, `skipStartingWith`, `skipEmpty`,
-// `restartAtProgramStart`, `onlyNumbered`, `altPrefixes`.
+// `restartAtProgramStart`, `onlyNumbered`, `altPrefixes`, and since P4d (plan §6.6 rules
+// 1–7) `fitToMax`, `alignColumn`, `everyNth`, `skipContaining`, `skipFirst`, `skipLast`,
+// `startTrigger` and `startAfterTrigger` (see "The advanced options" below).
 //
 // Klartext (`numbering.mode === 'consecutive'`) has no options form at all: the control
 // requires consecutive numbers from 0, and a continuation line (the tail of a `~` block)
@@ -72,7 +75,11 @@
 // empty and `skipEmpty` is set, when it starts with one of `skipStartingWith`, when it
 // continues the block above by its leading mark (`syntax.continuationStart`, Okuma `$`), when it
 // carries a block *name* instead of a number, when `onlyNumbered` is set and it has no
-// number, and once numbering has stopped at `max`.
+// number, and once numbering has stopped at `max`. P4d adds the lines of `skipFirst` and
+// `skipLast`, the lines above the start trigger and the lines that contain one of
+// `skipContaining`; the order in which these questions are asked is fixed (§6.6 rule 7,
+// [`walkLines`]). "Left as it was" is about the block number: a reference on such a line
+// still follows its block, as it always has on a line of `skipStartingWith`.
 //
 // `skipStartingWith` reads the line as it is written, behind its indentation and nothing
 // else: `(HEADER)` starts with `(` and is skipped, while `/(HEADER)` starts with `/` and
@@ -91,6 +98,7 @@ import { compileProfile } from '$lib/core/profiles/compile';
 import { t } from '$lib/i18n';
 import { continuationRisk, stateBefore } from './fragment';
 import { mainKeyOf, mainPrefixOf, mainReferencesOn, maskedOf, referencePreflight, scanProgram } from './references';
+import { indexPrograms, possibleProgramsOf, targetProgramOf } from './programs';
 
 export { mainKeyOf, mainPrefixOf } from './references';
 import type { Located, Msg } from '$lib/app/types';
@@ -98,6 +106,7 @@ import type { FieldSpec } from '$lib/core/forms/types';
 import type { LineState, NcToken } from '$lib/core/nc/types';
 import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
 import type { BlockKey, FoundReference, NumberSite, ProgramScan, ReferenceWord } from './references';
+import type { ProgramIndex, RenumberedProgram, RenumberOutcome, TargetRefusal } from './programs';
 import type { TransformContext, TransformDef, TransformResult } from './types';
 
 /** Rows the results panel gets at most; the summary still counts every skipped line. */
@@ -105,6 +114,12 @@ const SKIP_LIMIT = 200;
 
 const TAB = 0x09;
 const SPACE = 0x20;
+
+/** P4d (§6.6 rules 2–6): the bounds of the advanced options, the same as the profile validator's. */
+const MAX_ALIGN_COLUMN = 120;
+const MAX_EVERY_NTH = 1000;
+const MAX_SKIP_LINES = 1_000_000;
+const MAX_SKIP_TEXT = 200;
 
 function isSpaceCode(code: number): boolean {
   return code === SPACE || code === TAB;
@@ -155,6 +170,20 @@ interface Settings {
   onlyNumbered: boolean;
   /** Prefixes that also count as an existing block number; new numbers keep the profile's. */
   altPrefixes: string[];
+  /** P4d (§6.6 rule 1): the largest whole step that keeps the last number at or below `max`. */
+  fitToMax: boolean;
+  /** P4d (§6.6 rule 2): the column the code behind a written number starts at; 0 = off. */
+  alignColumn: number;
+  /** P4d (§6.6 rule 3): number every Nth block, the ones between lose their number; 1 = every block. */
+  everyNth: number;
+  /** P4d (§6.6 rule 4): a line containing one of these texts keeps its text. */
+  skipContaining: string[];
+  /** P4d (§6.6 rule 5): lines at the start and the end of the scope that keep their text. */
+  skipFirst: number;
+  skipLast: number;
+  /** P4d (§6.6 rule 6): numbering starts at the first line containing this text; '' = off. */
+  startTrigger: string;
+  startAfterTrigger: boolean;
 }
 
 /**
@@ -168,6 +197,17 @@ function intOf(value: unknown, fallback: number, min: number): number {
   if (value === undefined || value === null || value === '') return Math.max(min, fallback);
   const n = typeof value === 'number' ? value : Number(String(value).trim());
   return Number.isFinite(n) ? Math.max(min, Math.trunc(n)) : Math.max(min, fallback);
+}
+
+/** [`intOf`], held to `max` as well: a caller that skips the form is held to the form's bounds. */
+function boundedOf(value: unknown, fallback: number, min: number, max: number): number {
+  return Math.min(max, intOf(value, fallback, min));
+}
+
+/** A one-line text field; surrounding blanks are not part of it (the form stores it trimmed). */
+function textOf(value: unknown, fallback: string | undefined): string {
+  if (typeof value === 'string') return value.trim();
+  return (fallback ?? '').trim();
 }
 
 function boolOf(value: unknown, fallback: boolean): boolean {
@@ -229,6 +269,16 @@ function settingsFor(cp: CompiledProfile, options: Record<string, unknown>): Set
       restartAtProgramStart: false,
       onlyNumbered: false,
       altPrefixes: [],
+      // The consecutive dialect has no options (§6.6 rule 7), whatever the profile or a
+      // headless caller says.
+      fitToMax: false,
+      alignColumn: 0,
+      everyNth: 1,
+      skipContaining: [],
+      skipFirst: 0,
+      skipLast: 0,
+      startTrigger: '',
+      startAfterTrigger: false,
     };
   }
 
@@ -256,6 +306,14 @@ function settingsFor(cp: CompiledProfile, options: Record<string, unknown>): Set
     restartAtProgramStart: boolOf(options.restartAtProgramStart, numbering.restartAtProgramStart === true),
     onlyNumbered: boolOf(options.onlyNumbered, numbering.onlyNumbered === true),
     altPrefixes: wordsOf(options.altPrefixes, cp.profile.syntax.blockNumber.altPrefixes ?? []),
+    fitToMax: boolOf(options.fitToMax, numbering.fitToMax === true),
+    alignColumn: boundedOf(options.alignColumn, numbering.alignColumn ?? 0, 0, MAX_ALIGN_COLUMN),
+    everyNth: boundedOf(options.everyNth, numbering.everyNth ?? 1, 1, MAX_EVERY_NTH),
+    skipContaining: wordsOf(options.skipContaining, numbering.skipContaining ?? []),
+    skipFirst: boundedOf(options.skipFirst, numbering.skipFirst ?? 0, 0, MAX_SKIP_LINES),
+    skipLast: boundedOf(options.skipLast, numbering.skipLast ?? 0, 0, MAX_SKIP_LINES),
+    startTrigger: textOf(options.startTrigger, numbering.startTrigger),
+    startAfterTrigger: boolOf(options.startAfterTrigger, numbering.startAfterTrigger === true),
   };
 }
 
@@ -352,8 +410,13 @@ function readHead(line: string, tokens: NcToken[]): Head {
  * The gaps *inside* the head are copied from the original, so the two block-skip forms
  * keep their shape. `spacesAfter` only sets the gap between the head and the code, and
  * only when the head does not end in a skip mark.
+ *
+ * P4d (§6.6 rule 2): with `alignColumn` the gap is whatever puts the code at that column
+ * (1-based, in characters, the leading whitespace and the skip marks in front of the number
+ * included), and one space where the head already reaches it. Like `spacesAfter` it leaves
+ * the gap behind a skip mark that follows the number alone: the mark binds to its block.
  */
-function rebuild(line: string, head: Head, numberText: string, spacesAfter: number): string {
+function rebuild(line: string, head: Head, numberText: string, spacesAfter: number, alignColumn = 0): string {
   let out = line.slice(0, head.leadEnd);
   if (head.skipBefore !== null) {
     out += head.skipBefore.text;
@@ -368,8 +431,32 @@ function rebuild(line: string, head: Head, numberText: string, spacesAfter: numb
   // separator the block has nothing to separate.
   if (head.restStart >= line.length) return out + line.slice(head.end);
 
-  const gap = head.skipAfter !== null ? line.slice(head.skipAfter.end, head.restStart) : ' '.repeat(spacesAfter);
+  const gap =
+    head.skipAfter !== null
+      ? line.slice(head.skipAfter.end, head.restStart)
+      : alignColumn > 0
+        ? ' '.repeat(Math.max(1, alignColumn - 1 - out.length))
+        : ' '.repeat(spacesAfter);
   return out + gap + line.slice(head.restStart);
+}
+
+/**
+ * The line without its block number (§6.6 rule 3, `everyNth`): the number and the blanks
+ * behind it go, exactly as Remove Block Numbers cuts them, so `/N100 G0` becomes `/G0` and
+ * `N120/ G0` keeps its mark (`/ G0`).
+ */
+function withoutNumber(line: string, number: NcToken): string {
+  let end = number.end;
+  while (end < line.length && isSpaceCode(line.charCodeAt(end))) end++;
+  return line.slice(0, number.start) + line.slice(end);
+}
+
+/** True when `alignColumn` sets this line's gap and a tab stands in front of the code. */
+function tabInHead(line: string, head: Head): boolean {
+  // The gap behind the head is written anew; a tab in front of it — in the indentation or
+  // between the skip marks and the number — is copied and counts as one character.
+  if (head.skipAfter !== null || head.restStart >= line.length || head.end === 0) return false;
+  return line.lastIndexOf('\t', head.end - 1) >= 0;
 }
 
 /**
@@ -549,7 +636,11 @@ type Outcome =
   | 'rewritten'
   /** Resolved, and the number did not change. */
   | 'unchanged'
-  /** The rule says report only: the block may be in the calling program (`M99 P`, F42). */
+  /**
+   * The rule says report only: the block is one of another program the dialect never
+   * follows (`M98 P1000 Q30`, owner 2026-10-19), or a cycle read with a milling profile
+   * (its own row since the P4d review NC-9).
+   */
   | 'kept'
   /** No block of this program carries that number. */
   | 'missing'
@@ -563,7 +654,11 @@ type Outcome =
   | 'notNumber'
   /** The block carries two words with this address, so which one points at a block
    *  number cannot be told from the line (`references.ts`, `ReferenceWord.ambiguous`). */
-  | 'ambiguous';
+  | 'ambiguous'
+  /** P4d (plan §6.6 rule 10): the program the value names a block of cannot be told
+   *  (`programs.ts`, `TargetRefusal`): no call on the line, the program is not in this file
+   *  or is there twice, no or several programs of this file call this one. */
+  | TargetRefusal;
 
 interface Decision {
   /** Index into the run's `lines`, or -1 when the reference stands outside them. */
@@ -609,8 +704,15 @@ function keyOfWritten(scan: ProgramScan, text: string, main: string | null = nul
 }
 
 /**
+ * What `newTextOf` answers for a line whose number the run removed (§6.6 rule 3,
+ * `everyNth`): no digits at all, which no written number ever is.
+ */
+const REMOVED = '';
+
+/**
  * The key of the block number `row` carries **after** the run: the digits the run wrote
- * for a line of its scope, the number the scan read for every other row (or null).
+ * for a line of its scope, the number the scan read for every other row (or null). A line
+ * whose number the run removed ([`REMOVED`]) carries none.
  */
 function keyAfter(
   scan: ProgramScan,
@@ -621,6 +723,7 @@ function keyAfter(
   main: string | null,
 ): BlockKey | null {
   const written = row >= base && row < base + lineCount ? newTextOf(row - base) : null;
+  if (written === REMOVED) return null;
   // A main block keeps its prefix, so it keeps its kind of key.
   return written === null ? scan.keys[row] : keyOfWritten(scan, written, isMainKey(scan.keys[row], main) ? main : null);
 }
@@ -675,6 +778,7 @@ function keysAfter(
  */
 function decideReferences(
   scan: ProgramScan,
+  programs: ProgramIndex,
   firstLine: number,
   lineCount: number,
   newTextOf: ((index: number) => string | null) | null,
@@ -689,17 +793,23 @@ function decideReferences(
 
   for (const { row, word } of scan.found) {
     const line = scan.firstLine + row;
-    const site = word.key === null ? undefined : scan.segments[scan.segmentOf[row]].get(word.key);
+    // P4d (§6.6 rule 10): the program whose blocks the value names — its own for `own`,
+    // which is all M6 knew; the one its line calls, or the one that calls it, otherwise.
+    const program = targetProgramOf(scan, programs, row, word);
+    const segment = 'segment' in program ? program.segment : -1;
+    const site = word.key === null || segment < 0 ? undefined : scan.segments[segment]?.get(word.key);
 
     if (row < base || row >= end) {
       // A reference this run does not rewrite only matters when it points **into** the
       // lines it does: everything else keeps naming a number nothing here touches.
-      if (site === undefined) continue;
-      const inside =
-        (site.row >= base && site.row < end) ||
-        (site.lastRow >= base && site.lastRow < end) ||
-        (site.row < base && site.lastRow >= end);
-      if (inside) decisions.push({ index: -1, line, word, outcome: 'incoming', text: '' });
+      if (site !== undefined) {
+        if (siteInside(site, base, end)) decisions.push({ index: -1, line, word, outcome: 'incoming', text: '' });
+      } else if ('refused' in program && word.key !== null && mayPointInto(scan, possibleProgramsOf(scan, programs, row, word), word.key, base, end)) {
+        // P4d review NC-3: the program it names a block of cannot be told, and one it may
+        // name has that block among these lines. Reported with its reason, and asked about
+        // before the run, as it is inside them.
+        decisions.push({ index: -1, line, word, outcome: program.refused, text: '' });
+      }
       continue;
     }
 
@@ -714,6 +824,8 @@ function decideReferences(
     // which of them it meant, so neither is touched.
     else if (word.ambiguous) decide('ambiguous');
     else if (word.target === null) decide('notNumber');
+    // The program it names a block of cannot be told: reported with the reason (§6.6 rule 10).
+    else if ('refused' in program) decide(program.refused);
     // Without a document a missing number may simply be out of sight, and saying "this
     // program has no N100" about lines nobody read would be a lie.
     else if (site === undefined) decide(scan.unchecked ? 'outside' : 'missing');
@@ -721,12 +833,18 @@ function decideReferences(
     else if (site.row < base || site.row >= end) decide('outside');
     else {
       const written = newTextOf === null ? null : newTextOf(site.row - base);
+      // A block a reference names never loses its number to `everyNth` (§6.6 rule 3, see
+      // `protectionOf`); should one ever do, the value names nothing and is left standing.
+      if (written === REMOVED) {
+        decide('missing');
+        continue;
+      }
       // The block this reference would name afterwards, whether the run rewrites the
       // value or leaves it standing. A run that wrapped hands the same number out several
       // times, and a control takes the first match, so an answer that is no longer unique
       // is not an answer (G8 M6).
       const named = written === null ? word.key : keyOfWritten(scan, written, isMainKey(word.key, main) ? main : null);
-      if (after !== null && named !== null && (after[scan.segmentOf[row]].get(named) ?? 0) > 1) decide('duplicate');
+      if (after !== null && named !== null && (after[segment]?.get(named) ?? 0) > 1) decide('duplicate');
       else if (written === null || named === word.key) {
         // Where blocks are names, the same key is the same text: nothing to write.
         decide('unchanged');
@@ -735,6 +853,50 @@ function decideReferences(
     }
   }
   return decisions;
+}
+
+/** True when the block (or one of the blocks) of `site` is among the scope's rows `[base, end)`. */
+function siteInside(site: NumberSite, base: number, end: number): boolean {
+  return (site.row >= base && site.row < end) || (site.lastRow >= base && site.lastRow < end) || (site.row < base && site.lastRow >= end);
+}
+
+/**
+ * P4d review NC-3: true when one of the `segments` (null: any program of the file) has a
+ * block `key` among the scope's rows `[base, end)`.
+ */
+function mayPointInto(scan: ProgramScan, segments: readonly number[] | null, key: BlockKey, base: number, end: number): boolean {
+  const list = segments ?? scan.segments.map((_, segment) => segment);
+  for (const segment of list) {
+    const site = scan.segments[segment]?.get(key);
+    if (site !== undefined && siteInside(site, base, end)) return true;
+  }
+  return false;
+}
+
+/**
+ * P4d review NC-4: the rows that carry a block number the run put on more blocks of their
+ * program than carried it before, now more than one (a line above the start text, or one it
+ * skips, kept that number), in row order, and how many such numbers there are.
+ */
+function duplicatesMade(
+  scan: ProgramScan,
+  after: readonly Map<BlockKey, number>[],
+  keyAfterRow: (row: number) => BlockKey | null,
+): { rows: number[]; count: number } {
+  let count = 0;
+  const grown = after.map((counts, segment) => {
+    const keys = new Set<BlockKey>();
+    for (const [key, n] of counts) if (n > 1 && n > (scan.segments[segment]?.get(key)?.count ?? 0)) keys.add(key);
+    count += keys.size;
+    return keys;
+  });
+  if (count === 0) return { rows: [], count };
+  const rows: number[] = [];
+  for (let row = 0; row < scan.keys.length; row++) {
+    const key = keyAfterRow(row);
+    if (key !== null && grown[scan.segmentOf[row]]?.has(key) === true) rows.push(row);
+  }
+  return { rows, count };
 }
 
 /**
@@ -777,11 +939,17 @@ function applyReferences(out: string[], lines: readonly string[], decisions: rea
  *
  * Only a target that existed once in the input counts: a value that named nothing, or two
  * blocks, has its own row already, and so does a line whose two words of one address
- * cannot be told apart. The target is looked for in the reference's own program; for a
- * reference the dialect never rewrites (`M99 P` names a block of the **caller**) it is the
- * one block of the file that carries the number, in another program than the reference
- * (see `targetOf`).
+ * cannot be told apart. The target is looked for in the program the value names a block
+ * of (§6.6 rule 10, `targetProgramOf`) — its own, the one its line calls, or the one that
+ * calls its program — also where the dialect never rewrites the value (`M98 P2000 Q50` with
+ * `O2000` in the file). Where that program cannot be told, it is the one block of the file
+ * that carries the number, in another program than the reference (see `targetOf`).
  */
+/** `LandingFinder`'s answer where the program a value names cannot be told. */
+const NO_PROGRAM = -1;
+/** `LandingFinder`'s answer where the program a value names is not in this file. */
+const NOT_IN_FILE = -2;
+
 interface Landing {
   /** The row of the block the reference named before the run. */
   targetRow: number;
@@ -796,22 +964,34 @@ class LandingFinder {
   constructor(
     private readonly scan: ProgramScan,
     private readonly keyAfterRow: (row: number) => BlockKey | null,
+    /**
+     * P4d (§6.6 rule 10): the program a reference names a block of, `NOT_IN_FILE` when that
+     * program is not in this file, or `NO_PROGRAM` when it cannot be told.
+     */
+    private readonly segmentOf: (row: number, word: ReferenceWord) => number,
   ) {}
 
   /** The block a reference on `row` named in the input, as program and site, or null. */
   private targetOf(row: number, word: ReferenceWord): { segment: number; site: NumberSite } | null {
     if (word.key === null) return null;
     const own = this.scan.segmentOf[row];
-    if (word.rewrite) {
-      const here = this.scan.segments[own]?.get(word.key);
-      return here !== undefined && here.count === 1 ? { segment: own, site: here } : null;
+    // P4d (§6.6 rule 10): the program the value names a block of, wherever the file tells
+    // which one — for a value the dialect never rewrites as well, as long as it names a
+    // block of another program (`M98 P2000 Q50` one of `O2000`). A rule of the own program
+    // that never rewrites (a cycle read with a milling profile) keeps M6's answer below.
+    const target = word.rewrite || word.program !== 'own' ? this.segmentOf(row, word) : NO_PROGRAM;
+    if (target >= 0) {
+      const here = this.scan.segments[target]?.get(word.key);
+      return here !== undefined && here.count === 1 ? { segment: target, site: here } : null;
     }
-    // A value the dialect never rewrites names a block of **another** program: `M99 P`
-    // one of the caller, `M98 P2000 Q50` one of `O2000`. Where that block stands cannot be
-    // read from the line, so only a number exactly one block of the file carries is an
-    // answer, and only when that block is not in the reference's own program: `Q50` behind
-    // `M98 P2000` does not name the `N50` beside it (golden `m98-p-before-call`), and a
-    // subprogram's own `N30` is not where its `M99 P30` returns to (`m99-p-caller`).
+    // The program it calls is not in this file: no block of the file is its target.
+    if (target === NOT_IN_FILE) return null;
+    // Otherwise the value names a block of a program that cannot be told: `M99 P` one of a
+    // caller that is not the only one, `M98 P#1 Q50` one of whichever program it calls. Only
+    // a number exactly one block of the file carries is an answer, and only when that block
+    // is not in the reference's own program: `Q50` behind `M98 P2000` does not name the `N50`
+    // beside it (golden `m98-p-before-call`), and a subprogram's own `N30` is not where its
+    // `M99 P30` returns to (`m99-p-caller`).
     let found: { segment: number; site: NumberSite } | null = null;
     for (let segment = 0; segment < this.scan.segments.length; segment++) {
       const site = this.scan.segments[segment].get(word.key);
@@ -918,10 +1098,352 @@ function mostBlocks(scan: ProgramScan, restart: boolean, firstLine: number, line
  * it happens, and it can only bound it: the answer is "may", and the message says so.
  */
 function mayWrap(settings: Settings, scan: ProgramScan, firstLine: number, lineCount: number): boolean {
-  if (!settings.wrap || settings.max === null) return false;
+  // `fitToMax` picks a step that never passes the maximum (§6.6 rule 1).
+  if (!settings.wrap || settings.max === null || settings.fitToMax) return false;
   const blocks = mostBlocks(scan, settings.restartAtProgramStart, firstLine, lineCount);
   if (blocks <= 0) return false;
   return settings.start + settings.step * (blocks - 1) > settings.max;
+}
+
+// ---------------------------------------------------------------------------
+// The advanced options (P4d, plan §6.6 rules 1–7)
+// ---------------------------------------------------------------------------
+//
+// The run is three walks over the scope since P4d, and only the first one tokenizes:
+//
+//  1. [`walkLines`] decides for every line what it is, in the fixed order of rule 7:
+//     continuation tail → blank line → program marker → `skipFirst`/`skipLast` → before the
+//     start trigger → `skipStartingWith` → `skipContaining` → `continuationStart` → block
+//     name → `onlyNumbered` → a block the run numbers. Nothing in it depends on the numbers.
+//  2. [`selectBlocks`] picks, among those blocks, the ones `everyNth` numbers, and counts
+//     them per run of the counter — the count `fitToMax` needs before the first number is
+//     written (rule 1).
+//  3. The numbering itself (`runRenumber`): stopped at `max`, wrapped, written.
+//
+// A run an option refuses (`noMax`, `doesNotFit`, `noTrigger`) writes nothing at all
+// (rule 7): the lines come back as they were, the reason is the summary, and the status
+// bar says it. The preflight asks nothing about such a run.
+
+/** What [`walkLines`] decided for a line. 1 to 7 are the skip rows of the results table. */
+const LEFT = 0;
+const MARKER = 1;
+const PREFIX = 2;
+const CONTAINING = 3;
+const CONTINUED = 4;
+const NAME = 5;
+const NOT_NUMBERED = 6;
+const STOPPED = 7;
+/** Numbered, and the numbering started over here: a warning row. */
+const WRAPPED = 8;
+/** A block the run numbers (or, under `everyNth`, takes the number off). */
+const BLOCK = 9;
+/** Kept by `skipFirst`/`skipLast` or above the start trigger: one row per region, not one per line. */
+const QUIET = 10;
+
+/** What [`selectBlocks`] picked for a block. */
+const NUMBER = 1;
+/** Numbered although `everyNth` passes over it: a reference names it, or it is a main block. */
+const NUMBER_KEPT = 2;
+/** `everyNth` passes over it: the block loses its number. */
+const DROP = 3;
+
+type Refusal = 'noMax' | 'doesNotFit' | 'noTrigger';
+
+interface Walk {
+  /** Per line, one of the codes above (`LEFT` … `QUIET`). */
+  codes: Uint8Array;
+  /** The head of each `BLOCK` line, read once. */
+  heads: (Head | undefined)[];
+  /** 1 where the counter starts over (a program start, with `restartAtProgramStart`). */
+  restarts: Uint8Array;
+}
+
+/**
+ * The scope's length in lines (§6.6 rule 5): every line counts, an empty one too, but the
+ * trailing empty element a final newline leaves in the array is no line.
+ */
+function scopeLength(lines: readonly string[]): number {
+  return lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length;
+}
+
+/**
+ * A test for "the line contains one of these texts" (§6.6 rules 4 and 6): anywhere in the
+ * line as it is written, comments included, under the profile's case rule. Null when there
+ * is no text to look for.
+ */
+function containsAny(texts: readonly string[], caseSensitive: boolean): ((line: string) => boolean) | null {
+  const wanted = texts.filter((text) => text !== '').map((text) => (caseSensitive ? text : text.toUpperCase()));
+  if (wanted.length === 0) return null;
+  return (line) => {
+    const hay = caseSensitive ? line : line.toUpperCase();
+    for (const text of wanted) if (hay.includes(text)) return true;
+    return false;
+  };
+}
+
+/** The first line of the scope that contains the start trigger, or -1 (§6.6 rule 6). */
+function triggerRowOf(lines: readonly string[], trigger: string, caseSensitive: boolean): number {
+  const contains = containsAny([trigger], caseSensitive);
+  if (contains === null) return -1;
+  for (let i = 0; i < lines.length; i++) if (contains(lines[i])) return i;
+  return -1;
+}
+
+/**
+ * The refusals that the settings and the text alone decide (§6.6 rules 1 and 6), in that
+ * order, or null. `doesNotFit` needs the walk and comes later ([`fittedStep`]).
+ */
+function earlyRefusal(lines: readonly string[], settings: Settings, caseSensitive: boolean): Msg | null {
+  if (settings.fitToMax && settings.max === null) return refusal('noMax');
+  if (settings.startTrigger !== '' && triggerRowOf(lines, settings.startTrigger, caseSensitive) < 0) {
+    return refusal('noTrigger', { text: settings.startTrigger });
+  }
+  return null;
+}
+
+function refusal(reason: Refusal, params?: Record<string, string | number>): Msg {
+  return params === undefined ? { key: `ncNumbering.renumber.refused.${reason}` } : { key: `ncNumbering.renumber.refused.${reason}`, params };
+}
+
+/** True when `skipFirst` and `skipLast` together cover the whole scope: nothing to renumber (§6.6 rule 5). */
+function skipsEverything(lines: readonly string[], settings: Settings): boolean {
+  const skipped = settings.skipFirst + settings.skipLast;
+  return skipped > 0 && skipped >= scopeLength(lines);
+}
+
+/**
+ * The step `fitToMax` uses (§6.6 rule 1), or null when even a step of 1 does not fit.
+ *
+ * `blocks` is the number of blocks the run numbers — of the longest program where the
+ * counter starts over at each one, only the ones `everyNth` numbers. One block or none
+ * needs no step, and the form's increment stands (it is never used).
+ */
+function fittedStep(start: number, max: number, blocks: number, step: number): number | null {
+  if (blocks === 0) return step;
+  if (start > max) return null;
+  if (blocks === 1) return step;
+  const fitted = Math.floor((max - start) / (blocks - 1));
+  return fitted >= 1 ? fitted : null;
+}
+
+/**
+ * The first walk: what every line of the scope is (§6.6 rule 7, see above). `from` is the
+ * first line numbering may start at (the start trigger, rule 6).
+ */
+function walkLines(lines: readonly string[], ctx: TransformContext, cp: CompiledProfile, settings: Settings, from: number): Walk {
+  const caseSensitive = cp.profile.syntax.caseSensitive === true;
+  const blockNumber = cp.profile.syntax.blockNumber;
+  const prefixOut = blockNumber.mode === 'leading-integer' ? '' : (blockNumber.prefix ?? 'N');
+  const namePrefixes = blockNumber.mode === 'leading-integer' ? [] : [prefixOut, ...settings.altPrefixes];
+  const marks = settings.skipStartingWith;
+  const containing = containsAny(settings.skipContaining, caseSensitive);
+  const continuedLine = cp.re.continuationStart;
+  // Lines at or behind this index belong to `skipLast`.
+  const lastKept = scopeLength(lines) - settings.skipLast;
+
+  const codes = new Uint8Array(lines.length);
+  const heads = new Array<Head | undefined>(lines.length);
+  const restarts = new Uint8Array(lines.length);
+  // The state `lines[0]` begins in. `undefined` — a caller that handed over a fragment
+  // without its document — is what `tokenizeLine` reads as the start of the document,
+  // and the preflight has already warned about that on a dialect with continuations.
+  let state: LineState | undefined = stateBefore(ctx);
+  const lastIndex = lines.length - 1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const continuation = state?.continuation === true;
+    const { tokens, state: next } = tokenizeLine(line, cp, state);
+    state = next;
+
+    // The tail of a `~` block is part of the block above; it is not a block and gets no
+    // number, and it is not something the user "skipped" either.
+    if (continuation) continue;
+
+    if (settings.restartAtProgramStart && isProgramStart(maskedOf(line, tokens), cp)) restarts[i] = 1;
+
+    const head = readHead(line, tokens);
+    const blank = head.restStart >= line.length && head.end === head.leadEnd;
+    // The trailing empty element belongs to the final newline, not to a block: numbering
+    // it would turn that newline into text (types.ts, rule 5).
+    if (blank && (settings.skipEmpty || (i === lastIndex && line === ''))) continue;
+
+    // A program marker is not a block, whatever the skip list says (see the function).
+    if (isProgramMarkerLine(tokens)) {
+      codes[i] = MARKER;
+      continue;
+    }
+    // P4d (§6.6 rules 5 and 6): the first and last lines of the scope, and the lines above
+    // the start trigger, keep their text and their numbers. One row says so per region.
+    if (i < settings.skipFirst || i >= lastKept || i < from) {
+      codes[i] = QUIET;
+      continue;
+    }
+    if (marks.length > 0 && marks.some((mark) => matchesAt(line, head.leadEnd, mark, caseSensitive))) {
+      codes[i] = PREFIX;
+      continue;
+    }
+    // P4d (§6.6 rule 4): anywhere in the line, read as written.
+    if (containing !== null && containing(line)) {
+      codes[i] = CONTAINING;
+      continue;
+    }
+    // B1: a line that continues the block above by its leading mark (`syntax.continuationStart`,
+    // Okuma `$`) is no block of its own, whatever the editable skip list says: `N30 $ H1.8`
+    // would take the mark off the head of the line and cut the line off its block.
+    if (continuedLine?.test(line) === true) {
+      codes[i] = CONTINUED;
+      continue;
+    }
+    // `restStart` is where the block's text starts, which is where a block *name* would
+    // stand: behind the leading whitespace, or behind a skip mark and its whitespace.
+    // The tokenizer decides where it read a label there (`NEXT_PECK:` is no block name,
+    // Okuma `NLAP1` is); the text decides where it did not (Fanuc `NLAP1`).
+    const named =
+      head.number === null &&
+      (labelIsBlockName(tokens, head.restStart, namePrefixes, caseSensitive) ??
+        looksLikeBlockName(line, head.restStart, namePrefixes, caseSensitive));
+    if (named) {
+      codes[i] = NAME;
+      continue;
+    }
+    if (settings.onlyNumbered && head.number === null) {
+      codes[i] = NOT_NUMBERED;
+      continue;
+    }
+    codes[i] = BLOCK;
+    heads[i] = head;
+  }
+  return { codes, heads, restarts };
+}
+
+/**
+ * The blocks `everyNth` numbers (§6.6 rule 3), and the most one run of the counter numbers.
+ *
+ * Of the blocks the run would number, the 1st, the (N+1)th, the (2N+1)th … get a number;
+ * the ones between lose theirs, unless `keeps` says otherwise — then the block gets the
+ * next number of the sequence and the count goes on, so the next Nth block is the one it
+ * would have been. Where the counter starts over at each program start, so does the count:
+ * the first block of every program gets the start number.
+ */
+function selectBlocks(walk: Walk, everyNth: number, keeps: (index: number) => boolean): { picks: Uint8Array; most: number } {
+  const picks = new Uint8Array(walk.codes.length);
+  let most = 0;
+  let count = 0;
+  let position = 0;
+  for (let i = 0; i < walk.codes.length; i++) {
+    if (walk.restarts[i] === 1) {
+      count = 0;
+      position = 0;
+    }
+    if (walk.codes[i] !== BLOCK) continue;
+    let pick = NUMBER;
+    if (everyNth > 1 && position % everyNth !== 0) pick = keeps(i) ? NUMBER_KEPT : DROP;
+    position++;
+    picks[i] = pick;
+    if (pick === DROP) continue;
+    count++;
+    if (count > most) most = count;
+  }
+  return { picks, most };
+}
+
+/**
+ * Which blocks a reference names, so `everyNth` never takes their number (§6.6 rule 3).
+ *
+ * A reference resolved into one program (rule 10, `targetProgramOf`) keeps the block of
+ * that program. One that is not — a rule that never rewrites (`M98 P… Q…`, a cycle read
+ * with a milling profile), a program that cannot be told — keeps a block with that number in
+ * **every** program of the file, as Remove Block Numbers does: keeping a number too many
+ * costs nothing, a missing jump target makes the control stop. A computed value (`GOTO
+ * #100`) names no number and keeps nothing; it is reported as a reference all the same.
+ * Returns a test on the scan's rows.
+ */
+function referencedRows(scan: ProgramScan, programs: ProgramIndex): (row: number) => boolean {
+  const everywhere = new Set<BlockKey>();
+  const inProgram = new Map<number, Set<BlockKey>>();
+  for (const { row, word } of scan.found) {
+    if (word.key === null) continue;
+    const program = word.rewrite ? targetProgramOf(scan, programs, row, word) : null;
+    if (program !== null && 'segment' in program) {
+      let keys = inProgram.get(program.segment);
+      if (keys === undefined) inProgram.set(program.segment, (keys = new Set()));
+      keys.add(word.key);
+    } else everywhere.add(word.key);
+  }
+  if (everywhere.size === 0 && inProgram.size === 0) return () => false;
+  return (row) => {
+    const key = scan.keys[row];
+    if (key === null || key === undefined) return false;
+    return everywhere.has(key) || inProgram.get(scan.segmentOf[row])?.has(key) === true;
+  };
+}
+
+/**
+ * `TransformResult.renumbered` (§6.6 rule 11): every named program of the scan in which the
+ * run changed, removed or created a block number, with what it did. A key several blocks
+ * of a program carried before the run names no one block, so what became of it has no
+ * answer and it is not in `changed`; where the run changed one of those blocks it is in
+ * `duplicated` (P4d review CODE-10), so a reference to it elsewhere is listed as one.
+ */
+function outcomeOf(
+  scan: ProgramScan,
+  programs: ProgramIndex,
+  base: number,
+  lineCount: number,
+  writtenOf: (index: number) => string | null,
+  main: string | null,
+  prefix: string,
+): RenumberOutcome {
+  const end = Math.min(scan.keys.length, base + lineCount);
+  const changed = new Map<number, Map<BlockKey, string | null>>();
+  // P4d review CODE-10: keys several blocks carried before the run, one of which it changed.
+  const twiceBefore = new Map<number, Set<BlockKey>>();
+  const touched = new Set<number>();
+  for (let row = Math.max(0, base); row < end; row++) {
+    const written = writtenOf(row - base);
+    if (written === null) continue;
+    const segment = scan.segmentOf[row];
+    touched.add(segment);
+    const before = scan.keys[row];
+    if (before === null) continue;
+    if (keyAfter(scan, row, base, lineCount, writtenOf, main) === before) continue;
+    if ((scan.segments[segment]?.get(before)?.count ?? 0) !== 1) {
+      let keys = twiceBefore.get(segment);
+      if (keys === undefined) twiceBefore.set(segment, (keys = new Set()));
+      keys.add(before);
+      continue;
+    }
+    let map = changed.get(segment);
+    if (map === undefined) changed.set(segment, (map = new Map()));
+    map.set(before, written === REMOVED ? null : written);
+  }
+
+  const result: RenumberedProgram[] = [];
+  if (touched.size === 0) return { byText: scan.byText, prefix, programs: result };
+  const after = keysAfter(scan, base, lineCount, writtenOf, main);
+  for (const segment of [...touched].sort((a, b) => a - b)) {
+    const info = programs.programs[segment];
+    if (info === undefined || info.name === null || info.key === null) continue;
+    const before = scan.segments[segment] ?? new Map<BlockKey, NumberSite>();
+    const created = new Set<BlockKey>();
+    // A value that named several blocks before the run names no one block, and the run
+    // changed one of them: listed as a duplicate (CODE-10), never followed.
+    const duplicated = new Set<BlockKey>(twiceBefore.get(segment) ?? []);
+    for (const [key, count] of after[segment] ?? new Map<BlockKey, number>()) {
+      if (!before.has(key)) created.add(key);
+      if (count > 1) duplicated.add(key);
+    }
+    const map = changed.get(segment) ?? new Map<BlockKey, string | null>();
+    if (map.size === 0 && created.size === 0 && !twiceBefore.has(segment)) continue;
+    result.push({ name: info.name, key: info.key, changed: map, created, duplicated });
+  }
+  return { byText: scan.byText, prefix, programs: result };
+}
+
+/** A run that writes nothing: the input as it was, an identity map, and `summary` as the reason. */
+function untouched(lines: readonly string[], summary: Msg): TransformResult {
+  return { lines: lines.slice(), lineMap: Int32Array.from(lines, (_line, i) => i), summary, skipped: [], warnings: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -948,7 +1470,16 @@ function optionFields(cp: CompiledProfile): FieldSpec[] {
       min: 0,
       max: limit?.max ?? 99999999,
     },
-    { id: 'step', type: 'integer', label: t('ncNumbering.renumber.fields.step.label'), default: numbering.step ?? 10, required: true, min: 1, max: 100000 },
+    {
+      id: 'step',
+      type: 'integer',
+      label: t('ncNumbering.renumber.fields.step.label'),
+      help: t('ncNumbering.renumber.fields.step.help'),
+      default: numbering.step ?? 10,
+      required: true,
+      min: 1,
+      max: 100000,
+    },
     {
       id: 'digits',
       type: 'integer',
@@ -976,6 +1507,14 @@ function optionFields(cp: CompiledProfile): FieldSpec[] {
       min: 1,
       max: limit?.max ?? 999999999,
     },
+    // P4d (§6.6 rule 1): the increment worked out from the maximum; `step` is then not used.
+    {
+      id: 'fitToMax',
+      type: 'bool',
+      label: t('ncNumbering.renumber.fields.fitToMax.label'),
+      help: t('ncNumbering.renumber.fields.fitToMax.help'),
+      default: numbering.fitToMax === true,
+    },
     {
       id: 'onOverflow',
       type: 'choice',
@@ -995,12 +1534,75 @@ function optionFields(cp: CompiledProfile): FieldSpec[] {
       min: cp.profile.syntax.wordSeparatorRequired === true ? 1 : 0,
       max: 16,
     },
+    // P4d (§6.6 rules 2 and 3).
+    {
+      id: 'alignColumn',
+      type: 'integer',
+      label: t('ncNumbering.renumber.fields.alignColumn.label'),
+      help: t('ncNumbering.renumber.fields.alignColumn.help'),
+      default: numbering.alignColumn ?? 0,
+      required: true,
+      min: 0,
+      max: MAX_ALIGN_COLUMN,
+    },
+    {
+      id: 'everyNth',
+      type: 'integer',
+      label: t('ncNumbering.renumber.fields.everyNth.label'),
+      help: t('ncNumbering.renumber.fields.everyNth.help'),
+      default: numbering.everyNth ?? 1,
+      required: true,
+      min: 1,
+      max: MAX_EVERY_NTH,
+    },
     {
       id: 'skipStartingWith',
       type: 'text',
       label: t('ncNumbering.renumber.fields.skipStartingWith.label'),
       help: t('ncNumbering.renumber.fields.skipStartingWith.help'),
       default: (numbering.skipStartingWith ?? []).join(' '),
+    },
+    // P4d (§6.6 rules 4–6).
+    {
+      id: 'skipContaining',
+      type: 'text',
+      label: t('ncNumbering.renumber.fields.skipContaining.label'),
+      help: t('ncNumbering.renumber.fields.skipContaining.help'),
+      default: (numbering.skipContaining ?? []).join(' '),
+    },
+    {
+      id: 'skipFirst',
+      type: 'integer',
+      label: t('ncNumbering.renumber.fields.skipFirst.label'),
+      help: t('ncNumbering.renumber.fields.skipFirst.help'),
+      default: numbering.skipFirst ?? 0,
+      required: true,
+      min: 0,
+      max: MAX_SKIP_LINES,
+    },
+    {
+      id: 'skipLast',
+      type: 'integer',
+      label: t('ncNumbering.renumber.fields.skipLast.label'),
+      help: t('ncNumbering.renumber.fields.skipLast.help'),
+      default: numbering.skipLast ?? 0,
+      required: true,
+      min: 0,
+      max: MAX_SKIP_LINES,
+    },
+    {
+      id: 'startTrigger',
+      type: 'text',
+      label: t('ncNumbering.renumber.fields.startTrigger.label'),
+      help: t('ncNumbering.renumber.fields.startTrigger.help'),
+      default: numbering.startTrigger ?? '',
+      maxLength: MAX_SKIP_TEXT,
+    },
+    {
+      id: 'startAfterTrigger',
+      type: 'bool',
+      label: t('ncNumbering.renumber.fields.startAfterTrigger.label'),
+      default: numbering.startAfterTrigger === true,
     },
     { id: 'skipEmpty', type: 'bool', label: t('ncNumbering.renumber.fields.skipEmpty.label'), default: numbering.skipEmpty === true },
     {
@@ -1036,6 +1638,11 @@ function optionFields(cp: CompiledProfile): FieldSpec[] {
  * The reference scan is over the **document**, not over `lines`. A selection that holds
  * `N100` but not the `IF [#1 EQ 1] GOTO 100` above it used to pass the preflight without
  * a word and rewrite the jump target in silence (G8 M4).
+ *
+ * P4d (§6.6 rule 7): a run an option refuses, or one `skipFirst` and `skipLast` leave
+ * nothing to do, writes nothing, so there is nothing to confirm; the run's summary says
+ * why. The preflight asks the run's own questions to find out, the walk included where
+ * `fitToMax` needs its count.
  */
 function preflightOf(lines: string[], ctx: TransformContext): Msg | null {
   const numbering = ctx.cp.profile.numbering;
@@ -1043,17 +1650,27 @@ function preflightOf(lines: string[], ctx: TransformContext): Msg | null {
     if (ctx.firstLine <= 1) return null;
     return { key: 'ncNumbering.renumber.consecutiveSelection', params: { start: numbering.start ?? 0 } };
   }
+
+  const settings = settingsFor(ctx.cp, ctx.options);
+  const cp = withAltPrefixes(ctx.cp, settings.altPrefixes);
+  if (earlyRefusal(lines, settings, cp.profile.syntax.caseSensitive === true) !== null) return null;
+  if (skipsEverything(lines, settings)) return null;
+
   // A dialect that joins blocks across lines, run on a fragment whose incoming state is
   // unknown: the first lines could be the tail of a block above and must not be numbered.
   if (continuationRisk(ctx, stateBefore(ctx))) return { key: 'ncNumbering.renumber.fragmentUnknown' };
 
-  const settings = settingsFor(ctx.cp, ctx.options);
-  const cp = withAltPrefixes(ctx.cp, settings.altPrefixes);
   const scan = scanFor(lines, ctx, cp);
+  const programs = indexPrograms(scan, cp);
+  if (settings.fitToMax && settings.max !== null) {
+    const { most } = selectRun(lines, ctx, cp, settings, scan, programs);
+    if (fittedStep(settings.start, settings.max, most, settings.step) === null) return null;
+  }
+
   // One line, one question: a `G71 P100 Q200` whose two targets are both gone is one
   // thing to look at, not two.
   const lineNumbers = new Set<number>();
-  for (const decision of decideReferences(scan, ctx.firstLine, lines.length, null, mainPrefixOf(cp))) {
+  for (const decision of decideReferences(scan, programs, ctx.firstLine, lines.length, null, mainPrefixOf(cp))) {
     if (isTrouble(decision.outcome)) lineNumbers.add(decision.line);
   }
   let first = 0;
@@ -1075,111 +1692,102 @@ function preflightOf(lines: string[], ctx: TransformContext): Msg | null {
   );
 }
 
+/**
+ * The first two walks (see "The advanced options"): what every line is, and which blocks
+ * get a number. Shared by the run and the preflight, so both count the same blocks.
+ */
+function selectRun(
+  lines: readonly string[],
+  ctx: TransformContext,
+  cp: CompiledProfile,
+  settings: Settings,
+  scan: ProgramScan,
+  programs: ProgramIndex,
+): { walk: Walk; picks: Uint8Array; most: number; triggerRow: number } {
+  const caseSensitive = cp.profile.syntax.caseSensitive === true;
+  const triggerRow = settings.startTrigger === '' ? -1 : triggerRowOf(lines, settings.startTrigger, caseSensitive);
+  const from = triggerRow < 0 ? 0 : triggerRow + (settings.startAfterTrigger ? 1 : 0);
+  const walk = walkLines(lines, ctx, cp, settings, from);
+  if (settings.everyNth <= 1) return { walk, ...selectBlocks(walk, 1, () => false), triggerRow };
+
+  // A main block keeps its number whatever `everyNth` says: without it the block is no
+  // main block any more, and a block search can no longer start the program there (M9).
+  const main = mainPrefixOf(cp);
+  const referenced = referencedRows(scan, programs);
+  const base = Math.max(0, Math.trunc(ctx.firstLine) - scan.firstLine);
+  const keeps = (index: number): boolean =>
+    (main !== null && walk.heads[index]?.number?.address === main) || referenced(base + index);
+  return { walk, ...selectBlocks(walk, settings.everyNth, keeps), triggerRow };
+}
+
 function runRenumber(lines: string[], ctx: TransformContext): TransformResult {
   const settings = settingsFor(ctx.cp, ctx.options);
   const cp = withAltPrefixes(ctx.cp, settings.altPrefixes);
-  const caseSensitive = cp.profile.syntax.caseSensitive === true;
   const blockNumber = cp.profile.syntax.blockNumber;
   const prefixOut = blockNumber.mode === 'leading-integer' ? '' : (blockNumber.prefix ?? 'N');
-  const namePrefixes = blockNumber.mode === 'leading-integer' ? [] : [prefixOut, ...settings.altPrefixes];
   const main = mainPrefixOf(cp);
-  const marks = settings.skipStartingWith;
-  const continuedLine = cp.re.continuationStart;
 
-  // One lookup per run instead of one per skipped line (`Located.message` is display text).
-  const reason = {
-    prefix: t('ncNumbering.renumber.skippedByPrefix'),
-    name: t('ncNumbering.renumber.skippedName'),
-    notNumbered: t('ncNumbering.renumber.skippedNotNumbered'),
-    stopped: t('ncNumbering.renumber.skippedStopped'),
-    programMarker: t('ncNumbering.renumber.skippedProgramMarker'),
-    continued: t('ncNumbering.renumber.skippedContinued'),
-    wrapped: t('ncNumbering.renumber.wrappedRow'),
-  };
+  // P4d (§6.6 rule 7): a refusal writes nothing, and says why as the summary.
+  const refused = earlyRefusal(lines, settings, cp.profile.syntax.caseSensitive === true);
+  if (refused !== null) return untouched(lines, refused);
+  // §6.6 rule 5: the first and last lines together cover the scope.
+  if (skipsEverything(lines, settings)) return untouched(lines, { key: 'ncNumbering.renumber.nothing' });
+
+  // The references, over the whole document: a jump *above* the selection points into it
+  // just as well, and the run's own walk only ever sees the selection (G8 M4). Read before
+  // the numbering since P4d: `everyNth` keeps the blocks they name.
+  const scan = scanFor(lines, ctx, cp);
+  const programs = indexPrograms(scan, cp);
+  const { walk, picks, most, triggerRow } = selectRun(lines, ctx, cp, settings, scan, programs);
+
+  let step = settings.step;
+  if (settings.fitToMax && settings.max !== null) {
+    const fitted = fittedStep(settings.start, settings.max, most, settings.step);
+    if (fitted === null) {
+      return untouched(lines, refusal('doesNotFit', { count: most, start: settings.start, max: settings.max }));
+    }
+    step = fitted;
+  }
 
   const out = lines.slice();
   const lineMap = new Int32Array(lines.length);
-  const skipped: Located[] = [];
+  const codes = walk.codes;
   const warnings: Msg[] = [];
   /**
    * Scope index → the digits of the block number that line carries after the run, as they
    * are written (`'20'`, `'0020'`): a dialect whose sequence numbers are names tells blocks
-   * apart by exactly that text.
+   * apart by exactly that text. [`REMOVED`] where `everyNth` took the number off.
    */
   const newTextOf = new Map<number, string>();
-  let skippedCount = 0;
   let numbered = 0;
+  let removed = 0;
+  let keptNamed = 0;
   let value = settings.start;
   let stopped = false;
   let wraps = 0;
   let firstWrapLine = 0;
-  // The state `lines[0]` begins in. `undefined` — a caller that handed over a fragment
-  // without its document — is what `tokenizeLine` reads as the start of the document,
-  // and the preflight has already warned about that on a dialect with continuations.
-  let state: LineState | undefined = stateBefore(ctx);
-  const lastIndex = lines.length - 1;
-
-  const note = (index: number, message: string, severity: Located['severity']): void => {
-    if (skipped.length < SKIP_LIMIT) skipped.push({ line: ctx.firstLine + index, message, severity });
-  };
-  const skip = (index: number, message: string): void => {
-    skippedCount++;
-    note(index, message, 'info');
-  };
+  let tabbed = false;
+  let changedAny = false;
 
   for (let i = 0; i < lines.length; i++) {
     lineMap[i] = i;
+    if (walk.restarts[i] === 1) value = settings.start;
+    if (codes[i] !== BLOCK) continue;
     const line = lines[i];
-    const continuation = state?.continuation === true;
-    const { tokens, state: next } = tokenizeLine(line, cp, state);
-    state = next;
+    const head = walk.heads[i] as Head;
 
-    // The tail of a `~` block is part of the block above; it is not a block and gets no
-    // number, and it is not something the user "skipped" either.
-    if (continuation) continue;
-
-    if (settings.restartAtProgramStart && isProgramStart(maskedOf(line, tokens), cp)) value = settings.start;
-
-    const head = readHead(line, tokens);
-    const blank = head.restStart >= line.length && head.end === head.leadEnd;
-    // The trailing empty element belongs to the final newline, not to a block: numbering
-    // it would turn that newline into text (types.ts, rule 5).
-    if (blank && (settings.skipEmpty || (i === lastIndex && line === ''))) continue;
-
-    // A program marker is not a block, whatever the skip list says (see the function).
-    if (isProgramMarkerLine(tokens)) {
-      skip(i, reason.programMarker);
-      continue;
-    }
-    if (marks.length > 0 && marks.some((mark) => matchesAt(line, head.leadEnd, mark, caseSensitive))) {
-      skip(i, reason.prefix);
-      continue;
-    }
-    // B1: a line that continues the block above by its leading mark (`syntax.continuationStart`,
-    // Okuma `$`) is no block of its own, whatever the editable skip list says: `N30 $ H1.8`
-    // would take the mark off the head of the line and cut the line off its block.
-    if (continuedLine?.test(line) === true) {
-      skip(i, reason.continued);
-      continue;
-    }
-    // `restStart` is where the block's text starts, which is where a block *name* would
-    // stand: behind the leading whitespace, or behind a skip mark and its whitespace.
-    // The tokenizer decides where it read a label there (`NEXT_PECK:` is no block name,
-    // Okuma `NLAP1` is); the text decides where it did not (Fanuc `NLAP1`).
-    const named =
-      head.number === null &&
-      (labelIsBlockName(tokens, head.restStart, namePrefixes, caseSensitive) ??
-        looksLikeBlockName(line, head.restStart, namePrefixes, caseSensitive));
-    if (named) {
-      skip(i, reason.name);
-      continue;
-    }
-    if (settings.onlyNumbered && head.number === null) {
-      skip(i, reason.notNumbered);
-      continue;
-    }
     if (stopped) {
-      skip(i, reason.stopped);
+      codes[i] = STOPPED;
+      continue;
+    }
+    // §6.6 rule 3: a block `everyNth` passes over loses its number, skip marks kept.
+    if (picks[i] === DROP) {
+      if (head.number !== null) {
+        out[i] = withoutNumber(line, head.number);
+        newTextOf.set(i, REMOVED);
+        removed++;
+        changedAny = true;
+      }
       continue;
     }
 
@@ -1190,7 +1798,7 @@ function runRenumber(lines: string[], ctx: TransformContext): TransformResult {
       if (!settings.wrap || value > settings.max) {
         stopped = true;
         warnings.push({ key: 'ncNumbering.renumber.overflowStopped', params: { line: ctx.firstLine + i, max: settings.max } });
-        skip(i, reason.stopped);
+        codes[i] = STOPPED;
         continue;
       }
       // Wrapping is not free, and it used to be silent: 12,000 blocks numbered from 10 in
@@ -1200,16 +1808,19 @@ function runRenumber(lines: string[], ctx: TransformContext): TransformResult {
       // control takes the first match. `stop` says what it did; so does this now.
       wraps++;
       if (firstWrapLine === 0) firstWrapLine = ctx.firstLine + i;
-      note(i, reason.wrapped, 'warning');
+      codes[i] = WRAPPED;
     }
 
+    if (picks[i] === NUMBER_KEPT) keptNamed++;
     const digits = settings.digits > 0 ? String(value).padStart(settings.digits, '0') : String(value);
     // A main block keeps its own prefix (`:20` becomes `:30`, never `N30`).
     const prefix = main !== null && head.number !== null && head.number.address === main ? main : prefixOut;
-    out[i] = rebuild(line, head, prefix + digits, settings.spacesAfter);
+    out[i] = rebuild(line, head, prefix + digits, settings.spacesAfter, settings.alignColumn);
+    if (settings.alignColumn > 0 && !tabbed) tabbed = tabInHead(line, head);
+    if (head.number === null || head.number.text !== prefix + digits) changedAny = true;
     newTextOf.set(i, digits);
     numbered++;
-    value += settings.step;
+    value += step;
   }
 
   // One warning per answer that was cut down: a run that only asked for too high a maximum
@@ -1226,12 +1837,16 @@ function runRenumber(lines: string[], ctx: TransformContext): TransformResult {
       params: { count: wraps, line: firstWrapLine, start: settings.start, max: settings.max ?? 0 },
     });
   }
+  // P4d (§6.6 rules 1–3): what the options did that the numbers alone do not say.
+  if (settings.fitToMax && settings.max !== null && most >= 2) {
+    warnings.push({ key: 'ncNumbering.renumber.fitted', params: { step, count: most, start: settings.start, max: settings.max } });
+  }
+  if (removed > 0) warnings.push({ key: 'ncNumbering.renumber.everyNthRemoved', params: { count: removed } });
+  if (keptNamed > 0) warnings.push({ key: 'ncNumbering.renumber.everyNthKept', params: { count: keptNamed } });
+  if (tabbed) warnings.push({ key: 'ncNumbering.renumber.alignTabs' });
 
-  // The references, over the whole document: a jump *above* the selection points into it
-  // just as well, and the run's own walk only ever saw the selection (G8 M4).
-  const scan = scanFor(lines, ctx, cp);
   const writtenOf = (index: number): string | null => newTextOf.get(index) ?? null;
-  const decisions = decideReferences(scan, ctx.firstLine, lines.length, writtenOf, main);
+  const decisions = decideReferences(scan, programs, ctx.firstLine, lines.length, writtenOf, main);
   applyReferences(out, lines, decisions);
 
   // Where a value left as written lands now (NC-8): rows of the scope are read as the run
@@ -1239,7 +1854,15 @@ function runRenumber(lines: string[], ctx: TransformContext): TransformResult {
   const base = Math.max(0, Math.trunc(ctx.firstLine) - scan.firstLine);
   const textAfter = (row: number): string =>
     row >= base && row < base + out.length ? out[row - base] : (scan.scanned[row] ?? '');
-  const landings = new LandingFinder(scan, (row) => keyAfter(scan, row, base, lines.length, writtenOf, main));
+  const landings = new LandingFinder(
+    scan,
+    (row) => keyAfter(scan, row, base, lines.length, writtenOf, main),
+    (row, word) => {
+      const program = targetProgramOf(scan, programs, row, word);
+      if ('segment' in program) return program.segment;
+      return program.refused === 'notInFile' ? NOT_IN_FILE : NO_PROGRAM;
+    },
+  );
 
   const rowText: Record<Outcome, string> = {
     rewritten: '',
@@ -1251,7 +1874,16 @@ function runRenumber(lines: string[], ctx: TransformContext): TransformResult {
     incoming: t('ncNumbering.renumber.referenceIncomingRow'),
     notNumber: t('ncNumbering.renumber.referenceNotNumberRow'),
     ambiguous: t('ncNumbering.renumber.referenceAmbiguousRow'),
+    noCall: t('ncNumbering.renumber.referenceNoCallRow'),
+    notInFile: t('ncNumbering.renumber.referenceNotInFileRow'),
+    programTwice: t('ncNumbering.renumber.referenceProgramTwiceRow'),
+    noCaller: t('ncNumbering.renumber.referenceNoCallerRow'),
+    callers: t('ncNumbering.renumber.referenceCallersRow'),
+    interrupt: t('ncNumbering.renumber.referenceInterruptRow'),
   };
+  // P4d review NC-9: a rule of the own program that never rewrites (a turning cycle read
+  // with a milling profile) has its own words; `kept` says it of a block of another program.
+  const keptOwnText = t('ncNumbering.renumber.referenceKeptOwnRow');
   const referenceRows: Located[] = [];
   const seen = new Set<string>();
   let rewritten = 0;
@@ -1267,7 +1899,8 @@ function runRenumber(lines: string[], ctx: TransformContext): TransformResult {
     if (!seen.has(key)) {
       seen.add(key);
       if (referenceRows.length < SKIP_LIMIT) {
-        referenceRows.push({ line: decision.line, message: rowText[decision.outcome], severity: 'warning' });
+        const message = decision.outcome === 'kept' && decision.word.program === 'own' ? keptOwnText : rowText[decision.outcome];
+        referenceRows.push({ line: decision.line, message, severity: 'warning' });
       }
     }
 
@@ -1299,12 +1932,72 @@ function runRenumber(lines: string[], ctx: TransformContext): TransformResult {
     });
   }
 
+  // P4d review NC-4: a number the run put on several blocks of a program (one it skipped,
+  // or one above the start text, kept the same number). Not refused: the user asked for
+  // these options, and the warning and the rows say what came of it. A run that wrapped has
+  // said so already, with a row on every block that got a number twice.
+  const madeTwice =
+    wraps > 0
+      ? { rows: [], count: 0 }
+      : duplicatesMade(scan, keysAfter(scan, base, lines.length, writtenOf, main), (row) => keyAfter(scan, row, base, lines.length, writtenOf, main));
+  const duplicateRows: Located[] = [];
+  if (madeTwice.count > 0) {
+    warnings.push({ key: 'ncNumbering.renumber.duplicatesMade', params: { count: madeTwice.count } });
+    const message = t('ncNumbering.renumber.duplicateMadeRow');
+    for (const row of madeTwice.rows) {
+      if (duplicateRows.length >= SKIP_LIMIT) break;
+      duplicateRows.push({ line: scan.firstLine + row, message, severity: 'warning' });
+    }
+  }
+
   if (rewritten > 0) warnings.push({ key: 'ncNumbering.renumber.referencesRewritten', params: { count: rewritten } });
   if (kept > 0) warnings.push({ key: 'ncNumbering.renumber.referencesKept', params: { count: kept } });
   if (unresolved > 0) warnings.push({ key: 'ncNumbering.renumber.referencesUnresolved', params: { count: unresolved } });
 
-  const rows = mergeRows(skipped, referenceRows, SKIP_LIMIT);
-  const listed = skippedCount + wraps + seen.size;
+  // The skipped lines, in line order and capped (`Located.message` is display text, one
+  // lookup per reason rather than one per line).
+  const reason: Record<number, string> = {
+    [MARKER]: t('ncNumbering.renumber.skippedProgramMarker'),
+    [PREFIX]: t('ncNumbering.renumber.skippedByPrefix'),
+    [CONTAINING]: t('ncNumbering.renumber.skippedContaining'),
+    [CONTINUED]: t('ncNumbering.renumber.skippedContinued'),
+    [NAME]: t('ncNumbering.renumber.skippedName'),
+    [NOT_NUMBERED]: t('ncNumbering.renumber.skippedNotNumbered'),
+    [STOPPED]: t('ncNumbering.renumber.skippedStopped'),
+    [WRAPPED]: t('ncNumbering.renumber.wrappedRow'),
+  };
+  const skipped: Located[] = [];
+  let skippedCount = 0;
+  for (let i = 0; i < codes.length; i++) {
+    const code = codes[i];
+    if (code === LEFT || code === BLOCK || code === QUIET) continue;
+    if (code !== WRAPPED) skippedCount++;
+    if (skipped.length < SKIP_LIMIT) {
+      skipped.push({ line: ctx.firstLine + i, message: reason[code], severity: code === WRAPPED ? 'warning' : 'info' });
+    }
+  }
+
+  // P4d (§6.6 rules 5 and 6): the regions an option leaves alone, one row each.
+  const regions: Located[] = [];
+  const length = scopeLength(lines);
+  if (settings.skipFirst > 0) {
+    regions.push({ line: ctx.firstLine, message: t('ncNumbering.renumber.skippedFirstRow', { count: settings.skipFirst }), severity: 'info' });
+  }
+  if (triggerRow >= 0) {
+    const key = settings.startAfterTrigger ? 'ncNumbering.renumber.startAfterTriggerRow' : 'ncNumbering.renumber.startTriggerRow';
+    regions.push({ line: ctx.firstLine + triggerRow, message: t(key, { text: settings.startTrigger }), severity: 'info' });
+  }
+  if (settings.skipLast > 0) {
+    regions.push({
+      line: ctx.firstLine + length - settings.skipLast,
+      message: t('ncNumbering.renumber.skippedLastRow', { count: settings.skipLast }),
+      severity: 'info',
+    });
+  }
+  regions.sort((a, b) => a.line - b.line);
+
+  const rows = mergeRows(mergeRows(mergeRows(regions, skipped, SKIP_LIMIT), referenceRows, SKIP_LIMIT), duplicateRows, SKIP_LIMIT);
+  const listed = skippedCount + wraps + seen.size + regions.length + madeTwice.rows.length;
   if (listed > rows.length) warnings.push({ key: 'ncNumbering.renumber.skippedTruncated', params: { shown: rows.length, total: listed } });
 
   const summary: Msg =
@@ -1314,7 +2007,12 @@ function runRenumber(lines: string[], ctx: TransformContext): TransformResult {
         ? { key: 'ncNumbering.renumber.summary', params: { count: numbered } }
         : { key: 'ncNumbering.renumber.summarySkipped', params: { count: numbered, skipped: skippedCount } };
 
-  return { lines: out, lineMap, summary, skipped: rows, warnings };
+  const result: TransformResult = { lines: out, lineMap, summary, skipped: rows, warnings };
+  // §6.6 rule 11: what the run did to the numbers of the named programs, for the other
+  // open documents. Only a run that changed a number has an outcome, and the consecutive
+  // dialect has none: its blocks are named by labels, never by their numbers.
+  if (changedAny && !settings.consecutive) result.renumbered = outcomeOf(scan, programs, base, lines.length, writtenOf, main, prefixOut);
+  return result;
 }
 
 export const renumber: TransformDef = {

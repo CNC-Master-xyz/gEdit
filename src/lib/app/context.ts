@@ -22,6 +22,7 @@ import { files } from '$lib/app/fileOps';
 import { modal } from '$lib/app/modalService';
 import { modals } from '$lib/app/modals';
 import { outline } from '$lib/app/outlineService';
+import { print } from '$lib/app/print';
 import { recovery } from '$lib/app/recovery';
 import { scripts } from '$lib/app/scripts';
 import { session } from '$lib/app/session';
@@ -80,4 +81,5 @@ export const ctx: AppContext = {
   modal,
   templates,
   channelPanes,
+  print,
 };

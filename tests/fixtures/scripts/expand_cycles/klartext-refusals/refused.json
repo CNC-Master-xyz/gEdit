@@ -1,0 +1,29 @@
+{
+  "message": "Nothing was changed: 4 blocks cannot be written out as plain moves: 1 cycle gEdit has no description of, 1 tapping or thread cycle, 1 cycle with a value other than its default, 1 cycle missing a value. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 15,
+      "severity": "error",
+      "message": "5 L X+10 Y+10 R0 FMAX M99: this value changes how the cycle moves in a way gEdit does not write out; only its default can be expanded (Q211=0.5).",
+      "reason": "param-not-default"
+    },
+    {
+      "line": 23,
+      "severity": "error",
+      "message": "7 L X+30 Y+10 R0 FMAX M99: a tapping or thread cycle keeps the spindle and the feed in step, which plain moves cannot do.",
+      "reason": "tapping"
+    },
+    {
+      "line": 39,
+      "severity": "error",
+      "message": "9 L X+50 Y+10 R0 FMAX M99: gEdit has no description of how this cycle moves, so it cannot be written out as plain moves.",
+      "reason": "no-schema"
+    },
+    {
+      "line": 48,
+      "severity": "error",
+      "message": "11 L X+70 Y+10 R0 FMAX M99: a value the cycle needs is not written and has no default (Q206=0, a feed of 0 or less).",
+      "reason": "value-missing"
+    }
+  ]
+}

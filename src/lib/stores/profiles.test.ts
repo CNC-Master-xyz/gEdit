@@ -348,11 +348,12 @@ describe('the effective profile', () => {
 
 describe('variant detection through the registry', () => {
   it('answers what the profile declares, and nothing for a profile that declares none', () => {
-    expect(withFilters.detectVariants('fanuc-gcode', 'N10 G0 X0\n')).toEqual({});
+    // Since D3-4c the mill declares one variant with no detection rule: its default, margin 0.
+    expect(withFilters.detectVariants('fanuc-gcode', 'N10 G0 X0\n')).toEqual({ toolOnChangeLine: { value: 'loaded', margin: 0 } });
     expect(withFilters.detectVariants('siemens', 'N10 G0 X0\n')).toEqual({});
     // The lathe declares `gcodeSystem` (and, from M9, the two R6 variants with no rules); WP6.2 writes its rules, so until then every
     // program keeps the declared default with a margin of 0.
-    expect(Object.keys(withFilters.detectVariants('fanuc-lathe', 'N10 G0 X0\n'))).toEqual(['gcodeSystem', 'incrementalAddresses', 'toolWord']);
+    expect(Object.keys(withFilters.detectVariants('fanuc-lathe', 'N10 G0 X0\n'))).toEqual(['gcodeSystem', 'incrementalAddresses', 'toolWord', 'toolChange', 'counterSpindleY']);
   });
 });
 

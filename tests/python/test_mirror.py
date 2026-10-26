@@ -263,18 +263,28 @@ class FixRoundTest(unittest.TestCase):
 
 
 class SharedEngineTest(unittest.TestCase):
-    """rotate.py and mirror.py carry the same run, word for word, so each stays a script a
-    user can copy and read on its own (README principle 3); this keeps the two copies one."""
+    """rotate.py and mirror.py run on one engine, `_nc_run.plane_main` (the P4b prelude, TODO
+    CODE-6): until then each carried a copy of it, word for word, that this test held equal.
+    Now it holds that neither carries a copy again and that both hand the engine the texts
+    of the run's own refusals for every id it knows."""
 
-    MARK = "# The run: the same text in rotate.py and mirror.py"
+    OLD_MARK = "# The run: the same text in rotate.py and mirror.py"
 
-    def test_the_two_copies_are_the_same(self) -> None:
-        texts = []
-        for name in ("rotate.py", "mirror.py"):
-            source = (helpers.SCRIPTS_DIR / name).read_text(encoding="utf-8")
-            self.assertEqual(source.count(self.MARK), 1, name)
-            texts.append(source[source.index(self.MARK):])
-        self.assertEqual(texts[0], texts[1])
+    def test_both_scripts_run_on_the_shared_engine(self) -> None:
+        import importlib
+
+        helpers.import_gedit_nc()
+        import _nc_run
+
+        for name in ("rotate", "mirror"):
+            source = (helpers.SCRIPTS_DIR / (name + ".py")).read_text(encoding="utf-8")
+            with self.subTest(script=name):
+                self.assertNotIn(self.OLD_MARK, source)
+                self.assertNotIn("class Run", source)
+                self.assertIn("_nc_run.plane_main(SCRIPT, Params, RUN_REASONS)", source)
+                module = importlib.import_module(name)
+                self.assertEqual(set(module.RUN_REASONS), set(_nc_run.PLANE_RUN_REASONS))
+                self.assertIs(module.REASON_LABEL, _nc_run.REASON_LABEL)
 
 
 class MirrorRegressionTest(unittest.TestCase):

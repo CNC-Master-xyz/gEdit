@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be written out as plain moves: 1 cycle under radius compensation. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N50 G98 G81 X10. Y10. Z-5. R2. F150.: radius compensation is on, and a drilling cycle runs without it.",
+      "reason": "radius-comp"
+    }
+  ]
+}

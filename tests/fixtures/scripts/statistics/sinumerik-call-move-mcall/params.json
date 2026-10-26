@@ -1,0 +1,9 @@
+{
+  "motionUnits": "mm",
+  "rapidX": 30000,
+  "rapidY": 30000,
+  "rapidZ": 20000,
+  "rapidKind": "straight",
+  "toolChange": 4,
+  "format": "csv"
+}

@@ -91,6 +91,8 @@ const SHIPPED: Declared[] = readdirSync(CONTRIB)
  * the Phase 3 prelude).
  */
 const PINNED: { id: string; keys?: Keys; title: string; owner: string; pending?: true }[] = [
+  // P4.20b, plan §6.6 rule 13 (NC tab, group `ncNumbering.group`, order 10; no key; enabled while a list from the last renumber is pending)
+  { id: 'nc.updateOtherReferences', title: 'renumberOthers.update', owner: 'renumberOthers.ts' },
   { id: 'nc.blockSkip.add', title: 'ncBlockSkip.add', owner: 'ncBlockSkip.ts' },
   { id: 'nc.blockSkip.remove', title: 'ncBlockSkip.remove', owner: 'ncBlockSkip.ts' },
   { id: 'nav.selectToolSegment', keys: 'Mod+F7', title: 'segments.selectToolSegment', owner: 'segments.ts' },
@@ -183,6 +185,28 @@ const PINNED: { id: string; keys?: Keys; title: string; owner: string; pending?:
   { id: 'view.focusPreviousPane', keys: 'Shift+F6', title: 'splitView.focusPrevious', owner: 'splitView.ts' },
   { id: 'channels.sideBySide', title: 'channelPanes.sideBySide', owner: 'channelPanes.ts' },
   { id: 'channels.mergeBack', title: 'channels.mergeBack', owner: 'channels.ts' },
+  // Phase 4, P4c (pinned at the P4c integration; Phase 4 plan §6.5). Typing (`contrib/typing.ts`,
+  // P4.12): the two toggles beside Force Upper Case, Edit tab, group `typing.group`; no key
+  // (like Force Upper Case, a switch that changes what every keystroke does is not one key press
+  // away). Bookmarks (`contrib/bookmarks.ts`, P4.13): rename, Bookmark All Matches and the panel,
+  // Edit tab, group `bookmarks.group` (the panel also on the View tab, group `view.groupPanels`);
+  // no new key. Block range (`contrib/ranges.ts`, P4.14a): Edit tab, group `ranges.group`; no key.
+  // Printing (`contrib/print.ts`, P4.15): File tab, group `print.group`; Print is `Mod+P` (owner
+  // 2026-10-19; Monaco binds no `Mod+P` and the quick-open palette is `F1`), Export as HTML has no key.
+  // Insert File and Append File (`contrib/insertFile.ts`, P4.14b): File tab, group `insertFile.group`
+  // (orders 80 and 81, before Print's 90); no key (a file dialog behind a key is one mis-press from a
+  // changed program).
+  { id: 'edit.toggleAutoSpace', title: 'typing.toggleAutoSpace', owner: 'typing.ts' },
+  { id: 'edit.toggleAutoNumber', title: 'typing.toggleAutoNumber', owner: 'typing.ts' },
+  { id: 'bookmark.rename', title: 'bookmarks.rename', owner: 'bookmarks.ts' },
+  { id: 'bookmark.addAllMatches', title: 'bookmarks.addAllMatches', owner: 'bookmarks.ts' },
+  { id: 'view.toggleBookmarks', title: 'bookmarks.togglePanel', owner: 'bookmarks.ts' },
+  { id: 'edit.selectBlockRange', title: 'ranges.select', owner: 'ranges.ts' },
+  { id: 'edit.deleteBlockRange', title: 'ranges.delete', owner: 'ranges.ts' },
+  { id: 'file.insertFile', title: 'insertFile.insert', owner: 'insertFile.ts' },
+  { id: 'file.appendFile', title: 'insertFile.append', owner: 'insertFile.ts' },
+  { id: 'file.print', keys: 'Mod+P', title: 'print.print', owner: 'print.ts' },
+  { id: 'file.exportHtml', title: 'print.exportHtml', owner: 'print.ts' },
 ];
 /**
  * The ribbon groups of those entries: NC tab (M10, M12 navigation), Edit tab (search, M13
@@ -204,6 +228,10 @@ const PINNED_GROUPS = [
   'cycleForm.group',
   'templateManager.group',
   'splitView.group',
+  'bookmarks.group',
+  'ranges.group',
+  'insertFile.group',
+  'print.group',
 ];
 /** The palette categories of those entries. */
 const PINNED_CATEGORIES = [
@@ -222,6 +250,10 @@ const PINNED_CATEGORIES = [
   'templateManager.category',
   'splitView.category',
   'channelPanes.category',
+  'bookmarks.category',
+  'ranges.category',
+  'insertFile.category',
+  'print.category',
 ];
 
 const asDefs = (rows: { id: string; keys?: Keys }[]): CommandDef[] =>

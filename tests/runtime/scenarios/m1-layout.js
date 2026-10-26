@@ -23,11 +23,10 @@ scenario('m1-layout', { timeout: 180 }, async (h) => {
   /** Runs a view command the way a user does: the View tab, then its ribbon button. */
   const viewCommand = async (/** @type {string} */ id) => {
     h.click(h.q('ribbon-tab', { tab: 'view' }))
-    await h.sleep(120)
-    const button = h.q('cmd-button', { command: id })
+    const button = await h.waitFor(() => h.q('cmd-button', { command: id }), { timeout: 5000 })
     if (!button) throw new Error(`no ribbon button for ${id}`)
     h.click(button)
-    await h.sleep(250)
+    await h.idle()
   }
 
   // ------------------------------------------------------------ the window itself
@@ -52,7 +51,8 @@ scenario('m1-layout', { timeout: 180 }, async (h) => {
   let squeezed = 0
   for (const tab of TABS) {
     h.click(h.q('ribbon-tab', { tab }))
-    await h.sleep(150)
+    await h.waitFor(() => h.q('ribbon-tab', { tab, 'aria-selected': 'true' }), { timeout: 5000 })
+    await h.idle()
     const groups = [...(ribbonBody?.querySelectorAll('.ribbon-group') ?? [])]
     const buttons = h.qa('cmd-button')
     for (const el of [...groups, ...buttons]) if (getComputedStyle(/** @type {Element} */ (el)).flexShrink !== '0') squeezed++
@@ -62,19 +62,21 @@ scenario('m1-layout', { timeout: 180 }, async (h) => {
   h.check('no ribbon group or button may be squeezed: they all have flex-shrink 0', squeezed === 0, { squeezed, perTab })
   // P3a (intentional change): the View tab gains Code Inspector, between Side Panel and Bottom Panel, and Motion Colors.
   h.click(h.q('ribbon-tab', { tab: 'view' }))
-  await h.sleep(150)
+  await h.waitFor(() => h.q('ribbon-tab', { tab: 'view', 'aria-selected': 'true' }), { timeout: 5000 })
+  await h.idle()
   const viewButtons = h.qa('cmd-button').map((e) => e.dataset.command)
   const at = (/** @type {string} */ command) => viewButtons.indexOf(command)
   h.check('P3a: the View tab lists Side Panel, Code Inspector and Bottom Panel in that order, and offers Motion Colors', at('view.toggleSidePanel') >= 0 && at('view.toggleSidePanel') < at('view.toggleInspector') && at('view.toggleInspector') < at('view.toggleBottomPanel') && at('view.toggleMotionColors') > at('view.toggleBottomPanel'), viewButtons)
   h.click(h.q('ribbon-tab', { tab: 'file' }))
-  await h.sleep(150)
+  await h.waitFor(() => h.q('ribbon-tab', { tab: 'file', 'aria-selected': 'true' }), { timeout: 5000 })
+  await h.idle()
 
   // A real overflow, on the strip that does overflow at this width: the tab bar. It is
   // the same AD-6 rule — the strip scrolls, the window does not.
   const bar = h.q('tab-bar')
   for (let i = 0; i < 11; i++) await ctx.commands.run('file.new')
   await h.waitFor(() => h.qa('doc-tab').length === 12, { timeout: 8000 })
-  await h.sleep(300)
+  await h.idle()
   h.check(
     'with twelve tabs the tab bar scrolls horizontally and the window still does not',
     (bar?.scrollWidth ?? 0) > (bar?.clientWidth ?? 0) && !pageScrolls() && getComputedStyle(/** @type {Element} */ (bar)).overflowX === 'auto',

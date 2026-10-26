@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be written out as plain moves: 2 cycle calls that are not written out. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N50 M98 P2000: this way of calling the cycle is not written out yet (M98 while G81 is in force).",
+      "reason": "call-form"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "N70 GOTO 90: this way of calling the cycle is not written out yet (GOTO while G81 is in force).",
+      "reason": "call-form"
+    }
+  ]
+}

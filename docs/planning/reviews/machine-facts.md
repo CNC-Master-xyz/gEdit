@@ -9,7 +9,7 @@ How to work through it:
 3. Where a row says "no field", the fact is not a gEdit setting yet: write the answer next to the row (or tell the next session), then tick.
 4. Check one real program with the machine chosen and with "none" (F7, the tool list) after the first machine of each control.
 
-Control families: 12 Fanuc lathe facts, 8 Okuma, 7 Sinumerik, 4 Heidenhain, 31 rows in all.
+Control families: 12 Fanuc lathe facts, 8 Okuma, 7 Sinumerik, 4 Heidenhain, 31 rows in all; P4b adds 5 Fanuc mill facts, 3 Heidenhain facts and 8 facts of the Motion and limits page (all machines), 47 rows in all; the manual check adds 10 more at the end (57 rows).
 
 ## Fanuc lathes (12)
 
@@ -29,6 +29,18 @@ The fields are on the machine form of a Fanuc lathe; see [The Fanuc lathe](../..
 | [ ] | Which M number starts rigid tapping | No field; write the answer here |
 | [ ] | Whether your posts ever write `E` (inch thread lead) | No field; write the answer here |
 | [ ] | What the control does with lower-case comments (its code table has none) | No field; write the answer here |
+
+## Fanuc mills (5), added in P4b
+
+Not settings of the machine form: write the answer next to the row. They decide what [Expand Drilling Cycles](../../user/scripts.md#expand-drilling-cycles), [Statistics and Time](../../user/scripts.md#statistics-and-time) and the channel checks may assume.
+
+| Done | Fact | Where in gEdit |
+|---|---|---|
+| [ ] | After `G86` stops the spindle at the bottom of the hole and the tool is out again, in which direction does the spindle restart: the one in force before the cycle (`M3` or `M4`), or always `M3`? The expansion writes the direction in force and refuses when none is known | No field; write the answer here |
+| [ ] | Parameter 3405 bit 1: does your control count a dwell in revolutions when feed per revolution is in force? gEdit reads a `G4` as seconds (`X`) or increments (`P`) only, and counts only seconds in the time estimate | No field; write the answer here |
+| [ ] | Parameter 3404 bit 2: does `M198 P` mean a file number on your control? With the bit off and a program on a Handy File or floppy disk, the `P` of `M198` is a file number; with a memory card or data server it is a program number. gEdit reads the `P` of `M198` as a program number everywhere: the channel checks, and Renumber Blocks (an `M198` is a call like `M98`, so an `M99 P` in the program it names is rewritten for it). Write which of the two your control does | No field; write the answer here |
+| [ ] | Is `M96` reassigned (the M number of the interrupt macro call can be moved by a parameter), and to which number? gEdit reads `M96 P…` as an interrupt call: it never proves which program an `M99 P` returns to (an interrupt returns into whichever program it interrupted), and a bare `M96` calls nothing. If your control moved the interrupt to another M number, Renumber Blocks does not know it | No field; write the answer here |
+| [ ] | Does the Fanuc mill start in direct rpm (`G97`) after a reset? The profile data does not say; the speed marks of the time estimate and the checks "read as rpm" until it does | No field; write the answer here |
 
 ## Okuma (8)
 
@@ -59,7 +71,7 @@ See [Sinumerik: diameter programming and the rest](../../user/machines.md#sinume
 | [ ] | Which machines run ISO mode (`G291`; two programs in your Siemens folder look like it) | No field; the program is read with a Fanuc profile (choose it by hand) |
 | [ ] | Which Fanuc reading the ISO-mode machines emulate | No field; write the answer here |
 
-## Heidenhain (4)
+## Heidenhain (7)
 
 Klartext has no machine fields, so these are written down, not set. See [syntax-heidenhain section 10](../syntax/syntax-heidenhain.md#10-open-questions--to-verify-on-real-cam-output). Where it matters, the answer becomes a profile of your own ([Your own profiles](../../user/profiles.md)).
 
@@ -69,3 +81,38 @@ Klartext has no machine fields, so these are written down, not set. See [syntax-
 | [ ] | Whether cycle 19 reads spatial or axis angles | No field; write the answer here |
 | [ ] | The dialog language, and whether the turning option is present | No field; write the answer here |
 | [ ] | One CAM drilling program from each machine, to see whether the posts write Q395 | Put it in `tests/real/` (never committed) |
+| [ ] | The NC software number of each machine, 07 or 08 and later (added for P4b): the manuals do not settle whether the dwell `Q211` of cycles 200 and 201 is read the same on both; the expansion and the time estimate take it as seconds | No field; write the answer here |
+| [ ] | Does your control show the dwell of cycle 9 under its German text (`VERWEILZEIT`, `V.ZEIT`)? The data names the lines in English only, so a German program's dwell is not timed | No field; put a German sample in `tests/real/` (never committed) |
+| [ ] | Is a position written with `M92` in machine coordinates on your control (so the travel check can judge it)? | No field; write the answer here |
+
+## Motion and limits, all machines (8), added in P4b
+
+Every value is optional and none is assumed. Set them on the page **Motion and limits** of the machine form ([Motion and limits](../../user/machines.md#motion-and-limits)), from the machine's data sheet or parameter list. A machine without them still works; the time estimate, the peck values of the expansion and the two limit checks then say *not set* and stay silent.
+
+| Done | Fact | Where in gEdit |
+|---|---|---|
+| [ ] | The unit of the machine's rates and travel (mm or inch) | Machine form, Motion and limits: **Units** |
+| [ ] | The rapid rate of each axis, per minute (degrees per minute for a rotary axis) | Motion and limits: **Rapid rate** of each axis |
+| [ ] | Whether a rapid move runs as a straight line (all axes arrive together) or each axis at its own rate | Motion and limits: **How a rapid move runs** |
+| [ ] | The top cutting feed | Motion and limits: **Top cutting feed** |
+| [ ] | The time of one tool change | Motion and limits: **Tool change time** |
+| [ ] | The two peck settings of the control: the retract of `G73` and the clearance of `G83` | Motion and limits: **Retract of a high-speed peck**, **Clearance of a deep peck** |
+| [ ] | The top spindle speed of the main spindle and of each other spindle | Motion and limits: **Top spindle speed** |
+| [ ] | The travel of each axis in machine coordinates, lowest and highest; on a lathe the X travel as a diameter | Motion and limits: **Travel** |
+
+## Added by the manual check (2026-10-26), per machine
+
+The manual-check fix round made these readings choices or marked them "verify". Each default stays until your machine says otherwise.
+
+| Done | Fact | Where in gEdit |
+|---|---|---|
+| [ ] | Fanuc lathe: how the control reads a number without a point in a feed per revolution and a thread lead (0.0001 mm/rev by default, 0.01 mm/rev in the Series 15 format) and in a feed per minute (parameters 1404 bit 2 and 0001 bit 1) | Machine form: **Point-less feeds** |
+| [ ] | Fanuc mill: whether a feed per revolution without a point counts in 0.001 mm/rev (parameter 1405 bit 1) | Machine form: **Point-less feeds** |
+| [ ] | Fanuc lathe: whether a short `T` word (`T12`) is the station (the default, verify) or tool 0 with offset 12, as the manual says for two-digit offsets | Machine form: **Tool word: offset digits** (no field for the short word itself; write the answer here) |
+| [ ] | Fanuc lathe: turret (the `T` word changes the tool) or tool changer (`T` selects, `M6` changes; parameter 5040 bit 3) | Machine form: **Tool change** |
+| [ ] | Fanuc mill: is the `T` on the `M6` line the tool loaded or the next tool | Machine form: **T on the M6 line** |
+| [ ] | Sinumerik turning and milling: does `T` change the tool, or `M6` (machine data 22550) | Machine form: **Tool change** |
+| [ ] | Lathes: does `Y` turn with `Z` when a program is mirrored for the counter spindle | Machine form: **Counter spindle** |
+| [ ] | Okuma: is a `P` word with a minus sign (`P-10`) a wait both turrets need, outside the order | The **Two turrets in one program** preset (a `P-10` rule, to be confirmed) |
+| [ ] | Fanuc mill with a tilted plane and tool centre point control: is parameter 19696 bit 5 = 0 (the table coordinate system), as translate assumes | No field; write the answer here |
+| [ ] | Fanuc: the presets for Nakamura-Tome (two and three units) and the Star SV-20: do the wait codes and the `P` form match your machine | Channels step: the three new presets |

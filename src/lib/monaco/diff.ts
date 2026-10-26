@@ -40,7 +40,10 @@
 // editor, on the text the pane shows (so, in review mode, the normalized one). A pair that
 // has marks also gets `gedit-word-line` over the whole line, and `wordMarks.css` hides
 // Monaco's own character marks (`char-insert`, `char-delete`) wherever that class is, so
-// the two kinds never stack; a pair without marks keeps Monaco's. The pairs are computed in
+// the two kinds never stack; a pair without marks keeps Monaco's. Inside a long marked word (a
+// cycle call, an expression, a comment) the parts that differ get `gedit-word-part` on top
+// (`WordMarks.parts`, review NC-8), so a changed argument of `CYCLE800(…)` can be found
+// without reading the whole call. The pairs are computed in
 // slices of `MARK_SLICE_MS` between timers, so the diff of a 100,000-line program never
 // blocks typing, and a run ends when the text changes again or a new diff arrives. In the
 // inline view the deleted lines are Monaco's view zone and cannot be decorated: only the
@@ -78,6 +81,8 @@ const MARK_SLICE_MS = 12;
 /** The class on a marked word, and on a whole line that has marks (`wordMarks.css`). */
 export const WORD_CHANGED_CLASS = 'gedit-word-changed';
 export const WORD_LINE_CLASS = 'gedit-word-line';
+/** The class on the parts that differ inside a long marked word (review NC-8; `wordMarks.css`). */
+export const WORD_PART_CLASS = 'gedit-word-part';
 
 /** A profile's compiled form by language id; undefined for an id the registry does not know. */
 function compiledProfile(languageId: string): CompiledProfile | undefined {
@@ -139,6 +144,12 @@ export interface DiffHandle {
    * copied; Monaco's own update event is the ordering that makes it right.
    */
   nextWhenUpdated(): void;
+  /**
+   * Calls `listener` whenever what `changeAtCursor` would answer can change: a cursor moved,
+   * the keyboard went to the other pane, or the changes were worked out again. The copy buttons
+   * follow it (M11 CODE-18). Optional: a stand-in without it is never asked.
+   */
+  onDidChangeState?(listener: () => void): Disposable;
   dispose: Disposable;
 }
 
@@ -348,13 +359,23 @@ export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
   // A toolbar button takes the focus away from both panes, so the pane the user was last
   // in is remembered: that is the one a "copy" starts from.
   let lastSide: DiffSide = 'modified';
+  /** Who follows the cursor and the changes (`onDidChangeState`). */
+  const stateListeners = new Set<() => void>();
+  const stateChanged = (): void => {
+    if (disposed) return;
+    for (const listener of [...stateListeners]) listener();
+  };
   const trackFocus = [
     instance.getOriginalEditor().onDidFocusEditorText(() => {
       lastSide = 'original';
+      stateChanged();
     }),
     instance.getModifiedEditor().onDidFocusEditorText(() => {
       lastSide = 'modified';
+      stateChanged();
     }),
+    instance.getOriginalEditor().onDidChangeCursorPosition(stateChanged),
+    instance.getModifiedEditor().onDidChangeCursorPosition(stateChanged),
   ];
 
   const markStale = (): void => {
@@ -387,6 +408,7 @@ export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
       model: MonacoApi.editor.ITextModel,
       line: number,
       spans: { start: number; end: number }[],
+      parts: { start: number; end: number }[] | undefined,
       into: MonacoApi.editor.IModelDeltaDecoration[],
     ): void => {
       const lineEnd = model.getLineMaxColumn(line);
@@ -400,6 +422,12 @@ export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
         into.push({
           range: new monaco.Range(line, span.start + 1, line, span.end + 1),
           options: { inlineClassName: WORD_CHANGED_CLASS },
+        });
+      }
+      for (const span of parts ?? []) {
+        into.push({
+          range: new monaco.Range(line, span.start + 1, line, span.end + 1),
+          options: { inlineClassName: WORD_PART_CLASS },
         });
       }
     };
@@ -417,8 +445,8 @@ export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
           break;
         }
         const { originalLine, modifiedLine, marks } = next.value;
-        decorationsOf(originalText, originalLine, marks.original, forOriginal);
-        decorationsOf(modifiedText, modifiedLine, marks.modified, forModified);
+        decorationsOf(originalText, originalLine, marks.original, marks.parts?.original, forOriginal);
+        decorationsOf(modifiedText, modifiedLine, marks.modified, marks.parts?.modified, forModified);
       } while (performance.now() < until);
       if (forOriginal.length > 0) collections[0].append(forOriginal);
       if (forModified.length > 0) collections[1].append(forModified);
@@ -434,6 +462,7 @@ export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
     instance.onDidUpdateDiff(() => {
       fresh = true;
       startMarks();
+      stateChanged();
     }),
   ];
 
@@ -526,9 +555,14 @@ export async function createDiff(req: DiffRequest): Promise<DiffHandle> {
         if (!disposed) instance.goToDiff('next');
       });
     },
+    onDidChangeState(listener: () => void): Disposable {
+      stateListeners.add(listener);
+      return () => void stateListeners.delete(listener);
+    },
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      stateListeners.clear();
       pendingNext?.dispose();
       pendingNext = null;
       stopFollowingLock();
@@ -564,10 +598,32 @@ export function settleCreated(
 // ---------------------------------------------------------------------------
 
 let mounted: DiffHandle | null = null;
+/** Who follows the diff on screen (`watchCurrentDiff`), and the hook on the mounted handle. */
+const watchers = new Set<() => void>();
+let mountedHook: Disposable | null = null;
+
+function notifyWatchers(): void {
+  for (const watcher of [...watchers]) watcher();
+}
 
 /** `CompareView` publishes its handle here, so the commands can drive the toolbar's job. */
 export function setCurrentDiff(handle: DiffHandle | null): void {
+  if (handle === mounted) return;
+  mountedHook?.();
+  mountedHook = null;
   mounted = handle;
+  mountedHook = handle?.onDidChangeState?.(notifyWatchers) ?? null;
+  notifyWatchers();
+}
+
+/**
+ * Calls `listener` when another diff is put on screen (or none), and whenever the one on screen
+ * says its cursor or its changes moved (`DiffHandle.onDidChangeState`): what the copy buttons
+ * of the toolbar follow (M11 CODE-18). The returned function stops it.
+ */
+export function watchCurrentDiff(listener: () => void): Disposable {
+  watchers.add(listener);
+  return () => void watchers.delete(listener);
 }
 
 /** The diff editor on screen, or null while there is none. */

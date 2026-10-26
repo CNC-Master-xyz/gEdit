@@ -99,6 +99,24 @@ describe('testReport over the built-ins', () => {
     expect(rowsOf(report, 'toolCall', 6)).toHaveLength(0);
   });
 
+  it('D3-4c: with toolFrom last-before, a T word on a line without M6 is reported as a tool word', () => {
+    const profile = structuredClone(compiled('fanuc-gcode').profile);
+    profile.toolCall.toolFrom = 'last-before';
+    const cp = compileProfile(profile);
+    const lines = ['O1', 'T2', 'M6 T3', 'M30'];
+    const report = testReport({
+      cp,
+      lines,
+      codes: NO_CODES,
+      machine: noMachine(cp.profile),
+      now: FROZEN,
+      detection: detectResult(BUILTINS, null, lines.join('\n'), 'fanuc-gcode'),
+      variants: detectVariants(cp, lines.join('\n')),
+    });
+    expect(rowsOf(report, 'toolCall', 2)[0]).toMatchObject({ outcome: 'tool-word', tool: '2' });
+    expect(rowsOf(report, 'toolCall', 3)[0]).toMatchObject({ outcome: 'tool-change', tool: '3' });
+  });
+
   it('says which tool change a profile ignores, and what ignored it', () => {
     const lines = ['O1', 'G0 X1. Z1. T0100', 'T0101', 'M30'];
     const report = run('fanuc-lathe', lines);
@@ -205,7 +223,8 @@ describe('testReport: the settings the program points at', () => {
   });
 
   it('has no variant rows for a profile that declares none', () => {
-    const report = run('fanuc-gcode', MILL);
+    // Since D3-4c the Fanuc mill declares one (T on the M6 line); Klartext declares none.
+    const report = run('heidenhain-klartext', ['0 BEGIN PGM T MM', '1 TOOL CALL 1 Z S1000', '2 END PGM T MM']);
     expect(rowsOf(report, 'variant')).toHaveLength(0);
     expect(rowsOf(report, 'variantResult')).toHaveLength(0);
   });
@@ -296,7 +315,7 @@ describe('testReport: vetoes and bounds', () => {
   });
 
   it('answers an empty program with no rows', () => {
-    const report = run('fanuc-gcode', []);
+    const report = run('heidenhain-klartext', []);
     expect(report.rows).toEqual([]);
     expect(report.linesRead).toBe(0);
   });

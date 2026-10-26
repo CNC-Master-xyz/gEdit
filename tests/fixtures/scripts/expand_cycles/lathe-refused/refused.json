@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: drilling cycles are written out on milling programs only. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 1,
+      "severity": "error",
+      "message": "This is a turning program: drilling cycles are written out on milling programs only.",
+      "reason": "lathe"
+    }
+  ]
+}

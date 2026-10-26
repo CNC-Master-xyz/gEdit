@@ -215,7 +215,8 @@
       "group": "frame",
       "axisWords": "data",
       "frame": "open",
-      "conflicts": ["tcp", "radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "conflicts": ["radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "review": "pending",
       "label": "Tilted working plane",
       "description": "Defines a coordinate system tilted against the workpiece and makes it the one the program is written in. X, Y and Z give its origin; I, J and K give the three Euler angles, or with P another way to define the plane (P1 roll-pitch-yaw angles with Q as the order of the turns, P2 three points, P3 two vectors, P4 projection angles). On the lathe G69.1 ends it (G69 ends the mirror image of the second turret). G53.1 in the next block turns the rotary axes to the new tool direction.",
       "params": [
@@ -232,7 +233,8 @@
       "group": "frame",
       "axisWords": "data",
       "frame": "open",
-      "conflicts": ["tcp", "radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "conflicts": ["radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "review": "pending",
       "label": "Tilted working plane from the tool direction",
       "description": "Makes the coordinate system whose Z axis is the present direction of the tool the one the program is written in. X, Y and Z give its origin in absolute values (the present position when left out); R turns it about its Z axis. On the lathe G69.1 ends it (G69 ends the mirror image of the second turret).",
       "params": [
@@ -244,7 +246,8 @@
       "group": "frame",
       "axisWords": "data",
       "frame": "open",
-      "conflicts": ["tcp", "radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "conflicts": ["radiusComp", "lengthComp", "cycle", "surfaceSpeed", "code:G68.1", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "review": "pending",
       "label": "Tilted working plane, added to the one in force",
       "description": "Tilts again, relative to the tilted plane that is in force. It is written like G68.2 (P chooses the form), and its origin is given in the coordinates of that plane. Tool length and radius compensation must be off. On the lathe G69.1 ends it (G69 ends the mirror image of the second turret).",
       "params": [
@@ -270,6 +273,22 @@
       "review": "pending",
       "label": "Coordinate system rotation off",
       "description": "Ends G68.1 (the rotation or the three-dimensional conversion) and the tilted working plane of G68.2, and goes back to the coordinates of the program. It may stand in a block with other words; the first move after it has to be absolute."
+    },
+    {
+      "code": "G53.6",
+      "group": "nonmodal",
+      "positionsRotary": true,
+      "review": "pending",
+      "conflicts": ["!frame:frame"],
+      "label": "Turn the tool axis to the tilted plane, tool tip kept",
+      "description": "Written after G68.2 or G68.4: the rotary axes move so that the tool stands at right angles to the tilted plane, while the tool tip stays where it is on the workpiece. On a lathe D names the tool offset (a machining centre writes H), R the distance from the tool tip to the centre of rotation as a radius value; X, Y and Z, if written, are where the tool tip ends up.",
+      "params": [
+        { "address": "D", "label": "Tool offset number", "min": 0 },
+        { "address": "R", "label": "Distance from the tool tip to the centre of rotation, a radius value" },
+        { "address": "X", "label": "End point of the tool tip, X" },
+        { "address": "Y", "label": "End point of the tool tip, Y" },
+        { "address": "Z", "label": "End point of the tool tip, Z" }
+      ]
     },
     {
       "code": "G70",
@@ -309,8 +328,8 @@
       "params": [
         { "address": "U", "label": "Depth of cut per pass, a radius value without sign", "block": 1 },
         { "address": "R", "position": "none", "label": "Retract after each pass, a radius value without sign", "block": 1 },
-        { "address": "P", "position": "none", "label": "Block number of the first profile block", "min": 0, "unit": "count", "block": 2 },
-        { "address": "Q", "position": "none", "label": "Block number of the last profile block", "min": 0, "unit": "count", "block": 2 },
+        { "address": "P", "position": "none", "label": "Block number of the first profile block", "required": true, "min": 0, "unit": "count", "block": 2 },
+        { "address": "Q", "position": "none", "label": "Block number of the last profile block", "required": true, "min": 0, "unit": "count", "block": 2 },
         {
           "address": "U",
           "label": "Finishing allowance on X, read like X (a diameter value when X is a diameter); its sign gives the side",
@@ -340,8 +359,8 @@
       "params": [
         { "address": "W", "label": "Depth of cut per pass, a radius value without sign", "block": 1 },
         { "address": "R", "position": "none", "label": "Retract after each pass, a radius value without sign", "block": 1 },
-        { "address": "P", "position": "none", "label": "Block number of the first profile block", "min": 0, "unit": "count", "block": 2 },
-        { "address": "Q", "position": "none", "label": "Block number of the last profile block", "min": 0, "unit": "count", "block": 2 },
+        { "address": "P", "position": "none", "label": "Block number of the first profile block", "required": true, "min": 0, "unit": "count", "block": 2 },
+        { "address": "Q", "position": "none", "label": "Block number of the last profile block", "required": true, "min": 0, "unit": "count", "block": 2 },
         {
           "address": "U",
           "label": "Finishing allowance on X, read like X (a diameter value when X is a diameter); its sign gives the side",
@@ -380,8 +399,8 @@
           "block": 1
         },
         { "address": "R", "position": "none", "label": "Number of roughing passes", "min": 0, "unit": "count", "block": 1 },
-        { "address": "P", "position": "none", "label": "Block number of the first profile block", "min": 0, "unit": "count", "block": 2 },
-        { "address": "Q", "position": "none", "label": "Block number of the last profile block", "min": 0, "unit": "count", "block": 2 },
+        { "address": "P", "position": "none", "label": "Block number of the first profile block", "required": true, "min": 0, "unit": "count", "block": 2 },
+        { "address": "Q", "position": "none", "label": "Block number of the last profile block", "required": true, "min": 0, "unit": "count", "block": 2 },
         {
           "address": "U",
           "label": "Finishing allowance on X, read like X (a diameter value when X is a diameter); its sign gives the side",
@@ -603,6 +622,14 @@
           "required": true,
           "min": 0,
           "unit": "feedPerRev"
+        },
+        {
+          "address": "Q",
+          "position": "none",
+          "label": "Shift of the thread start angle, in 0.001° without a point (Q180000 is 180°); 0 to 360°",
+          "min": 0,
+          "max": 360000,
+          "unit": "count"
         }
       ]
     },
@@ -649,6 +676,7 @@
       "group": "cycle",
       "modal": true,
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Drilling cycle on the face",
       "description": "Drills along Z into the face of the part, on centre or on a C position under a driven tool. With Q it pecks. It stays active, so the next block with a position drills another hole, until G80.",
       "params": [
@@ -659,29 +687,34 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental",
+          "position": "none",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
           "required": true
         },
         {
           "address": "Q",
+          "position": "none",
           "label": "Peck depth in least increments, without a point (µm on a metric IS-B machine)",
           "min": 0,
           "unit": "increment"
         },
         {
           "address": "P",
+          "position": "none",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
           "unit": "count"
         },
         {
           "address": "F",
+          "position": "none",
           "label": "Drilling feed",
           "required": true,
           "min": 0
         },
         {
           "address": "K",
+          "position": "none",
           "label": "Repeat count",
           "min": 0,
           "unit": "count"
@@ -695,6 +728,7 @@
       "pitchFeed": true,
       "tapping": true,
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Tapping cycle on the face",
       "description": "Cuts a thread along Z into the face of the part: the spindle turns back at the bottom of the hole. F is the thread lead, so scaling the feed would change the thread.",
       "params": [
@@ -705,22 +739,26 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental"
+          "position": "none",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)"
         },
         {
           "address": "P",
+          "position": "none",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
           "unit": "count"
         },
         {
           "address": "F",
+          "position": "none",
           "label": "Thread lead",
           "required": true,
           "min": 0
         },
         {
           "address": "K",
+          "position": "none",
           "label": "Repeat count",
           "min": 0,
           "unit": "count"
@@ -742,6 +780,7 @@
       "group": "cycle",
       "modal": true,
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Boring cycle on the face",
       "description": "Feeds along Z into the face and feeds back out again, which leaves a cleaner wall than a rapid retract.",
       "params": [
@@ -752,23 +791,27 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental",
+          "position": "none",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
           "required": true
         },
         {
           "address": "P",
+          "position": "none",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
           "unit": "count"
         },
         {
           "address": "F",
+          "position": "none",
           "label": "Boring feed",
           "required": true,
           "min": 0
         },
         {
           "address": "K",
+          "position": "none",
           "label": "Repeat count",
           "min": 0,
           "unit": "count"
@@ -780,6 +823,7 @@
       "group": "cycle",
       "modal": true,
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Drilling cycle on the side",
       "description": "Drills along X into the side of the part under a driven tool. With Q it pecks. It stays active, so the next block with a position drills another hole, until G80.",
       "params": [
@@ -790,29 +834,34 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental",
+          "position": "none",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
           "required": true
         },
         {
           "address": "Q",
+          "position": "none",
           "label": "Peck depth in least increments, without a point (µm on a metric IS-B machine)",
           "min": 0,
           "unit": "increment"
         },
         {
           "address": "P",
+          "position": "none",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
           "unit": "count"
         },
         {
           "address": "F",
+          "position": "none",
           "label": "Drilling feed",
           "required": true,
           "min": 0
         },
         {
           "address": "K",
+          "position": "none",
           "label": "Repeat count",
           "min": 0,
           "unit": "count"
@@ -826,6 +875,7 @@
       "pitchFeed": true,
       "tapping": true,
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Tapping cycle on the side",
       "description": "Cuts a thread along X into the side of the part: the spindle turns back at the bottom of the hole. F is the thread lead, so scaling the feed would change the thread.",
       "params": [
@@ -836,22 +886,26 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental"
+          "position": "none",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)"
         },
         {
           "address": "P",
+          "position": "none",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
           "unit": "count"
         },
         {
           "address": "F",
+          "position": "none",
           "label": "Thread lead",
           "required": true,
           "min": 0
         },
         {
           "address": "K",
+          "position": "none",
           "label": "Repeat count",
           "min": 0,
           "unit": "count"
@@ -863,6 +917,7 @@
       "group": "cycle",
       "modal": true,
       "sets": { "cycle": "start" },
+      "review": "pending",
       "label": "Boring cycle on the side",
       "description": "Feeds along X into the side and feeds back out again, which leaves a cleaner wall than a rapid retract.",
       "params": [
@@ -873,23 +928,27 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental",
+          "position": "none",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
           "required": true
         },
         {
           "address": "P",
+          "position": "none",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
           "unit": "count"
         },
         {
           "address": "F",
+          "position": "none",
           "label": "Boring feed",
           "required": true,
           "min": 0
         },
         {
           "address": "K",
+          "position": "none",
           "label": "Repeat count",
           "min": 0,
           "unit": "count"
@@ -954,6 +1013,14 @@
           "required": true,
           "min": 0,
           "unit": "feedPerRev"
+        },
+        {
+          "address": "Q",
+          "position": "none",
+          "label": "Shift of the thread start angle, in 0.001° without a point (Q180000 is 180°); 0 to 360°",
+          "min": 0,
+          "max": 360000,
+          "unit": "count"
         }
       ]
     },

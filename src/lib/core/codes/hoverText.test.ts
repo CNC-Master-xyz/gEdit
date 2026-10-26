@@ -81,6 +81,17 @@ describe('hoverText: codes', () => {
     expect(klartextHover('13 L X+10 R0 FMAX M3', 'FMAX')).toContain('**FMAX** — Rapid');
   });
 
+  it('reads a feed keyword written apart (F MAX, F AUTO) as the keyword, from either half (T166)', () => {
+    const line = '13 L X+10 R0 F MAX M3';
+    expect(klartextHover(line, 'F MAX')).toContain('**FMAX** — Rapid');
+    expect(klartextHover(line, 'MAX')).toContain('**FMAX** — Rapid');
+    expect(klartextHover(line, 'MAX')).not.toContain('Maximum retraction');
+    expect(hoverTarget(line, line.indexOf('MAX'), klartextProfile, heidenhain, undefined)).toMatchObject({ address: 'FMAX', text: 'F MAX' });
+    expect(klartextHover('14 L Z+50 F AUTO', 'AUTO')).toContain('**FAUTO** — Feed from the tool call');
+    // A feed with its number stays the feed word.
+    expect(klartextHover('15 L X+10 F100', 'F100')).toContain('**F** — Feed');
+  });
+
   it('joins a Klartext cycle with its number, from either half', () => {
     const line = '14 CYCL DEF 200 DRILLING';
     expect(klartextHover(line, 'CYCL')).toContain('**CYCL DEF 200** — Drilling cycle');
@@ -568,7 +579,9 @@ describe('hoverText in context: Fanuc lathe, G-code system A (l01-turning-a.nc)'
   });
 
   it('names a cycle parameter by its meaning, and lists the readings of a micron word with no machine', () => {
-    expect(read(doc, 50, 'R2.')).toMatch(/R — Distance from the start level to the R point.*\(G83\)/);
+    // Manual-check fix D5-8: the label says R is incremental in G-code system A; NC-9: in the
+    // standard drilling format, not always (the Series 15 format can make it absolute).
+    expect(read(doc, 50, 'R2.')).toMatch(/R — R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format.*\(G83\)/);
     const q = read(doc, 50, 'Q3000');
     expect(q).toMatch(/Q — Peck depth.*\(G83\)/);
     // A micron word reads 3 mm under calculator input too, so the preset is named by its whole
@@ -586,14 +599,15 @@ describe('hoverText in context: a number whose value depends on the machine (X11
     const x = read(openDoc('fanuc-lathe', text), 2, 'X50');
     expect(x).toContain('X — target, diameter (assumed: profile default), absolute');
     expect(x).toContain(
-      ['X50 — depends on the machine; choose a machine:', '- 50 mm: As written (profile default)', '- 0.05 mm: Increments of 0.001 mm (IS-B)', '- 0.005 mm: Increments of 0.0001 mm (IS-C)'].join('\n'),
+      ['X50 — depends on the machine; choose a machine:', '- 50 mm: As written (profile default)', '- 0.5 mm: Increments of 0.01 mm (IS-A)', '- 0.05 mm: Increments of 0.001 mm (IS-B)', '- 0.005 mm: Increments of 0.0001 mm (IS-C)'].join('\n'),
     );
   });
 
   it('gives the effective value and why under the machine', () => {
     const isB = openDoc('fanuc-lathe', text, IS_B);
     expect(read(isB, 2, 'X50')).toContain("X50 — 0.05 mm: no decimal point, increments of 0.001 mm (machine 'Lathe IS-B')");
-    expect(read(isB, 3, 'F25')).toContain("F25 — 0.25 mm/rev: no decimal point, increments of 0.01 mm/rev (machine 'Lathe IS-B')");
+    // Manual-check fix D4-1: the lathe counts a point-less feed per revolution in 0.0001 mm/rev.
+    expect(read(isB, 3, 'F25')).toContain("F25 — 0.0025 mm/rev: no decimal point, increments of 0.0001 mm/rev (machine 'Lathe IS-B')");
     expect(read(openDoc('fanuc-lathe', text, CALCULATOR), 2, 'X50')).toContain("X50 — 50 mm: as written (machine 'Lathe calc')");
   });
 
@@ -831,6 +845,16 @@ describe('hoverText in context: what the words of special blocks are', () => {
     expect(read(doc, 5, 'X30')).not.toContain('in force');
   });
 
+  it('names the turning pass in force at the positions under it (T167)', () => {
+    const doc = openDoc('fanuc-lathe', 'G99\nG90 X40. Z-20. F0.2\nX38.\nX36.\nG0 X100. Z5.\nG94 X20. Z-2. F0.2\nZ-4.');
+    expect(read(doc, 3, 'X38.')).toContain('cycle G90 in force (line 2)');
+    expect(read(doc, 4, 'X36.')).toContain('cycle G90 in force (line 2)');
+    // The block that writes the pass names it itself; a rapid move ends it.
+    expect(read(doc, 2, 'X40.')).not.toContain('in force');
+    expect(read(doc, 5, 'X100.')).not.toContain('in force');
+    expect(read(doc, 7, 'Z-4.')).toContain('cycle G94 in force (line 6)');
+  });
+
   it('calls a threading move in force a thread pass, not a cycle', () => {
     const doc = openDoc('sinumerik', 'G90 G18\nG33 Z-30 K1.5\nX20');
     expect(read(doc, 3, 'X20')).toContain('thread pass G33 in force (line 2)');
@@ -845,5 +869,62 @@ describe('hoverText in context: what the words of special blocks are', () => {
   it('names the code that gave a feed its unit, never one that says the opposite', () => {
     expect(read(openDoc('okuma-osp', 'G95\nG101 X40 C90 F100'), 2, 'F100')).toContain('F — feed per minute (G101)');
     expect(read(openDoc('okuma-osp', 'G94\nG101 X40 C90 F100'), 2, 'F100')).toContain('F — feed per minute (G94)');
+  });
+});
+
+describe('hoverText: the required words of a two-block lathe cycle belong to their block', () => {
+  const text = [
+    'G00 X30. Z2.',
+    'G71 U2. R0.5',
+    'G71 P10 Q20 U0.4 W0.1 F0.25',
+    'G72 W1. R0.5',
+    'G72 P10 Q20 U0.4 W0.1 F0.25',
+    'G73 U3. W1. R2',
+    'G73 P10 Q20 U0.4 W0.1 F0.25',
+    'G74 R0.5',
+    'G74 X20. Z-10. P1000 Q2000 F0.1',
+    'G76 P011060 Q100 R0.05',
+    'G76 X18. Z-20. P1000 Q300 F1.5',
+    'G71',
+    'G71 U2. P10',
+  ].join('\n');
+  const doc = openDoc('fanuc-lathe', text);
+  // The Phase 2 hover (no context) and the one with the modal context start the same way.
+  const both = (n: number, at: string): string[] => [hoverIn(doc, n, at, { context: false }), hoverIn(doc, n, at)];
+
+  it('G71: the first block names no required word, the second names P, Q', () => {
+    for (const first of both(2, 'G71')) expect(first).not.toContain('Required');
+    for (const second of both(3, 'G71')) {
+      expect(second).toContain('Required: P, Q');
+      expect(second).not.toContain('Required in the');
+    }
+  });
+
+  it('G72 and G73 are read the same way', () => {
+    for (const [first, second] of [[4, 5], [6, 7]]) {
+      const code = first === 4 ? 'G72' : 'G73';
+      for (const h of both(first!, code)) expect(h, `${code} first`).not.toContain('Required');
+      for (const h of both(second!, code)) expect(h, `${code} second`).toContain('Required: P, Q');
+    }
+  });
+
+  it('G76: the thread feed F belongs to the second block; G74 requires nothing in either', () => {
+    for (const h of both(10, 'G76')) expect(h).not.toContain('Required');
+    for (const h of both(11, 'G76')) expect(h).toContain('Required: F');
+    for (const n of [8, 9]) for (const h of both(n, 'G74')) expect(h).not.toContain('Required');
+  });
+
+  it('names the block when the line does not say which one it is', () => {
+    for (const h of both(12, 'G71')) {
+      expect(h).toContain('Required in the second block: P, Q');
+      expect(h).not.toContain('Required: P, Q');
+    }
+    // A first-block word and a second-block word together: the second block wins, as the inspector reads it.
+    for (const h of both(13, 'G71')) expect(h).toContain('Required: P, Q');
+  });
+
+  it('leaves the hover of a single-block code unchanged', () => {
+    const mill = openDoc('fanuc-gcode', 'G83 X10. Z-20. R2. Q5. F100.');
+    expect(hoverIn(mill, 1, 'G83', { context: false })).toContain('Required: Z, R, Q, F');
   });
 });

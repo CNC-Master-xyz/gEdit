@@ -1,0 +1,7 @@
+{
+  "profile": "sinumerik",
+  "machineName": "Lathe 3",
+  "limits": {
+    "spindle": { "main": 1000 }
+  }
+}

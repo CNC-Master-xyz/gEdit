@@ -9,6 +9,12 @@
 //
 // Delete `asIcon` (and this file) when lucide-svelte ships Svelte 5 typings: the fix is
 // then to drop the call, not to change `app/types.ts`.
+//
+// Checked again for v1.2.0 (T217): `lucide-svelte` is still at 1.0.1 on its `latest` tag
+// (the only newer builds are a 1.0.0 release candidate and old betas), with the same
+// Svelte 4 declarations, so the cast stays. The Svelte 5 icons live in a different
+// package, `@lucide/svelte`; moving to it would change every icon import in the app, so
+// it is its own piece of work and not part of this cast.
 
 import type { Component } from 'svelte';
 

@@ -181,7 +181,6 @@ scenario('m1-perf-open', { timeout: 300 }, async (h) => {
       `switch away ${ms(toSmall).join('/')} ms; docs.activate() alone ${activateMs} ms; program map ${mapMs} ms`,
   )
 
-  h.expectExit({ within: 20000 })
-  await h.sleep(300)
+  await h.expectExit({ within: 20000 })
   await h.nativeKeys([{ key: 'w', mods: ['cmd', 'shift'] }])
 })

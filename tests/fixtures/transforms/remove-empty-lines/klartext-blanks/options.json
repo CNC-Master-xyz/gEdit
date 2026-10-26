@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Klartext: removing lines leaves a program with gaps in its block numbers, so the run warns and offers renumbering.",
+  "profile": "heidenhain-klartext",
+  "options": {}
+}

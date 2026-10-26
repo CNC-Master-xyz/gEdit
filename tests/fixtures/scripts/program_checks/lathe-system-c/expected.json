@@ -1,0 +1,39 @@
+{
+  "title": "Program checks",
+  "columns": [
+    {
+      "key": "line",
+      "label": "Line"
+    },
+    {
+      "key": "check",
+      "label": "Check"
+    },
+    {
+      "key": "severity",
+      "label": "Severity"
+    },
+    {
+      "key": "message",
+      "label": "Finding"
+    }
+  ],
+  "rows": [
+    {
+      "line": 4,
+      "check": "Spindle",
+      "checkId": "spindleOff",
+      "severity": "warning",
+      "message": "G71: a cut before the program starts a spindle"
+    },
+    {
+      "line": 4,
+      "check": "G-code system",
+      "checkId": "gcodeSystemC",
+      "severity": "warning",
+      "message": "G71: written alone, as G-code system C writes inch or metric input. This program may be written in G-code system C, which gEdit does not read; check the G-code system of the machine"
+    }
+  ],
+  "message": "2 findings in 2 checks. No machine chosen: where the presets read a number differently, the finding lists every reading.",
+  "findings": []
+}

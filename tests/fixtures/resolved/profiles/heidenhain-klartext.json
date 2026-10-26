@@ -85,6 +85,11 @@
   "grammar": "klartext",
   "id": "heidenhain-klartext",
   "machineType": "mill",
+  "modal": {
+    "initial": {
+      "feedmode": "M137"
+    }
+  },
   "name": "Heidenhain Klartext",
   "numberFormat": {
     "decimals": "keep",
@@ -169,7 +174,9 @@
       "(?:BEGIN|END)\\s+PGM\\s+(?<text>[^\\s;]+)(?=\\s*$)",
       "CYCL\\s+DEF\\s+12\\.1\\s+PGM\\s+(?<text>[^\\s;~]+)",
       "FN\\s*16\\s*:\\s*(?<text>[^\\s;](?:[^;]*?[^\\s;])?)(?=\\s*(?:;|$))",
-      "CALL\\s+PGM\\s+(?<text>[^\\s;~\"]+)"
+      "CALL\\s+PGM\\s+(?<text>[^\\s;~\"]+)",
+      "SEL\\s+PGM\\s+(?<text>[^\\s;~\"]+)",
+      "SEL\\s+(?:CYCLE|TABLE|PATTERN|CORR-TABLE)\\s+(?<text>[^\\s;~\"]+)"
     ],
     "incrementalPrefix": "I",
     "keywords": [

@@ -49,8 +49,10 @@ describe('the ribbon layout', () => {
     expect(placed.length).toBeGreaterThan(40);
   });
 
-  it('File: New, Open, Save, Save As, Save All, Close, Reload, and Recent', () => {
-    expect(groupsOf('file')).toEqual(['files.groupFile', 'recent.groupRecent']);
+  it('File: New, Open, Save, Save As, Save All, Close, Reload, Insert File, Print and Recent', () => {
+    expect(groupsOf('file')).toEqual(['files.groupFile', 'insertFile.group', 'print.group', 'recent.groupRecent']);
+    expect(inGroup('insertFile.group')).toEqual(['file.insertFile', 'file.appendFile']);
+    expect(inGroup('print.group')).toEqual(['file.print', 'file.exportHtml']);
     expect(inGroup('files.groupFile')).toEqual([
       'file.new',
       'file.open',
@@ -63,12 +65,28 @@ describe('the ribbon layout', () => {
     expect(inGroup('recent.groupRecent')).toEqual(['component:RecentMenu']);
   });
 
-  it('Edit: the edit commands, Find and Replace, Go to Line and the typing options', () => {
+  it('Edit: the edit commands, Find and Replace, Go to Line, bookmarks, block ranges and the typing options', () => {
     expect(groupsOf('edit').sort()).toEqual(
-      ['editing.groupEdit', 'navigation.groupGoto', 'search.group', 'typing.group'].sort(),
+      [
+        'bookmarks.group',
+        'editing.groupEdit',
+        'navigation.groupGoto',
+        'ranges.group',
+        'search.group',
+        'typing.group',
+      ].sort(),
     );
     expect(inGroup('navigation.groupGoto')).toEqual(['nav.goto']);
-    expect(inGroup('typing.group')).toEqual(['edit.toggleForceUppercase']);
+    expect(inGroup('typing.group')).toEqual(['edit.toggleForceUppercase', 'edit.toggleAutoSpace', 'edit.toggleAutoNumber']);
+    expect(inGroup('bookmarks.group')).toEqual([
+      'bookmark.toggle',
+      'bookmark.next',
+      'bookmark.prev',
+      'bookmark.rename',
+      'bookmark.addAllMatches',
+      'view.toggleBookmarks',
+    ]);
+    expect(inGroup('ranges.group')).toEqual(['edit.selectBlockRange', 'edit.deleteBlockRange']);
     expect(inGroup('search.group')).toEqual(['search.findAll', 'search.replace', 'search.wholeAddressInFind']);
   });
 
@@ -86,7 +104,15 @@ describe('the ribbon layout', () => {
     expect(groupsOf('nc').sort()).toEqual(
       ['channels.group', 'ncBlockSkip.group', 'ncCleanup.group', 'ncNumbering.group', 'segments.group'].sort(),
     );
-    expect(inGroup('ncNumbering.group')).toEqual(['nc.renumber', 'nc.removeBlockNumbers']);
+    // P4.20b: Update References in Other Documents joins them (the list here is by file name).
+    expect(inGroup('ncNumbering.group').sort()).toEqual(['nc.removeBlockNumbers', 'nc.renumber', 'nc.updateOtherReferences']);
+    // ... and sits between the two: the ribbon orders a group's buttons by `order` (ribbonModel.ts).
+    const orderOf = (id: string): number => {
+      const file = placed.find((p) => p.what === id)?.file ?? '';
+      const m = readFileSync(join(CONTRIB, file), 'utf8').match(new RegExp(`command:\\s*'${id.replace('.', '\\.')}',\\s*order:\\s*(\\d+)`));
+      return m === null ? -1 : Number(m[1]);
+    };
+    expect(['nc.renumber', 'nc.updateOtherReferences', 'nc.removeBlockNumbers'].map(orderOf)).toEqual([5, 10, 15]);
   });
 
   it('Tools: Compare and the built-in NC scripts (program checks, scale feed and speed, tool list, extents, address arithmetic)', () => {

@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { cpOf } from '../../../../tests/unit/helpers/profiles';
-import { blockNumberParams, blockValueErrors, documentNumbers, freeBlockValues, namedOwnNumbers, needsDocumentNumbers, ownNumbers } from './blockNumbers';
+import { blockNumberParams, blockValueErrors, documentLabels, documentNumbers, documentNumbersByTokens, freeBlockValues, namedOwnNumbers, needsDocumentNumbers, ownNumbers } from './blockNumbers';
 import type { TemplateDef } from './types';
 
 const ROUGH: TemplateDef = {
@@ -37,6 +37,16 @@ describe('which parameters name a block', () => {
     expect(blockNumberParams({ ...LAP, body: '{{name}} G81\nG80' }, cpOf('okuma-osp'))).toEqual([]);
   });
 
+  it('WX-NC-2: a parameter that only a kept word or another program\'s block names is no block number', () => {
+    const t = (body: string): TemplateDef => ({ id: 't', label: 'T', group: 'G', body, params: [{ id: 'n', label: 'N', type: 'integer', default: 30 }] });
+    // GOTO names a block of its own program; M99 P one of the caller, M98 Q one of the called program.
+    expect(blockNumberParams(t('{{n}} G0 X0\nGOTO {{n}}'), cpOf('fanuc-gcode'))).toEqual([{ id: 'n', kind: 'number' }]);
+    expect(blockNumberParams(t('{{n}} G0 X0\nM99 P{{n}}'), cpOf('fanuc-gcode'))).toEqual([]);
+    expect(blockNumberParams(t('{{n}} G0 X0\nM98 P1000 Q{{n}}'), cpOf('fanuc-lathe'))).toEqual([]);
+    // On a mill G73 Q and P are kept as written (a peck depth and a dwell).
+    expect(blockNumberParams(t('{{n}} G0 X0\nG73 X1. Z-5. R1. Q{{n}} P20 F100.'), cpOf('fanuc-gcode'))).toEqual([]);
+  });
+
   it('has none on a consecutive profile, and a template without {{N}} and block numbers needs no scan', () => {
     expect(blockNumberParams(ROUGH, cpOf('heidenhain-klartext'))).toEqual([]);
     expect(needsDocumentNumbers(ROUGH, cpOf('heidenhain-klartext'))).toBe(false);
@@ -58,6 +68,26 @@ describe('what a program uses', () => {
       ['170', { line: 5, word: 'Q170' }],
       ['300', { line: 6, word: 'GOTO 300' }],
     ]);
+  });
+
+  it('WX-NC-2: a word kept as written (mill G73 Q/P) or naming another program\'s block (M99 P, M98 P… Q…) still counts as referenced: refuse, do not guess', () => {
+    const cp = cpOf('fanuc-gcode');
+    const lines = ['O2000', 'N30 G0 X0', 'N40 G98 G73 X10. Y10. Z-20. R2. Q10 P20 F100.', 'N50 M98 P1000 Q60', 'M99 P30', 'GOTO 70'];
+    for (const doc of [documentNumbers(lines, cp), documentNumbersByTokens(lines, cp)]) {
+      expect([...doc.referenced.entries()]).toEqual([
+        ['10', { line: 3, word: 'Q10' }],
+        ['20', { line: 3, word: 'P20' }],
+        ['60', { line: 4, word: 'Q60' }],
+        ['30', { line: 5, word: 'P30' }],
+        ['70', { line: 6, word: 'GOTO 70' }],
+      ]);
+      expect([...doc.blocks.keys()]).toEqual(['30', '40', '50']);
+    }
+    // The form refuses N60 (an M98 Q of the file may name it) and says so of a {{N}} that writes N20.
+    const doc = documentNumbers(lines, cp);
+    const params = [{ id: 'ns', kind: 'number' as const }];
+    expect(blockValueErrors(params, { ns: '60' }, doc, [], cp).ns?.key).toBe('templates.value.blockNumberNamed');
+    expect(namedOwnNumbers([10, 20], doc, cp).map((x) => x.word)).toEqual(['Q10', 'P20']);
   });
 
   it('compares Okuma sequence numbers and names as text: N0100 is not N100', () => {
@@ -105,5 +135,31 @@ describe('the values the form starts with, and what it refuses', () => {
   it('names the {{N}} numbers a reference of the program points at', () => {
     const doc = documentNumbers(['N120 G71 P130 Q170'], cp);
     expect(namedOwnNumbers([110, 120, 130], doc, cp)).toEqual([{ number: 'N130', word: 'P130', line: 1 }]);
+  });
+});
+
+describe('v1.2.0 T160: Klartext labels', () => {
+  const klartext = cpOf('heidenhain-klartext');
+  const tpl = (body: string): TemplateDef => ({ id: 't', label: 'T', group: 'G', body, params: [{ id: 'lbl', label: 'Label', type: 'integer' }, { id: 'n', label: 'N', type: 'integer' }] });
+
+  it('a parameter written as the label of LBL at the head of a block is a label field; one only called is not', () => {
+    expect(blockNumberParams(tpl('{{N}}LBL {{lbl}}\n{{N}}CALL LBL {{lbl}}'), klartext)).toEqual([{ id: 'lbl', kind: 'label' }]);
+    expect(blockNumberParams(tpl('{{N}}/ LBL {{lbl}}'), klartext)).toEqual([{ id: 'lbl', kind: 'label' }]);
+    expect(blockNumberParams(tpl('{{N}}CALL LBL {{n}}'), klartext)).toEqual([]);
+    expect(needsDocumentNumbers(tpl('{{N}}LBL {{lbl}}'), klartext)).toBe(true);
+    expect(needsDocumentNumbers(tpl('{{N}}L X+{{n}}'), klartext)).toBe(false);
+  });
+
+  it('reads the labels a program defines and calls, offers the next free one and refuses a used or called one', () => {
+    const doc = documentLabels(['0 BEGIN PGM A MM', '1 CALL LBL 9', '2 LBL 1', '3 LBL 0', '4 LBL 4', '5 L X+0 ; LBL 7 in a comment', '6 LBL "NAME"'], klartext);
+    expect([...doc.blocks.keys()]).toEqual(['LBL1', 'LBL4']);
+    expect([...doc.referenced.entries()]).toEqual([['LBL9', { line: 2, word: 'CALL LBL 9' }]]);
+    expect(doc.max).toBe(4);
+    const params = [{ id: 'lbl', kind: 'label' as const }];
+    const t: TemplateDef = { ...tpl('{{N}}LBL {{lbl}}'), params: [{ id: 'lbl', label: 'Label', type: 'integer', default: '1', min: 1, max: 65535 }] };
+    expect(freeBlockValues(t, params, doc, [], klartext)).toEqual({ lbl: '5' });
+    expect(blockValueErrors(params, { lbl: '4' }, doc, [], klartext).lbl).toEqual({ key: 'templates.value.labelUsed', params: { number: 'LBL 4', line: 5 } });
+    expect(blockValueErrors(params, { lbl: '9' }, doc, [], klartext).lbl).toEqual({ key: 'templates.value.labelCalled', params: { number: 'LBL 9', word: 'CALL LBL 9', line: 2 } });
+    expect(blockValueErrors(params, { lbl: '6' }, doc, [], klartext)).toEqual({});
   });
 });

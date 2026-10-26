@@ -199,6 +199,66 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// P4.8 (plan §6.4 rule 1, §7 #522): `params.motion` and `params.limits` are members of
+    /// the opaque `params` object, so Rust neither reads nor changes them. A record with
+    /// both blocks, a block with members this build does not know, and a block that is plainly
+    /// broken (the TypeScript validator is the gate, and a broken block costs the block) all
+    /// come back from `config_load` exactly as they were saved, and the version stays 1.
+    #[test]
+    fn motion_and_limits_survive_save_and_load_untouched() {
+        let (root, dirs) = scratch("motion-limits");
+        let file = serde_json::json!({
+            "machines": [
+                {
+                    "id": "mill-1",
+                    "name": "Mill 1",
+                    "profile": "fanuc-gcode",
+                    "params": {
+                        "units": "mm",
+                        "motion": {
+                            "units": "mm",
+                            "rapid": { "X": 30000, "Y": 30000, "Z": 24000, "C": 12000.5 },
+                            "rapidKind": "per-axis",
+                            "maxFeed": 9000,
+                            "toolChange": 4.5,
+                            "peckRetract": 0.5,
+                            "peckClearance": 3,
+                            "futureMember": { "kept": [1, 2, 3] }
+                        },
+                        "limits": {
+                            "units": "mm",
+                            "spindle": { "main": 6000, "S2": 3000 },
+                            "travel": { "X": { "min": -300, "max": 300 }, "C": { "min": 0, "max": 360 } },
+                            "alsoUnknown": true
+                        }
+                    }
+                },
+                {
+                    "id": "mill-2",
+                    "name": "Mill 2",
+                    "profile": "fanuc-gcode",
+                    "params": { "motion": { "maxFeed": "fast" }, "limits": [] }
+                }
+            ],
+            "defaults": {}
+        });
+        save(&dirs, file.clone()).unwrap();
+
+        let written = on_disk(&dirs);
+        assert_eq!(written["machines"], file["machines"]);
+        assert_eq!(written["$version"], Value::from(1));
+        let loaded = crate::config::load(&dirs);
+        assert_eq!(loaded.machines_error, None);
+        assert_eq!(loaded.machines["machines"], file["machines"]);
+
+        // And a second save of what was loaded changes nothing.
+        let mut again = loaded.machines.clone();
+        again.as_object_mut().unwrap().remove("$version");
+        save(&dirs, again).unwrap();
+        assert_eq!(on_disk(&dirs)["machines"], file["machines"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// The write is atomic and leaves no temporary file behind: the whole file is
     /// replaced or none of it is, because half a machine reads numbers wrongly.
     #[test]

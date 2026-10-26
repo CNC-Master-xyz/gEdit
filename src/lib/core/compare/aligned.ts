@@ -46,11 +46,22 @@
 //     line before, nor go missing when both lines have it; otherwise it is refused, and the
 //     line copy is the way.
 //
+//  5. **Modes at the place of a copy** (review NC-6; the owner, 2026-10-17: a warning, never a
+//     refusal). Copied text is read in the modes of the program it goes into. `copyModes` takes
+//     four of them from a modal state (`core/nc/modal.ts`): absolute or incremental (`G90`/`G91`),
+//     inch or mm, the plane and the work offset (`G54.1` with its P); `modeDifferences` lists those that differ at
+//     the place, also where one program knows the mode and the other does not (2026-10-22). `app/compare.ts` reads the states in front of
+//     the copied lines on each side and warns after the copy. The owner, 2026-10-20: the copy
+//     also warns at its **end**, when it changes the modes the target's lines below it run in
+//     (a copied block that ends in `G91` where the target was in `G90`, or a removed line that
+//     held the `G91`): `modeChanges` lists the modes of the line below the copy before and
+//     after it. Front and end make one warning.
+//
 // Lines and columns are 1-based as in Monaco; spans are UTF-16 offsets as in `wordDiff`.
 
 import { diffLines } from '$lib/core/transforms/lineDiff';
 import { tokenizeLine } from '$lib/core/nc/tokenizer';
-import type { LineState, NcToken } from '$lib/core/nc/types';
+import type { LineState, ModalState, NcToken } from '$lib/core/nc/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import { normalizedWords } from './index';
 import type { CompareOptions, NormalizeContext } from './types';
@@ -352,6 +363,27 @@ export function facingRows(a: readonly string[], b: readonly string[]): Int32Arr
     j = pj + 1;
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// When the view aligns again after an edit (review CODE-4)
+// ---------------------------------------------------------------------------
+
+/** The shortest wait after the last change of either text before the view aligns again. */
+export const REALIGN_DELAY_MS = 150;
+/** The longest wait, however long the last alignment took. */
+export const REALIGN_DELAY_MAX_MS = 3000;
+
+/**
+ * How long the view waits after the last change before it aligns again: twice what the last
+ * alignment took, at least `REALIGN_DELAY_MS` and at most `REALIGN_DELAY_MAX_MS`. A lathe
+ * program of a few thousand lines aligns in well under 0.1 s and keeps the short wait; a
+ * 100,000-line program that takes 1.3 s waits 2.6 s, so a pause between two keystrokes does
+ * not freeze the editor for the time of a whole alignment each time (review CODE-4).
+ */
+export function realignDelay(lastCostMs: number): number {
+  if (!Number.isFinite(lastCostMs) || lastCostMs <= 0) return REALIGN_DELAY_MS;
+  return Math.min(REALIGN_DELAY_MAX_MS, Math.max(REALIGN_DELAY_MS, Math.round(2 * lastCostMs)));
 }
 
 /** Lines the diff may not have a partner for: the normalized text of a side whose lines are all dropped is empty. */
@@ -852,4 +884,113 @@ function checkWordEdit(
   for (const [address, n] of inResult) if (n > Math.max(inSource.get(address) ?? 0, inTarget.get(address) ?? 0)) return 'moved';
   for (const address of inTarget.keys()) if (inSource.has(address) && !inResult.has(address)) return 'moved';
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Modes at the place of a copy (review NC-6)
+// ---------------------------------------------------------------------------
+
+/** The modes a copy warns about: absolute/incremental, inch/mm, the plane, the work offset. */
+export type CopyModeKind = 'distance' | 'units' | 'plane' | 'offset';
+
+/** The order the modes are named in a warning. */
+export const COPY_MODE_KINDS: readonly CopyModeKind[] = ['distance', 'units', 'plane', 'offset'];
+
+/** One mode in force: what is compared (`value`) and how it is named (`label`, as the program writes it where it can). */
+export interface CopyMode {
+  value: string;
+  label: string;
+}
+
+/** The modes of a state that are known; a mode nobody knows (no code read, no power-on value) is left out. */
+export type CopyModes = Partial<Record<CopyModeKind, CopyMode>>;
+
+/**
+ * The extended work offset a block selects: `G54.1 P1` gives `P1` (WX-NC-7). `text` is the block
+ * with its comments blanked. A number is read as a number (`P01` is `P1`); a variable stays as
+ * written. Null: the block names no P, so the offset is known by its code only.
+ */
+export function extendedOffsetP(text: string): string | null {
+  if (!/(?:^|[^A-Za-z0-9.])G0*54\.1(?![0-9])/i.test(text)) return null;
+  const p = /(?:^|[^A-Za-z])P\s*(#\d+|\d+)/i.exec(text);
+  if (p === null) return null;
+  const written = p[1];
+  return written.startsWith('#') ? written : String(Number(written));
+}
+
+/**
+ * The four modes of `state` that a copy is read in (null: the state is not known, so nothing
+ * is). The label is the code in force (`G91`, `G18`, `G55`) where the database has one, else the
+ * reading (`incremental`, `ZX`); the units are `mm` or `inch`. A work offset is compared by its
+ * code, and for `G54.1` by its P as well (`G54.1 P1` against `G54.1 P2` differ, WX-NC-7): P is
+ * read from the line that set the offset, `lineText(line)` (the line's text with its comments
+ * blanked; without it, or when the line names no P, the code alone counts).
+ */
+export function copyModes(state: ModalState | null, lineText?: (line: number) => string | undefined): CopyModes {
+  const out: CopyModes = {};
+  if (state === null) return out;
+  const code = (group: string): string | undefined => {
+    const written = state.groups[group]?.code;
+    return written !== undefined && written.trim() !== '' ? written.trim() : undefined;
+  };
+  if (state.distance !== 'unknown') out.distance = { value: state.distance, label: code('distance') ?? state.distance };
+  if (state.units.value !== 'unknown') out.units = { value: state.units.value, label: state.units.value };
+  if (state.plane !== 'unknown') out.plane = { value: state.plane, label: code('plane') ?? state.plane };
+  const offset = code('offset');
+  if (offset !== undefined) {
+    const line = state.groups.offset?.line ?? 0;
+    const text = lineText !== undefined && line > 0 && /^G0*54\.1$/i.test(offset) ? lineText(line) : undefined;
+    const p = text === undefined ? null : extendedOffsetP(text);
+    const label = p === null ? offset : `${offset} P${p}`;
+    out.offset = { value: label.toUpperCase(), label };
+  }
+  return out;
+}
+
+/**
+ * A mode in which the two sides of a copy differ. A label of null: that side does not know the
+ * mode (no code read yet, no power-on value), while the other does (the owner, 2026-10-22).
+ */
+export interface ModeDifference {
+  kind: CopyModeKind;
+  /** The label on the side the text comes from, and on the side it goes to. */
+  source: string | null;
+  target: string | null;
+}
+
+/**
+ * The modes that differ between the two sides, in the order of `COPY_MODE_KINDS`: both know the
+ * mode and it is not the same, or one side knows it and the other does not (`G90` here, not
+ * known in the other program). A mode neither knows is no difference.
+ */
+export function modeDifferences(source: CopyModes, target: CopyModes): ModeDifference[] {
+  const out: ModeDifference[] = [];
+  for (const kind of COPY_MODE_KINDS) {
+    const from = source[kind];
+    const to = target[kind];
+    if (from === undefined && to === undefined) continue;
+    if (from === undefined || to === undefined || from.value !== to.value) {
+      out.push({ kind, source: from?.label ?? null, target: to?.label ?? null });
+    }
+  }
+  return out;
+}
+
+/** A mode the lines below a copy run in that the copy changed (the owner, 2026-10-20). */
+export interface ModeChange {
+  kind: CopyModeKind;
+  /** The label of the mode the lines below ran in before the copy, and run in after it; null: not known. */
+  before: string | null;
+  after: string | null;
+}
+
+/**
+ * The modes the lines below a copy ran in before it (`before`) and run in after it (`after`)
+ * that differ, in the order of `COPY_MODE_KINDS`: a copied block that ends in `G91` where the
+ * target was in `G90`, or a removed line that held the `G91`; also a mode that was not known
+ * there before and is now (a copied block ending in `G91` into an area with no distance mode
+ * yet), or the other way round (the owner, 2026-10-22).
+ */
+export function modeChanges(before: CopyModes, after: CopyModes): ModeChange[] {
+  return modeDifferences(before, after).map((d) => ({ kind: d.kind, before: d.source, after: d.target }));
 }

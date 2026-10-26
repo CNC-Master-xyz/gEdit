@@ -1816,10 +1816,14 @@ class TestOutput(unittest.TestCase):
         source = (self.SNIPPET % str(helpers.SCRIPTS_DIR)) + body
         # `-B`: nothing may leave a `.pyc` in the bundled scripts folder, because that
         # folder ships as an app resource (see `tests/python/__init__.py`).
+        # The app runs every script with UTF-8 standard streams (`scripts/runner.rs`);
+        # without these, Python on Windows writes the result in the system code page.
+        env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         done = subprocess.run(
             [system.executable, "-B", "-c", source],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=env,
             check=False,
         )
         self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8"))

@@ -29,20 +29,11 @@ export default {
     let stopped = false;
     const registrations: Disposable[] = [];
 
-    // Enter ends a block, it never accepts a suggestion.
-    //
-    // Monaco's default (`on`) hands Enter to the suggest widget whenever it is open, and
-    // the widget is open for most of an NC block: typing `M6` offers M6, and the Enter
-    // behind it would be swallowed. The M0 harness scenarios type `T5 M6\n` and check
-    // that the line break arrived — they are right to. Tab still accepts a suggestion,
-    // which is also how the snippet tab stops are reached.
-    //
-    // It lives here and not in `monaco/editorOptions.ts` because it is a rule *about the
-    // assistant*: without this contribution nothing would ever open the widget. The
-    // editor service remembers every option it is handed, so this survives the re-attach
-    // the compare overlay does, and it is set before the editor exists so that the first
-    // paint already has it. A later milestone may turn it into a setting of its own.
-    editor.updateOptions({ acceptSuggestionOnEnter: 'off' });
+    // Whether Enter accepts a suggestion is the setting `assist.acceptOnEnter` (off by
+    // default: Enter ends a block, Tab accepts), mapped onto the editor with the other
+    // settings in `monaco/editorOptions.ts` (T214). Monaco's own default (`on`) hands Enter
+    // to the suggest widget whenever it is open, which is for most of an NC block: typing
+    // `M6` offers M6, and the Enter behind it would be swallowed.
 
     void (async () => {
       await editor.ready;

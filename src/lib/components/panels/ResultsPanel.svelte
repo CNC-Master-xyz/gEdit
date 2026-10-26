@@ -281,7 +281,11 @@
     </header>
 
     {#if hasTable}
-      <div class="grid" style="--columns: {report.columns.length}">
+      <div
+        class="grid"
+        data-testid="results-grid"
+        style="--columns: {report.columns.length}; grid-template-columns: repeat({report.columns.length}, minmax(0, auto))"
+      >
         <div class="row header">
           {#each report.columns as column (column.key)}
             <button
@@ -441,15 +445,18 @@
     background-color: var(--surface-hover);
   }
 
+  /* One set of column tracks for the whole table (T140): the heading and every row are
+     subgrids of it, so a value stands exactly under its heading. A grid per row sized each
+     row by its own text and the columns drifted apart. */
   .grid {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
+    display: grid;
+    row-gap: 1px;
   }
 
   .row {
     display: grid;
-    grid-template-columns: repeat(var(--columns), minmax(0, auto));
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
     gap: 8px;
     width: 100%;
     padding: 2px 4px;
@@ -463,8 +470,8 @@
   }
 
   .row.header {
-    grid-template-columns: repeat(var(--columns), minmax(0, auto));
-    padding: 0;
+    /* the same side padding as a row, so a heading and its values start at one edge */
+    padding: 0 4px;
     border-bottom: 1px solid var(--border-color);
   }
 
@@ -478,7 +485,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 2px 4px;
+    padding: 2px 0;
     color: var(--text-muted);
     font: inherit;
     font-size: 9px;

@@ -32,6 +32,14 @@ export type TemplateParamType = 'number' | 'integer' | 'text' | 'choice' | 'form
  */
 export type TemplateDecimals = 'as-entered' | 'min1' | number;
 
+/**
+ * v1.2.0 (T155): the characters a `text` parameter may hold. `'no-spaces'`: anything but a blank
+ * (a Klartext program name); `'letters-digits'`: only the letters A–Z and the digits (an Okuma
+ * program name); `'name'`: a letter, then letters and digits (a tape header name). The check
+ * refuses, it never changes what was typed.
+ */
+export type TemplateCharset = 'no-spaces' | 'letters-digits' | 'name';
+
 /** One option of a `choice` parameter: `label` is shown, `value` is inserted. */
 export interface TemplateChoice {
   label: string;
@@ -67,6 +75,16 @@ export interface TemplateParam {
   uppercase?: boolean;
   /** `text`: wrapped in the profile's comment delimiters. */
   comment?: boolean;
+  /** v1.2.0 (T155) `text`: at most this many characters (1 to `TEMPLATE_LIMITS.text`), counted on the typed text; a longer one is refused, never cut. */
+  maxLength?: number;
+  /** v1.2.0 (T155) `text`: the characters the value may hold (`TemplateCharset`). */
+  charset?: TemplateCharset;
+  /**
+   * v1.2.0 (T154, owner decision A14) `number`, `integer` and `formula`: the unit, shown beside the
+   * field (`mm/min`, `1/min`). Display only: nothing is converted or checked against it, and it is
+   * never written into the program. At most `TEMPLATE_LIMITS.unit` characters.
+   */
+  unit?: string;
   /** The last value is remembered in `state.json` (`ui.lastParams['template:<dialect>:<id>']`). */
   remember?: boolean;
   /** `formula` only (P3.8): the expression over the other parameters, e.g. `s * z * fz`. */
@@ -87,7 +105,10 @@ export interface TemplateDef {
   toolbar?: boolean;
   /** No form: the body is Monaco snippet syntax (`${1:Z-5.}`) inserted by the snippet controller. No `params`. */
   snippet?: boolean;
-  /** Plain NC text with placeholders: `{{id}}`, `{{N}}` at a line start, `{{sys.date|time|file|stem}}`, `\{{` for a literal `{{`. */
+  /**
+   * Plain NC text with placeholders: `{{id}}`, `{{N}}` at a line start (or right behind a leading
+   * block-delete `/`, T157), `{{sys.date|time|file|stem}}`, `\{{` for a literal `{{`.
+   */
   body: string;
   /** In form order (the form's order may differ from the order in the body). */
   params?: TemplateParam[];
@@ -155,6 +176,11 @@ export interface CycleForm {
   values: Record<string, string>;
   /** The block's words the database does not know, as written; kept by `applyCycleForm` (shown as a note). */
   kept: string[];
+  /**
+   * v1.2.0 (T119): the block of a two-block cycle the form edits (`1` or `2`); its fields are the
+   * parameters the database declares for that block (`CodeParam.block`). Absent for a one-block cycle.
+   */
+  part?: 1 | 2;
   /**
    * P3b fix NC (review NC-08): by field id, how the machine reads a value written without a
    * point (`cycleForm.withoutPoint`: `Q4000` is 4 mm on IS-B), for a field whose literal and

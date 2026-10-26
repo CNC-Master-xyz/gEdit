@@ -159,7 +159,7 @@ export function okumaRules(p: Profile, db: CodeDb): GrammarRule[] {
             : []),
         ];
   const skip = blockSkipPattern(p);
-  if (skip?.before) rules.push([lineStart(`\\s*${skip.pattern}`), 'skip']);
+  if (skip?.before) rules.push([lineStart(`(\\s*)(${skip.pattern})`), ['', 'skip']]);
   if (skip?.after) {
     for (const sequence of sequences) {
       rules.push([lineStart(`(\\s*)(${sequence.pattern})(\\s*)(${skip.pattern})`), ['', sequence.role, '', 'skip']]);

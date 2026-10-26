@@ -1,0 +1,30 @@
+{
+  "note": "P4d §6.6 rule 4: a line that contains MSG anywhere, comments included, keeps its text and is listed like a skipped prefix. Okuma reads letters without regard to case, so (msg …) matches as well.",
+  "profile": "okuma-osp",
+  "options": {
+    "skipContaining": "MSG"
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 2,
+        "severity": "info"
+      },
+      {
+        "line": 5,
+        "severity": "info"
+      },
+      {
+        "line": 9,
+        "severity": "info"
+      }
+    ],
+    "warnings": [],
+    "preflight": null
+  }
+}

@@ -28,6 +28,7 @@ export default {
   thirdPartyIntro: 'gEdit ships the following packages. Each one keeps its own license.',
   packages_one: '{count} package',
   packages_other: '{count} packages',
+  showMoreNotices: 'Show more packages ({left} not shown yet)',
   showLicenseText: 'Show the license text of {name}',
   hideLicenseText: 'Hide the license text of {name}',
   sourceNpm: 'npm',

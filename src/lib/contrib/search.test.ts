@@ -13,6 +13,7 @@ const cp = compileProfile(fanucJson as unknown as Profile);
 const fake = vi.hoisted(() => ({
   answers: [] as (Record<string, unknown> | undefined)[],
   forms: [] as Record<string, unknown>[],
+  lives: [] as (((values: Record<string, unknown>) => unknown) | undefined)[],
   documents: {} as Record<string, string[]>,
   titles: {} as Record<string, string>,
   reports: [] as unknown[],
@@ -21,12 +22,14 @@ const fake = vi.hoisted(() => ({
   actions: [] as { id: string; payload: unknown }[],
   selected: '',
   models: new Set<string>(),
+  runner: null as import('$lib/core/regexGuard/runner').GuardRunner | null,
 }));
 
 vi.mock('$lib/app/modals', () => ({
   modals: {
-    form: (o: { values?: Record<string, unknown> }): Promise<Record<string, unknown> | undefined> => {
+    form: (o: { values?: Record<string, unknown>; live?: (values: Record<string, unknown>) => unknown }): Promise<Record<string, unknown> | undefined> => {
       fake.forms.push({ ...o.values });
+      fake.lives.push(o.live);
       return Promise.resolve(fake.answers.shift());
     },
   },
@@ -60,6 +63,7 @@ vi.mock('$lib/stores/documents', () => ({
 }));
 vi.mock('$lib/stores/machines', () => ({ machines: { effective: () => ({ cp, codes: undefined }) } }));
 vi.mock('$lib/stores/results', () => ({ results: { show: (r: unknown) => fake.reports.push(r) } }));
+vi.mock('$lib/core/regexGuard/app', () => ({ appGuardRunner: () => Promise.resolve(fake.runner) }));
 vi.mock('$lib/stores/uiState', () => ({ uiState: { getLastParams: () => undefined, setLastParams: () => undefined } }));
 
 const search = (await import('./search')).default;
@@ -74,6 +78,7 @@ beforeEach(() => {
   Object.assign(fake, {
     answers: [],
     forms: [],
+    lives: [],
     documents: { a: ['G1 X1', 'G0 X2', 'G01 (G1)', 'G10'], b: ['G1', 'X5'] },
     titles: { a: 'part.nc', b: 'part.nc' },
     reports: [],
@@ -82,6 +87,7 @@ beforeEach(() => {
     actions: [],
     selected: '',
     models: new Set(['a', 'b']),
+    runner: null,
   });
 });
 
@@ -234,6 +240,17 @@ describe('search.wholeAddressInFind', () => {
   });
 });
 
+describe('the search forms (T226)', () => {
+  it.each(['search.findAll', 'search.replace'])('%s grays out Also in comments while Whole address is ticked', async (id) => {
+    fake.answers.push(undefined);
+    await run(id);
+    const live = fake.lives[0];
+    expect(typeof live).toBe('function');
+    expect(live?.({ wholeAddress: true, inComments: true })).toMatchObject({ readOnly: ['inComments'] });
+    expect(live?.({ wholeAddress: false })).toEqual({});
+  });
+});
+
 describe('the form texts (CODE-2, NC-4, CODE-7, CODE-17)', () => {
   it('say that Also in comments is for text searches', async () => {
     const { t } = await import('$lib/i18n');
@@ -249,5 +266,65 @@ describe('the form texts (CODE-2, NC-4, CODE-7, CODE-17)', () => {
     const { t } = await import('$lib/i18n');
     expect(t('search.regexHelp')).toMatch(/empty/);
     expect(t('search.wholeAddressNeedsValue', { query: 'S>1' })).toMatch(/address, or an address with a number/);
+  });
+});
+
+describe('a regular expression that runs away (T227)', () => {
+  const RUNAWAY = { ...FORM, query: '(a+)+$', wholeAddress: false, regex: true, replacement: 'x', output: 'replace' };
+  /** A worker that never finishes the pattern: the budget runs out. */
+  const stuck = (): { runner: import('$lib/core/regexGuard/runner').GuardRunner; jobs: unknown[] } => {
+    const jobs: unknown[] = [];
+    return {
+      jobs,
+      runner: {
+        run: (job, budgetMs) => {
+          jobs.push(job);
+          return Promise.resolve({ status: 'timeout' as const, budgetMs, probe: 'query' });
+        },
+        dispose: () => undefined,
+      },
+    };
+  };
+
+  it('Find All stops it, says so in plain words and lists nothing', async () => {
+    const s = stuck();
+    fake.runner = s.runner;
+    fake.answers.push(RUNAWAY);
+    await run('search.findAll');
+    expect(s.jobs).toHaveLength(1);
+    expect(fake.reports).toEqual([]);
+    expect(fake.said.at(-1)?.error).toBe(true);
+    expect(fake.said.at(-1)?.text).toMatch(/took longer than 2 seconds and was stopped/);
+  });
+
+  it('Find All of every open document stops at the first document that runs away', async () => {
+    const s = stuck();
+    fake.runner = s.runner;
+    fake.answers.push({ ...RUNAWAY, scope: 'open' });
+    await run('search.findAll');
+    expect(s.jobs).toHaveLength(1);
+    expect(fake.reports).toEqual([]);
+  });
+
+  it('Replace All stops it before the transform reads the document, and changes nothing', async () => {
+    const s = stuck();
+    fake.runner = s.runner;
+    fake.answers.push(RUNAWAY);
+    await run('search.replace');
+    expect(s.jobs).toHaveLength(1);
+    expect(fake.ran).toEqual([]);
+    expect(fake.said.at(-1)?.text).toMatch(/Nothing was found or changed/);
+  });
+
+  it('lets a sound pattern through, and a word query never asks the worker', async () => {
+    const s = stuck();
+    fake.runner = { run: (job, ms) => (s.jobs.push(job), import('$lib/core/regexGuard/runner').then((m) => m.createInlineRunner().run(job, ms))), dispose: () => undefined };
+    fake.answers.push({ ...FORM, query: 'G\\d', wholeAddress: false, regex: true });
+    await run('search.findAll');
+    expect((fake.reports[0] as ReportData).rows.length).toBeGreaterThan(0);
+    expect(s.jobs).toHaveLength(1);
+    fake.answers.push(FORM);
+    await run('search.findAll');
+    expect(s.jobs).toHaveLength(1); // the word query did not go to the worker
   });
 });

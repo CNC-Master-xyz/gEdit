@@ -1,0 +1,26 @@
+{
+  "note": "P4d §6.6 rule 2: the code behind each new block number starts at column 8, counted in characters from the start of the line, the indentation and a skip mark in front of the number included. Behind a skip mark that follows the number (N6/) the gap is copied, as with \"Spaces after the number\".",
+  "profile": "fanuc-lathe",
+  "options": {
+    "alignColumn": 8
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 2,
+        "severity": "info"
+      },
+      {
+        "line": 13,
+        "severity": "info"
+      }
+    ],
+    "warnings": [],
+    "preflight": null
+  }
+}

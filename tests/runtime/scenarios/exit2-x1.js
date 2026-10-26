@@ -45,25 +45,58 @@ import {
 /** @typedef {import('../lib/api.js').Harness} Harness */
 
 /**
+ * Runs Renumber Blocks with the form as it opens. When the golden has a preflight
+ * (`report.preflight`), answers it with Continue and returns the question's texts; when it
+ * has none (null), returns the alert that is up after the run (null when none is).
+ * @param {Harness} h
+ * @param {any} report
+ */
+async function renumberAsOpened(h, report) {
+  const running = context(h).commands.run('nc.renumber')
+  await h.waitFor(() => h.q('modal'), { timeout: 10000 })
+  await h.frame()
+  h.click(h.q('modal-ok'))
+  await h.waitFor(() => !h.q('modal'), { timeout: 10000 })
+  if (report.preflight === null) {
+    // Either the run ends without a question, or an unexpected one shows up: answered with
+    // Continue so the scenario goes on, and returned so the caller fails its check.
+    let finished = false
+    const done = running.then(() => {
+      finished = true
+    })
+    const seen = await h.waitFor(async () => finished || (await h.alert.visible()), { timeout: 30000 })
+    if (seen !== true) {
+      if (seen) await h.alert.click('Continue')
+      await done
+    }
+    await h.idle()
+    return { asked: null, alert: seen === true ? null : (seen ?? 'no end and no question within 30 s') }
+  }
+  const asked = await h.alert.click('Continue')
+  await running
+  await h.idle()
+  return { asked, alert: null }
+}
+
+/**
  * Renumbers the active document with the form as it opens, answering the preflight with
- * Continue, and compares the result with the golden.
+ * Continue where the golden has one, and compares the result with the golden.
  * @param {Harness} h
  * @param {string} id
  * @param {{ text: string, report: any, label: string }} o
  */
 export async function renumberAndCompare(h, id, { text, report, label }) {
   const input = textNow(h)
-  const running = context(h).commands.run('nc.renumber')
-  await h.waitFor(() => h.q('modal'), { timeout: 10000 })
-  await h.frame()
-  h.click(h.q('modal-ok'))
-  await h.waitFor(() => !h.q('modal'), { timeout: 10000 })
-  const asked = await h.alert.click('Continue')
-  await running
-  await h.idle()
-  h.check(`${label}: the preflight asks about the reference it cannot follow, in the golden's words`, asked.texts.some((t) => t.includes(report.preflight)), { texts: asked.texts, want: report.preflight })
+  const { asked, alert } = await renumberAsOpened(h, report)
+  if (report.preflight === null) {
+    // P4d (plan §6.6 rule 10): `M99 P300` returns into the single caller `O3101`, so the run
+    // follows it and has nothing to ask.
+    h.check(`${label}: no question is asked: every reference in this program can be followed`, alert === null, alert)
+  } else {
+    h.check(`${label}: the preflight asks about the reference it cannot follow, in the golden's words`, asked?.texts.some((t) => t.includes(report.preflight)) === true, { texts: asked?.texts, want: report.preflight })
+  }
   const got = textNow(h)
-  h.check(`${label}: renumber gives the golden bytes (G71/G70 P/Q rewritten, M99 P left)`, got === lf(text), { diff: firstDifference(got, lf(text)) })
+  h.check(`${label}: renumber gives the golden bytes (G71/G70 P/Q and M99 P rewritten)`, got === lf(text), { diff: firstDifference(got, lf(text)) })
   const panel = h.q('results-panel')?.textContent ?? ''
   h.check(`${label}: the summary and the warnings are the golden's`, panel.includes(report.summary) && report.warnings.every((/** @type {string} */ w) => panel.includes(w)), { panel: panel.slice(0, 400), want: [report.summary, ...report.warnings] })
   h.check(`${label}: and the skipped lines are listed with the golden rows`, JSON.stringify(findings(h)) === JSON.stringify(goldenFindings(report.skipped)), { got: findings(h), want: goldenFindings(report.skipped) })
@@ -130,14 +163,7 @@ export async function runX1(h, { noPython = false } = {}) {
   await renumberAndCompare(h, idA, { text: renumberText, report: renumberA, label: 'A: renumber' })
   // The last run again, so that what is saved is its golden.
   const lastA = await goldText(h, dir, 'fanuc-lathe-a.renumber.nc', noPython)
-  const lastRun = context(h).commands.run('nc.renumber')
-  await h.waitFor(() => h.q('modal'), { timeout: 10000 })
-  await h.frame()
-  h.click(h.q('modal-ok'))
-  await h.waitFor(() => !h.q('modal'), { timeout: 10000 })
-  await h.alert.click('Continue')
-  await lastRun
-  await h.idle()
+  await renumberAsOpened(h, renumberA)
   h.check('A: the last run is applied again before the save', textNow(h) === lf(lastA), firstDifference(textNow(h), lf(lastA)))
 
   // ============================================================ B. system B

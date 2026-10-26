@@ -224,7 +224,10 @@ describe('what a code does to the modal state', () => {
   });
 
   it('switches diameter programming on DIAMON, DIAMOF and DIAM90 and nowhere else', () => {
-    expect(codesWith((e) => e.sets?.diameter !== undefined)).toEqual(['DIAM90', 'DIAMOF', 'DIAMON']);
+    // v1.2.0 manual-check fix round (D5-9): DIAMCYCOF, written inside cycles, moves in radii too.
+    expect(codesWith((e) => e.sets?.diameter !== undefined)).toEqual(['DIAM90', 'DIAMCYCOF', 'DIAMOF', 'DIAMON']);
+    expect(entry('DIAMCYCOF')?.sets).toEqual({ diameter: 'off' });
+    expect(entry('DIAMCYCOF')?.group).toBe('diametermode');
     expect(entry('DIAMON')?.sets).toEqual({ diameter: 'on' });
     expect(entry('DIAMOF')?.sets).toEqual({ diameter: 'off' });
     expect(entry('DIAM90')?.sets).toEqual({ diameter: 'absolute-only' });
@@ -652,5 +655,40 @@ describe('B1 fix NC (NC-07): CYCLE93 SPD and SLOT1 _DP labels', () => {
   });
   it('says _DP of SLOT1 becomes a depth through _AMODE', () => {
     expect(entry('SLOT1')?.params?.find((p) => p.address === '_DP')?.label).toMatch(/_AMODE/);
+  });
+});
+
+describe('v1.2.0 manual-check fix round (batch B5): the cycle arguments of the newer manuals', () => {
+  // SINUMERIK 840D sl programming manual SW 4.94 (2020), "Programming cycles externally".
+  const addresses = (code: string): string[] => (entry(code)?.params ?? []).map((p) => p.address);
+
+  it('D1-3: describes the 14 arguments of CYCLE82, the last five understood only at 0', () => {
+    expect(addresses('CYCLE82')).toEqual(['RTP', 'RFP', 'SDIS', 'DP', 'DPR', 'DTB', '_GMODE', '_DMODE', '_AMODE', '_VARI', 'S_ZA', 'S_FA', 'S_ZD', 'S_FD']);
+    const late = (entry('CYCLE82')?.params ?? []).slice(9);
+    for (const p of late) {
+      // A mode: translate, rotate, mirror and address arithmetic refuse a block that writes it as anything but 0.
+      expect(p.position, p.address).toBe('mode');
+      expect(p.expandRole, p.address).toBe('default');
+    }
+    const schema = entry('CYCLE82')?.expand;
+    expect(schema && 'defaults' in schema ? schema.defaults : undefined).toMatchObject({ _VARI: '0', S_ZA: '0', S_FA: '0', S_ZD: '0', S_FD: '0' });
+  });
+
+  it('D5-9: describes all 30 arguments of CYCLE99', () => {
+    expect(addresses('CYCLE99')).toEqual([
+      '_SPL', '_SPD', '_FPL', '_FPD', '_APP', '_ROP', '_TDEP', '_FAL', '_IANG', '_NSP', '_NRC', '_NID', '_PIT', '_VARI', '_NUMTH',
+      '_SDIS', '_MID', '_GDEP', '_PIT1', '_FDEP', '_GST', '_GUD', '_IFLANK', '_PITA', '_PITM', '_PTAB', '_PTABA', '_DMODE', '_AMODE', '_S_XRS',
+    ]);
+    // Still no reviewed role: the thread cycle is not moved (it refuses as before).
+    expect((entry('CYCLE99')?.params ?? []).every((p) => p.position === undefined)).toBe(true);
+  });
+
+  it('D6-5: marks the arguments of the swivel to the home position', () => {
+    // Read as written: the loader carries these marks from the patch for core/codes on.
+    const raw = (p: unknown): Record<string, unknown> => p as Record<string, unknown>;
+    const marks = (entry('CYCLE800')?.params ?? []).map((p) => [p.address, raw(p).frameZero ?? raw(p).frameCloses ?? null]);
+    expect(marks.filter(([, m]) => m !== null)).toEqual([
+      ['_TC', '"0"'], ['_ST', 'onesDigit'], ['_X0', 'zero'], ['_Y0', 'zero'], ['_Z0', 'zero'], ['_A', 'zero'], ['_B', 'zero'], ['_C', 'zero'], ['_X1', 'zero'], ['_Y1', 'zero'], ['_Z1', 'zero'],
+    ]);
   });
 });

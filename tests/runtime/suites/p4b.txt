@@ -1,0 +1,34 @@
+# P4b: "Drilling cycles and time" - the Motion and limits page of the machine form, Expand Drilling Cycles, Statistics and Time and
+# the limits rows of the program checks (plan docs/planning/phase-4-implementation.md, H4b), and the Phase 4 exit criteria X23, X24
+# and X25 that the running app proves. The budgets of the expansion and of Statistics and Time at 300,000 lines are sections B and C
+# of p4-perf, which is in suites/p4a.txt (a scenario of the first part of that file; never retried).
+# Run with: tests/runtime/suites/m0.txt tests/runtime/suites/m1.txt tests/runtime/suites/m2.txt tests/runtime/suites/m3.txt tests/runtime/suites/m4.txt tests/runtime/suites/m5.txt tests/runtime/suites/m6.txt tests/runtime/suites/m7.txt tests/runtime/suites/m8.txt tests/runtime/suites/m9.txt tests/runtime/suites/m10.txt tests/runtime/suites/m11.txt tests/runtime/suites/m12.txt tests/runtime/suites/rp.txt tests/runtime/suites/m13.txt tests/runtime/suites/p3a.txt tests/runtime/suites/p3b.txt tests/runtime/suites/b1.txt tests/runtime/suites/p4a.txt tests/runtime/suites/p4b.txt tests/runtime/suites/p4e.txt
+#
+# Every expected text comes from the goldens (tests/fixtures/scripts/{expand_cycles,statistics,program_checks}/, whose READMEs list every
+# case), from ctx.t(...) or from the plan's bounds (§6.4 rule 2) typed in the scenario; the table of Statistics and Time is worked out from
+# its CSV golden by the layout rules of the script. Nothing is read from what the app shows except through the test ids and the
+# editors' own models. tests/fixtures/p4b/harness/README.md lists the two fixtures that no golden can be.
+#
+# Intentional changes to earlier scenarios, made with this suite (plan "Intentional behaviour changes when P4b lands"):
+# the Tools tab gains two built-in scripts, so the lists of the bundled scripts in m4-scripts and m5-common (read by m5-scripts, which
+# also counts the F9 picker and the Tools group by it) are eleven long (bundled:address_arithmetic.py, expand_cycles.py, extents.py,
+# mirror.py, program_checks.py, rotate.py, scale_feed.py, scale_speed.py, time_estimate.py, tool_list.py, translate.py), and the labels
+# of the checks that count them say eleven (m4-scripts, m5-scripts). The grep of tests/runtime for bundled:, BUNDLED, script-item,
+# menuScriptIds, quick-pick-item, scripts_list and the Built-in Scripts group found no other scenario that pins the list or its count
+# (m10-scripts picks its three by id, b1-ribbon asks for "at least one", m5-perf for "more than none"). The record BUNDLED_M10 in
+# m10-common is the six of M10 and is not read.
+
+# X25 (the page): the page "Motion and limits" on Add and Edit, the unit first, one field per axis, a value outside its bound refused with the
+# bound named (mm and inch), Save disabled while one field fails, the blocks as the page writes them, an untouched page keeping a
+# hand-edited block, a touched page rewriting it, a broken block listed on the machine's row and on the page with its JSON path.
+p4-machines
+
+# X23: Expand Drilling Cycles from the Tools tab on the goldens of tests/fixtures/scripts/expand_cycles: Fanuc G81 under G98 and G99,
+# G83 and G73 with the peck values typed, Klartext cycle 200 with its calls, the refusals (the return level is never assumed, the two
+# peck values missing, a turning program) that leave the text the same bytes, and the peck fields prefilled from the machine's motion block.
+p4-cycles
+
+# X24 and X25 (the check half): Statistics and Time on the goldens of tests/fixtures/scripts/statistics (a machine's prefill, typed
+# values, the form left empty, CSV and table, a new document with the totals), and the "Spindle speed limit" and "Travel" rows of the
+# program checks with a machine that has limits and with one that has none (tests/fixtures/scripts/program_checks/limits-*).
+p4-cycles-time

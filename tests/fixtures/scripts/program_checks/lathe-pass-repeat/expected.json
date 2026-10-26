@@ -1,0 +1,46 @@
+{
+  "title": "Program checks",
+  "columns": [
+    {
+      "key": "line",
+      "label": "Line"
+    },
+    {
+      "key": "check",
+      "label": "Check"
+    },
+    {
+      "key": "severity",
+      "label": "Severity"
+    },
+    {
+      "key": "message",
+      "label": "Finding"
+    }
+  ],
+  "rows": [
+    {
+      "line": 11,
+      "check": "Pass repeated",
+      "checkId": "passRepeat",
+      "severity": "warning",
+      "message": "M08: the single pass G90 is still in force (last pass on line 10), so the control runs that pass again here; write G00 or G01 before this block"
+    },
+    {
+      "line": 14,
+      "check": "Pass repeated",
+      "checkId": "passRepeat",
+      "severity": "warning",
+      "message": "An empty block: the single pass G90 is still in force (last pass on line 13), so the control runs that pass again here; write G00 or G01 before this block"
+    },
+    {
+      "line": 16,
+      "check": "Pass repeated",
+      "checkId": "passRepeat",
+      "severity": "warning",
+      "message": "T0100: the single pass G90 is still in force (last pass on line 13), so the control runs that pass again here; write G00 or G01 before this block"
+    }
+  ],
+  "message": "3 findings in 1 check. No machine chosen: where the presets read a number differently, the finding lists every reading.",
+  "findings": []
+}

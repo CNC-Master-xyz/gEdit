@@ -174,9 +174,27 @@
     {
       "code": "G4",
       "description": "Holds the position for the time in F, in seconds, or for the number of spindle revolutions in S; S2= and the like count the revolutions of another spindle. It stands in a block of its own. That F is not a feed and that S is not a speed, so nothing that scales feeds or speeds may touch them.",
+      "dwell": {
+        "revolutions": "S",
+        "seconds": "F"
+      },
       "fNotFeed": true,
       "group": "nonmodal",
-      "label": "Dwell"
+      "label": "Dwell",
+      "params": [
+        {
+          "address": "F",
+          "label": "Dwell time in seconds",
+          "min": 0,
+          "unit": "dwell"
+        },
+        {
+          "address": "S",
+          "label": "Dwell in revolutions of the master spindle",
+          "min": 0
+        }
+      ],
+      "review": "pending"
     },
     {
       "code": "G63",
@@ -560,7 +578,10 @@
       "code": "G74",
       "description": "Moves the machine axes written with it, as X1=0 Z1=0, to their reference points. The values say which axes move, not where to. It stands in a block of its own, and no transformation may be on for those axes.",
       "group": "nonmodal",
-      "label": "Reference point approach"
+      "label": "Reference point approach",
+      "sets": {
+        "motion": "rapid"
+      }
     },
     {
       "axisWords": "machine",
@@ -571,7 +592,10 @@
       ],
       "description": "Moves the axes written with it, each on its own and at rapid traverse, to the fixed point FP= names (1 to 4; none or 0 is 1), a position set in machine data and reached in machine coordinates. The values of the axis words are not positions, which is why posts write 0. Milling posts use it to retract before a tool change; it is not allowed while radius compensation or a transformation is on.",
       "group": "nonmodal",
-      "label": "Approach a fixed machine point"
+      "label": "Approach a fixed machine point",
+      "sets": {
+        "motion": "rapid"
+      }
     },
     {
       "code": "G500",
@@ -857,58 +881,113 @@
       }
     },
     {
+      "code": "DIAMCYCOF",
+      "description": "Switches diameter programming off for the work of a cycle, so the cycle can calculate in radii; it is written inside cycles. The position display keeps showing the mode written before it. gEdit reads the cross axis as a radius from here on, as the control moves it.",
+      "group": "diametermode",
+      "label": "Diameter programming off while a cycle runs",
+      "modal": true,
+      "review": "pending",
+      "sets": {
+        "diameter": "off"
+      }
+    },
+    {
       "code": "CYCLE81",
       "description": "Drills to depth in one pass and retracts. The plane, the depth and the safety distance come in the order below.",
+      "expand": {
+        "defaults": {
+          "_AMODE": "0",
+          "_DMODE": [
+            "0",
+            "1"
+          ],
+          "_GMODE": "0"
+        },
+        "kind": "drill",
+        "leaves": {
+          "feed": "cycle",
+          "motion": "before"
+        },
+        "relativeDepth": "into-material",
+        "returnBy": "role",
+        "steps": [
+          {
+            "step": "rapid",
+            "to": "clearance"
+          },
+          {
+            "step": "feed",
+            "to": "depth"
+          },
+          {
+            "at": "bottom",
+            "step": "dwell"
+          },
+          {
+            "step": "rapid",
+            "to": "return"
+          }
+        ]
+      },
       "group": "cycle",
       "label": "Drilling or centring cycle",
       "params": [
         {
           "address": "RTP",
+          "expandRole": "return",
           "label": "Retraction plane, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "RFP",
+          "expandRole": "surface",
           "label": "Reference plane: the top of the hole, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "SDIS",
+          "expandRole": "clearance",
           "label": "Safety distance above the reference plane, written without a sign",
           "position": "none"
         },
         {
           "address": "DP",
+          "expandRole": "depth",
           "label": "Final depth, as an absolute position",
           "position": "tool-axis",
           "twin": "DPR"
         },
         {
           "address": "DPR",
+          "expandRole": "depth-relative",
           "label": "Final depth, measured from the reference plane",
           "position": "none",
           "twin": "DP"
         },
         {
           "address": "DTB",
+          "expandRole": "dwell",
           "label": "Dwell at the bottom of the hole: seconds when positive, spindle revolutions when negative",
           "position": "none",
           "unit": "dwell"
         },
         {
           "address": "_GMODE",
+          "expandRole": "default",
           "label": "Geometry mode: tens 0 drill to the depth, 1 DP is the diameter of a centring",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_DMODE",
+          "expandRole": "default",
           "label": "Display mode, digit by digit: ones the plane while the cycle runs (0 the plane in force, 1 G17, 2 G18, 3 G19)",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_AMODE",
+          "expandRole": "default",
           "label": "Alternative mode, digit by digit: whether the depth is absolute or measured from the reference plane, and how the dwell is read; 0 the reading of the parameters above",
           "position": "mode",
           "unit": "count"
@@ -921,60 +1000,140 @@
     },
     {
       "code": "CYCLE82",
-      "description": "Drills to depth, waits there and retracts, which is what a counterbore needs.",
+      "description": "Drills to depth, waits there and retracts, which is what a counterbore needs. Newer control versions take 14 arguments: the last five drill a first part and a last part of the hole at feeds of their own. gEdit changes or expands such a block only with those five left out or 0.",
+      "expand": {
+        "defaults": {
+          "S_FA": "0",
+          "S_FD": "0",
+          "S_ZA": "0",
+          "S_ZD": "0",
+          "_AMODE": "0",
+          "_DMODE": [
+            "0",
+            "1"
+          ],
+          "_GMODE": "0",
+          "_VARI": "0"
+        },
+        "kind": "drill",
+        "leaves": {
+          "feed": "cycle",
+          "motion": "before"
+        },
+        "relativeDepth": "into-material",
+        "returnBy": "role",
+        "steps": [
+          {
+            "step": "rapid",
+            "to": "clearance"
+          },
+          {
+            "step": "feed",
+            "to": "depth"
+          },
+          {
+            "at": "bottom",
+            "step": "dwell"
+          },
+          {
+            "step": "rapid",
+            "to": "return"
+          }
+        ]
+      },
       "group": "cycle",
       "label": "Drilling cycle with a dwell",
       "params": [
         {
           "address": "RTP",
+          "expandRole": "return",
           "label": "Retraction plane, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "RFP",
+          "expandRole": "surface",
           "label": "Reference plane: the top of the hole, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "SDIS",
+          "expandRole": "clearance",
           "label": "Safety distance above the reference plane, written without a sign",
           "position": "none"
         },
         {
           "address": "DP",
+          "expandRole": "depth",
           "label": "Final depth, as an absolute position",
           "position": "tool-axis",
           "twin": "DPR"
         },
         {
           "address": "DPR",
+          "expandRole": "depth-relative",
           "label": "Final depth, measured from the reference plane",
           "position": "none",
           "twin": "DP"
         },
         {
           "address": "DTB",
+          "expandRole": "dwell",
           "label": "Dwell at the bottom of the hole: seconds when positive, spindle revolutions when negative",
           "position": "none",
           "unit": "dwell"
         },
         {
           "address": "_GMODE",
+          "expandRole": "default",
           "label": "Geometry mode: tens 0 the depth is to the tip, 1 to the full diameter",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_DMODE",
+          "expandRole": "default",
           "label": "Display mode, digit by digit: ones the plane while the cycle runs (0 the plane in force, 1 G17, 2 G18, 3 G19)",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_AMODE",
-          "label": "Alternative mode, digit by digit: whether the depth is absolute or measured from the reference plane, and how the dwell is read; 0 the reading of the parameters above",
+          "expandRole": "default",
+          "label": "Alternative mode, digit by digit: whether the depth is absolute or measured from the reference plane, and how the dwell is read; 0 the reading of the parameters above. Newer control versions add digits for the depths and feeds of the next five parameters",
           "position": "mode",
           "unit": "count"
+        },
+        {
+          "address": "_VARI",
+          "expandRole": "default",
+          "label": "Pre-drilling and drilling through, on newer control versions: thousands 1 drills the last part of the hole at a feed of its own, ten thousands 1 the first part. gEdit changes or expands the block only with it left out or 0",
+          "position": "mode",
+          "unit": "count"
+        },
+        {
+          "address": "S_ZA",
+          "expandRole": "default",
+          "label": "Depth of the pre-drilled first part: from the reference point, or absolute, as _AMODE says. gEdit changes or expands the block only with it left out or 0",
+          "position": "mode"
+        },
+        {
+          "address": "S_FA",
+          "expandRole": "default",
+          "label": "Feed for the pre-drilled first part, as a value or as a percentage of the drilling feed, as _AMODE says. gEdit changes or expands the block only with it left out or 0",
+          "position": "mode"
+        },
+        {
+          "address": "S_ZD",
+          "expandRole": "default",
+          "label": "Remaining depth drilled through: from the final depth, or absolute, as _AMODE says. gEdit changes or expands the block only with it left out or 0",
+          "position": "mode"
+        },
+        {
+          "address": "S_FD",
+          "expandRole": "default",
+          "label": "Feed for the remaining depth, as a value or as a percentage of the drilling feed, as _AMODE says. gEdit changes or expands the block only with it left out or 0",
+          "position": "mode"
         }
       ],
       "review": "pending",
@@ -985,117 +1144,192 @@
     {
       "code": "CYCLE83",
       "description": "Drills in pecks, so the chips break or leave the hole. VARI decides between breaking the chip and pulling the drill out.",
+      "expand": {
+        "by": "VARI",
+        "cases": {
+          "1": {
+            "defaults": {
+              "DTB": "0",
+              "FRF": [
+                "1",
+                "0"
+              ],
+              "_AMODE": "0",
+              "_AXN": [
+                "0",
+                "3"
+              ],
+              "_DAM": "0",
+              "_DMODE": [
+                "0",
+                "1"
+              ],
+              "_GMODE": "0",
+              "_MDEP": "0"
+            },
+            "kind": "peck",
+            "leaves": {
+              "feed": "cycle",
+              "motion": "before"
+            },
+            "relativeDepth": "into-material",
+            "returnBy": "role",
+            "steps": [
+              {
+                "step": "rapid",
+                "to": "clearance"
+              },
+              {
+                "back": "clearance",
+                "mode": "full-retract",
+                "reentry": {
+                  "role": "advance"
+                },
+                "step": "pecks"
+              },
+              {
+                "at": "bottom",
+                "step": "dwell"
+              },
+              {
+                "step": "rapid",
+                "to": "return"
+              }
+            ]
+          }
+        }
+      },
       "group": "cycle",
       "label": "Deep-hole drilling cycle",
       "params": [
         {
           "address": "RTP",
+          "expandRole": "return",
           "label": "Retraction plane, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "RFP",
+          "expandRole": "surface",
           "label": "Reference plane: the top of the hole, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "SDIS",
+          "expandRole": "clearance",
           "label": "Safety distance above the reference plane, written without a sign",
           "position": "none"
         },
         {
           "address": "DP",
+          "expandRole": "depth",
           "label": "Final depth, as an absolute position",
           "position": "tool-axis",
           "twin": "DPR"
         },
         {
           "address": "DPR",
+          "expandRole": "depth-relative",
           "label": "Final depth, measured from the reference plane",
           "position": "none",
           "twin": "DP"
         },
         {
           "address": "FDEP",
+          "expandRole": "first-peck",
           "label": "Depth of the first peck, as an absolute position",
           "position": "tool-axis",
           "twin": "FDPR"
         },
         {
           "address": "FDPR",
+          "expandRole": "first-peck-relative",
           "label": "Depth of the first peck, measured from the reference plane",
           "position": "none",
           "twin": "FDEP"
         },
         {
           "address": "_DAM",
+          "expandRole": "default",
           "label": "How much each further peck is reduced",
           "position": "none"
         },
         {
           "address": "DTB",
+          "expandRole": "default",
           "label": "Dwell at the bottom of the hole: seconds when positive, spindle revolutions when negative",
           "position": "none",
           "unit": "dwell"
         },
         {
           "address": "DTS",
+          "expandRole": "dwell-top",
           "label": "Dwell at the start point: seconds when positive, spindle revolutions when negative",
           "position": "none",
           "unit": "dwell"
         },
         {
           "address": "FRF",
+          "expandRole": "default",
           "label": "Feed factor for the first peck",
           "position": "none"
         },
         {
           "address": "VARI",
+          "expandRole": "variant",
           "label": "Chip breaking or full retract",
           "position": "none",
           "unit": "count"
         },
         {
           "address": "_AXN",
+          "expandRole": "default",
           "label": "Drilling axis: 0 or 3 and up the third axis of the plane, 1 the first, 2 the second",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_MDEP",
+          "expandRole": "default",
           "label": "Smallest infeed, for a degressive peck",
           "position": "none"
         },
         {
           "address": "_VRT",
+          "expandRole": "chip-retract",
           "label": "Retract distance after each peck when breaking the chip; 0 the standard 1 mm",
           "position": "none"
         },
         {
           "address": "_DTD",
+          "expandRole": "dwell",
           "label": "Dwell at the final depth",
           "position": "none",
           "unit": "dwell"
         },
         {
           "address": "_DIS1",
+          "expandRole": "advance",
           "label": "Advance distance before the next peck when the drill comes back into the hole",
           "position": "none"
         },
         {
           "address": "_GMODE",
+          "expandRole": "default",
           "label": "Geometry mode: tens 0 the depth is to the tip, 1 to the full diameter",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_DMODE",
+          "expandRole": "default",
           "label": "Display mode, digit by digit: ones the plane while the cycle runs (0 the plane in force, 1 G17, 2 G18, 3 G19)",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_AMODE",
+          "expandRole": "default",
           "label": "Alternative mode, digit by digit: whether the depth is absolute or measured from the reference plane, and how the dwell is read; 0 the reading of the parameters above",
           "position": "mode",
           "unit": "count"
@@ -1379,66 +1613,117 @@
     {
       "code": "CYCLE85",
       "description": "Feeds in and feeds back out, so the bore keeps its finish. The two feeds are given separately.",
+      "expand": {
+        "defaults": {
+          "_AMODE": "0",
+          "_DMODE": [
+            "0",
+            "1"
+          ],
+          "_GMODE": "0"
+        },
+        "kind": "bore",
+        "leaves": {
+          "feed": "before",
+          "motion": "before"
+        },
+        "relativeDepth": "into-material",
+        "returnBy": "role",
+        "steps": [
+          {
+            "step": "rapid",
+            "to": "clearance"
+          },
+          {
+            "step": "feed",
+            "to": "depth"
+          },
+          {
+            "at": "bottom",
+            "step": "dwell"
+          },
+          {
+            "feed": "feed-out",
+            "step": "feed",
+            "to": "clearance"
+          },
+          {
+            "step": "rapid",
+            "to": "return"
+          }
+        ]
+      },
       "group": "cycle",
       "label": "Reaming cycle, feed in and feed out",
       "params": [
         {
           "address": "RTP",
+          "expandRole": "return",
           "label": "Retraction plane, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "RFP",
+          "expandRole": "surface",
           "label": "Reference plane: the top of the hole, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "SDIS",
+          "expandRole": "clearance",
           "label": "Safety distance above the reference plane, written without a sign",
           "position": "none"
         },
         {
           "address": "DP",
+          "expandRole": "depth",
           "label": "Final depth, as an absolute position",
           "position": "tool-axis",
           "twin": "DPR"
         },
         {
           "address": "DPR",
+          "expandRole": "depth-relative",
           "label": "Final depth, measured from the reference plane",
           "position": "none",
           "twin": "DP"
         },
         {
           "address": "DTB",
+          "expandRole": "dwell",
           "label": "Dwell at the bottom of the hole: seconds when positive, spindle revolutions when negative",
           "position": "none",
           "unit": "dwell"
         },
         {
           "address": "FFR",
+          "expandRole": "feed",
           "label": "Feed on the way in",
           "position": "none"
         },
         {
           "address": "RFF",
+          "expandRole": "feed-out",
           "label": "Feed on the way out",
           "position": "none"
         },
         {
           "address": "_GMODE",
+          "expandRole": "default",
           "label": "Reserved, written as 0 or left empty",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_DMODE",
+          "expandRole": "default",
           "label": "Display mode, digit by digit: ones the plane while the cycle runs (0 the plane in force, 1 G17, 2 G18, 3 G19)",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_AMODE",
+          "expandRole": "default",
           "label": "Alternative mode, digit by digit: whether the depth is absolute or measured from the reference plane, and how the dwell is read; 0 the reading of the parameters above",
           "position": "mode",
           "unit": "count"
@@ -1452,82 +1737,148 @@
     {
       "code": "CYCLE86",
       "description": "Stops the spindle at an angle at depth, lifts the tool off the wall and pulls it out at rapid.",
+      "expand": {
+        "defaults": {
+          "_AMODE": "0",
+          "_DMODE": [
+            "0",
+            "1"
+          ],
+          "_GMODE": "0"
+        },
+        "kind": "bore",
+        "leaves": {
+          "feed": "cycle",
+          "motion": "before"
+        },
+        "relativeDepth": "into-material",
+        "returnBy": "role",
+        "steps": [
+          {
+            "step": "spindle-restore"
+          },
+          {
+            "step": "rapid",
+            "to": "clearance"
+          },
+          {
+            "step": "feed",
+            "to": "depth"
+          },
+          {
+            "at": "bottom",
+            "step": "dwell"
+          },
+          {
+            "step": "orient"
+          },
+          {
+            "step": "lift-off"
+          },
+          {
+            "step": "rapid",
+            "to": "clearance"
+          },
+          {
+            "back": true,
+            "step": "lift-off"
+          },
+          {
+            "step": "rapid",
+            "to": "return"
+          }
+        ]
+      },
       "group": "cycle",
       "label": "Boring cycle with an oriented stop",
       "params": [
         {
           "address": "RTP",
+          "expandRole": "return",
           "label": "Retraction plane, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "RFP",
+          "expandRole": "surface",
           "label": "Reference plane: the top of the hole, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "SDIS",
+          "expandRole": "clearance",
           "label": "Safety distance above the reference plane, written without a sign",
           "position": "none"
         },
         {
           "address": "DP",
+          "expandRole": "depth",
           "label": "Final depth, as an absolute position",
           "position": "tool-axis",
           "twin": "DPR"
         },
         {
           "address": "DPR",
+          "expandRole": "depth-relative",
           "label": "Final depth, measured from the reference plane",
           "position": "none",
           "twin": "DP"
         },
         {
           "address": "DTB",
+          "expandRole": "dwell",
           "label": "Dwell at the bottom of the hole: seconds when positive, spindle revolutions when negative",
           "position": "none",
           "unit": "dwell"
         },
         {
           "address": "SDIR",
+          "expandRole": "spindle-direction",
           "label": "Direction of rotation for the cycle",
           "position": "none",
           "unit": "count"
         },
         {
           "address": "RPA",
+          "expandRole": "lift-off-first",
           "label": "Lift-off in the first axis of the plane",
           "position": "none"
         },
         {
           "address": "RPO",
+          "expandRole": "lift-off-second",
           "label": "Lift-off in the second axis of the plane",
           "position": "none"
         },
         {
           "address": "RPAP",
+          "expandRole": "lift-off-axis",
           "label": "Lift-off along the tool axis",
           "position": "none"
         },
         {
           "address": "POSS",
+          "expandRole": "orient-angle",
           "label": "Angle the spindle stops at",
           "position": "none"
         },
         {
           "address": "_GMODE",
+          "expandRole": "default",
           "label": "Lift-off mode: 0 lift the tool off the wall, 1 do not",
           "position": "none",
           "unit": "count"
         },
         {
           "address": "_DMODE",
+          "expandRole": "default",
           "label": "Display mode, digit by digit: ones the plane while the cycle runs (0 the plane in force, 1 G17, 2 G18, 3 G19)",
           "position": "mode",
           "unit": "count"
         },
         {
           "address": "_AMODE",
+          "expandRole": "default",
           "label": "Alternative mode, digit by digit: whether the depth is absolute or measured from the reference plane, and how the dwell is read; 0 the reading of the parameters above",
           "position": "mode",
           "unit": "count"
@@ -1637,38 +1988,75 @@
     {
       "code": "CYCLE89",
       "description": "Waits at depth and feeds back out at the cutting feed, then leaves at rapid.",
+      "expand": {
+        "kind": "bore",
+        "leaves": {
+          "feed": "cycle",
+          "motion": "before"
+        },
+        "relativeDepth": "into-material",
+        "returnBy": "role",
+        "steps": [
+          {
+            "step": "rapid",
+            "to": "clearance"
+          },
+          {
+            "step": "feed",
+            "to": "depth"
+          },
+          {
+            "at": "bottom",
+            "step": "dwell"
+          },
+          {
+            "step": "feed",
+            "to": "clearance"
+          },
+          {
+            "step": "rapid",
+            "to": "return"
+          }
+        ]
+      },
       "group": "cycle",
       "label": "Boring cycle with a dwell, feed out",
       "params": [
         {
           "address": "RTP",
+          "expandRole": "return",
           "label": "Retraction plane, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "RFP",
+          "expandRole": "surface",
           "label": "Reference plane: the top of the hole, as an absolute position",
           "position": "tool-axis"
         },
         {
           "address": "SDIS",
+          "expandRole": "clearance",
           "label": "Safety distance above the reference plane, written without a sign",
           "position": "none"
         },
         {
           "address": "DP",
+          "expandRole": "depth",
           "label": "Final depth, as an absolute position",
           "position": "tool-axis",
           "twin": "DPR"
         },
         {
           "address": "DPR",
+          "expandRole": "depth-relative",
           "label": "Final depth, measured from the reference plane",
           "position": "none",
           "twin": "DP"
         },
         {
           "address": "DTB",
+          "expandRole": "dwell",
           "label": "Dwell at the bottom of the hole, in seconds",
           "position": "none",
           "unit": "dwell"
@@ -2582,6 +2970,7 @@
       "description": "Cuts a symmetric or asymmetric groove, along or across, outside or inside, on any straight contour element, from the start point SPD, SPL. It needs a tool with two cutting edges in two consecutive D numbers. It has no feed among its arguments.",
       "group": "cycle",
       "label": "Grooving cycle",
+      "machineType": "lathe",
       "params": [
         {
           "address": "SPD",
@@ -2693,6 +3082,7 @@
       "description": "Roughs and finishes along a contour that a subprogram describes. Its three feeds, for roughing, for plunging into undercuts and for finishing, are arguments.",
       "group": "cycle",
       "label": "Stock removal cycle",
+      "machineType": "lathe",
       "params": [
         {
           "address": "NPP",
@@ -2779,6 +3169,7 @@
       "description": "Cuts a cylindrical or tapered thread, along or across, outside or inside, in several passes. The lead is one of its arguments (PIT, or the metric size MPIT), not the feed in force; the spindle direction decides right- or left-hand.",
       "group": "cycle",
       "label": "Thread cutting cycle",
+      "machineType": "lathe",
       "params": [
         {
           "address": "PIT",
@@ -2877,9 +3268,10 @@
     },
     {
       "code": "CYCLE99",
-      "description": "Cuts a thread in several passes, along Z, across X or on a taper. The pitch is its own argument (PIT), not the feed in force.",
+      "description": "Cuts a thread in several passes, along Z, across X or on a taper. The pitch is its own argument (PIT), not the feed in force. Newer control versions take 30 arguments; older ones stop after fewer.",
       "group": "cycle",
       "label": "Thread turning cycle",
+      "machineType": "lathe",
       "params": [
         {
           "address": "_SPL",
@@ -2944,8 +3336,74 @@
           "address": "_NUMTH",
           "label": "Number of thread starts",
           "unit": "count"
+        },
+        {
+          "address": "_SDIS",
+          "label": "Return distance, incremental"
+        },
+        {
+          "address": "_MID",
+          "label": "Depth of the first infeed, when _VARI asks for it instead of a number of cuts"
+        },
+        {
+          "address": "_GDEP",
+          "label": "Depth at which a multi-start thread changes to the next start; 0 none"
+        },
+        {
+          "address": "_PIT1",
+          "label": "Change of the pitch per revolution: 0 constant pitch, above 0 rising, below 0 falling"
+        },
+        {
+          "address": "_FDEP",
+          "label": "Insertion depth, written without a sign"
+        },
+        {
+          "address": "_GST",
+          "label": "Start to begin with, 1 up to the number of starts, as _AMODE says",
+          "unit": "count"
+        },
+        {
+          "address": "_GUD",
+          "label": "Reserved",
+          "unit": "count"
+        },
+        {
+          "address": "_IFLANK",
+          "label": "Infeed slope as a width, for the input screen"
+        },
+        {
+          "address": "_PITA",
+          "label": "Unit of the pitch: 0 or 1 millimetres, 2 threads per inch, 3 inches, 4 module",
+          "unit": "count"
+        },
+        {
+          "address": "_PITM",
+          "label": "Text that marks how the pitch was entered, for the input screen"
+        },
+        {
+          "address": "_PTAB",
+          "label": "Name of the thread table, for the input screen"
+        },
+        {
+          "address": "_PTABA",
+          "label": "Entry chosen in the thread table, for the input screen"
+        },
+        {
+          "address": "_DMODE",
+          "label": "Display mode, digit by digit: ones the plane while the cycle runs (0 the plane in force, 1 G17, 2 G18, 3 G19), tens the kind of thread (0 along Z, 1 on the face, 2 tapered)",
+          "unit": "count"
+        },
+        {
+          "address": "_AMODE",
+          "label": "Alternative mode, digit by digit: whether the thread end in Z and in X is absolute or incremental, how the run-in is worked out, angle or width for the infeed slope, one or several starts, which start to cut, and how the crowning correction is given",
+          "unit": "count"
+        },
+        {
+          "address": "_S_XRS",
+          "label": "Correction for a crowned thread along Z: a segment height or a radius, as _AMODE says"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -2955,6 +3413,7 @@
       "description": "Parts the workpiece off and lowers speed and feed for the last part of the cut. Its speeds and feeds are arguments.",
       "group": "cycle",
       "label": "Parting-off cycle",
+      "machineType": "lathe",
       "params": [
         {
           "address": "_SPD",
@@ -3020,6 +3479,7 @@
           "unit": "count"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -3029,6 +3489,7 @@
       "description": "Cuts one groove or a row of grooves, with slopes, radii or chamfers at its edges. Its feed is argument 21.",
       "group": "cycle",
       "label": "Grooving cycle",
+      "machineType": "lathe",
       "params": [
         {
           "address": "_SPD",
@@ -3118,6 +3579,7 @@
           "label": "Feed"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -3127,6 +3589,8 @@
       "description": "Cuts a relief groove of form E or F, or an undercut for a thread. The parameters are not described yet.",
       "group": "cycle",
       "label": "Undercut cycle",
+      "machineType": "lathe",
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -3136,6 +3600,7 @@
       "description": "Removes stock at a corner given by points in its arguments, with radii or chamfers. Its feed is argument 16.",
       "group": "cycle",
       "label": "Stock removal cycle for a corner",
+      "machineType": "lathe",
       "params": [
         {
           "address": "_SPD",
@@ -3204,6 +3669,7 @@
           "label": "Feed for roughing or finishing"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -3213,6 +3679,7 @@
       "description": "Turns, grooves or plunge-turns along a contour, rest material included. Its feeds are arguments 5 and 6 (one per axis when it plunge-turns), and 34 for the finishing cut when one call roughs and finishes.",
       "group": "cycle",
       "label": "Contour turning and grooving cycle",
+      "machineType": "lathe",
       "params": [
         {
           "address": "_PRG",
@@ -3359,6 +3826,7 @@
           "label": "Feed for the finishing cut when one call roughs and finishes"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -3368,6 +3836,8 @@
       "description": "Cuts several thread sections one after the other. The lead is one of its arguments. The parameters are not described yet.",
       "group": "cycle",
       "label": "Thread chain cycle",
+      "machineType": "lathe",
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -3384,7 +3854,7 @@
     },
     {
       "code": "CYCLE800",
-      "description": "Swivels the working plane for 3+2 machining, or swivels or aligns the tool, with the swivel data set named in the second argument, and sets the frame that goes with it. Written with no arguments, CYCLE800() clears the swivel and its frames, which is why posts write it at the start of a program, some without the brackets. The reference points before and after the rotation are absolute positions. Older control versions take 15 arguments, without the last one.",
+      "description": "Swivels the working plane for 3+2 machining, or swivels or aligns the tool, with the swivel data set named in the second argument, and sets the frame that goes with it. Written with no arguments, CYCLE800() clears the swivel and its frames, which is why posts write it at the start of a program, some without the brackets. A swivel to the home position, as the manual recommends at the start of every program, also leaves no tilt: a new swivel (ones digit of _ST 0) with every angle and every reference point written as 0; so does the data set name \"0\". The rotary axes then keep what gEdit knew about them. The reference points before and after the rotation are absolute positions. Older control versions take 15 arguments, without the last one.",
       "frame": "open",
       "frameWithoutValues": "close",
       "group": "tilt",
@@ -3398,11 +3868,13 @@
         },
         {
           "address": "_TC",
+          "frameCloses": "\"0\"",
           "label": "Name of the swivel data set: empty when there is only one, \"0\" deselects it and clears the swivel frames",
           "position": "none"
         },
         {
           "address": "_ST",
+          "frameZero": "onesDigit",
           "label": "State, digit by digit: ones 0 new or 1 on top of the active swivel, tens 1 to follow the tool tip (TRAORI), hundreds to swivel or align the tool",
           "position": "mode",
           "unit": "count"
@@ -3415,46 +3887,55 @@
         },
         {
           "address": "_X0",
+          "frameZero": "zero",
           "label": "Reference point X before the rotation, as an absolute position",
           "position": "other"
         },
         {
           "address": "_Y0",
+          "frameZero": "zero",
           "label": "Reference point Y before the rotation, as an absolute position",
           "position": "other"
         },
         {
           "address": "_Z0",
+          "frameZero": "zero",
           "label": "Reference point Z before the rotation, as an absolute position",
           "position": "other"
         },
         {
           "address": "_A",
+          "frameZero": "zero",
           "label": "First rotation, as _MODE says",
           "position": "none"
         },
         {
           "address": "_B",
+          "frameZero": "zero",
           "label": "Second rotation, as _MODE says",
           "position": "none"
         },
         {
           "address": "_C",
+          "frameZero": "zero",
           "label": "Third rotation, as _MODE says",
           "position": "none"
         },
         {
           "address": "_X1",
+          "frameZero": "zero",
           "label": "Reference point X after the rotation, as an absolute position",
           "position": "other"
         },
         {
           "address": "_Y1",
+          "frameZero": "zero",
           "label": "Reference point Y after the rotation, as an absolute position",
           "position": "other"
         },
         {
           "address": "_Z1",
+          "frameZero": "zero",
           "label": "Reference point Z after the rotation, as an absolute position",
           "position": "other"
         },
@@ -3582,6 +4063,19 @@
       "group": "spindle",
       "label": "Spindle orientation",
       "verify": true
+    },
+    {
+      "code": "SPOS",
+      "description": "SPOS=90 turns the master spindle to 90 degrees and holds it there in position control until the next M3, M4 or M5; SPOS[2]= does the same for spindle 2. The block goes on only once the angle is reached. The boring cycle CYCLE86 makes its oriented stop with it.",
+      "label": "Spindle to an angle",
+      "orient": true,
+      "params": [
+        {
+          "address": "SPOS",
+          "label": "Angle the spindle stops at, in degrees"
+        }
+      ],
+      "review": "pending"
     },
     {
       "code": "M40",
@@ -3969,6 +4463,121 @@
       "label": "Additive programmable mirroring"
     },
     {
+      "axisWords": "data",
+      "code": "ROTS",
+      "description": "Turns the coordinate system so that the working plane lies at the solid angles written for at most two axes, and replaces the frame instructions programmed before it, as ROT does. The axis words are angles, not positions. ROT or TRANS written on its own clears it.",
+      "frame": "open",
+      "group": "frame",
+      "label": "Programmable rotation by solid angles",
+      "review": "pending"
+    },
+    {
+      "axisWords": "data",
+      "code": "AROTS",
+      "description": "Turns the coordinate system by solid angles written for at most two axes, on top of the frame already programmed. The axis words are angles, not positions.",
+      "frame": "open",
+      "group": "frame",
+      "label": "Additive programmable rotation by solid angles",
+      "review": "pending"
+    },
+    {
+      "axisWords": "data",
+      "code": "CROTS",
+      "description": "Works like ROTS, but starts from the frame stored in the control's frame data instead of the programmed one. The axis words are angles, not positions. ROT or TRANS written on its own clears it.",
+      "frame": "open",
+      "group": "frame",
+      "label": "Programmable rotation by solid angles, from the stored frame",
+      "review": "pending"
+    },
+    {
+      "code": "TOFRAME",
+      "description": "Turns the coordinate system so that its Z axis points along the tool as it stands now, for example to pull the tool back along its own axis on a five-axis machine. How X and Y lie afterwards is set up on the machine. TOROTOF ends it.",
+      "frame": "open",
+      "group": "toolFrame",
+      "label": "Frame along the tool: Z axis",
+      "review": "pending"
+    },
+    {
+      "code": "TOFRAMEZ",
+      "description": "The same as TOFRAME. TOROTOF ends it.",
+      "frame": "open",
+      "group": "toolFrame",
+      "label": "Frame along the tool: Z axis",
+      "review": "pending"
+    },
+    {
+      "code": "TOFRAMEY",
+      "description": "Turns the coordinate system so that its Y axis points along the tool as it stands now. TOROTOF ends it.",
+      "frame": "open",
+      "group": "toolFrame",
+      "label": "Frame along the tool: Y axis",
+      "review": "pending"
+    },
+    {
+      "code": "TOFRAMEX",
+      "description": "Turns the coordinate system so that its X axis points along the tool as it stands now, as a turning program needs it. TOROTOF ends it.",
+      "frame": "open",
+      "group": "toolFrame",
+      "label": "Frame along the tool: X axis",
+      "review": "pending"
+    },
+    {
+      "code": "TOROT",
+      "description": "Turns the coordinate system like TOFRAME, so that its Z axis points along the tool, but changes only the rotation of the programmed frame and keeps its other parts. TOROTOF ends it.",
+      "frame": "open",
+      "group": "toolFrame",
+      "label": "Rotation along the tool: Z axis",
+      "review": "pending"
+    },
+    {
+      "code": "TOROTZ",
+      "description": "The same as TOROT. TOROTOF ends it.",
+      "frame": "open",
+      "group": "toolFrame",
+      "label": "Rotation along the tool: Z axis",
+      "review": "pending"
+    },
+    {
+      "code": "TOROTY",
+      "description": "Turns the coordinate system so that its Y axis points along the tool, changing only the rotation of the programmed frame. TOROTOF ends it.",
+      "frame": "open",
+      "group": "toolFrame",
+      "label": "Rotation along the tool: Y axis",
+      "review": "pending"
+    },
+    {
+      "code": "TOROTX",
+      "description": "Turns the coordinate system so that its X axis points along the tool, changing only the rotation of the programmed frame. TOROTOF ends it.",
+      "frame": "open",
+      "group": "toolFrame",
+      "label": "Rotation along the tool: X axis",
+      "review": "pending"
+    },
+    {
+      "code": "TOROTOF",
+      "description": "Ends the frame that TOFRAME or TOROT (and their X, Y and Z forms) turned along the tool. ROT or TRANS alone clears the programmable frame on the control too; gEdit waits for TOROTOF, which is the safe reading.",
+      "frame": "close",
+      "group": "toolFrame",
+      "label": "Frame along the tool off",
+      "review": "pending"
+    },
+    {
+      "code": "PAROT",
+      "description": "Turns the coordinate system with the turned table or tool holder so that it lies on the workpiece; the shift, scaling and mirroring in force stay as they are. PAROTOF ends it.",
+      "frame": "open",
+      "group": "rotation",
+      "label": "Align the coordinate system with the workpiece",
+      "review": "pending"
+    },
+    {
+      "code": "PAROTOF",
+      "description": "Ends the rotation that PAROT switched on.",
+      "frame": "close",
+      "group": "rotation",
+      "label": "Workpiece alignment off",
+      "review": "pending"
+    },
+    {
       "code": "FFWON",
       "label": "Feed-forward control on"
     },
@@ -4344,18 +4953,21 @@
       "label": "Declare a variable"
     },
     {
+      "call": true,
       "code": "CALL",
       "description": "Calls a program whose name stands in quotation marks or in a variable.",
       "group": "subprogram",
       "label": "Indirect call"
     },
     {
+      "call": true,
       "code": "PCALL",
       "description": "Calls a subprogram by its full path, with arguments: PCALL/path/NAME(…).",
       "group": "subprogram",
       "label": "Call with a path"
     },
     {
+      "call": true,
       "code": "EXTCALL",
       "description": "Runs a program from a drive outside the control's program memory, such as a local, network or USB drive, named in quotation marks in brackets: EXTCALL(\"…\").",
       "group": "subprogram",

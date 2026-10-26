@@ -17,10 +17,12 @@
 
 import type { Component } from 'svelte';
 import type { Readable } from 'svelte/store';
+import type { PrintService } from '$lib/app/print';
 import type { ChannelMember, ChannelRef, ChannelSet, SyncFinding } from '$lib/core/channels/types';
 import type { CodeDb, CodeEntry, CodeLookup } from '$lib/core/codes/types';
 import type { CompareOptions } from '$lib/core/compare/types';
 import type { FieldSpec } from '$lib/core/forms/types';
+import type { ModalSnapshot } from '$lib/core/nc/modal';
 import type { ModalState, NcToken } from '$lib/core/nc/types';
 import type { Settings } from '$lib/core/settings/schema';
 import type { OutlineItem } from '$lib/core/profiles/outline';
@@ -581,7 +583,11 @@ export interface NativeDialogs {
    * through in `app/dialogs.ts`).
    */
   openFiles(o?: { multiple?: boolean; defaultPath?: string }): Promise<string[]>;
-  saveFile(o: { defaultPath: string; profileId?: string }): Promise<string | null>;
+  /**
+   * `filters` (P4.15, Export as HTML) are the caller's own list and win over the profile's: a file that is
+   * not a program (an HTML page) has no profile. Left out, the profile's filters apply as before (none on macOS, AD-7).
+   */
+  saveFile(o: { defaultPath: string; profileId?: string; filters?: DialogFilter[] }): Promise<string | null>;
   pickFolder(o?: { title?: string }): Promise<string | null>;
   pickFile(o?: { title?: string }): Promise<string | null>;
   /** One chain at a time; a re-entrant call resolves `undefined`. */
@@ -882,6 +888,8 @@ export interface UiState {
   lastScript: string | null;
   /** M7, AD-22: per-file memory, by absolute path. At most 500 entries (LRU). */
   files: Record<string, FileMemo>;
+  /** T141: the ribbon tab the window last showed; read back through `resolveTab`. */
+  ribbonTab?: string;
 }
 
 /** stores/uiState.ts → `export const uiState: UiStateStore` (owner: WP2.3) */
@@ -1110,7 +1118,11 @@ export interface ResultsService {
  * `prev` wrap around the ends.
  */
 export interface BookmarkService {
-  toggle(id?: DocId, line?: number): void;
+  /**
+   * Sets or removes the bookmark. `full`: the document has the most it keeps (200) and the line has none,
+   * so nothing was set; `none`: no document or no line to act on.
+   */
+  toggle(id?: DocId, line?: number): 'set' | 'removed' | 'full' | 'none';
   next(): void;
   prev(): void;
   clear(id?: DocId): void;
@@ -1122,7 +1134,45 @@ export interface BookmarkService {
    * dropped, so a file that grew shorter since cannot produce a bookmark in nowhere.
    */
   set(id: DocId, lines: number[]): void;
+  /**
+   * P4c (plan §6.5; P4.13): the bookmarks of `id` with their names and line text, ascending, for
+   * the bookmark panel. A document without a model answers `[]`.
+   */
+  list(id: DocId): BookmarkInfo[];
+  /**
+   * Sets (`name` a string) or clears (`null`) the name of the bookmark at `line` of `id`; the
+   * bookmark is created when the line has none. Answers the cleaned name, or `null` when the
+   * name is cleared, the line is outside the document or the name is refused (§6.5 rule 4).
+   */
+  setName(id: DocId, line: number, name: string | null): string | null;
+  /** Removes the bookmark at `line` of `id`; false when there was none. */
+  remove(id: DocId, line: number): boolean;
+  /**
+   * Like `set`, with the names: replaces the bookmarks of `id` with `marks` (a remembered file
+   * is reopened). Lines outside the document are dropped; a name without its bookmark too.
+   */
+  restore(id: DocId, marks: readonly { line: number; name?: string }[]): void;
+  /** Bookmark All Matches for the active document: every line the find widget's search finds. */
+  addAllMatches(): BookmarkMatchesAnswer;
+  /** Fires after every change of any document's bookmarks (toggle, name, clear, restore, edit). */
+  onDidChange(cb: (id: DocId) => void): Disposable;
 }
+
+/** One row of the bookmark panel (plan §6.5 rule 5). */
+export interface BookmarkInfo {
+  docId: DocId;
+  /** 1-based. */
+  line: number;
+  /** The name the user gave it, absent for an unnamed bookmark. */
+  name?: string;
+  /** The line's text, trimmed and cut at 120 characters; empty for a line that is blank. */
+  text: string;
+}
+
+/** What `addAllMatches` did (§6.5 rule 6); the status bar says it in plain words. */
+export type BookmarkMatchesAnswer =
+  | { ok: true; marked: number; already: number }
+  | { ok: false; reason: 'noDocument' | 'noSearch' | 'noMatch' | 'tooMany'; matches?: number };
 
 // ---------------------------------------------------------------------------
 // §7.3 Services added in M5: scripting
@@ -1310,6 +1360,14 @@ export interface FileMemo {
   top: number;
   /** 1-based, ascending, at most 200. */
   bookmarks: number[];
+  /**
+   * P4c (plan §6.5): the names of the bookmarks that have one, as `{ line, name }`, ascending
+   * by line. **Beside `bookmarks`, not inside it**: the lines stay a plain `number[]`, so an
+   * older build reads them as before and keeps this member verbatim like any member it does
+   * not know. A name whose line is not in `bookmarks` is dropped on the way in; read as
+   * untrusted (`stores/uiState.ts`, `stores/fileMemory.ts`).
+   */
+  bookmarkNames?: { line: number; name: string }[];
   /** A dialect the user picked by hand; it wins over detection when the file reopens. */
   profileId?: string;
   /**
@@ -1516,6 +1574,19 @@ export interface ModalService {
    * order, or `null` as for `stateAfter`. The motion colours read a viewport with one call.
    */
   statesAfter(id: DocId, first: number, last: number): ModalState[] | null;
+  /**
+   * The nearest snapshot of the index at or before `line` (0: the power-on state) of document
+   * `id`, for a reader that walks the rest itself (the comparison's checks at a copy): a frozen
+   * copy of the interpreter after `snapshot.line` and the tokenizer's state for the next line.
+   * It is the index of the text the document has now, so the reader walks on with that text:
+   * `null` when the document is not open or has no realized model, has no index (a profile, a
+   * code file or a script), when `expect` does not describe what the index was built from (the
+   * text was read at another `version` (`editor.versionId`), or the reader's profile or
+   * database differs in content), and the reader then walks from the top. Where the idle build
+   * has not yet reached `line`, the snapshot is the nearest one it has (at worst the power-on
+   * one): never wrong, only further away. Never blocks and never builds.
+   */
+  snapshotAt(id: DocId, line: number, expect: { version?: number; cp: CompiledProfile; db: CodeDb }): ModalSnapshot | null;
   /** Bumps whenever any document's index gains or loses states (an edit, an idle chunk, a rebuild). */
   readonly changed: Readable<number>;
   /**
@@ -1576,6 +1647,8 @@ export interface AppContext {
   templates: TemplateService;
   // Phase 4, P4e (P4.22b; the prelude wires the stub)
   channelPanes: ChannelPaneService;
+  // Phase 4, P4c (P4.15; the prelude wires the stub, plan §6.5 rule 10)
+  print: PrintService;
 }
 
 /**
@@ -1595,8 +1668,12 @@ export interface ChannelViewState {
   notShown: string[];
   /** `single-file`: lines after the header that belong to no channel (no pane shows them). */
   outsideLines: number;
-  /** The wait marks of all panes by state (`core/channels/panes.ts` `MarkState`). */
-  marks: { matched: number; unmatched: number; none: number };
+  /**
+   * The wait marks of all panes by state (`core/channels/panes.ts` `MarkState`). `unmatched` are the
+   * waits that have no partner; `unknown` the waits that name a channel the machine does not have
+   * (v1.2.0 T037: the bar says so apart from the others); `none` need no partner or are not judged.
+   */
+  marks: { matched: number; unmatched: number; none: number; unknown: number };
 }
 
 export interface ChannelPaneService {

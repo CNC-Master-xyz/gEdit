@@ -1,1 +1,9 @@
-{ "dropEmptied": true, "keepProgramName": true, "keepFirstLines": 0 }
+{
+  "note": "Sinumerik: the ;$PATH= line at the top is a header, not a comment; the same text after code is one.",
+  "profile": "sinumerik",
+  "options": {
+    "dropEmptied": true,
+    "keepProgramName": true,
+    "keepFirstLines": 0
+  }
+}

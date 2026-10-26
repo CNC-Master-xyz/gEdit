@@ -272,6 +272,16 @@ class TestRules(unittest.TestCase):
         self.assertTrue(result.ok, result.stderr)
         return result.json()["rows"]
 
+    def test_d3_4c_the_t_on_the_m6_line_is_the_next_tool_when_the_machine_says_so(self):
+        # v1.2.0 manual-check fix round (D3-4c): Fanuc mill choice "T on the M6 line is the
+        # next tool": M6 loads the T written before its line, and `M6 T0` preselects an unload.
+        program = "O1\nT1\nM6 T2\nG1 X1. F100.\nM6 T3\nG1 X2.\nM6 T0\nG1 X3.\nM6\nM30\n"
+        rows = self.run_text("fanuc-gcode", program, ("toolOnChangeLine", "next"))
+        self.assertEqual([(row["tool"], row["line"], row["calls"]) for row in rows], [("T1", 3, 1), ("T2", 5, 1), ("T3", 7, 1)])
+        # The default reads the T on the line as the tool loaded.
+        rows = self.run_text("fanuc-gcode", program)
+        self.assertEqual([(row["tool"], row["line"]) for row in rows], [("T2", 3), ("T3", 5)])
+
     def test_a_five_digit_lathe_word_without_a_machine_is_a_2_digit_tool_and_a_3_digit_offset(self):
         # M12.5 decision 1 (the owner, 2026-10-08): ``byLength``, the default. The same
         # program under the case's 3 + 2 machine lists T123.

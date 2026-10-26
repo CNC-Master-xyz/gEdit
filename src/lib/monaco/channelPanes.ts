@@ -52,6 +52,8 @@ import {
   type TextEdit,
 } from '$lib/core/channels/panes';
 import { ViewUndoStack, type UndoableModel } from '$lib/core/channels/viewUndo';
+import { canReasonAbout, editKeepsChannels } from '$lib/core/channels/touch';
+import { createJumpLineCache, mayDecideJumps, type JumpLineCache, type SectionPrint } from '$lib/core/channels/jumpCache';
 import { sectionOwners } from '$lib/core/channels/marks';
 import { channelAt } from '$lib/core/channels/resolve';
 import { computeJumpLines } from '$lib/app/outlineService';
@@ -59,6 +61,7 @@ import { machines as appMachines } from '$lib/stores/machines';
 import { t } from '$lib/i18n';
 import { registerPaneHistory, editor as appEditor, type PaneHistory } from '$lib/monaco/editorService';
 import { getMonaco, type Monaco } from '$lib/monaco/setup';
+import { registerWaitHover } from '$lib/monaco/channelHover';
 import { channels as appChannels, type ChannelServiceInternals } from '$lib/stores/channels';
 import { docs as appDocs } from '$lib/stores/documents';
 import { status as appStatus } from '$lib/app/status';
@@ -88,7 +91,7 @@ export const CLOSED_VIEW: ChannelViewState = Object.freeze({
   panes: [],
   notShown: [],
   outsideLines: 0,
-  marks: { matched: 0, unmatched: 0, none: 0 },
+  marks: { matched: 0, unmatched: 0, none: 0, unknown: 0 },
 }) as ChannelViewState;
 
 /**
@@ -101,6 +104,8 @@ export const WAIT_RULER_COLORS = { matched: '#2ea043', unmatched: '#e5534b' } as
 
 /** `OverviewRulerLane.Right`: the lane the bookmarks (left) do not use. The enum's value is part of Monaco's API. */
 const RULER_LANE_RIGHT = 4;
+/** `OverviewRulerLane.Full`: an unmatched wait fills the lane's whole width, so it differs from a matched one by shape, not by colour alone (T029). */
+const RULER_LANE_FULL = 7;
 /** `ScrollType.Immediate`: a smooth scroll would animate every pane through the others' events. */
 const SCROLL_IMMEDIATE = 1;
 /** The longest wait text quoted in a hover. */
@@ -131,9 +136,23 @@ export interface ChannelPanesDeps {
    * The lines the written order of a channel may not be carried across (jump targets, backward
    * jumps, loop starts and ends), per channel id, in the document's own lines: what Check Wait
    * Codes reads (`computeJumpLines`, WP12.5). `channelOf` says which channels a line is in.
+   * `lines` are the program's lines, read by the view (it keeps them between edits, T033).
    * Absent: every count difference of a wait is judged (P4e review NC-10).
    */
-  jumpLines?: (docId: DocId, channelOf: (line: number) => string | readonly string[]) => Record<string, number[]>;
+  jumpLines?: (docId: DocId, channelOf: (line: number) => string | readonly string[], lines: readonly string[]) => Record<string, number[]>;
+  /**
+   * Whether `line` of program `docId` can decide the jump lines (`mayDecideJumps` under the program's profile). With it
+   * the view keeps the jump lines from one version of the program to the next when an edit touches only lines that
+   * cannot (T033); without it they are read again for every version.
+   */
+  jumpMayDecide?: (docId: DocId, line: string) => boolean;
+  /**
+   * Whether changing a line of program `docId` from `oldText` to `newText` leaves its channels as they were
+   * (`editKeepsChannels` under the program's profile and channel settings). Then the view does not ask the channel
+   * service for the resolution after the keystroke: for a program with thousands of waits that is the cost of the
+   * keystroke (v1.2.0 T026). Absent: it always asks.
+   */
+  editKeepsChannels?: (docId: DocId, oldText: string, newText: string) => boolean;
 }
 
 /** One pane of the open view. */
@@ -177,13 +196,27 @@ interface View {
   lastSet: ChannelSet | null;
   alignment: Alignment | null;
   paneMarks: PaneMarks[];
-  alignKey: string;
+  /** The alignment must be made again whatever the marks say (the editors were hooked anew, or no alignment was made yet). */
+  alignStale: boolean;
   /** The pane (index) that gets the cursor at this document line when its editor appears. */
   place: { index: number; line: number } | null;
-  /** The jump lines of a document (`deps.jumpLines`) at a version of it, read only when a count difference needs them. */
-  jumpCache: Map<DocId, { version: number; lines: Record<string, number[]> }>;
+  /** The jump lines of the documents (`deps.jumpLines`), read only when a count difference needs them and kept across edits that cannot change them (T033). */
+  jumps: JumpLineCache;
+  /** An edit since the last alignment may have changed the jump lines (`JumpLineCache.note` dropped them). */
+  jumpsChanged: boolean;
+  /** The last alignment judged a wait by the jump lines (a `missing` or a `loop` reason): a change of them changes it. */
+  usesJumps: boolean;
+  /** The marks of the alignment by state, counted once per alignment (the state is published for every edit). */
+  counts: ChannelViewState['marks'];
+  /** The group of each lined-up wait by pane and line, for the hovers; built when the first hover is made. */
+  groupAt: Map<string, { marks: readonly { pane: number; line: number }[] }> | null;
+  /** The marks of each pane by line, for the hovers; built when the first hover of an alignment is asked for. */
+  hitsAt: Map<number, number[]>[] | null;
+  /** The hover sentences of the matched waits with slots for the names and numbers, translated when the first hover of an alignment is made. */
+  slots: { partner: string; matched: string } | null;
   /** Sections: the program's version right after a refused pane edit was taken back off its undo stack. The redo
-   *  stack then holds that edit with its inverse, a step that changes nothing: a Redo at this version skips it. */
+   *  stack then holds that edit with its inverse, a step that changes nothing: a Redo at this version skips it
+   *  (and, once the view is closed, `leaveRedoGuard` goes on skipping it, T032). */
   noopRedoAt: number | null;
 }
 
@@ -274,11 +307,18 @@ function adapter(model: TextModel, originals: Map<TextModel, Original>): Undoabl
   };
 }
 
-/** Whether two sets of mark lines are the same (the keystroke path asks this for every pane). */
-function marksKey(marks: readonly SyncHit[]): string {
-  let out = '';
-  for (const h of marks) out += `${h.ruleId}|${h.mark}|${h.line}|${h.channel}|${h.partners.join('')}|${h.blocking ? 1 : 0};`;
-  return out;
+/** Whether a pane has the line count and the marks, on the same lines, it had (the keystroke path asks this for every pane). */
+function samePane(a: PaneMarks, b: PaneMarks): boolean {
+  if (a === b) return true;
+  if (a.lineCount !== b.lineCount || a.marks.length !== b.marks.length) return false;
+  for (let i = 0; i < a.marks.length; i++) {
+    const x = a.marks[i];
+    const y = b.marks[i];
+    if (x === y) continue;
+    if (x.line !== y.line || x.mark !== y.mark || x.ruleId !== y.ruleId || x.channel !== y.channel || x.blocking !== y.blocking || x.absent !== y.absent || x.partners.length !== y.partners.length) return false;
+    for (let k = 0; k < x.partners.length; k++) if (x.partners[k] !== y.partners[k]) return false;
+  }
+  return true;
 }
 
 /** The text of the wait on a pane line, for the hover. */
@@ -287,6 +327,10 @@ function waitText(model: TextModel | null, line: number): string {
   const text = model.getLineContent(line).trim();
   return text.length > HOVER_TEXT_MAX ? `${text.slice(0, HOVER_TEXT_MAX)}…` : text;
 }
+
+/** Where a name and a number go in a translated sentence that is filled for every wait. */
+const SLOT_A = '\u0001';
+const SLOT_B = '\u0002';
 
 const paneSources = new WeakMap<object, PaneSource>();
 
@@ -313,6 +357,8 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
   let trace: { line: number; docId: DocId | null } | null = null;
   /** The originals of the documents' `pushStackElement` while their boundaries go to the stack. */
   const originals = new Map<TextModel, Original>();
+  /** Programs whose redo stack still holds the empty step of a refused pane edit after the view closed (T032). */
+  const redoGuards = new Map<TextModel, () => void>();
 
   /**
    * The channel service's answer for `id`, with the change already applied. Its revision store ticks when
@@ -340,8 +386,7 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
       state.set(CLOSED_VIEW);
       return;
     }
-    const marks = { matched: 0, unmatched: 0, none: 0 };
-    for (const row of v.alignment?.states ?? []) for (const s of row) marks[s]++;
+    const marks = { ...v.counts };
     state.set({
       open: true,
       layout: v.layout,
@@ -353,9 +398,31 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
     });
   }
 
-  function lineOutsideCount(set: ChannelSet): number {
+  /** The marks of an alignment by state. A wait that names a channel the machine does not have is its own count, not a missing partner (T037). */
+  function countMarks(alignment: Alignment | null): ChannelViewState['marks'] {
+    const marks = { matched: 0, unmatched: 0, none: 0, unknown: 0 };
+    alignment?.states.forEach((row, pane) =>
+      row.forEach((s, i) => {
+        if (s === 'unmatched' && alignment.reasons[pane]?.[i]?.kind === 'unknown') marks.unknown++;
+        else marks[s]++;
+      }),
+    );
+    return marks;
+  }
+
+  /**
+   * The lines after the header that no channel holds. The empty line after the final line break is the
+   * end of the text, not a line of the program, so it is not counted (v1.2.0 T036).
+   */
+  function lineOutsideCount(docId: DocId, set: ChannelSet): number {
     let n = 0;
-    for (const r of set.outside) if (r.startLine !== 1) n += r.endLine - r.startLine + 1;
+    const last = deps.editor.getLineCount(docId);
+    for (const r of set.outside) {
+      if (r.startLine === 1) continue;
+      let end = r.endLine;
+      if (end === last && end >= r.startLine && deps.editor.getLines(docId, end, end)[0] === '') end--;
+      n += end - r.startLine + 1;
+    }
     return n;
   }
 
@@ -464,6 +531,8 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
     }
     const before = v.lastSet;
     const mapped = mapPaneEdits(proj, changes, (n) => doc.getLineMaxColumn(docLineOf(proj, n)), doc.getLineCount());
+    // The line as the program has it now, before the edit goes in (`quietEdit`).
+    const oldLine = mapped.length === 1 && mapped[0].range.startLineNumber === mapped[0].range.endLineNumber && !mapped[0].text.includes('\n') ? doc.getLineContent(mapped[0].range.startLineNumber) : null;
     if (mapped.length === 0) {
       fixes.add(rec);
       schedule();
@@ -488,7 +557,9 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
       forwarding = null;
     }
     if (view !== v) return;
-    const set = freshSet(v.docId);
+    // T026: a character typed into an ordinary line changes no section and no wait; the resolution is not read again for it
+    // (the service reads it after its own pause, or when an edit that does touch them asks).
+    const set = before !== null && oldLine !== null && quietEdit(v, before, mapped[0], oldLine, doc) ? before : freshSet(v.docId);
     const hint = fwd.events === 1 && fwd.hint !== null ? fwd.hint : undefined;
     // NC-2 (the owner, 2026-10-17): an edit in a pane never moves lines to another channel. One
     // that would (a section start typed over, deleted, or written into the pane) is taken back
@@ -498,6 +569,12 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
       return;
     }
     applySet(v, set, hint, fwd);
+  }
+
+  /** Whether the pane edit `e` (one line, no line break, already in the document `doc`, which had `oldLine` there) leaves the program's sections and waits as they were. */
+  function quietEdit(v: View, before: ChannelSet, e: TextEdit, oldLine: string, doc: TextModel): boolean {
+    if (deps.editKeepsChannels === undefined || !canReasonAbout(before)) return false;
+    return deps.editKeepsChannels(v.docId, oldLine, doc.getLineContent(e.range.startLineNumber));
   }
 
   /**
@@ -574,6 +651,7 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
   function onDocChange(id: DocId, change: ContentChange): void {
     const v = view;
     if (v === null) return;
+    if (v.jumps.note(id, change, (from, to) => deps.editor.getLines(id, from, to)) === 'dropped') v.jumpsChanged = true;
     if (trace !== null && change.startLine < trace.line && (id === v.docId || v.recs.some((r) => r.docId === id))) {
       trace = { line: change.startLine, docId: id };
     }
@@ -612,8 +690,11 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
       end(v, set.layout === 'none' && deps.channels.params(v.docId) !== null ? 'channelPanes.status.closedGone' : 'channelPanes.status.closedMachine');
       return;
     }
+    // T026: an edit that touches no wait, no section start and no jump line, and adds no line to a pane, leaves the
+    // alignment as it was: it is not worked out again (for a program with 20,000 waits that is the cost of a keystroke).
+    const unchanged = v.lastSet !== null && alignmentUnchanged(v, v.lastSet, set);
     v.lastSet = set;
-    v.outsideLines = lineOutsideCount(set);
+    v.outsideLines = lineOutsideCount(v.docId, set);
     const docLines = (a: number, b: number): string[] => deps.editor.getLines(v.docId, a, b);
     let alive = 0;
     for (const rec of [...v.recs]) {
@@ -646,9 +727,30 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
       end(v, 'channelPanes.status.closedGone');
       return;
     }
-    alignDirty = true;
+    if (!unchanged) alignDirty = true;
     schedule();
     publish();
+  }
+
+  /**
+   * Whether the sections `next` give the panes the same alignment as `prev` did: the same sections on the same lines,
+   * the very same marks (the channel service keeps the mark objects of the lines an edit did not touch, so an edit
+   * of a wait or one that moves a mark is never "unchanged"), and, when a wait was judged by the jump lines, no
+   * edit since that may have changed them.
+   */
+  function alignmentUnchanged(v: View, prev: ChannelSet, next: ChannelSet): boolean {
+    if (v.alignment === null || prev.layout !== 'single-file' || next.layout !== 'single-file') return false;
+    if (v.usesJumps && (v.jumpsChanged || deps.jumpMayDecide === undefined)) return false;
+    if (prev === next) return true;
+    if (prev.marks.length !== next.marks.length || prev.members.length !== next.members.length) return false;
+    for (let i = 0; i < prev.marks.length; i++) if (prev.marks[i] !== next.marks[i]) return false;
+    for (let i = 0; i < prev.members.length; i++) {
+      const a = prev.members[i];
+      const b = next.members[i];
+      if (a.kind !== 'section' || b.kind !== 'section' || a.channel.id !== b.channel.id || a.ranges.length !== b.ranges.length) return false;
+      for (let k = 0; k < a.ranges.length; k++) if (a.ranges[k].startLine !== b.ranges[k].startLine || a.ranges[k].endLine !== b.ranges[k].endLine) return false;
+    }
+    return true;
   }
 
   function goneRec(rec: PaneRec): void {
@@ -688,9 +790,14 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
         return { channel: rec.channel, lineCount, marks: rec.proj === null || rec.gone ? [] : marksInPane(rec.proj, set.marks) };
       }
       const own = freshSet(rec.docId);
+      const lineCount = deps.editor.getLineCount(rec.docId);
+      // The same marks (the service keeps the objects of the lines an edit did not touch) on the same number of lines:
+      // the pane's marks are the ones it had, and the alignment need not be worked out again (T026).
+      const last = v.paneMarks.find((p) => p.channel === rec.channel);
+      if (last !== undefined && last.lineCount === lineCount && last.marks.length === own.marks.length && own.marks.every((h, i) => h === last.marks[i])) return last;
       return {
         channel: rec.channel,
-        lineCount: deps.editor.getLineCount(rec.docId),
+        lineCount,
         marks: own.marks.map((h) => (h.channel === rec.channel.id ? h : { ...h, channel: rec.channel.id })),
       };
     });
@@ -699,15 +806,20 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
   /** The alignment again, when a pane's line count or a mark changed; the zones and the marks of the editors follow. */
   function align(v: View, force = false): void {
     const panes = paneMarksOf(v);
-    const key = panes.map((p) => `${p.lineCount}#${marksKey(p.marks)}`).join('/');
-    if (!force && key === v.alignKey && v.alignment !== null) return;
-    v.alignKey = key;
+    // Every pane's marks are the ones it had (`paneMarksOf` answers the same object then): nothing to work out.
+    const known = !force && !v.alignStale && v.alignment !== null && panes.length === v.paneMarks.length;
+    if (known && !(v.usesJumps && (v.jumpsChanged || deps.jumpMayDecide === undefined)) && panes.every((p, i) => p === v.paneMarks[i])) return;
+    // The same line counts and the same marks on the same lines in new objects: nothing to work out either, unless a wait judged by
+    // the jump lines is judged again because an edit changed them (the marks and the line counts may be the same).
+    if (known && !(v.usesJumps && v.jumpsChanged) && panes.every((p, i) => samePane(p, v.paneMarks[i]))) return;
+    v.alignStale = false;
     const params = deps.channels.params(v.docId);
     const rules = params?.syncMarks ?? [];
     // NC-11: a wait that names a channel the machine does not have is never met.
     const declared = params?.list.map((c) => c.id);
     v.paneMarks = panes;
-    let alignment = alignPanes(panes, rules, { declared });
+    // A line break typed in an ordinary line only moves the waits: the alignment before it is the starting point (`AlignOptions.previous`).
+    let alignment = alignPanes(panes, rules, { declared, previous: v.alignment ?? undefined });
     // NC-10: a count difference inside a loop or a jump is not judged, as Check Wait Codes. The
     // jump lines only change a count difference, so the program is read for them only then.
     if (alignment.reasons.some((row) => row.some((r) => r?.kind === 'missing'))) {
@@ -715,18 +827,26 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
       if (jumpLines !== null) alignment = alignPanes(panes, rules, { jumpLines, declared });
     }
     v.alignment = alignment;
+    v.counts = countMarks(alignment);
+    v.groupAt = null;
+    v.hitsAt = null;
+    v.slots = null;
+    v.usesJumps = alignment.reasons.some((row) => row.some((r) => r?.kind === 'missing' || r?.kind === 'loop'));
+    v.jumpsChanged = false;
     for (const hook of v.hooks.values()) paint(v, hook);
     publish();
   }
 
-  /** The jump lines of a document by channel, in its own lines (cached per version of the document). */
-  function docJumpLines(v: View, docId: DocId, channelOf: (line: number) => string | readonly string[]): Record<string, number[]> {
+  /** The jump lines of a document by channel, in its own lines (kept per version of the document, and across the edits that cannot change them). */
+  function docJumpLines(v: View, docId: DocId, channelOf: (line: number) => string | readonly string[], sections: SectionPrint): Record<string, number[]> {
     const version = deps.editor.model(docId)?.getVersionId() ?? -1;
-    const cached = v.jumpCache.get(docId);
-    if (cached !== undefined && cached.version === version) return cached.lines;
-    const lines = deps.jumpLines?.(docId, channelOf) ?? {};
-    v.jumpCache.set(docId, { version, lines });
-    return lines;
+    return v.jumps.get(
+      docId,
+      version,
+      sections,
+      () => deps.editor.getLines(docId, 1, deps.editor.getLineCount(docId)),
+      (lines) => deps.jumpLines?.(docId, channelOf, lines) ?? {},
+    );
   }
 
   /** The jump lines of each pane's channel in the pane's **own** lines (`alignPanes` compares them with the marks' lines), or null without a source. */
@@ -734,14 +854,14 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
     if (deps.jumpLines === undefined) return null;
     const out: Record<string, number[]> = {};
     if (v.layout === 'multi-file') {
-      for (const rec of v.recs) out[rec.channel.id] = docJumpLines(v, rec.docId, () => rec.channel.id)[rec.channel.id] ?? [];
+      for (const rec of v.recs) out[rec.channel.id] = docJumpLines(v, rec.docId, () => rec.channel.id, null)[rec.channel.id] ?? [];
       return out;
     }
     const set = v.lastSet;
     if (set === null || set.layout !== 'single-file') return null;
     // A line of a shared section is in each of its channels (as Check Wait Codes reads it).
     const sections = set.members.flatMap((m) => (m.kind === 'section' ? [m] : []));
-    const byChannel = docJumpLines(v, v.docId, sectionOwners(sections));
+    const byChannel = docJumpLines(v, v.docId, sectionOwners(sections), sections.map((m) => ({ channel: m.channel.id, ranges: m.ranges })));
     for (const rec of v.recs) {
       if (rec.proj === null || rec.gone) continue;
       const own: number[] = [];
@@ -758,7 +878,7 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
     return v.recs.indexOf(rec);
   }
 
-  /** A wait mark's decoration in pane `index`; a wait in neither state gets a hover only, when there is something to say. */
+  /** A wait mark's decoration in pane `index`: the margin bar and the overview ruler. A wait in neither state has none; its hover is `waitHovers`' (made when asked for). */
   function markDecorations(v: View, index: number): MonacoApi.editor.IModelDeltaDecoration[] {
     const alignment = v.alignment;
     if (alignment === null) return [];
@@ -766,36 +886,82 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
     const out: MonacoApi.editor.IModelDeltaDecoration[] = [];
     own.marks.forEach((hit, i) => {
       const state = alignment.states[index]?.[i] ?? 'none';
-      const reason = alignment.reasons[index]?.[i] ?? null;
-      const range = { startLineNumber: hit.line, startColumn: 1, endLineNumber: hit.line, endColumn: 1 };
-      if (state === 'none') {
-        if (reason !== null) out.push({ range, options: { isWholeLine: true, hoverMessage: { value: reasonMessage(v, index, hit, reason), isTrusted: false, supportHtml: false } } });
-        return;
-      }
-      const message = state === 'matched' ? matchedMessage(v, index, hit) : reasonMessage(v, index, hit, reason ?? { kind: 'crossing' });
+      if (state === 'none') return;
       out.push({
-        range,
+        range: { startLineNumber: hit.line, startColumn: 1, endLineNumber: hit.line, endColumn: 1 },
         options: {
           isWholeLine: true,
           linesDecorationsClassName: state === 'matched' ? 'gedit-wait-matched' : 'gedit-wait-unmatched',
-          overviewRuler: { color: state === 'matched' ? WAIT_RULER_COLORS.matched : WAIT_RULER_COLORS.unmatched, position: RULER_LANE_RIGHT as MonacoApi.editor.OverviewRulerLane },
-          hoverMessage: { value: message, isTrusted: false, supportHtml: false },
+          overviewRuler: { color: state === 'matched' ? WAIT_RULER_COLORS.matched : WAIT_RULER_COLORS.unmatched, position: (state === 'matched' ? RULER_LANE_RIGHT : RULER_LANE_FULL) as MonacoApi.editor.OverviewRulerLane },
         },
       });
     });
     return out;
   }
 
+  /**
+   * The hover sentences of the wait marks on `line` of `model`, built now and for these marks only (the pointer is on them):
+   * who the wait meets, or why it is not lined up. A model that is not a pane of the open view, or a line without a mark, has none.
+   */
+  function waitHovers(model: TextModel, line: number): string[] {
+    const v = view;
+    const alignment = v?.alignment ?? null;
+    if (v === null || alignment === null) return [];
+    const index = v.recs.findIndex((rec) => (v.layout === 'single-file' ? rec.model : (deps.editor.model(rec.docId) ?? null)) === model);
+    if (index < 0 || v.paneMarks[index] === undefined) return [];
+    if (v.hitsAt === null) {
+      v.hitsAt = v.paneMarks.map((pane) => {
+        const byLine = new Map<number, number[]>();
+        pane.marks.forEach((hit, i) => {
+          const list = byLine.get(hit.line);
+          if (list === undefined) byLine.set(hit.line, [i]);
+          else list.push(i);
+        });
+        return byLine;
+      });
+    }
+    const out: string[] = [];
+    for (const i of v.hitsAt[index]?.get(line) ?? []) {
+      const hit = v.paneMarks[index].marks[i];
+      const state = alignment.states[index]?.[i] ?? 'none';
+      const reason = alignment.reasons[index]?.[i] ?? null;
+      if (state === 'none') {
+        if (reason !== null) out.push(reasonMessage(v, index, hit, reason));
+      } else {
+        out.push(state === 'matched' ? matchedMessage(v, index, hit) : reasonMessage(v, index, hit, reason ?? { kind: 'crossing' }));
+      }
+    }
+    return out;
+  }
+
+  /**
+   * One hover provider for every language, for as long as the view is open. It used to be one per language the
+   * models were in at opening; in the one-file-per-channel layout a profile change of a file (or a file saved
+   * under another name) puts its model into a language with no provider and the hover was gone until the view was
+   * opened again (WX-CODE-8). `waitHovers` answers only for the view's own pane models, so a model of any other
+   * file gets nothing from it.
+   */
+  function registerHovers(v: View): void {
+    v.disposables.push(registerWaitHover(v.monaco, '*', (model, line) => waitHovers(model, line)));
+  }
+
   function matchedMessage(v: View, index: number, hit: SyncHit): string {
-    const group = v.alignment?.groups.find((g) => g.marks.some((m) => m.pane === index && m.line === hit.line));
+    // One map per alignment: a search through every group for every wait is quadratic in the waits.
+    if (v.groupAt === null) {
+      v.groupAt = new Map();
+      for (const g of v.alignment?.groups ?? []) for (const m of g.marks) if (!v.groupAt.has(`${m.pane}:${m.line}`)) v.groupAt.set(`${m.pane}:${m.line}`, g);
+    }
+    const group = v.groupAt.get(`${index}:${hit.line}`);
+    // The two sentences are translated once with slots, and filled for each wait: `t` per wait and partner is most of the time of a program with 20,000 waits.
+    const slots = (v.slots ??= { partner: t('channelPanes.mark.partner', { channel: SLOT_A, line: SLOT_B }), matched: t('channelPanes.mark.matched', { partners: SLOT_A }) });
     const partners = (group?.marks ?? [])
       .filter((m) => m.pane !== index)
       .map((m) => {
         const other = v.recs[m.pane];
         const line = v.layout === 'single-file' && other.proj !== null ? docLineOf(other.proj, clamp(m.line, 1, other.proj.lineCount)) : m.line;
-        return t('channelPanes.mark.partner', { channel: other.channel.name, line });
+        return slots.partner.replace(SLOT_B, String(line)).replace(SLOT_A, () => other.channel.name);
       });
-    return t('channelPanes.mark.matched', { partners: partners.join('; ') });
+    return slots.matched.replace(SLOT_A, () => partners.join('; '));
   }
 
   /** The names of channel ids: a pane's, the machine's, or the id as written (a channel the machine does not have). */
@@ -1067,9 +1233,15 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
       lastSet: null,
       alignment: null,
       paneMarks: [],
-      alignKey: '',
+      alignStale: true,
       place: null,
-      jumpCache: new Map(),
+      jumps: createJumpLineCache(deps.jumpMayDecide),
+      jumpsChanged: false,
+      usesJumps: false,
+      counts: { matched: 0, unmatched: 0, none: 0, unknown: 0 },
+      groupAt: null,
+      hitsAt: null,
+      slots: null,
       noopRedoAt: null,
     };
   }
@@ -1088,7 +1260,7 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
     const languageId = deps.docs.get(id)?.profileId ?? 'plaintext';
     const shown = sections.slice(0, MAX_CHANNEL_PANES);
     v.notShown = sections.slice(MAX_CHANNEL_PANES).map((c) => c.id);
-    v.outsideLines = lineOutsideCount(set);
+    v.outsideLines = lineOutsideCount(v.docId, set);
     v.lastSet = set;
     for (const channel of shown) {
       const proj = projectChannel(set, channel.id);
@@ -1141,6 +1313,7 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
       }
     }
     v.disposables.push(deps.registerHistory({ undo: () => history('undo'), redo: () => history('redo') }));
+    registerHovers(v);
     const focus = focusIndexFor(set, v.recs, v.docId, cursorLine);
     const contents: GroupContent[] = v.recs.map((rec) =>
       v.layout === 'single-file' ? { kind: 'pane', docId: rec.docId, channelId: rec.channel.id } : { kind: 'document', docId: rec.docId, channelId: rec.channel.id },
@@ -1225,11 +1398,13 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
       for (const restore of rec.restore.splice(0)) restore();
       wrapDocument(v, rec);
       v.stack?.forget(docId);
+      v.jumps.forget(docId);
       alignDirty = true;
       schedule();
       return;
     }
     if (docId === v.docId) {
+      v.jumps.forget(docId);
       const set = freshSet(docId);
       applySet(v, set, undefined, null);
     }
@@ -1272,7 +1447,7 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
         rehook = true;
       }
     }
-    if (rehook) v.alignKey = '';
+    if (rehook) v.alignStale = true;
     hookEditors(v, false);
     alignDirty = true;
     schedule();
@@ -1321,8 +1496,36 @@ export function createChannelPanes(deps: ChannelPanesDeps): ChannelPaneService {
     publish();
   }
 
+  /**
+   * A refused pane edit leaves its step, the edit and its inverse, on the program's redo stack: Monaco has no way to take
+   * one step off it. While the view is open a Redo at that version is skipped (`history`); the view closing must not
+   * bring the step back as a Redo that does nothing (T032). So the program's own `redo` keeps skipping it at that
+   * version, until the next edit, a reload or the program's disposal empties the redo stack for good.
+   */
+  function leaveRedoGuard(v: View): void {
+    const at = v.noopRedoAt;
+    const model = at === null ? undefined : deps.editor.model(v.docId);
+    if (at === null || !model) return;
+    redoGuards.get(model)?.();
+    const own = model.redo.bind(model);
+    const restore = replaceMethods(model, {
+      redo: (() => (model.getAlternativeVersionId() === at ? Promise.resolve() : own())) as never,
+    });
+    const subs: MonacoApi.IDisposable[] = [];
+    const dispose = (): void => {
+      if (redoGuards.get(model) === dispose) redoGuards.delete(model);
+      for (const sub of subs.splice(0)) sub.dispose();
+      restore();
+    };
+    redoGuards.set(model, dispose);
+    // An undo or a redo leaves the redo stack as it is; any other change of the text empties it.
+    subs.push(model.onDidChangeContent((e) => (e.isUndoing || e.isRedoing ? undefined : dispose())));
+    subs.push(model.onWillDispose(dispose));
+  }
+
   /** Everything the view put on the editors and the models, taken away; the panes' models are disposed. */
   function teardown(v: View): void {
+    leaveRedoGuard(v);
     for (const hook of [...v.hooks.values()]) unhook(v, hook);
     for (const dispose of v.disposables.splice(0)) dispose();
     for (const rec of v.recs) releaseRec(v, rec);
@@ -1364,5 +1567,10 @@ export const channelPanes: ChannelPaneService = createChannelPanes({
   status: appStatus,
   createNode: () => document.createElement('div'),
   defer: (fn) => queueMicrotask(fn),
-  jumpLines: (id, channelOf) => computeJumpLines(appEditor.getLines(id, 1, appEditor.getLineCount(id)), appMachines.effective(id).cp, channelOf),
+  jumpLines: (id, channelOf, lines) => computeJumpLines(lines, appMachines.effective(id).cp, channelOf),
+  jumpMayDecide: (id, line) => mayDecideJumps(line, appMachines.effective(id).cp),
+  editKeepsChannels: (id, oldText, newText) => {
+    const p = appChannels.params(id);
+    return p !== null && editKeepsChannels(oldText, newText, appMachines.effective(id).cp, p);
+  },
 });

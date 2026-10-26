@@ -278,6 +278,14 @@ gEdit reads a block the way the control does.
 - A wait on a block-skip line (`/M901`) **is** a wait. gEdit cannot know whether the skip is
   on.
 - One block makes one wait. If two of your rules match the same line, the first rule wins.
+  One exception is made for a `P` word: when a rule of the machine has a `P` word as the
+  partners of its wait code (`M901 P12`), a rule for plain `P` codes (the Okuma order
+  numbers) does not read that `P` as a code of its own. Without that, the `P12` of
+  `M901 P12` would count as the order number 12.
+- Put a wait code in a block of its own. A Fanuc control takes the first M code of a block as
+  the waiting one, and Check Wait Codes warns about a wait that shares its block with other
+  words (*Shares its block*, below). Okuma writes P words beside other words on purpose, so
+  there is no such warning for the Okuma rules.
 
 ### Which channels a wait names
 
@@ -291,7 +299,10 @@ list under *Paths named by* and has three ways to do it:
 |---|---|
 | `M901 P12` | paths 1 and 2 |
 | `M901 P123` | paths 1, 2 and 3 |
-| `M901 P0` | path 10 |
+| `M901 P10` | paths 1 and 10 |
+
+The digit 0 is path 10. A 0 at the front is not read: `P012` is `P12`, and a `P0` alone names
+no path.
 
 **2. The `P` word as a bit sum.** The paths count 1, 2, 4, 8 … and the `P` word is their
 sum.
@@ -317,17 +328,19 @@ This is only used for a line **without** a `P` word. A `P` word gEdit cannot rea
 `P#1`, or `P1 2` with a blank between the digits), or two different `P` words in one block,
 are reported as a wait that names an unknown channel. They are never read as "no P".
 
-Whichever way you choose, the path a wait is in may be listed too, or not. `M901 P3` in
-path 1 is the same as `M901 P2`. gEdit ignores the channel's own number when it looks for
-the answer.
-
-On a Fanuc control the waits that meet must also be **written alike**: every path of one wait
-names the same paths, and either all of them have a `P` word or none has. `M901 P123` in
-path 1 against `M901 P12` in path 2 stops the control with an alarm, and so does `M901`
-without `P` against `M901 P3`, although both mean paths 1 and 2. Check Wait Codes checks
-this (the finding *Different channels*, below) for every wait rule whose partners are a `P`
-word: the Fanuc presets and a rule you build on the machine page. A Sinumerik `WAITM` need
-not list the same channels in every channel, so its preset does not.
+On a Fanuc control the `P` word names **every** path that takes part, the path the wait is in
+too: `M901 P3` in path 1 (a bit sum, paths 1 and 2) and `M901 P12` (path numbers, paths 1 and
+2). The waits that meet must also be **written alike**: every path of one wait names the same
+paths, and either all of them have a `P` word or none has. gEdit compares the paths as the
+`P` word writes them, and adds none. `M901 P123` in path 1 against `M901 P12` in path 2 stops
+the control with an alarm, and so does `M901` without `P` against `M901 P3`, although both
+mean paths 1 and 2; so does `M901 P2` in path 1 against `M901 P3` in path 2, because the two
+words name other paths. Check Wait Codes checks this (the finding *Different channels*,
+below) for every wait rule whose partners are a `P` word: the Fanuc presets and a rule you
+build on the machine page. It also reports a wait whose `P` word names other paths but not
+the path the wait is in (the finding *Own channel not named*: `M901 P2` in path 1). A
+Sinumerik `WAITM` need not list the same channels in every channel, and may leave its own
+channel out, so its preset does not ask for either.
 
 A channel number is read by its value, as the control reads it: `WAITM(1,01,02)` names
 channels 1 and 2.
@@ -407,6 +420,39 @@ Example. Path 1 has `M901 M902 M901` and path 2 has `M901 M902 M901` too. As *Nu
 waits* that is clean. As *Order numbers* it would be reported, because the number goes down
 from `M902` to `M901`. The program is right, and the setting was wrong.
 
+### The Okuma P codes and M100
+
+The Okuma preset for two turrets in one program (see the presets, below) reads three kinds
+of code. They behave differently, and it matters which one a program uses.
+
+- **`P1` to `P9999`: an order.** The smaller number runs first, equal numbers run together,
+  and a number may stand in one turret only. Only a number that goes *down* in one turret is
+  reported.
+- **`P` with a minus sign (`P-10`): a wait both turrets need.** It is not part of the order,
+  and the number has to be the same in turret A and turret B; `P-10` in A only is reported as
+  *missing*. This rule comes from the control's alarm list and is marked "verify": check it
+  against your machine.
+- **`M100`: a wait without a number.** Both turrets need the same count of them.
+
+A `P` code and an `M100` do not wait for each other: if an `M100` in one turret meets a `P`
+code in the other, both sides go on, and Check Wait Codes warns about the pair
+(*Meets another kind of wait*).
+
+A spindle command (`S`, `M00`, `M01`, `M03` to `M05`, `M41` to `M44`, `G96`) in a block with a
+`P` code has to be matched by the other turret at the same `P` code, or the control reports
+a contradiction. gEdit checks exactly that: a spindle command in a `P` block whose `P` code
+the other turret does not have is reported as *missing*. A spindle command in a block
+**without** a `P` word is not judged, because the control's own example writes the spindle
+commands in the block after the `P` code.
+
+`M100` is also refused while nose radius compensation is on (`G41`, `G42`). That is not a
+wait-code finding: [Check Program](scripts.md#program-checks) warns about it under *Refused in
+this state*, where it knows the state. The entry in the code data is marked for review.
+
+The preset knows two turrets. A third turret (`G313` is turret C in the programming manual
+and is marked "review pending" in the code database) is not covered by any preset: the
+manuals give no rule for the codes that synchronise three turrets.
+
 ---
 
 ## Presets, and what to check on your machine
@@ -428,7 +474,10 @@ documentation. It is only a **starting point**:
 | Fanuc lathe | **Two paths, files tied by hand** | No file-name rule; waits `M900-M999` written **without `P`**: a wait with no `P` means paths 1 and 2, and a `P`, when written, names path numbers (`P12`) | That your post writes the waits with no `P`. Open the files and assign each to its path by hand (see [When the names do not tell](#when-the-names-do-not-tell)) |
 | Fanuc lathe | **Three paths, files named `<name>_<path>`, no `P` means 1 and 2** | Files `PART_1.ISO`, `PART_2.ISO`, `PART_3.ISO`; waits `M190-M199`; `P` as path numbers (`P123` is all three); a wait without `P` means paths 1 and 2. **Careful:** the file-name rule also catches a version file such as `SHAFT_2.NC`, which it reads as path 2 | That the range and the "no `P` = 1 and 2" are what your machine does. Where your folders hold version files, do not use a file-name rule; assign the files by hand |
 | Fanuc lathe | **Two heads, `M100-M197`** | Files tied by hand ("Head 1", "Head 2"); the waits are `M100-M197`, the same code in both head programs, written without `P` (paths 1 and 2). On this kind of machine `M198` calls a program on an external device and is **no wait**; `M199` is not one either | That the codes your post uses for the heads are in `M100-M197` |
-| Okuma | **Two turrets in one program** | `G13` or `G013` starts turret A, `G14` or `G014` turret B, as often as needed; `P` codes in order (smaller number first); `M100` by count | That your post writes the turret starts that way. That the `P1-P9999` range is what your post uses |
+| Fanuc lathe | **Nakamura-Tome, two units** | Files tied by hand; waits `M100-M199`, the same code in both unit programs, written without `P` (paths 1 and 2); while one unit waits, a different wait code in the other unit is an alarm | That your machine's wait codes are `M100-M199`; add any other waiting codes it uses to the range |
+| Fanuc lathe | **Nakamura-Tome, three units** | Files tied by hand; waits `M100-M199` with a `P` after the code, naming the paths by number (the factory setting, parameter 8103 bit 1 = 1: `P12`, `P13`, `P123`); the same code may come again with other paths; a wait without `P` is an error | That your control reads `P` as path numbers and not as a bit sum. Which unit is path 1, 2 or 3 depends on the machine type |
+| Fanuc lathe | **Star, two heads** | Files tied by hand (Head 1, Head 2); waits `M200-M999`, the same three-digit code in both head programs, written without `P`. Function codes that also wait for the other head (`M40`/`M41`, `M54`/`M55`) are not counted | That the codes your post uses are in `M200-M999` |
+| Okuma | **Two turrets in one program** | `G13` or `G013` starts turret A, `G14` or `G014` turret B, as often as needed; `P` codes in order (smaller number first); `P-10` (a minus sign) a wait both turrets need; a spindle command stands at a `P` code both turrets have; `M100` by count. See [the Okuma P codes and M100](#the-okuma-p-codes-and-m100) | That your post writes the turret starts that way. That the `P1-P9999` range is what your post uses. A post that writes a wait as `M901P12` needs its own rule on the machine page |
 | Sinumerik | **Two channels in one archive file** | Channel 1 starts at `%_N_1_0_MPF`, channel 2 at `%_N_2_0_MPF`; the archive's other sections (`%_N_1_7_MPF` tool data and the like) belong to no channel. The waits are the same as in the next row | That your archive numbers its channel sections that way |
 | Sinumerik | **Two channels, one program per channel, named `<name>_C1.MPF`, `<name>_C2.MPF`** | The files are tied by the `_C<n>` in the name; the waits are as in the next row. A machine that synchronises its channels through its builder's own cycle needs [Advanced rules](#a-builders-own-cycle-an-advanced-example) | That your files are named that way. That the machine uses `WAITM` and not a cycle of the builder |
 | Sinumerik | **Two channels as tagged sections of one file** | `<PROG_BEGIN_C1>` starts channel 1, `<PROG_BEGIN_C2>` channel 2, and a `<PROG_END_…>` line ends the section; other tagged sections belong to no channel. The waits are as in the next row | That your post writes the tags that way |
@@ -470,6 +519,7 @@ On a program with channels, the status bar has a **Channel** item. It says:
 | **Channel: not set** | A program of a machine with one file per channel that no rule recognises. Click it to assign it |
 | **Channel rules are broken** | The channel settings of the machine have a mistake; see [Machines](machines.md#channels) |
 | **Channels: too slow to read** | gEdit could not read the program for channels in time (half a second), usually because the computer was busy. It tries once more a second later, and again after your next edit. Until then the program shows no channels, and Check Wait Codes says *not checked* |
+| **Channels: pattern stopped** | A pattern of the machine's channel rules (a section, wait or channel pattern you wrote as a regular expression) took longer than 2 seconds on this program and was stopped. The program shows no channels until you make the pattern simpler, for example without a repeat inside a repeat such as `(a+)+`; see [When a pattern is slow](regex.md#when-a-pattern-is-slow). The patterns are read in the background first, so the editor does not freeze meanwhile, and a program shows no channels until that first reading has finished |
 
 Hover it for what was used to find the channel: the sections of the program, the file name,
 the marker or your assignment. **Click** it for a list: each channel (choosing one takes you
@@ -548,7 +598,7 @@ Say path 1 and path 2, with `M901 P3`-style waits.
 
 | Finding | In words | What to do |
 |---|---|---|
-| **Missing** — *M903 in Path 1 waits for Path 2, but Path 2 has no M903 that waits for Path 1.* | A wait has no answer | Look for the wait in the other channel. It may be missing, or it may be written with another number or a `P` word that does not name this channel |
+| **Missing** — *M903 in Path 1 waits for Path 2, but Path 2 has no M903 that waits for Path 1.* | A wait has no answer | Look for the wait in the other channel. It may be missing, or it may be written with another number or a `P` word that does not name this channel. On an Okuma, a spindle command (`S`, `M00`, `M01`, `M03` to `M05`, `M41` to `M44`, `G96`) in a block with a `P` code is *missing* when the other turret has no block with that `P` code: both turrets have to carry the spindle command at the same `P` code |
 | **Count differs** — *M904: Path 1 waits on it 3 times for Path 2, Path 2 has 2; both need the same number.* | Both have the number, but not as often. The row points at the first wait the other channel has no answer for | Find the extra wait, or the missing one. Check the line it points at and the one in the other channel |
 | **Count differs (rule)** — *Wait codes 1: Path 1 has 3, Path 2 has 2; both sides need the same number.* | For waits without a number: different totals | As above |
 | **Count differs (stops and ends)** — *Stops and ends: Path 1 has 2, Path 2 has 1; both sides need the same number.* | One channel has a stop or end more | Is the extra `M01` or `M30` meant? |
@@ -557,9 +607,16 @@ Say path 1 and path 2, with `M901 P3`-style waits.
 | **Other order** — *M902 (line 40) and M903 (line 52) are in the other order in Path 2 (lines 61 and 58). 2 more out of order.* | Both channels have the waits, but not in the same order. With the control, each would wait for the other | Swap them in one channel. The finding reports the first pair; the *more* (only there when there are more) says how many further pairs are the other way round |
 | **Order not checked** — *The order of M902 and M903 against Path 2 is not checked: a jump target or a backward jump lies between them.* | The order is not as written, but a jump target or a backward jump (`GOTO` back, `M99 P`, the end of a loop) lies between the two waits, so gEdit cannot say what runs first | **Nothing is wrong that gEdit can see.** Check the order by hand. With *Count not checked* these are the cases where the check refuses to judge |
 | **Not increasing** — *P20 comes after P30 (line 12) in Turret A; the numbers must increase.* | For order numbers: a number below the one before it | Correct the number, or the order |
+| **Own channel not named** — *M901 in Path 1 waits for Path 2 but does not name Path 1 itself; the channel list (the P word) has to name every channel that waits, this one too.* | A wait rule with a `P` word that asks for the same partners: the `P` names other paths but not the path the wait is in (`M901 P2` in path 1). The control reads the `P` word as written and stops with an alarm. The wait is not compared again with its partner | Write the path in its own `P` word: `M901 P12` in path 1 and in path 2 |
 | **Names no other channel** — *M905 in Path 1 names no other channel, so nothing can answer it.* | The wait's `P` word (or the line) names only its own channel, or none | Look at the `P` word. It should name the other channel. With a wait without `P`, see [which channels a wait names](#which-channels-a-wait-names) |
 | **Unknown channel** — *M906 in Path 1 names “4”, which is not a channel of this machine.* | The wait names a channel the machine does not have. If it names several, one finding lists them all | A typing mistake in the `P` word, or a channel missing in the setting |
 | **Outside every channel** — *M901 on line 3 is outside every channel section.* | A wait in lines that belong to no channel | A wait before the first section or after a section end. Is it in the right place? |
+| **Meets another kind of wait** — *Warning: P10 in Turret A (line 12) meets M100 in Turret B (line 14); these two do not wait for each other, so both sides go on.* | Okuma: an `M100` in one turret meets a `P` code in the other. The two do not wait for each other | Write `M100` in both turrets, or the same `P` code in both. A warning, not an error: nothing is wrong that the text can prove |
+| **Shares its block** — *Warning: M901 in Path 1 shares its block with other words; write a wait code in a block of its own.* | A Fanuc wait written together with moves or other codes. The control takes the first M code of a block as the waiting one | Move the wait into a block of its own |
+| **Mark out of range** — *Warning: WAITM(100,1,2) in Path 1 is not a mark number from 0 to 99.* | A Sinumerik `WAITM` whose mark is a number outside the marks the control has: above 99, negative, or with a fraction | Look at the number. A mark that is a variable is not judged |
+
+A finding that is only a warning begins with *Warning:*. The others are things the control
+would refuse or would not wait for.
 
 ### What the check cannot tell you
 
@@ -634,6 +691,13 @@ or *One file per channel*) and counts the waits:
   sections, are in no pane.
 
 The button at the right end of the bar closes the view.
+
+**For a screen reader.** The bar speaks only what matters to someone fixing the waits, and
+not after every keystroke. When the view opens it announces the problems it finds at once:
+*N waits have no partner*, *N waits name a channel this machine does not have* and *Not shown:
+…* (the channels left out). After that it says something only when one of these changes, and
+*All waits are lined up.* once, when the last problem has gone. The counts of waits that are
+lined up and of lines in no channel are on the screen only.
 
 Every pane has a header with the name of its channel (with one file for each channel, also the
 file's name). The lines of a pane are the lines of its channel, but the **line numbers are those
@@ -832,9 +896,9 @@ them. See [Scripts](scripts.md#channels-in-a-script). The bundled
   the reason. Take the code out of the list or use a pattern that does not match the call.
 - **A channel is compared with the channels that are open.** gEdit does not open files for
   you.
-- **One mark per `SETM` or `CLEARM`.** `SETM(5,6)` is read as mark 5 only, so a `WAITM(6,…)`
-  that only it answers is reported as missing. Write one mark per `SETM` if you want the check
-  to see it.
+- **Marks are whole numbers from 0 to 99.** A `WAITM` whose mark is a number outside that range is reported as a warning (*Mark out of range*): a negative number such as `-1` and a number with a fraction such as `1.5` too. `1.` is the whole number 1, as the control reads it. A mark written as a
+  variable (`_M`) is not judged. `SETM(5,6)` and `CLEARM(5,6)` are read as the marks 5 and 6,
+  and a `SETM` with several marks answers a `WAITM` of each of them.
 - **A line longer than 1,000 characters is not read for channels and wait codes.** NC
   blocks are far shorter; such a line is usually a data block. gEdit says how many lines it
   skipped (*… lines longer than 1000 characters were not read …*), never silently.

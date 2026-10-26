@@ -54,6 +54,30 @@ function variantsOf(decl: MachineParamsDecl | undefined): VariantDecl[] {
   return Array.isArray(list) ? list : [];
 }
 
+/**
+ * D5-3: the default of `variant` while the other variants stand at `chosen` — its
+ * `defaultBy` value for the other variant's choice, else its own `default`.
+ */
+export function variantDefaultOf(variant: VariantDecl, chosen: Readonly<Record<string, string>>): string {
+  const by = variant?.defaultBy;
+  if (by !== undefined && typeof by.variant === 'string') {
+    const value = by.values?.[chosen[by.variant] ?? ''];
+    if (typeof value === 'string' && choicesOf(variant).includes(value)) return value;
+  }
+  return variant.default;
+}
+
+/** D5-3: every variant whose value is its profile default takes its `defaultBy` default. */
+function applyDefaultBy(decl: MachineParamsDecl | undefined, variants: Record<string, string>, sources: Record<string, ParamSource> | null): void {
+  const chosen = { ...variants };
+  for (const variant of variantsOf(decl)) {
+    const id = variant?.id;
+    if (typeof id !== 'string' || variant.defaultBy === undefined) continue;
+    if (sources !== null && sources[id] !== 'profile') continue;
+    variants[id] = variantDefaultOf(variant, chosen);
+  }
+}
+
 /** The `NumberInput` of the declaration's default preset, or null when none is declared. */
 function defaultNumberInput(decl: MachineParamsDecl | undefined): NumberInput | null {
   const numberInput = decl?.numberInput;
@@ -77,6 +101,7 @@ export function defaultParams(p: Profile): MachineParams {
       variants[variant.id] = variant.default;
     }
   }
+  applyDefaultBy(decl, variants, null);
   return {
     numberInput: defaultNumberInput(decl),
     units: decl?.units ?? p.modal?.units ?? 'mm',
@@ -136,6 +161,8 @@ export function effectiveMachine(
       variantSources[id] = 'profile';
     }
   }
+  // D5-3: a default that follows another variant (`defaultBy`), once all of them are known.
+  applyDefaultBy(decl, params.variants, variantSources);
 
   const numberInput = m?.params?.numberInput;
   const hasNumberInput = decl?.numberInput !== undefined && isRecord(numberInput);

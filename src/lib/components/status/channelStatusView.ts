@@ -43,6 +43,11 @@ export function channelStatusView(o: {
     if (set.problems.some((p) => p.message.key === 'channels.problems.tooSlow')) {
       return { ...base, id: '', layout: '', open: '', label: t('channels.status.tooSlow'), tooltip: t('channels.problems.tooSlow'), broken: false, slow: true };
     }
+    // T171: a pattern of the machine's channel rules was stopped; the item names it instead of hiding.
+    const stopped = set.problems.find((p) => p.message.key === 'channels.problems.patternStopped');
+    if (stopped !== undefined) {
+      return { ...base, id: '', layout: '', open: '', label: t('channels.status.patternStopped'), tooltip: t(stopped.message.key, stopped.message.params), broken: false, slow: true };
+    }
     return null;
   }
 
@@ -56,11 +61,19 @@ export function channelStatusView(o: {
       lines.push(`${m.channel.name}: ${t(how)}, ${t(state)}`);
     }
   }
+  // One program with sections (T127): a channel without a section is information, not a fault —
+  // a one-turret program on a two-turret machine (a single `G13`) simply does not use the other
+  // turret. If a wait code does name it, Check Wait Codes says so. One file per channel: a file
+  // that is not in the folder stays "not found".
+  const single = set.layout === 'single-file';
   for (const c of set.missing) {
-    lines.push(`${c.name}: ${t(unknown(c) ? 'channels.status.stateUnknown' : 'channels.status.stateNotFound')}`);
+    const state = unknown(c) ? 'channels.status.stateUnknown' : single ? 'channels.status.stateNotUsed' : 'channels.status.stateNotFound';
+    lines.push(`${c.name}: ${t(state)}`);
   }
-  // "could not be checked" is already said on the channel's own line.
-  for (const p of set.problems) if (p.message.key !== 'channels.problems.siblingUnknown') lines.push(t(p.message.key, p.message.params));
+  // Both are already said on the channel's own line: "could not be checked", and (one program
+  // with sections) "not used in this program".
+  const saidOnItsLine = (key: string): boolean => key === 'channels.problems.siblingUnknown' || (single && key === 'channels.problems.channelNotFound');
+  for (const p of set.problems) if (!saidOnItsLine(p.message.key)) lines.push(t(p.message.key, p.message.params));
   const open = set.members.filter((m) => m.kind === 'section' || m.docId !== null).map((m) => m.channel.id).join(' ');
 
   if (set.layout === 'single-file') {

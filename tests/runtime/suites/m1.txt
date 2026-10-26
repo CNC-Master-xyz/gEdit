@@ -11,6 +11,9 @@ m1-smoke
 m1-open-multi
 m1-dnd
 
+# Saving over a file another program changed: the question, Cancel, Overwrite; a file that is gone is written again.
+m1-save-changed
+
 # The tabs themselves: untitled numbering, per-document undo and cursor, reorder,
 # Ctrl+Tab, the switch-tab picker, and the three ways to close one.
 m1-tabs
@@ -22,8 +25,10 @@ m1-encoding2
 # The default shortcuts of §7.11, where they are dispatched from, and the command palette.
 m1-keys
 
-# Quitting with more than one unsaved document: one combined question, every way out.
+# Quitting with more than one unsaved document: one combined question, every way out
+# (a drop while it is up is not taken); Save All with a note whose Save As is declined.
 m1-quit-multi
+m1-quit-save-all
 
 # The shell layout: no window scrollbar, the panel regions, the splitters.
 m1-layout

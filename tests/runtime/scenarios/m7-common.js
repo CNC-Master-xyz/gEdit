@@ -407,9 +407,8 @@ export async function requireFirstRun(h, first) {
  * @param {Harness} h
  */
 export async function quitCleanly(h) {
-  h.expectExit({ within: 15000 })
-  // `h.expectExit` only queues its record; the flush is an IPC round trip of its own and
-  // the window can be gone before it lands (see `m2-recent-restart-1`).
-  await h.sleep(500)
+  // The record is in Rust before the window can go (`h.expectExit` resolves after it and
+  // `h.nativeKeys` flushes first), so nothing waits for it.
+  await h.expectExit({ within: 15000 })
   await h.nativeKeys([{ key: 'w', mods: ['cmd', 'shift'] }])
 }

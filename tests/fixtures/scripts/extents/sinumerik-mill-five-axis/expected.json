@@ -60,11 +60,11 @@
       "scope": "program",
       "axis": "Z",
       "axisId": "Z",
-      "min": "-2",
-      "minLine": 6,
+      "min": "-20",
+      "minLine": 16,
       "max": "50",
       "maxLine": 5,
-      "unresolved": 5,
+      "unresolved": 4,
       "line": 5
     },
     {
@@ -120,11 +120,11 @@
       "scope": "offset",
       "axis": "Z",
       "axisId": "Z",
-      "min": "-2",
-      "minLine": 6,
+      "min": "-20",
+      "minLine": 16,
       "max": "50",
       "maxLine": 5,
-      "unresolved": 5,
+      "unresolved": 4,
       "line": 5
     },
     {
@@ -180,11 +180,11 @@
       "scope": "tool",
       "axis": "Z",
       "axisId": "Z",
-      "min": "-2",
-      "minLine": 6,
+      "min": "-20",
+      "minLine": 16,
       "max": "50",
       "maxLine": 5,
-      "unresolved": 5,
+      "unresolved": 4,
       "line": 5
     },
     {
@@ -224,7 +224,7 @@
       "line": 21
     }
   ],
-  "message": "No machine: readings assumed from the profile defaults, and a word whose reading depends on the machine is not resolved. 9 positions not resolved; the findings say why.",
+  "message": "No machine: readings assumed from the profile defaults, and a word whose reading depends on the machine is not resolved. 8 positions not resolved; the findings say why.",
   "findings": [
     {
       "line": 9,
@@ -249,12 +249,6 @@
       "severity": "warning",
       "message": "1 position, first X (line 15), written while C stood turned (or at an angle that is not known) and tool centre point control was off: they are positions of the machine's axes, not of the workpiece, so they are not resolved.",
       "reason": "rotary"
-    },
-    {
-      "line": 16,
-      "severity": "warning",
-      "message": "CYCLE81 (line 16), run in 1 block: the positions this cycle works to are in its parameters, which the extents do not compute; they are not resolved (its depth is not in the Z range).",
-      "reason": "cycle"
     },
     {
       "line": 18,

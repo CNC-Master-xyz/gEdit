@@ -252,6 +252,36 @@ export async function hoverAt(h, id, line, column) {
   return text === before ? '' : text
 }
 
+/**
+ * Everything the visible hover shows at a position: every row of it, one after the other, not only the first. A hover with
+ * two providers (the code's own hover, and a wait mark's sentence in the channel view) has two rows, and `hoverAt` reads the
+ * first. The text of the rows is run together as the widget draws it.
+ * @param {Harness} h
+ * @param {string} id
+ * @param {number} line
+ * @param {number} column
+ * @returns {Promise<string>}
+ */
+export async function hoverAllAt(h, id, line, column) {
+  const ctx = context(h)
+  const all = () => plain([...document.querySelectorAll('.monaco-hover:not(.hidden)')].map((e) => e.textContent ?? '').join(' ')).trim()
+  ctx.editor.triggerAction('editor.action.hideHover')
+  await h.idle()
+  const before = all()
+  await revealLine(h, id, line, column)
+  ctx.editor.triggerAction('editor.action.showHover')
+  await h.waitFor(() => all() !== before, { timeout: 2500 })
+  // The providers answer one after the other: settle on the text that stays.
+  let text = all()
+  for (let i = 0; i < 10; i++) {
+    await h.sleep(100)
+    const now = all()
+    if (now === text) break
+    text = now
+  }
+  return text === before ? '' : text
+}
+
 /** The icon a suggestion row carries says where it came from. */
 const DB_ICONS = ['symbol-function', 'symbol-snippet', 'symbol-keyword']
 

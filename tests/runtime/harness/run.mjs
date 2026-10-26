@@ -1,7 +1,7 @@
 // run.sh: runs one scenario against the synced test build.
 // Usage: run.sh <scenario> [--home DIR] [--keep-home] [--env K=V]… [--timeout S]
 
-import { loadScenarios, rhDir, runScenario, summarize, withLock } from './core.mjs'
+import { foreignBuild, loadScenarios, rhDir, runScenario, summarize, withLock } from './core.mjs'
 
 const args = process.argv.slice(2)
 const opts = { env: [] }
@@ -28,6 +28,11 @@ const rh = rhDir()
 const known = await loadScenarios()
 if (!known.has(name)) {
   console.error(`unknown scenario ${name}; known: ${[...known.keys()].join(', ')}`)
+  process.exit(2)
+}
+const foreign = foreignBuild(rh)
+if (foreign) {
+  console.error(foreign)
   process.exit(2)
 }
 const result = await withLock(rh, `run ${name}`, () => runScenario(rh, name, known, opts))

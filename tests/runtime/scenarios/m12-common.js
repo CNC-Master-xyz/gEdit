@@ -39,7 +39,7 @@ export const OKUMA = 'okuma-osp'
 export const NC_DIR = 'channels/nc/fanuc-lathe'
 
 /** The machine's own number rules as the lathe default stores them (`m6-machines-manage`; the tool word is `byLength` since M12.5). */
-export const LATHE_PARAMS = { numberInput: { mode: 'calculator', incrementMm: '0.001' }, units: 'mm', diameter: 'on', variants: { gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength' } }
+export const LATHE_PARAMS = { numberInput: { mode: 'calculator', incrementMm: '0.001' }, units: 'mm', diameter: 'on', variants: { gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength', toolChange: 'turret', counterSpindleY: 'turns' } }
 
 // ---------------------------------------------------------------- the goldens
 

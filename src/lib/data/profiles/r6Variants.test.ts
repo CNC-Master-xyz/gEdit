@@ -75,17 +75,23 @@ const OKUMA = 'okuma-osp';
 describe('the declaration (§8.8 "The M9 variants")', () => {
   const variantsOf = (id: string) => profile(id).machineParams?.variants ?? [];
 
-  it('gives the Fanuc lathe the G-code system and the two R6 variants, in that order', () => {
+  it('gives the Fanuc lathe the G-code system, the two R6 variants, the tool change and the counter spindle, in that order', () => {
+    // Manual-check fix D3-4a: the tool change, turret (T, the default) or tool changer (M6),
+    // comes after the tool word, so its overlay of `toolCall.trigger` wins over the tool word's.
+    // Review round D5-7: the counter spindle (Y turns with Z, or stays) has no overlay.
     expect(variantsOf(LATHE).map((v) => [v.id, v.default, v.choices.map((c) => c.value)])).toEqual([
       ['gcodeSystem', 'A', ['A', 'B']],
       ['incrementalAddresses', 'uw', ['uw', 'uwvh', 'none']],
       ['toolWord', 'byLength', ['byLength', 'offset2', 'offset1', 'offset3']],
+      ['toolChange', 'turret', ['turret', 'atc']],
+      ['counterSpindleY', 'turns', ['turns', 'stays']],
     ]);
   });
 
-  it('gives Okuma one variant: the tool word', () => {
+  it('gives Okuma two variants: the tool word and (review round D5-7) the counter spindle', () => {
     expect(variantsOf(OKUMA).map((v) => [v.id, v.default, v.choices.map((c) => c.value)])).toEqual([
       ['toolWord', 'offset2', ['offset2', 'offset3']],
+      ['counterSpindleY', 'turns', ['turns', 'stays']],
     ]);
   });
 
@@ -95,9 +101,17 @@ describe('the declaration (§8.8 "The M9 variants")', () => {
         for (const choice of variant.choices) {
           expect(choice.detect, `${id} ${variant.id}=${choice.value}`).toBeUndefined();
           expect(choice.codes, `${id} ${variant.id}=${choice.value}`).toBeUndefined();
-          expect(Object.keys(choice.overlay ?? {}), `${id} ${variant.id}=${choice.value}`).toEqual([
-            variant.id === 'toolWord' ? 'toolCall' : 'addresses',
-          ]);
+          // D3-4a: the turret is the profile's own tool rule, so its choice has no overlay.
+          // D5-7: the counter spindle is read by the Z mirror itself, so it has none either.
+          const wanted =
+            variant.id === 'counterSpindleY'
+              ? []
+              : variant.id === 'toolChange'
+                ? choice.value === 'turret'
+                  ? []
+                  : ['toolCall']
+                : [variant.id === 'toolWord' ? 'toolCall' : 'addresses'];
+          expect(Object.keys(choice.overlay ?? {}), `${id} ${variant.id}=${choice.value}`).toEqual(wanted);
         }
       }
     }
@@ -142,10 +156,12 @@ const BEFORE: Record<string, Record<string, string>> = {
     tool: '(?<![A-Z])T(?<tool>\\d{1,3}?)(?:\\d{2})?(?!\\d)',
     toolFrom: 'same-line',
   },
+  // Okuma: the rule before M9 plus the three-digit word (manual-check fix D3-2, 2026-10-25:
+  // `T100` is station 1 with offset 00); base, no machine and `offset2` still agree.
   [OKUMA]: {
-    trigger: '(?<![A-Z])T\\d{4}(?:\\d{2})?(?!\\d)',
-    ignore: '(?<![A-Z])(?:G0*(?:7[1-8]|18\\d)(?![\\d.])|T(?:\\d{2})?00\\d{2}(?!\\d))',
-    tool: '(?<![A-Z])T(?:\\d{2}(?=\\d{4}(?!\\d)))?(?<tool>\\d{2})(?=\\d{2}(?!\\d))',
+    trigger: '(?<![A-Z])T(?:\\d{3,4}|\\d{6})(?!\\d)',
+    ignore: '(?<![A-Z])(?:G0*(?:7[1-8]|18\\d)(?![\\d.])|T(?:(?:\\d{2})?00\\d{2}|0\\d{2})(?!\\d))',
+    tool: '(?<![A-Z])T(?:\\d{2}(?=\\d{4}(?!\\d)))?(?<tool>\\d{2}(?=\\d{2}(?!\\d))|\\d(?=\\d{2}(?!\\d)))',
     toolFrom: 'same-line',
   },
 };
@@ -199,8 +215,10 @@ describe('the default choice reads exactly as the profile did before M9', () => 
   });
 
   it('a machine that sets nothing about the R6 variants gets the defaults', () => {
+    // D5-3: in system B the U/W default is "none" (G91 only); in system A it stays "uw".
     const eff = machineWith(profile(LATHE), { gcodeSystem: 'B' });
-    expect(eff.params.variants).toEqual({ gcodeSystem: 'B', incrementalAddresses: 'uw', toolWord: 'byLength' });
+    expect(eff.params.variants).toEqual({ gcodeSystem: 'B', incrementalAddresses: 'none', toolWord: 'byLength', toolChange: 'turret', counterSpindleY: 'turns' });
+    expect(machineWith(profile(LATHE), { gcodeSystem: 'A' }).params.variants.incrementalAddresses).toBe('uw');
     expect(eff.source.variants.toolWord).toBe('profile');
     expect(eff.source.variants.incrementalAddresses).toBe('profile');
   });
@@ -223,11 +241,13 @@ describe('incrementalAddresses', () => {
     expect(addresses.axes).toEqual(['X', 'Z', 'C', 'Y', 'U', 'W']);
   });
 
-  it('is independent of the G-code system', () => {
+  it('is independent of the G-code system once chosen; its default follows it (D5-3)', () => {
     for (const system of ['A', 'B']) {
       expect(effective(LATHE, { gcodeSystem: system, incrementalAddresses: 'none' }).profile.addresses.incremental).toBeUndefined();
-      expect(effective(LATHE, { gcodeSystem: system }).profile.addresses.incremental).toEqual({ U: 'X', W: 'Z' });
+      expect(effective(LATHE, { gcodeSystem: system, incrementalAddresses: 'uw' }).profile.addresses.incremental).toEqual({ U: 'X', W: 'Z' });
     }
+    expect(effective(LATHE, { gcodeSystem: 'A' }).profile.addresses.incremental).toEqual({ U: 'X', W: 'Z' });
+    expect(effective(LATHE, { gcodeSystem: 'B' }).profile.addresses.incremental).toBeUndefined();
   });
 });
 
@@ -294,6 +314,45 @@ describe('toolWord: a word under each choice (r6-tool-words.json, read by Python
   it('reads T2000 on Okuma as station 2 only with three-digit offsets', () => {
     expect(toolOf(effective(OKUMA, { toolWord: 'offset2' }), 'T2000')).toBe('20');
     expect(toolOf(effective(OKUMA, { toolWord: 'offset3' }), 'T2000')).toBe('2');
+  });
+
+  // T087: the seven-digit form names station 2 as `02`, `T2000` as `2`. Both are one tool for
+  // everything that compares tools — the program map's label here, the tool segments
+  // (`segments.ts` `toolKey`: '05' and '5' are one key) and the tool list (`test_r6_variants.py`),
+  // which normalise the number since M13 — so a file that mixes the two never splits a tool.
+  it('names station 02 of T0102003 and station 2 of T2000 as one tool under three-digit offsets', () => {
+    const index = new OutlineIndex(effective(OKUMA, { toolWord: 'offset3' }));
+    index.reset(['O0103', 'G00 T0102003', 'G01 Z-20. F0.2', 'G00 T2000', 'G01 Z-30. F0.15', 'M02']);
+    const tools = index.items().filter((item) => item.kind === 'tool');
+    expect(tools.map((item) => [item.tool, item.text])).toEqual([
+      ['02', 'T2'],
+      ['2', 'T2'],
+    ]);
+  });
+
+  // Manual-check fix D3-4a (5040#3 TCT): on a lathe with a tool changer T only selects the tool,
+  // M6 changes it; a turret (the default) changes at the T word. The tool word is still read
+  // with the toolWord choice (2 + 2 here).
+  it('D3-4a: a tool changer lathe changes the tool at M6, a turret at T', () => {
+    const program = ['O1', 'T0101', 'G00 X50. Z2.', 'M06', 'G01 Z-10. F0.2', 'T0202 M06', 'T0300', 'M06', 'M30'];
+    const atc = new OutlineIndex(effective(LATHE, { toolChange: 'atc' }));
+    atc.reset(program);
+    expect(atc.items().filter((item) => item.kind === 'tool').map((item) => [item.line, item.tool])).toEqual([
+      [4, '01'],
+      [6, '02'],
+      [8, '03'],
+    ]);
+    const turret = new OutlineIndex(effective(LATHE, { toolChange: 'turret' }));
+    turret.reset(program);
+    expect(turret.items().filter((item) => item.kind === 'tool').map((item) => [item.line, item.tool])).toEqual([
+      [2, '01'],
+      [6, '02'],
+    ]);
+    // The turret choice is the profile's own rule; the tool changer's T0 still unloads.
+    expect(effective(LATHE, { toolChange: 'turret' }).profile.toolCall).toEqual(effective(LATHE).profile.toolCall);
+    const unload = new OutlineIndex(effective(LATHE, { toolChange: 'atc' }));
+    unload.reset(['O1', 'T0', 'M06', 'M30']);
+    expect(unload.items().filter((item) => item.kind === 'tool')).toEqual([]);
   });
 
   it('keeps an Okuma cycle block out of the tool list under both choices', () => {

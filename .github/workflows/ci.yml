@@ -72,19 +72,24 @@ jobs:
         run: npm run licenses:check
       - name: Versions match
         run: npm run versions:check
-      - name: Bundle has no eval and no test hook
-        shell: bash
-        run: |
-          # `Function(…)` counts with and without `new`: minifiers and globalThis
-          # polyfills drop the `new`, and the CSP refuses both.
-          if grep -rnE '(^|[^a-zA-Z0-9_.$])(Function|eval)[[:space:]]*\(' build/_app; then
-            echo "::error::The bundle contains eval or Function() (blocked by the CSP)."
-            exit 1
-          fi
-          if grep -rq '__gedit' build/_app; then
-            echo "::error::The production bundle contains the test hook (__gedit)."
-            exit 1
-          fi
+      # Each of the checks below is a script or a command of its own, so the same line runs on a
+      # developer's machine; `tests/unit/{checkBundle,licenseList,controlBytes}.test.ts` pin
+      # what each one has to catch (they run in the unit tests above).
+      - name: Bundle has no eval, no Function() and no test hook
+        # Direct and indirect forms: `(0, eval)(…)`, `window.eval(…)`, a string timer. Needs build/.
+        run: node scripts/check-bundle.mjs build
+
+      - name: Licences are exactly the agreed list
+        # Which licences, where `licenses:check` above only proves the notices are current.
+        run: node scripts/check-license-list.mjs
+
+      - name: No NUL or control characters in source files
+        # Reads the bytes itself: the grep this replaces passed on macOS without looking.
+        run: node scripts/check-control-bytes.mjs
+
+      - name: Harness scripts type-check
+        # tests/runtime/harness/*.mjs are not in `npm run check` (it reads .js and .ts only).
+        run: npx tsc -p tests/runtime/harness
 
       # tests/runtime/harness/harness.rs is not part of the src-tauri crate, so the
       # `rust` job's `cargo fmt` never sees it.
@@ -95,16 +100,32 @@ jobs:
   # interpreter gEdit supports (3.9, which is what macOS still ships) as well as on a
   # current one, so both ends of the range are checked and nothing in between can drift.
   python:
-    name: Python ${{ matrix.python }}
-    runs-on: ubuntu-22.04
+    name: Python ${{ matrix.python }}${{ matrix.os == 'windows-latest' && ' (Windows)' || '' }}
+    runs-on: ${{ matrix.os }}
     # The P4a tests (the geometry oracle, the owner-public runs) made the suite ~9.5 min on
     # 3.12 and longer on 3.9 (cancelled at 10 min on 2026-10-16); 30 leaves room on both.
-    timeout-minutes: 30
+    # Windows starts a process much more slowly than Linux and the suite starts hundreds:
+    # not measured yet, so the limit is double.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 30 }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-22.04]
         python: ['3.9', '3.12']
+        include:
+          # The scripts run on a user's Windows machine too (`python.rs` has a Windows branch),
+          # and the suite had never run there. One interpreter: the newest, which is what a fresh
+          # install gives; 3.9, the macOS floor, is covered on Linux above.
+          - os: windows-latest
+            python: '3.12'
     steps:
+      # Git for Windows turns core.autocrlf on, which would give the line-ending-sensitive
+      # fixtures CRLF. `.gitattributes` already pins what it can (`tests/fixtures/** -text`,
+      # `*.py eol=lf`); this makes the checkout itself take no part in it.
+      - name: Check out without line-ending conversion
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7

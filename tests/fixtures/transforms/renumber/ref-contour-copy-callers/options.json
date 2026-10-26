@@ -1,0 +1,16 @@
+{
+  "note": "Owner 2026-10-20 (plan 6.6 rule 9): the contour copy G72.1 calls the program its P names, as M98 does (the 30i manuals). O4012 is called by M98 from O4010 and by G72.1 from O4011, so it has two callers and which program M99 P9 returns into cannot be told. The value is reported with its reason (callers) and left exactly as it is, although each caller had an N9.",
+  "profile": "fanuc-gcode",
+  "options": {},
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      { "line": 1, "severity": "info" },
+      { "line": 6, "severity": "info" },
+      { "line": 11, "severity": "info" },
+      { "line": 14, "severity": "warning" }
+    ],
+    "warnings": ["ncNumbering.renumber.referencesUnresolved"],
+    "preflight": "ncNumbering.renumber.references"
+  }
+}

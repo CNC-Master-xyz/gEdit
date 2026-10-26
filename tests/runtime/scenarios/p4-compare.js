@@ -26,6 +26,9 @@
 //   D5. typing in a pane               forced upper case (the dialect's own setting) reaches the aligned view's panes: `g1x10`
 //                                      typed with real key presses into the current document's pane reads `G1X10` in the
 //                                      document, and the other pane's document is not touched; undone again afterwards.
+//   D6. typing in a pane, the second    the line-join guard of both panes (Backspace at the start of a block and Delete at its end are
+//       helper                         refused with a message, in the editable pane of the current document and in the original's pane
+//                                      of an open document), capitals in the original's pane, and a read-only pane that is left alone.
 //   E. closing                         the editors are back, the keyboard is in the editor, no mark or tint is left.
 
 import { scenario } from '../lib/index.js'
@@ -109,7 +112,7 @@ scenario('p4-compare', { timeout: 420 }, async (h) => {
     }
     return { original: find('original'), modified: find('modified') }
   }
-  /** Waits until the aligned view says exactly which lines are tinted as changed (the alignment is redone 150 ms after a change). @param {number[]} want */
+  /** Waits until the aligned view says exactly which lines are tinted as changed (the alignment is redone 150 ms after a change; longer on a program that takes long to align, review CODE-4). @param {number[]} want */
   const waitBlocks = async (want) => {
     await h.waitFor(() => pane().original && pane().modified && sameJson(tinted(pane().original, CHANGED), want) && sameJson(tinted(pane().modified, CHANGED), want), { timeout: 8000 })
     await h.idle()
@@ -282,6 +285,64 @@ scenario('p4-compare', { timeout: 420 }, async (h) => {
     await h.waitFor(() => textOf(h, current) === CURRENT_TEXT, { timeout: 8000 })
     h.check('Cmd+Z takes the typing back: the current document is as it was, and not marked as changed', textOf(h, current) === CURRENT_TEXT && ctx.docs.get(current)?.dirty !== true, textOf(h, current).split('\n').slice(-3))
     await waitBlocks([5])
+  })
+
+  // The typing helpers of `hookTyping` (T034): `AlignedDiff.svelte` hooks each pane for the document it shows. The first
+  // step above is the capitals; this one is the guard that keeps two blocks from running together, and the capitals in
+  // the other pane, which belongs to the original document and has to follow *its* setting, not the compared one's.
+  await guard(h, 'D6. the line-join guard and the capitals in both panes', async () => {
+    await waitBlocks([5])
+    const joined = (/** @type {any} */ editor) => editor.getModel().getValue(1)
+    const press = async (/** @type {string} */ key) => {
+      await h.nativeKeys([{ key }])
+      await h.idle()
+    }
+    const clearStatus = () => h.q('status-message')?.textContent ?? ''
+    // The current document's pane: Backspace in column 1 of line 3 would join "N20 T1 M6" to the line above it.
+    {
+      const { modified: m } = pane()
+      m.focus()
+      m.setPosition({ lineNumber: 3, column: 1 })
+      await h.idle()
+      h.check('the keyboard is in the current document\'s pane', !!h.q('aligned-pane-modified')?.contains(document.activeElement), document.activeElement?.className)
+      await press('Backspace')
+      h.check('Backspace at the start of a block is refused in the current document\'s pane, and the status bar says why', joined(m) === CURRENT_TEXT && textOf(h, current) === CURRENT_TEXT && message(h) === ctx.t('typing.noJoin'), { status: message(h), changed: joined(m) !== CURRENT_TEXT })
+      m.setPosition({ lineNumber: 2, column: CURRENT[1].length + 1 })
+      await h.idle()
+      await press('Delete')
+      h.check('Delete at the end of a block is refused too', joined(m) === CURRENT_TEXT && textOf(h, current) === CURRENT_TEXT, { changed: joined(m) !== CURRENT_TEXT })
+      m.setPosition({ lineNumber: 3, column: 3 })
+      await h.idle()
+      await press('Backspace')
+      h.check('Backspace inside a block still deletes a character (the guard is for joins only): N20 loses its 2', textOf(h, current).split('\n')[2] === 'N0 T1 M6', textOf(h, current).split('\n')[2])
+      await undoKey(h)
+      await h.waitFor(() => textOf(h, current) === CURRENT_TEXT, { timeout: 8000 })
+      h.check('and one Cmd+Z puts it back', textOf(h, current) === CURRENT_TEXT && ctx.docs.get(current)?.dirty !== true)
+    }
+    // The original's pane belongs to an open document, so it is hooked for that one.
+    {
+      await waitBlocks([5])
+      const { original: o } = pane()
+      o.focus()
+      o.setPosition({ lineNumber: 3, column: 1 })
+      await h.idle()
+      h.check('the keyboard is in the original\'s pane', !!h.q('aligned-pane-original')?.contains(document.activeElement), document.activeElement?.className)
+      await press('Backspace')
+      h.check('Backspace at the start of a block is refused in the original\'s pane too', joined(o) === ORIGINAL_TEXT && textOf(h, original) === ORIGINAL_TEXT && message(h) === ctx.t('typing.noJoin'), { status: message(h), changed: joined(o) !== ORIGINAL_TEXT })
+      // Capitals follow the document the pane shows: the original is a Fanuc program as well, so `g1x10` reads `G1X10` there.
+      const last = o.getModel().getLineCount()
+      o.setPosition({ lineNumber: last, column: 1 })
+      await h.idle()
+      await h.nativeType('g1x10')
+      await h.waitFor(() => textOf(h, original).split('\n').some((l) => l.toLowerCase() === 'g1x10'), { timeout: 8000 })
+      await h.idle()
+      const typed = textOf(h, original).split('\n')[last - 1]
+      h.check('g1x10 typed into the original\'s pane reads G1X10 in the original document, and the current document is not touched', typed === 'G1X10' && textOf(h, current) === CURRENT_TEXT, { typed, status: clearStatus() })
+      for (let i = 0; i < 12 && textOf(h, original) !== ORIGINAL_TEXT; i++) await undoKey(h)
+      await h.waitFor(() => textOf(h, original) === ORIGINAL_TEXT, { timeout: 8000 })
+      h.check('Cmd+Z takes the typing back: the original is as it was, and not marked as changed', textOf(h, original) === ORIGINAL_TEXT && ctx.docs.get(original)?.dirty !== true, textOf(h, original).split('\n').slice(-3))
+      await waitBlocks([5])
+    }
   })
 
   // ============================================================ E. closing

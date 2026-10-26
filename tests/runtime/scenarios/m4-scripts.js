@@ -29,15 +29,17 @@ import { scenario } from '../lib/index.js'
 import { configPaths } from './m2-common.js'
 import { context, ready } from './m4-common.js'
 
-/** The scripts `src-tauri/resources/scripts` ships, sorted (M10 added three, P4a added mirror, rotate and translate). */
+/** The scripts `src-tauri/resources/scripts` ships, sorted (M10 added three, P4a added mirror, rotate and translate, P4b expand_cycles and time_estimate). */
 const BUNDLED = [
   'bundled:address_arithmetic.py',
+  'bundled:expand_cycles.py',
   'bundled:extents.py',
   'bundled:mirror.py',
   'bundled:program_checks.py',
   'bundled:rotate.py',
   'bundled:scale_feed.py',
   'bundled:scale_speed.py',
+  'bundled:time_estimate.py',
   'bundled:tool_list.py',
   'bundled:translate.py',
 ]
@@ -134,7 +136,7 @@ scenario('m4-scripts-backend', { timeout: 420 }, async (h) => {
   /** @type {any[]} */
   const scripts = list.ok ? list.value.scripts : []
   const bundled = scripts.filter((s) => s.root === 'bundled').map((s) => s.id).sort()
-  h.check('the nine bundled scripts (the three of Phase 1, address arithmetic, extents and program checks from M10, translate, rotate and mirror from P4a) are listed and nothing else is bundled', JSON.stringify(bundled) === JSON.stringify(BUNDLED), bundled)
+  h.check('the eleven bundled scripts (the three of Phase 1, address arithmetic, extents and program checks from M10, translate, rotate and mirror from P4a, expand cycles and time estimate from P4b) are listed and nothing else is bundled', JSON.stringify(bundled) === JSON.stringify(BUNDLED), bundled)
   h.check('the library module is not offered as a script', !scripts.some((s) => s.id.includes('gedit_nc')), scripts.map((s) => s.id))
   h.check(
     'every bundled header parsed, with no warning, and none of them is editable',
@@ -222,7 +224,7 @@ scenario('m4-scripts-backend', { timeout: 420 }, async (h) => {
     ok: timedOut.ok,
     value: timedOut.ok ? { timedOut: timedOut.value.timedOut, success: timedOut.value.success, code: timedOut.value.exitCode, cancelled: timedOut.value.cancelled } : timedOut,
   })
-  h.check('it is killed at the deadline rather than run to the end', tookMs < 10000 && timedOut.ok && timedOut.value.durationMs >= 900, { tookMs, durationMs: timedOut.ok ? timedOut.value.durationMs : null })
+  h.checkTime('it is killed at the deadline rather than run to the end', tookMs, 10000, { durationMs: timedOut.ok ? timedOut.value.durationMs : null }, { strict: true, also: timedOut.ok && timedOut.value.durationMs >= 900 })
   h.check('what it printed before the deadline is still reported', timedOut.ok && timedOut.value.stderr.includes('sleeping'), timedOut.ok ? timedOut.value.stderr.slice(0, 200) : null)
   h.check('the script did not finish, so nothing it prints at the end came back', timedOut.ok && !timedOut.value.stdout.includes('not stopped'), timedOut.ok ? timedOut.value.stdout.slice(0, 200) : null)
 

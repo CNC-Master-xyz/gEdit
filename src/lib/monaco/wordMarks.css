@@ -13,11 +13,22 @@
    `gedit-word-line` is laid over a whole line that has word marks. It makes Monaco's own
    character marks on that line (`char-insert`, `char-delete`) transparent, so the two kinds
    of mark never stack; a line pair without word marks keeps Monaco's. The compound
-   selector is more specific than Monaco's own, and no `!important` is needed. */
+   selector is more specific than Monaco's own, and no `!important` is needed.
+
+   `gedit-word-part` (review NC-8) lies over the parts that differ inside a long marked word
+   (a cycle call, an expression, a comment): the same tint, framed by a line above and a
+   thicker line under, so the changed argument stands out from the rest of the word. Only
+   lines, no darker tint: the syntax colours read on it as on the word. */
 
 .monaco-editor .gedit-word-changed {
   background-color: color-mix(in srgb, var(--warning) 10%, transparent);
   box-shadow: inset 0 -1px 0 0 var(--warning);
+}
+
+.monaco-editor .gedit-word-changed.gedit-word-part {
+  box-shadow:
+    inset 0 -2px 0 0 var(--warning),
+    inset 0 1px 0 0 var(--warning);
 }
 
 .monaco-editor .gedit-word-line.char-insert,

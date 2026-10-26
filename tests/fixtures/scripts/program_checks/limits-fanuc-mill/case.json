@@ -1,0 +1,9 @@
+{
+  "profile": "fanuc-gcode",
+  "machineName": "Mill 1",
+  "limits": {
+    "units": "mm",
+    "spindle": { "main": 10000 },
+    "travel": { "X": { "min": -800, "max": 0 }, "Y": { "min": -500, "max": 0 }, "Z": { "min": -600, "max": 0 } }
+  }
+}

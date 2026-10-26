@@ -289,8 +289,8 @@ scenario('p3-inspector', { timeout: 600 }, async (h) => {
 
   await inspectLine(h, probe.id, 2)
   const x50 = wordRow(h, 'X', 2, 'X50')
-  h.check('no machine: the row of X50 lists three readings and cannot be edited', !!x50 && x50.readings === 3 && !x50.editable && x50.value === '', x50 && { readings: x50.readings, editable: x50.editable, value: x50.value })
-  h.check('the assumed default comes first: 50 mm as written (the profile default), then 0.05 mm (IS-B) and 0.005 mm (IS-C)', !!x50 && x50.readingLines.length === 3 && /: 50 mm$/.test(x50.readingLines[0]) && /^Increments of 0\.001 mm \(IS-B\).*: 0\.05 mm$/.test(x50.readingLines[1]) && /^Increments of 0\.0001 mm \(IS-C\).*: 0\.005 mm$/.test(x50.readingLines[2]), x50?.readingLines)
+  h.check('no machine: the row of X50 lists four readings (T083 added IS-A) and cannot be edited', !!x50 && x50.readings === 4 && !x50.editable && x50.value === '', x50 && { readings: x50.readings, editable: x50.editable, value: x50.value })
+  h.check('the assumed default comes first: 50 mm as written (the profile default), then 0.5 mm (IS-A, T083), 0.05 mm (IS-B) and 0.005 mm (IS-C)', !!x50 && x50.readingLines.length === 4 && /: 50 mm$/.test(x50.readingLines[0]) && /^Increments of 0\.01 mm \(IS-A\).*: 0\.5 mm$/.test(x50.readingLines[1]) && /^Increments of 0\.001 mm \(IS-B\).*: 0\.05 mm$/.test(x50.readingLines[2]) && /^Increments of 0\.0001 mm \(IS-C\).*: 0\.005 mm$/.test(x50.readingLines[3]), x50?.readingLines)
   h.check('and the heading of the list says the value depends on the machine', !!x50 && x50.text.includes(ctx.t('inspector.panel.readingsHeading')), x50?.text)
   const z1000 = wordRow(h, 'Z', 2, 'Z1000')
   h.check('Z1000 is refused for the same reason: not editable, its tooltip says choose a machine', !!z1000 && !z1000.editable && z1000.element.getAttribute('title') === ctx.t('inspector.why.needsMachine'), z1000?.element.getAttribute('title'))

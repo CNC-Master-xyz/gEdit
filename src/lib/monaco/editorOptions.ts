@@ -65,6 +65,8 @@ function typedEditorOptions(s: Settings): EditorOptions {
     rulers: [...s['editor.rulers']],
     hover: { enabled: s['assist.hover'] },
     ...completionOptions(s['assist.completion']),
+    // T214: an NC block ends with Enter, so a suggestion is taken with Tab unless asked.
+    acceptSuggestionOnEnter: s['assist.acceptOnEnter'] ? 'on' : 'off',
   };
 }
 

@@ -534,7 +534,7 @@ describe('the script runner', () => {
         cursor: () => ({ line: 1, column: 1, selectedChars: 0, selections: 1 }),
         versionId: () => 1,
       },
-      machines: { effective: effectiveOf(docs) },
+      machines: { effective: effectiveOf(docs), get: () => undefined },
       modals: { form: (request) => Promise.resolve(request.values) },
       dialogs: { confirm: () => Promise.resolve(false), whenFree: (op) => op() },
       status: { show: (text, o) => seen.status.push({ text, error: o?.error === true }) },

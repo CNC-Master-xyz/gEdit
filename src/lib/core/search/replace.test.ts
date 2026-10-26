@@ -8,8 +8,8 @@ import { compileProfile } from '$lib/core/profiles/compile';
 import type { Profile } from '$lib/core/profiles/types';
 import fanucJson from '$lib/data/profiles/fanuc-gcode.json';
 import type { TransformContext } from '$lib/core/transforms/types';
-import { hasKey } from '$lib/i18n';
-import { flagsOf, replace, searchFields } from './replace';
+import { hasKey, t } from '$lib/i18n';
+import { flagsOf, replace, searchFields, searchLive } from './replace';
 
 const fanuc = compileProfile(fanucJson as unknown as Profile);
 const NO_CODES: CodeDb = { dialect: 'test', version: 1, addresses: {}, codes: [] };
@@ -63,5 +63,34 @@ describe('the replace transform', () => {
   it('has a message for its title', () => {
     expect(hasKey(replace.title)).toBe(true);
     expect(flagsOf({ regex: true })).toEqual({ wholeAddress: false, regex: true, caseSensitive: false, inComments: false });
+  });
+});
+
+// T226 (M11 CODE-2): "Also in comments" is for text searches only, and the form says so by
+// greying the field while "Whole address" is ticked.
+describe('searchLive', () => {
+  it('greys out Also in comments, and says why, while Whole address is ticked', () => {
+    const answer = searchLive({ query: 'G1', wholeAddress: true, inComments: true });
+    expect(answer.readOnly).toEqual(['inComments']);
+    expect(answer.help?.inComments).toBe(t('search.inCommentsWord'));
+    expect(answer.help?.inComments).toMatch(/Whole address/);
+  });
+
+  it('leaves the field alone for a text search', () => {
+    expect(searchLive({ wholeAddress: false, inComments: true })).toEqual({});
+    expect(searchLive({})).toEqual({});
+  });
+
+  it('names a field the form has', () => {
+    const ids = searchFields().map((f) => f.id);
+    for (const id of searchLive({ wholeAddress: true }).readOnly ?? []) expect(ids).toContain(id);
+  });
+
+  it('does not let a ticked Also in comments change a word search', () => {
+    const lines = ['G1 X1', 'X2 (G1 NOTE)'];
+    const run = (inComments: boolean) =>
+      replace.run(lines, context({ query: 'G1', replacement: 'G2', wholeAddress: true, inComments }));
+    expect(run(true).lines).toEqual(['G2 X1', 'X2 (G1 NOTE)']);
+    expect(run(true).lines).toEqual(run(false).lines);
   });
 });

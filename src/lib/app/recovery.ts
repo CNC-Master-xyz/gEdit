@@ -84,6 +84,23 @@ import type {
 export const SNAPSHOT_INTERVAL_MS = 30_000;
 
 /**
+ * How much earlier than a whole period a tick may be measured and still count as due
+ * (T175). The ticker runs on a fixed grid, but the throttle compares two readings of
+ * the wall clock taken *after* an idle callback, and each carries its own delay: a
+ * pass held up by a long task and the next one on time are 29.96 s apart, and a
+ * `setInterval` that runs on the monotonic clock can read a millisecond short. Without
+ * a margin such a tick was skipped and the next write waited for the tick after it, so
+ * a crash cost up to ~60 s of typing instead of 30.
+ *
+ * The ticker is the only scheduled trigger and fires once per period, so the margin
+ * cannot add writes; it only stops a jittery tick from being thrown away. One tenth of
+ * a period is far above any realistic idle delay and far below a second trigger.
+ */
+function throttleMargin(intervalMs: number): number {
+  return Math.floor(intervalMs / 10);
+}
+
+/**
  * What a restore of one snapshot is going to do. The dialog shows it per row, before
  * anything is opened, because most of them are surprises if they are not said out loud
  * — above all `changed`, where the file the text came from is not the file that is on
@@ -261,7 +278,11 @@ export function createRecoveryService(deps: RecoveryDeps): RecoveryService {
     if (last.version === deps.editor.versionId(doc.id)) return false;
     // `ticked`, not `at`: a forced write does not spend this document's turn on the
     // ticker. See [`Taken.ticked`].
-    return force || last.ticked === null || now - last.ticked >= deps.intervalMs;
+    return (
+      force ||
+      last.ticked === null ||
+      now - last.ticked >= deps.intervalMs - throttleMargin(deps.intervalMs)
+    );
   }
 
   function metaOf(doc: DocMeta, now: number): RecoveryMeta {

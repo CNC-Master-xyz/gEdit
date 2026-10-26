@@ -9,7 +9,8 @@
 //      in force (`G91 X10.` is incremental, `G99 F.2` a feed per revolution), the way the
 //      Python scripts read it (`update`, then the state).
 //   2. Its class is `numberClassOf` (AD-31) with the block's entries, the codes in force
-//      (`after.activeCycle`, the cycle the block calls, the motion code: `inForce`) and the
+//      (`after.activeCycle`, the cycle the block calls, the motion code, a pitch-feed mode, a
+//      mode that redefines the arc-centre words such as `G43.5`: `inForce`) and the
 //      pitch of the block or of the active cycle; its value is `resolveValue` with the
 //      document's effective machine and the profile's `machineParams` declaration, so with no
 //      machine and a reading that depends on one there is no value but the list of readings,
@@ -40,7 +41,7 @@ import type { EffectiveMachine, ParamSource, Reading, ResolvedClass } from '$lib
 import type { ModalState, ModalValue, NcToken } from '$lib/core/nc/types';
 import type { Profile } from '$lib/core/profiles/types';
 import { axisWordsOf, isAssignmentWord, lookupCode } from './lookup';
-import type { CodeDb, CodeEntry, CodeParam } from './types';
+import type { CodeDb, CodeEntry, CodeLookup, CodeParam } from './types';
 
 /** What `readWord` answers for a word with an address. */
 export interface WordReading {
@@ -154,15 +155,28 @@ export function blockEntries(tokens: readonly NcToken[], db: CodeDb): CodeEntry[
 
 /**
  * The entries of the codes in force that the block does not write (rule 2): the modal cycle,
- * the cycle the block calls (a defined cycle), the motion code, and a pitch-feed mode of any
+ * the cycle the block calls (a defined cycle), the motion code, a pitch-feed mode of any
  * other group (Fanuc `G63`, the tapping mode, in force until `G64`: `pitchFeed` on a modal
  * code outside the cycle and motion groups), which the Python scripts read off the groups
- * as `FeedModeTracker.pitch_mode` and hand to `number_class_of` the same way.
+ * as `FeedModeTracker.pitch_mode` and hand to `number_class_of` the same way, and (T120) a
+ * mode that gives the arc-centre words a meaning of its own (`redefinesArcCentre`). Such a
+ * mode lends the block those words only (FB-2, `arcCentreEntry`): the `Q` angle of `G43.5`
+ * does not reach a block under a modal `G83`, whose `Q` stays a length. The Python scripts
+ * read the same through `gedit_nc.arc_centre_modes`.
+ *
+ * `profile` names the arc-centre words for that last rule; `null` leaves it out, for a caller
+ * that only looks for the owner of a feed word (`feedUnitSource`), which it never names.
  */
-export function inForceEntries(after: ModalState, blockCodes: readonly CodeEntry[], db: CodeDb): CodeEntry[] {
+export function inForceEntries(
+  after: ModalState,
+  blockCodes: readonly CodeEntry[],
+  db: CodeDb,
+  profile: Profile | null,
+): CodeEntry[] {
   const out: CodeEntry[] = [];
-  const add = (entry: CodeEntry | null | undefined): void => {
-    if (entry && !blockCodes.includes(entry) && !out.includes(entry)) out.push(entry);
+  // `lent` is what the code gives the block: the entry itself, or a part of it.
+  const add = (entry: CodeEntry | null | undefined, lent: CodeEntry | null | undefined = entry): void => {
+    if (entry && lent && !blockCodes.includes(entry) && !out.includes(lent)) out.push(lent);
   };
   for (const code of [after.activeCycle?.code, after.block.cycle, after.groups.motion?.code]) {
     if (typeof code !== 'string' || code === '') continue;
@@ -171,9 +185,67 @@ export function inForceEntries(after: ModalState, blockCodes: readonly CodeEntry
   for (const [group, value] of Object.entries(after.groups)) {
     if (group === 'cycle' || group === 'motion' || typeof value?.code !== 'string' || value.code === '') continue;
     const entry = lookupCode(db, value.code);
-    if (entry?.pitchFeed === true && entry.modal === true) add(entry);
+    if (entry?.modal !== true) continue;
+    if (entry.pitchFeed === true) add(entry);
+    else if (profile !== null) add(entry, arcCentreEntry(entry, profile));
   }
   return out;
+}
+
+/**
+ * T120: a modal code that declares one of the profile's arc-centre words (`addresses.arcCenter`)
+ * as a parameter of its own gives that word its meaning for as long as it is in force, in the
+ * blocks after it too. Fanuc `G41.6`, `G42.6` and `G43.5` are such codes: in the blocks they
+ * govern, `I`, `J` and `K` are the tool direction, and read by the block's own codes alone they
+ * were called arc centres. A code of the cycle or motion group is not asked here (rule 2 reads
+ * those already), and no code is named: the database says which codes declare the words.
+ */
+export function redefinesArcCentre(entry: CodeEntry, profile: Profile): boolean {
+  return arcCentreEntry(entry, profile) !== null;
+}
+
+const LENT = new WeakMap<CodeEntry, Map<string, CodeEntry | null>>();
+
+/**
+ * FB-2 (WX-NC-6): what a mode in force that redefines the arc-centre words lends a block it
+ * does not write — a copy of `entry` that keeps only the parameters written with one of the
+ * profile's `addresses.arcCenter`, or null when it declares none of them. Its other
+ * parameters stay its own: under `G43.5` and a modal `G83`, the `Q` of the cycle is a length
+ * and not the angle `G43.5` declares, and the two never disagree (T212). The same copy every
+ * time for the same entry. The Python twin is `_nc_machine.arc_centre_entry`.
+ */
+export function arcCentreEntry(entry: CodeEntry, profile: Profile): CodeEntry | null {
+  const centres = listOf(profile.addresses?.arcCenter);
+  if (centres.length === 0) return null;
+  const key = centres.join(',');
+  let perEntry = LENT.get(entry);
+  if (perEntry?.has(key)) return perEntry.get(key) ?? null;
+  const params = (Array.isArray(entry.params) ? entry.params : []).filter((param) => centres.includes(upper(param?.address)));
+  const lent: CodeEntry | null =
+    params.length > 0
+      ? { code: entry.code, label: entry.label, ...(entry.group !== undefined ? { group: entry.group } : {}), modal: true, params }
+      : null;
+  if (!perEntry) {
+    perEntry = new Map();
+    LENT.set(entry, perEntry);
+  }
+  perEntry.set(key, lent);
+  return lent;
+}
+
+/**
+ * The entry of a word written with `=` under a name the database describes as an entry of
+ * its own, not as an address (`CTOL=0.02`, `ADIS=0.5`, `SVC=100`): the value behind the `=`
+ * is data, so the entry is the name's whatever value follows. The hover is headed by it and
+ * (T138) the inspector's row says what it is by it. Null for every other token, for an indexed
+ * word (`S[2]=500`, read by its address) and for an entry marked for verification. `lookup`
+ * is what `lookupWord` answered for the token: a code or an address it found comes first.
+ */
+export function valueWordEntry(db: CodeDb, token: NcToken, lookup: CodeLookup | null): CodeEntry | null {
+  if (token.kind !== 'word' || token.address === undefined || token.index !== undefined) return null;
+  if (!isAssignmentWord(token) || lookup?.entry || lookup?.address) return null;
+  const entry = lookupCode(db, token.address);
+  return entry && entry.verify !== true ? entry : null;
 }
 
 /** The parameter of `entry` written with `address`, if it declares one. */
@@ -268,7 +340,7 @@ export function readWord(
   const address = upper(token.address);
 
   const blockCodes = blockEntries(blockTokens, db);
-  const inForce = inForceEntries(after, blockCodes, db);
+  const inForce = inForceEntries(after, blockCodes, db, profile);
   const pitchFeed = after.block.pitchFeed === true || after.activeCycle?.pitchFeed === true;
   const feedWord = isFeedWord(profile, address);
 
@@ -342,7 +414,8 @@ export function feedUnitSource(
     if (CLASS_OF_FEED_UNIT[unit] === cls) return value;
     break; // the feed-unit group says something else: never name it for this class
   }
-  const owner = [...blockCodes, ...inForceEntries(after, blockCodes, db)].find((entry) => paramOf(entry, address)?.unit === cls);
+  // A feed class is never what a mode of the arc-centre words declares, so that rule is left out.
+  const owner = [...blockCodes, ...inForceEntries(after, blockCodes, db, null)].find((entry) => paramOf(entry, address)?.unit === cls);
   if (!owner) return null;
   for (const value of Object.values(after.groups)) {
     if (value && typeof value.code === 'string' && lookupCode(db, value.code) === owner) return value;

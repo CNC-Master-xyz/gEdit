@@ -33,13 +33,16 @@
 import { maskComments } from '$lib/core/nc/mask';
 import { tokenizeLine } from '$lib/core/nc/tokenizer';
 import { renumber } from '$lib/core/transforms/renumber';
-import { labelsOf, referenceAddresses, referencesOn } from '$lib/core/transforms/references';
+import { labelsOf, referenceAddresses, referencesOn, scanProgram } from '$lib/core/transforms/references';
+import { indexPrograms, targetProgramOf } from '$lib/core/transforms/programs';
+import type { ProgramIndex, TargetRefusal } from '$lib/core/transforms/programs';
+import type { ProgramScan } from '$lib/core/transforms/references';
 import { MAX_SNIFF_LINES, VARIANT_MARGIN } from '$lib/core/profiles/detect';
 import type { DetectResult } from '$lib/core/profiles/detect';
 import type { CodeDb } from '$lib/core/codes/types';
 import type { EffectiveMachine } from '$lib/core/machines/types';
 import type { LineState } from '$lib/core/nc/types';
-import type { CompiledProfile, OutlineKind, VariantDecl } from '$lib/core/profiles/types';
+import type { CompiledProfile, OutlineKind, ReferenceProgram, VariantDecl } from '$lib/core/profiles/types';
 
 /** A single rule that needs longer than this on one line is reported (milliseconds). */
 export const SLOW_MS = 50;
@@ -96,8 +99,19 @@ export interface TestRow {
   outlineKind?: OutlineKind;
   /** `reference`: the block number the word names, or null where it is not a plain number. */
   target?: number | null;
-  /** `reference`: whether a renumber is allowed to rewrite it. */
+  /**
+   * `reference`: whether a renumber rewrites it — the rule allows it, the block carries the
+   * address once, and (P4d, plan §6.6 rule 10) the program it names a block of is found.
+   */
   rewrite?: boolean;
+  /**
+   * `reference` (P4d, §6.6 rule 8): which program's block the value names — the program it
+   * stands in (`own`), the one its line calls (`called`), the one that calls its program
+   * (`caller`).
+   */
+  program?: ReferenceProgram;
+  /** `reference` (P4d, §6.6 rule 10): why the program it names a block of cannot be told. */
+  refused?: TargetRefusal;
   /** `numbering`: the reason, already translated by the renumber transform. */
   message?: string;
   /** `variant`, `variantResult`: which variant and which of its choices. */
@@ -211,6 +225,25 @@ function variantRulesOf(cp: CompiledProfile): { decls: VariantDecl[]; rules: Var
   return { decls, rules };
 }
 
+/**
+ * The programs of the text and the calls between them, for the references that name a block
+ * of another program (P4d, §6.6 rule 10): read only when a rule names one, the way the
+ * renumber transform reads them.
+ */
+function programsOf(input: TestReportInput, lines: readonly string[]): { scan: ProgramScan; index: ProgramIndex } | null {
+  const rules = input.cp.profile.numbering?.references ?? [];
+  if (!rules.some((rule) => rule?.program === 'called' || rule?.program === 'caller')) return null;
+  const scan = scanProgram(lines, {
+    cp: input.cp,
+    codes: input.codes,
+    machine: input.machine,
+    options: {},
+    firstLine: 1,
+    document: lines,
+  });
+  return { scan, index: indexPrograms(scan, input.cp) };
+}
+
 /** The renumber transform's skipped lines under the profile's defaults, or none where it cannot run. */
 function numberingSkips(input: TestReportInput, lines: readonly string[]): { line: number; message: string }[] {
   try {
@@ -299,6 +332,7 @@ function* reportSteps(input: TestReportInput): Generator<void, TestReport> {
   const references = cp.re.references.length > 0;
   const addresses = references ? referenceAddresses(cp) : null;
   const labels = references ? labelsOf(lines, cp) : undefined;
+  const programs = references ? programsOf(input, lines) : null;
   let state: LineState | undefined;
 
   for (let i = 0; i < lines.length; i++) {
@@ -383,8 +417,10 @@ function* reportSteps(input: TestReportInput): Generator<void, TestReport> {
       if (trigger !== null && ignore) {
         [ignoredBy, ignoreMs] = timed(timer, lineNo, ignore.source, 'toolCall', () => ignore.exec(masked));
       }
-      const isTool = trigger !== null && ignoredBy === null;
-      const fromLast = cp.profile.toolCall?.toolFrom === 'same-line-or-last';
+      // D3-4c: under `last-before` the ignore rule does not stop a tool line (its `T` unloads).
+      const isTool = trigger !== null && (ignoredBy === null || cp.profile.toolCall?.toolFrom === 'last-before');
+      // D3-4c: `last-before` reads every line's `T` word too (the tool line loads the one before it).
+      const fromLast = cp.profile.toolCall?.toolFrom === 'same-line-or-last' || cp.profile.toolCall?.toolFrom === 'last-before';
       let toolMatch: RegExpExecArray | null = null;
       let toolMs = 0;
       if (isTool || fromLast) {
@@ -399,9 +435,9 @@ function* reportSteps(input: TestReportInput): Generator<void, TestReport> {
           rule: cp.re.toolTrigger.source,
           captured: trigger[0].trim(),
           ms: triggerMs + ignoreMs + toolMs,
-          outcome: ignoredBy === null ? 'tool-change' : 'ignored',
+          outcome: isTool ? 'tool-change' : 'ignored',
           tool,
-          ...(ignoredBy === null ? {} : { ignoredBy: ignoredBy[0].trim() }),
+          ...(isTool || ignoredBy === null ? {} : { ignoredBy: ignoredBy[0].trim() }),
         });
       } else if (toolMatch !== null && tool !== null) {
         push({
@@ -451,6 +487,10 @@ function* reportSteps(input: TestReportInput): Generator<void, TestReport> {
     if (tokens && addresses) {
       for (const word of referencesOn(tokens.tokens, line, cp, addresses, labels)) {
         const fired = cp.re.references.find((rule) => rule.addresses.includes(word.address) && rule.trigger.test(masked));
+        // P4d (§6.6 rule 10): a value that names a block of another program is rewritten only
+        // where that program is found, so the row says what a renumber of this text does.
+        const target = programs === null || word.program === 'own' ? null : targetProgramOf(programs.scan, programs.index, i, word);
+        const refused = target !== null && 'refused' in target ? target.refused : undefined;
         push({
           line: lineNo,
           kind: 'reference',
@@ -458,7 +498,9 @@ function* reportSteps(input: TestReportInput): Generator<void, TestReport> {
           captured: `${word.address}${word.text}`,
           ms: null,
           target: word.target,
-          rewrite: word.rewrite && !word.ambiguous,
+          rewrite: word.rewrite && !word.ambiguous && refused === undefined,
+          program: word.program,
+          ...(refused === undefined ? {} : { refused }),
         });
       }
     }

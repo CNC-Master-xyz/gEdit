@@ -478,7 +478,10 @@ describe('variant detection', () => {
   );
 
   it('answers nothing for a profile that declares no variant', () => {
-    expect(detectVariants(BUILTINS[0], 'G98 G83 X1.\n')).toEqual({});
+    // Klartext declares none (the mill has one since D3-4c).
+    const klartext = BUILTINS.find((cp) => cp.profile.id === 'heidenhain-klartext');
+    expect(klartext).toBeDefined();
+    expect(detectVariants(klartext!, 'G98 G83 X1.\n')).toEqual({});
   });
 
   it('gives the winner and its margin over the runner-up', () => {

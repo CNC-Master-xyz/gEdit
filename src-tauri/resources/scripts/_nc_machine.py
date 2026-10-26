@@ -171,6 +171,7 @@ def machine_params(ctx: Dict[str, Any]) -> Dict[str, Any]:
 # The class order of `number_class_of` is fixed by AD-31 and the first match wins:
 #   1. the `unit` of a `CodeParam` of a code in this block (`increment`, `count`, or a
 #      class named outright) — the table in §8.2 is the one place these are written down;
+#      codes that declare the word with different units give it no class (T212);
 #      then (M9) the same of a code **in force** (`in_force`: the modal cycle, the motion
 #      code, a mode such as `G63`). A thread lead is declared this way (`F` with `unit:
 #      'feedPerRev'`), and so is the per-minute feed of Okuma `G101`-`G103`;
@@ -356,22 +357,35 @@ def _feed_class_of(unit: Any) -> Optional[str]:
     return None
 
 
-def _declared_unit(codes: "Sequence[Dict[str, Any]]", word: str) -> Optional[str]:
-    """The ``unit`` one of ``codes`` declares for ``word`` among its parameters, or ``None``.
+#: Two codes of one block (or two codes in force) declare one address with different units.
+_CONFLICT = object()
+
+
+def _declared_unit(codes: "Sequence[Dict[str, Any]]", word: str) -> Any:
+    """The ``unit`` ``codes`` declare for ``word`` among their parameters.
+
+    ``None`` when none does, ``_CONFLICT`` when two of them say different things. The answer
+    does not depend on the order of ``codes`` (T212): with the first declaration winning, a
+    block with two codes that declare one address with different units was read by
+    whichever the caller listed first, and M13's user databases can write such a pair.
 
     B1: a two-block cycle (``G71``, ``G76``) may declare an address once per block, with its
     own label in each; the two declarations have the same ``unit`` (the loader refuses a
-    database where they differ), so the first one answers for either block.
+    database where they differ), so they never conflict.
     """
+    found = None
     for entry in codes:
         params = entry.get("params")
         for param in params if isinstance(params, list) else []:
             if not isinstance(param, dict):
                 continue
             param_address = param.get("address")
-            if isinstance(param_address, str) and param_address.upper() == word and param.get("unit") is not None:
-                return param["unit"]
-    return None
+            if not isinstance(param_address, str) or param_address.upper() != word or param.get("unit") is None:
+                continue
+            if found is not None and found != param["unit"]:
+                return _CONFLICT
+            found = param["unit"]
+    return found
 
 
 def _has_upper(entries: Any, word: str) -> bool:
@@ -412,6 +426,9 @@ def number_class_of(
     declared = _declared_unit(codes, word)
     if declared is None:
         declared = _declared_unit(active, word)
+    if declared is _CONFLICT:
+        # codes that disagree tell nothing (T212): no class, whatever order they come in
+        return None
     if declared is not None:
         return declared
 
@@ -459,6 +476,113 @@ def number_class_of(
 
     # 7. no class
     return None
+
+
+# --- a mode that lends the arc-centre words its meaning (T120, FB-2) ----------
+#
+# Fanuc `G41.6`, `G42.6` and `G43.5` declare `I`, `J` and `K` as parameters of their own:
+# in the blocks they govern, the three words are the tool direction (a count), not an arc
+# centre, also in the blocks that do not write the code again. Such a mode is a code **in
+# force** for those words only: what it says about its other parameters (the `Q` angle of
+# `G43.5`) does not reach a block it governs, so the `Q` of a modal `G83` stays a length
+# (WX-NC-6). `wordValue.ts` (`inForceEntries`, `arcCentreEntry`) is the TypeScript twin, and
+# `tests/fixtures/machines/numbers.json` (`modes`) the golden set both sides pass.
+
+#: (id(profile)) -> (profile, the arc-centre words it names).
+_CENTRE_WORDS: Dict[int, Tuple[Any, Tuple[str, ...]]] = {}
+#: (id(entry), arc-centre words) -> (entry, the narrowed copy or ``None``): one copy per
+#: entry, so a caller that remembers classes by ``id`` sees the same entry every block.
+_LENT: Dict[Tuple[int, Tuple[str, ...]], Tuple[Any, Optional[Dict[str, Any]]]] = {}
+#: (id(the lookup's owner), code, arc-centre words) -> (owner, entry, what it lends).
+_MODES: Dict[Tuple[int, str, Tuple[str, ...]], Tuple[Any, Any, Optional[Dict[str, Any]]]] = {}
+
+
+def _arc_centre_words(profile: Any) -> Tuple[str, ...]:
+    """The profile's ``addresses.arcCenter``, upper case (remembered per profile)."""
+    hit = _CENTRE_WORDS.get(id(profile))
+    if hit is not None and hit[0] is profile:
+        return hit[1]
+    raw = _dict(_dict(profile).get("addresses")).get("arcCenter")
+    words = tuple(sorted({e.upper() for e in raw if isinstance(e, str)})) if isinstance(raw, list) else ()
+    if len(_CENTRE_WORDS) > 64:
+        _CENTRE_WORDS.clear()
+    _CENTRE_WORDS[id(profile)] = (profile, words)
+    return words
+
+
+def arc_centre_entry(entry: Any, profile: Any) -> Optional[Dict[str, Any]]:
+    """What a mode in force lends a block it does not write: a copy of ``entry`` that keeps
+    only the parameters written with one of the profile's arc-centre words, or ``None`` when
+    it declares none of them. The same copy every time it is asked for the same entry."""
+    centres = _arc_centre_words(profile)
+    if not centres or not isinstance(entry, dict):
+        return None
+    key = (id(entry), centres)
+    hit = _LENT.get(key)
+    if hit is not None and hit[0] is entry:
+        return hit[1]
+    params = [
+        p
+        for p in (entry.get("params") if isinstance(entry.get("params"), list) else [])
+        if isinstance(p, dict) and isinstance(p.get("address"), str) and p["address"].upper() in centres
+    ]
+    lent = {"code": entry.get("code"), "label": entry.get("label"), "group": entry.get("group"), "modal": True, "params": params} if params else None
+    if len(_LENT) > 4096:
+        _LENT.clear()
+    _LENT[key] = (entry, lent)
+    return lent
+
+
+def redefines_arc_centre(entry: Any, profile: Any) -> bool:
+    """Whether ``entry`` declares one of the profile's arc-centre words as its own parameter
+    (`wordValue.ts` ``redefinesArcCentre``)."""
+    return arc_centre_entry(entry, profile) is not None
+
+
+def arc_centre_modes(
+    groups: Any,
+    entry_of: Any,
+    profile: Any,
+    written: "Sequence[Any]" = (),
+) -> List[Dict[str, Any]]:
+    """The entries a block takes from the modes in force that redefine the arc-centre words.
+
+    ``groups`` is the modal state's ``groups`` (group -> ``{"code": …}``), ``entry_of`` the
+    interpreter's lookup of a code, ``written`` the entries of the codes the block writes
+    itself (a code written in the block is read whole, as one of its own). Only a modal code
+    outside the cycle and motion groups counts (those two are read as the cycle and the move
+    in force already), and each lends only its arc-centre parameters
+    (:func:`arc_centre_entry`). After the code that ends the mode (`G49`, `G40`) the group
+    names that code, and ``I``, ``J`` and ``K`` are arc centres again. Pass the answer with
+    the other entries in force to :func:`number_class_of`.
+    """
+    centres = _arc_centre_words(profile)
+    if not centres or not isinstance(groups, dict):
+        return []
+    # A long program asks on every block: what a code lends is remembered per lookup (the
+    # interpreter behind `entry_of`), so a block costs one dictionary probe per group.
+    owner = getattr(entry_of, "__self__", entry_of)
+    out: List[Dict[str, Any]] = []
+    for group, value in groups.items():
+        if group in ("cycle", "motion") or not isinstance(value, dict):
+            continue
+        code = value.get("code")
+        if not isinstance(code, str) or code == "":
+            continue
+        key = (id(owner), code, centres)
+        hit = _MODES.get(key)
+        if hit is not None and hit[0] is owner:
+            entry, lent = hit[1], hit[2]
+        else:
+            entry = entry_of(code)
+            lent = arc_centre_entry(entry, profile) if isinstance(entry, dict) and entry.get("modal") is True else None
+            if len(_MODES) > 4096:
+                _MODES.clear()
+            _MODES[key] = (owner, entry, lent)
+        if lent is None or any(entry is w for w in written) or any(lent is o for o in out):
+            continue
+        out.append(lent)
+    return out
 
 
 # --- reading a literal -------------------------------------------------------

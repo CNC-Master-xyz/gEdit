@@ -468,7 +468,8 @@ scenario('p3-templates', { timeout: 900, files: REPO_FILE }, async (h) => {
     h.click(h.q('cmd-button', { command: 'insert.template:program-start' }))
     await waitForm(h)
     let state = formNow(h)
-    h.check('the Machining choice of the shared Sinumerik Program start has no default: nothing is chosen, the field is marked, OK is off', setup.default === undefined && state.fields.get('setup')?.error !== '' && state.okDisabled && state.previewError !== '', { error: state.fields.get('setup')?.error, shown: state.fields.get('setup')?.value, ok: state.okDisabled })
+    // v1.2.0 T147: a field nobody has touched yet is not marked; OK stays off and the preview asks for the required fields.
+    h.check('the Machining choice of the shared Sinumerik Program start has no default: nothing is chosen, the field is not marked yet, OK is off and the preview asks for the required fields', setup.default === undefined && state.fields.get('setup')?.error === '' && state.okDisabled && state.previewError !== '' && state.preview === ctx.t('forms.previewRequired'), { error: state.fields.get('setup')?.error, shown: state.fields.get('setup')?.value, ok: state.okDisabled, preview: state.preview })
     await typeInField(h, 'setup', setup.choices[0].label)
     state = formNow(h)
     h.check('after the turning line is picked the live text is the golden (G18 G90 G95 DIAMON) and OK is on', state.preview === g.expected && !state.okDisabled, { preview: state.preview, want: g.expected })

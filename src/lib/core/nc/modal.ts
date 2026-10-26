@@ -4,7 +4,7 @@
 // What it does, in one paragraph: it reads the same state out of a program as the Python
 // interpreter (`src-tauri/resources/scripts/_nc_modal.py`), rule for rule (AD-19 rules 1-12,
 // the defined cycle of §7.4 and rule 11b, the cycle a word in front of it makes modal
-// (Sinumerik `MCALL`), rules 13-15, the speed-limit bound, indexed assignment words,
+// (Sinumerik `MCALL`), rules 13-17, the speed-limit bound, indexed assignment words,
 // the main spindle by number), driven by the **effective** compiled profile and code
 // database it is given and by no dialect name. The oracle is `tests/fixtures/modal/**`, every
 // golden unchanged (`modal.golden.test.ts`), and the per-line parity check
@@ -140,6 +140,62 @@ function identityOf(entry: CodeEntry): number {
   return 0;
 }
 
+/** `_PLAIN_NUMBER`: a number written plainly, a sign, digits and a point (no variable, no exponent). */
+const PLAIN_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+
+/** `_split_call_args` (D6-5): the arguments of a call as written, stripped; commas inside quotes or brackets do not split. */
+function splitCallArgs(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quoted = false;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') quoted = !quoted;
+    else if (quoted) continue;
+    else if (ch === '(' || ch === '[') depth++;
+    else if (ch === ')' || ch === ']') depth--;
+    else if (ch === ',' && depth === 0) {
+      out.push(text.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  out.push(text.slice(start).trim());
+  return out;
+}
+
+/** `_arg_reads_none` (D6-5): an argument written at the value at which it reads as no frame. */
+function argReadsNone(value: string, kind: 'zero' | 'onesDigit'): boolean {
+  if (!PLAIN_NUMBER.test(value)) return false;
+  if (kind === 'zero') return Number(value) === 0;
+  const unsigned = value.replace(/^[+-]/, '');
+  const dot = unsigned.indexOf('.');
+  const whole = dot >= 0 ? unsigned.slice(0, dot) : unsigned;
+  const fraction = dot >= 0 ? unsigned.slice(dot + 1) : '';
+  if (/[^0]/.test(fraction) || whole === '') return false;
+  return whole[whole.length - 1] === '0';
+}
+
+/** `_zero_args_of` / `_close_args_of` (D6-5): the call arguments, by place, with `frameZero` / `frameCloses`. */
+function zeroArgsOf(entry: CodeEntry): [number, 'zero' | 'onesDigit'][] {
+  return (entry.params ?? []).flatMap((p, i) => (p.frameZero === 'zero' || p.frameZero === 'onesDigit' ? [[i, p.frameZero] as [number, 'zero' | 'onesDigit']] : []));
+}
+function closeArgsOf(entry: CodeEntry): [number, string][] {
+  return (entry.params ?? []).flatMap((p, i) => (typeof p.frameCloses === 'string' && p.frameCloses !== '' ? [[i, p.frameCloses] as [number, string]] : []));
+}
+
+/** `zero_call_closes` (D6-5, the call twin of M10-2): the call's arguments read as no frame. */
+export function zeroCallCloses(entry: CodeEntry, argsText: string | undefined): boolean {
+  if (argsText === undefined) return false;
+  const zeros = zeroArgsOf(entry);
+  const closes = closeArgsOf(entry);
+  if (zeros.length === 0 && closes.length === 0) return false;
+  const args = splitCallArgs(argsText);
+  for (const [i, text] of closes) if (i < args.length && args[i] === text) return true;
+  if (zeros.length === 0) return false;
+  return zeros.every(([i, kind]) => i < args.length && argReadsNone(args[i], kind));
+}
+
 /** `_empty_closes_of`: the sub-block number whose empty block closes the code's group. */
 function emptyClosesOf(entry: CodeEntry | null): string | null {
   const value = entry?.frameEmptyCloses;
@@ -200,6 +256,8 @@ interface Inner {
   distance: ModalState['distance'];
   tool: Tool | null;
   lastTool: Tool | null;
+  /** `lastTool` is written the way `toolCall.ignore` says a tool is unloaded (`T0`). */
+  lastToolUnload: boolean;
   feed: WordSeen | null;
   speed: WordSeen | null;
   speedLimit: WordSeen | null;
@@ -224,6 +282,12 @@ interface Inner {
   blockLower: boolean;
   /** Rule 16: the last code of the block that owns words; it lasts to the end of the block. */
   blockOwner: Owner | null;
+  /**
+   * Rule 17 (P4b fix batch 3, NC-6): the feed and the feed unit word in force before a
+   * `blockFeed` block (Klartext `CYCL CALL POS … F300`), put back when the next block starts;
+   * null while no such block is open (`_feed_back`).
+   */
+  feedBack: { feed: WordSeen | null; unitWord: string | null } | null;
 }
 
 function emptyBlock(): Block {
@@ -256,6 +320,7 @@ function cloneInner(s: Inner): Inner {
     block: { ...s.block },
     blockRun: copyOf(s.blockRun),
     blockDefined: copyOf(s.blockDefined),
+    feedBack: s.feedBack === null ? null : { feed: copyOf(s.feedBack.feed), unitWord: s.feedBack.unitWord },
   };
 }
 
@@ -275,12 +340,18 @@ export class ModalInterpreter {
   private readonly speedLimitWords: Set<string>;
   private readonly axes: Set<string>;
   private readonly toolFromLast: boolean;
+  /** D3-4c: `toolFrom: 'last-before'`, the tool line loads the `T` written before it. */
+  private readonly toolFromBefore: boolean;
   private readonly hasDistance: boolean;
   private readonly hasBareFrames: boolean;
+  /** D6-5: a call that reads as no frame at its zero arguments (`frameZero`, `frameCloses`). */
+  private readonly hasZeroCalls: boolean;
   private readonly hasZeroFrames: boolean;
   private readonly hasEmptyCloses: boolean;
   /** Rule 11b: the database has a `'call-modal-next'` word at all (only then is a block searched for one). */
   private readonly hasModalNext: boolean;
+  /** Rule 17: the database has a `blockFeed` code at all (only then is a block searched for one). */
+  private readonly hasBlockFeed: boolean;
   /** Rule 11b: the block being applied holds a `'call-modal-next'` word. */
   private modalNext = false;
   /** The first letters a code of the database starts with, normalized: `G`, `M`, `C` (`CYCL DEF`, `CYCLE81`). */
@@ -298,6 +369,8 @@ export class ModalInterpreter {
   // Per block, filled by `readValues` and read in the same `update` only (`_read_values`).
   private axisPlane = false;
   private callsBare = new Map<string, boolean>();
+  /** D6-5: what each call of the block writes between its brackets. */
+  private callArgs = new Map<string, string>();
   private blockValues = false;
   /** Rule 13 (`frameZeroWords`): the block's words, `[value, incremental]`; a word without a value has `''`. */
   private blockWords = new Map<string, [string, boolean]>();
@@ -321,16 +394,21 @@ export class ModalInterpreter {
     this.speedLimitWords = new Set(Array.isArray(limits) ? limits.filter((w): w is string => typeof w === 'string').map((w) => w.toUpperCase()) : []);
     const axes = addresses.axes;
     this.axes = new Set(Array.isArray(axes) ? axes.filter((a): a is string => typeof a === 'string' && a !== '').map((a) => a.toUpperCase()) : []);
-    this.toolFromLast = record(profile.toolCall).toolFrom === 'same-line-or-last';
+    const toolFrom = record(profile.toolCall).toolFrom;
+    this.toolFromBefore = toolFrom === 'last-before';
+    // Both read the `T` words of every line, not only those of the tool lines.
+    this.toolFromLast = toolFrom === 'same-line-or-last' || this.toolFromBefore;
 
     const codes = Array.isArray(db.codes) ? db.codes : [];
     this.hasDistance = codes.some((e) => e.sets?.distance === 'absolute' || e.sets?.distance === 'incremental');
     this.hasBareFrames = codes.some((e) => e.frameWithoutValues === 'close');
+    this.hasZeroCalls = codes.some((e) => zeroArgsOf(e).length > 0 || closeArgsOf(e).length > 0);
     this.hasZeroFrames = codes.some((e) => zeroWordsOf(e).length > 0);
     const prefix = record(profile.syntax).incrementalPrefix;
     this.zeroPrefix = typeof prefix === 'string' && prefix.length === 1 ? prefix.toUpperCase() : '';
     this.hasEmptyCloses = codes.some((e) => emptyClosesOf(e) !== null);
     this.hasModalNext = codes.some((e) => e.sets?.cycle === 'call-modal-next');
+    this.hasBlockFeed = codes.some((e) => e.blockFeed === true);
     this.heads = new Set();
     for (const entry of codes) {
       const words = Array.isArray(entry.ownWords)
@@ -379,6 +457,7 @@ export class ModalInterpreter {
       distance: this.hasDistance ? 'unknown' : 'absolute',
       tool: null,
       lastTool: null,
+      lastToolUnload: false,
       feed: null,
       speed: null,
       speedLimit: null,
@@ -400,6 +479,7 @@ export class ModalInterpreter {
       blockUpper: false,
       blockLower: false,
       blockOwner: null,
+      feedBack: null,
     };
     this.owned = null;
     const fromOf = (key: string): ParamSource | undefined => {
@@ -452,7 +532,15 @@ export class ModalInterpreter {
     }
     const sameBlock = s.continued || continued;
     s.continued = tokens.some((token) => token.kind === 'continuation');
-    if (!sameBlock) this.clearBlock();
+    if (!sameBlock) {
+      if (s.feedBack !== null) {
+        // Rule 17: the feed of a `blockFeed` block was that block's alone.
+        s.feed = s.feedBack.feed;
+        s.feedUnitWord = s.feedBack.unitWord;
+        s.feedBack = null;
+      }
+      this.clearBlock();
+    }
 
     // Two passes, because a block is not a sentence: every code of the block is applied
     // before a single address word is read (rules 4 and 6 depend on it).
@@ -464,6 +552,10 @@ export class ModalInterpreter {
     this.modalNext = this.hasModalNext && codes.some((code) => this.entryOf(code)?.sets?.cycle === 'call-modal-next');
     if (this.modalNext) s.mcall = null;
     for (const code of codes) this.applyCode(code, line);
+    if (this.hasBlockFeed && s.feedBack === null && codes.some((code) => this.entryOf(code)?.blockFeed === true)) {
+      // Rule 17: what is in force before the block's own feed word is read.
+      s.feedBack = { feed: s.feed, unitWord: s.feedUnitWord };
+    }
     if (this.axisPlane) this.applyToolAxis(tokens);
     this.applyModalCall(tokens, codes);
     if (this.owners.size > 0) {
@@ -699,11 +791,13 @@ export class ModalInterpreter {
         }
       }
     }
-    if (!this.hasBareFrames) return;
+    if (!this.hasBareFrames && !this.hasZeroCalls) return;
     this.callsBare.clear();
+    this.callArgs.clear();
     for (const token of tokens) {
       if (token.kind === 'call' && token.address) {
         this.callsBare.set(normalizeCode(token.address), (token.valueText ?? '').trim() === '');
+        this.callArgs.set(normalizeCode(token.address), token.valueText ?? '');
       } else if (token.kind === 'word' && (token.valueText ?? '') !== '') {
         const address = token.address ?? '';
         if (address !== '' && !isAssignment(token) && this.entryOf(address + (token.valueText ?? '')) !== null) continue;
@@ -728,6 +822,7 @@ export class ModalInterpreter {
     }
     let frame = entry.frame === 'open' || entry.frame === 'close' ? entry.frame : null;
     if (entry.frameWithoutValues === 'close' && this.writtenBare(code)) frame = 'close';
+    else if (frame === 'open' && this.hasZeroCalls && zeroCallCloses(entry, this.callArgs.get(normalizeCode(code)))) frame = 'close';
     const s = this.s;
     if (frame === 'open') {
       s.frames = s.frames.filter((f) => f.code !== code);
@@ -918,7 +1013,9 @@ export class ModalInterpreter {
   private applyTool(masked: string, line: number): void {
     const s = this.s;
     const re = this.cp.re;
-    const isTool = re.toolTrigger.test(masked) && !(re.toolIgnore !== undefined && re.toolIgnore.test(masked));
+    // D3-4c `last-before`: the ignore rule does not stop a tool line (`M6 T0` loads the tool
+    // selected before it); its `T` is the next one, an unload.
+    const isTool = re.toolTrigger.test(masked) && (this.toolFromBefore || !(re.toolIgnore !== undefined && re.toolIgnore.test(masked)));
     let found: Tool | null = null;
     if (isTool || this.toolFromLast) {
       const match = re.tool.exec(masked);
@@ -930,8 +1027,27 @@ export class ModalInterpreter {
         found = { station: station.trim(), written: match[0].trim(), line };
       }
     }
-    if (found !== null) s.lastTool = found;
+    const before = s.lastTool;
+    const beforeUnload = s.lastToolUnload;
+    if (found !== null) {
+      s.lastTool = found;
+      s.lastToolUnload = this.toolFromBefore && re.toolIgnore !== undefined && re.toolIgnore.test(masked);
+    }
     if (!isTool) return;
+    if (this.toolFromBefore) {
+      // D3-4c `toolFrom: last-before`: the change loads the tool selected before this line; a
+      // `T` on the line itself is the next one (it is already `lastTool`). Nothing selected
+      // before: the tool in the spindle is not known. A selected `T0` (the ignore pattern)
+      // is an unload: the change that follows it empties the spindle and is no tool change,
+      // as the program map and the tool list read it (`unloads`).
+      if (before !== null && beforeUnload) {
+        s.tool = null;
+        return;
+      }
+      s.block.toolChange = true;
+      s.tool = before === null ? null : { station: before.station, written: before.written, line };
+      return;
+    }
     s.block.toolChange = true;
     if (found !== null) s.tool = found;
     else if (this.toolFromLast && s.lastTool !== null) {
@@ -1001,6 +1117,19 @@ interface IndexSnapshot {
   lineState: LineState | undefined;
 }
 
+/**
+ * A copy of one snapshot of the index, handed to a reader that walks on from it itself
+ * (`ModalIndex.snapshotAtOrBefore`): the interpreter after `line` (put back with
+ * `ModalInterpreter.restore`, which copies it again) and the tokenizer's state for line
+ * `line + 1`. Frozen, and a copy of what the index keeps, so a reader can neither change the
+ * index nor see it change.
+ */
+export interface ModalSnapshot {
+  readonly line: number;
+  readonly interp: unknown;
+  readonly lineState: LineState | undefined;
+}
+
 /** A walk in progress: the interpreter after `line`, and the tokenizer's state for `line + 1`. */
 interface Walk {
   interp: ModalInterpreter;
@@ -1033,6 +1162,7 @@ export class ModalIndex {
     this.every = every;
     this.builder = new ModalInterpreter(cp, db);
     this.readerInterp = new ModalInterpreter(cp, db);
+    this.copier = new ModalInterpreter(cp, db);
     this.snapshots.push({ interp: this.builder.snapshot(), lineState: undefined });
   }
 
@@ -1176,6 +1306,24 @@ export class ModalIndex {
     }
     return out;
   }
+
+  /**
+   * The nearest valid snapshot at or before `line` (0 is the power-on state), as a frozen copy;
+   * a reader walks on from it, at most `every - 1` lines to `line` once the build has got there
+   * (all the way from the top where it has not: the answer is the same, only the walk is
+   * longer). Never null: the power-on snapshot always stands. `line` past the end is the end.
+   */
+  snapshotAtOrBefore(line: number): ModalSnapshot {
+    const wanted = Number.isFinite(line) ? Math.min(Math.max(Math.floor(line), 0), this.lineCount) : 0;
+    const k = Math.min(this.baseOf(wanted), this.valid - 1);
+    const snap = this.snapshots[k];
+    this.copier.restore(snap.interp);
+    const lineState = snap.lineState === undefined ? undefined : Object.freeze({ ...snap.lineState });
+    return Object.freeze({ line: k * this.every, interp: Object.freeze(this.copier.snapshot() as object), lineState });
+  }
+
+  /** The interpreter `snapshotAtOrBefore` copies through; neither a build's nor a reader's. */
+  private readonly copier: ModalInterpreter;
 
   /** True once every snapshot up to the end of the document exists. */
   ready(): boolean {

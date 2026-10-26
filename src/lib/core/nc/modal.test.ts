@@ -117,7 +117,8 @@ describe('codes and words (rules 1-7, 9)', () => {
 
   it('rule 5: a feed word sets its own unit; a plain F returns to the group', () => {
     const s = walk(ctx('heidenhain-klartext'), ['L X+10 FU0.2', 'L X+20 FZ0.05', 'L X+30 F500']);
-    expect(s.map((x) => x.feedUnit)).toEqual(['per-rev', 'per-tooth', 'unknown']);
+    // A plain F returns to the feed mode in force: per minute, the profile's power-on M137 (P4.9).
+    expect(s.map((x) => x.feedUnit)).toEqual(['per-rev', 'per-tooth', 'per-minute']);
     expect(s[1].feed?.valueText).toBe('0.05');
   });
 
@@ -136,6 +137,38 @@ describe('codes and words (rules 1-7, 9)', () => {
     const mill = walk(ctx('fanuc-gcode'), ['T5', 'M6']);
     expect(mill[0].tool).toBeNull();
     expect(mill[1].tool).toEqual({ station: '5', written: 'T5', line: 2 });
+  });
+
+  it('rule 7 (D3-4c): with "T on the M6 line is the next tool", M6 loads the T written before its line', () => {
+    const lines = ['T1', 'M6 T2', 'G0 X1.', 'M6 T3', 'T4 M6'];
+    const loaded = walk(ctx('fanuc-gcode'), lines);
+    expect(loaded.map((s) => s.tool?.station ?? null)).toEqual([null, '2', '2', '3', '4']);
+    const next = walk(ctx('fanuc-gcode', { variants: { toolOnChangeLine: 'next' } }), lines);
+    expect(next.map((s) => s.tool?.station ?? null)).toEqual([null, '1', '1', '2', '3']);
+    expect(next[1].tool).toEqual({ station: '1', written: 'T1', line: 2 });
+    expect(next.map((s) => s.block.toolChange)).toEqual([false, true, false, true, true]);
+    // Nothing selected before the first M6: the tool in the spindle is not known.
+    expect(walk(ctx('fanuc-gcode', { variants: { toolOnChangeLine: 'next' } }), ['M6 T2'])[0].tool).toBeNull();
+  });
+
+  it('rule 7 (CODE-6): with last-before, an M6 after a selected T0 is an unload: no tool, no tool change', () => {
+    const base = PROFILES.get('fanuc-gcode');
+    if (!base) throw new Error('no profile fanuc-gcode');
+    const variant = {
+      ...base,
+      toolCall: {
+        trigger: '(?<![A-Z])M0*6(?!\\d)',
+        tool: '(?<![A-Z])T(?<tool>\\d+)',
+        ignore: '(?<![A-Z])T0+(?!\\d)',
+        toolFrom: 'last-before' as const,
+      },
+    };
+    const checked = validateProfile(variant);
+    if (!checked.ok) throw new Error(checked.errors.join('; '));
+    const c = { cp: compileProfile(checked.profile), db: ctx('fanuc-gcode').db };
+    const states = walk(c, ['T1', 'M6 T0', 'M6', 'T2', 'M6']);
+    expect(states.map((s) => s.tool?.station ?? null)).toEqual([null, '1', null, null, '2']);
+    expect(states.map((s) => s.block.toolChange)).toEqual([false, true, false, false, true]);
   });
 
   it('rule 7: a tool group that took no part in the match names no tool (B1, no whole-match fallback)', () => {
@@ -281,6 +314,38 @@ describe('frames, tool centre point and the plane (rules 13-15)', () => {
     expect(s[1].frame).toBeNull();
   });
 
+  it('rule 13 (D6-5): a CYCLE800 that swivels to the home position closes the tilt, as _TC "0" does', () => {
+    const lines = [
+      'CYCLE800(1,"TC1",0,57,0,0,0,0,30,0,0,0,0,-1,100,1)',
+      'CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)',
+      'CYCLE800(2,"TC1",100000,57,0,0,0,0,30,0,0,0,0,-1,100,1)',
+      'CYCLE800(1,"",1,57,0,0,0,0,0,0,0,0,0,1,0,1)',
+      'CYCLE800(1,"0",0,57,0,0,0,0,30,0,0,0,0,1,0,1)',
+      'CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)',
+      'CYCLE800(1,"",0,57,0,0,0,0,R1,0,0,0,0,1,0,1)',
+      'CYCLE800(1,"",0,57,0,0,0,0,,0,0,0,0,1,0,1)',
+    ];
+    const s = walk(ctx('sinumerik-mill'), lines);
+    expect(s.map((x) => x.frame?.code ?? null)).toEqual(['CYCLE800', null, 'CYCLE800', 'CYCLE800', null, null, 'CYCLE800', 'CYCLE800']);
+  });
+
+  it('rule 13 (CODE-7): the zero-call closing does not depend on frameWithoutValues', () => {
+    const base = ctx('sinumerik-mill');
+    const codes = base.db.codes.map((e) => {
+      const { frameWithoutValues: _dropped, ...rest } = e;
+      return rest;
+    });
+    const c = { cp: base.cp, db: { ...base.db, codes } };
+    expect(codes.some((e) => 'frameWithoutValues' in e)).toBe(false);
+    const s = walk(c, [
+      'CYCLE800(1,"TC1",0,57,0,0,0,0,30,0,0,0,0,-1,100,1)',
+      'CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)',
+      'CYCLE800(1,"TC1",0,57,0,0,0,0,30,0,0,0,0,-1,100,1)',
+      'CYCLE800(1,"0",0,57,0,0,0,0,30,0,0,0,0,1,0,1)',
+    ]);
+    expect(s.map((x) => x.frame?.code ?? null)).toEqual(['CYCLE800', null, 'CYCLE800', null]);
+  });
+
   it('rule 13: a tilt whose angles are all zero reads as none (cycle 19)', () => {
     const s = walk(ctx('heidenhain-klartext'), ['CYCL DEF 19.0 WORKING PLANE', 'CYCL DEF 19.1 B+30', 'CYCL DEF 19.1 B+0']);
     expect(s[1].frame).not.toBeNull();
@@ -354,6 +419,22 @@ describe('state, snapshot and restore', () => {
     // The snapshot was a copy: walking on did not change it.
     other.restore(snap);
     expect(other.state()).toEqual(all[2]);
+  });
+
+  it('carries the feed a CYCL CALL POS block puts back (rule 17, P4b fix batch 3 NC-6)', () => {
+    const c = ctx('heidenhain-klartext');
+    const lines = ['L X+10 Y+10 R0 F500', 'CYCL CALL POS X+40 Y+40 Z+0 F300', 'L X+90 Y+90'];
+    const all = walk(c, lines);
+    expect(all.map((s) => s.feed?.valueText)).toEqual(['500', '300', '500']);
+    const interp = new ModalInterpreter(c.cp, c.db);
+    for (let i = 0; i < 2; i++) interp.update(tokenizeLine(lines[i], c.cp).tokens, i + 1, maskComments(lines[i], c.cp));
+    const snap = interp.snapshot();
+    interp.update(tokenizeLine(lines[2], c.cp).tokens, 3, maskComments(lines[2], c.cp));
+    const other = new ModalInterpreter(c.cp, c.db);
+    other.restore(snap);
+    other.update(tokenizeLine(lines[2], c.cp).tokens, 3, maskComments(lines[2], c.cp));
+    expect(other.state()).toEqual(all[2]);
+    expect(other.state().feed).toEqual({ valueText: '500', line: 1, variable: false });
   });
 
   it('refuses something that is not a snapshot', () => {

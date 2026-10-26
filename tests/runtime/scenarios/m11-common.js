@@ -38,31 +38,14 @@ export const lines = (/** @type {string} */ text) => (text.endsWith('\n') ? text
 // ---------------------------------------------------------------- Monaco's registry
 
 /**
- * One service of the editor's instantiation tree, found by the id it was registered under.
- * @param {any} ctx
- * @param {string} id
- * @param {string} method a method the service must have
- */
-function serviceOf(ctx, id, method) {
-  let inst = /** @type {any} */ (ctx.editor.editorInstance())?._instantiationService
-  while (inst) {
-    for (const [key, service] of inst._services?._entries ?? []) {
-      if (String(key) === id && typeof service?.[method] === 'function') return service
-    }
-    inst = inst._parent
-  }
-  return null
-}
-
-/**
  * Monaco's two registries. **Call while the main editor exists** (before a comparison opens).
  * @param {Harness} h
  * @returns {{ models: any, editors: any }}
  */
 export function monacoRegistry(h) {
-  const ctx = context(h)
-  const models = serviceOf(ctx, 'modelService', 'getModels')
-  const editors = serviceOf(ctx, 'codeEditorService', 'listDiffEditors')
+  // `h.monaco.service` is the one place a scenario reads Monaco's instantiation tree (T193).
+  const models = h.monaco.service('modelService', 'getModels')
+  const editors = h.monaco.service('codeEditorService', 'listDiffEditors')
   h.check('Monaco’s model and editor registries are reachable (monaco 0.55 internals)', models !== null && editors !== null)
   return { models, editors }
 }

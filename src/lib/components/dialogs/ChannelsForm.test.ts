@@ -98,7 +98,9 @@ describe('ChannelsForm: Advanced opens by itself when the settings need it', () 
     const html = markup(preset('okuma-osp', 'okuma-2turret'), { waitLetters: ['M', 'P'], presets: decl('okuma-osp').presets });
     expect(html).toContain('Add a turret');
     expect(html).toContain('data-testid="section-from-names"');
-    expect(html).not.toMatch(/<details[^>]*\bopen\b/);
+    // Manual-check fix D2-1: the P-10 rule finds its codes with a pattern, so Advanced opens.
+    expect(html).toMatch(/<details[^>]*\bopen\b/);
+    expect(html).toContain('data-rule="p-negative"');
   });
 });
 

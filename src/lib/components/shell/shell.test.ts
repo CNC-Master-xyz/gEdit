@@ -14,6 +14,7 @@ import { panels, resetPanelsForTest } from '$lib/app/registry/panels';
 import { ribbon, resetRibbonForTest } from '$lib/app/registry/ribbon';
 import { resetStatusItemsForTest, statusItems } from '$lib/app/registry/statusItems';
 import { layout } from '$lib/stores/layout';
+import { uiState } from '$lib/stores/uiState';
 import ProgramMapPanel from '$lib/components/panels/ProgramMapPanel.svelte';
 import ScriptOutputPanel from '$lib/components/panels/ScriptOutputPanel.svelte';
 import ScriptStatusItem from '$lib/components/status/ScriptStatusItem.svelte';
@@ -102,6 +103,23 @@ describe('Ribbon', () => {
     expect(html).toContain('data-tab="view"');
     expect(html).not.toContain('data-tab="nc"');
     expect(/data-tab="file"[^>]*aria-selected="true"|aria-selected="true"[^>]*data-tab="file"/.test(html)).toBe(true);
+  });
+
+  it('opens on the tab the last session ended on, and on File when that tab is gone (T141)', () => {
+    contribute();
+    const selected = (html: string) => /data-tab="(\w+)"[^>]*aria-selected="true"|aria-selected="true"[^>]*data-tab="(\w+)"/.exec(html)?.slice(1).find(Boolean);
+    try {
+      uiState.update((s) => ({ ...s, ribbonTab: 'view' }));
+      expect(selected(render(Ribbon).body)).toBe('view');
+      // 'nc' has no entry in this test, so the ribbon opens on File; the choice is kept
+      uiState.update((s) => ({ ...s, ribbonTab: 'nc' }));
+      expect(selected(render(Ribbon).body)).toBe('file');
+      uiState.update((s) => ({ ...s, ribbonTab: 'home' }));
+      expect(selected(render(Ribbon).body)).toBe('file');
+    } finally {
+      uiState.update(({ ribbonTab: _gone, ...s }) => s);
+    }
+    expect(selected(render(Ribbon).body)).toBe('file');
   });
 
   it('does not repeat the app name above the tabs: the window title bar has it (B1 A9)', () => {

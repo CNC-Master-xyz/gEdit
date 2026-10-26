@@ -30,10 +30,15 @@
     errors?: Record<string, Msg>;
     /** Extra data a field type may need, e.g. the addresses of an `address-list`. */
     context?: { addresses?: string[] };
+    /**
+     * Put in front of every control, help and error id (default none). Two forms on one
+     * page (the machine form and its motion page) can have a field of the same id.
+     */
+    idPrefix?: string;
     onChange: (id: string, value: unknown) => void;
   }
 
-  let { fields, values, errors = {}, context, onChange }: Props = $props();
+  let { fields, values, errors = {}, context, idPrefix = '', onChange }: Props = $props();
 
   /**
    * What the user actually typed into a numeric control, so `1.50` and a lone `-` stay on
@@ -42,12 +47,17 @@
    */
   let typed = $state<Record<string, string>>({});
 
-  const controlId = (field: FieldSpec): string => `field-${field.id}`;
-  const helpId = (field: FieldSpec): string => `field-${field.id}-help`;
-  const errorId = (field: FieldSpec): string => `field-${field.id}-error`;
+  const controlId = (field: FieldSpec): string => `${idPrefix}field-${field.id}`;
+  const helpId = (field: FieldSpec): string => `${idPrefix}field-${field.id}-help`;
+  const errorId = (field: FieldSpec): string => `${idPrefix}field-${field.id}-error`;
+  const unitId = (field: FieldSpec): string => `${idPrefix}field-${field.id}-unit`;
+  /** The unit span is drawn beside every control except a checkbox and the address list. */
+  const hasUnit = (field: FieldSpec): boolean =>
+    !!field.unit && field.type !== 'bool' && field.type !== 'address-list';
 
   function describedBy(field: FieldSpec): string | undefined {
     const parts: string[] = [];
+    if (hasUnit(field)) parts.push(unitId(field));
     if (field.help) parts.push(helpId(field));
     if (errors[field.id]) parts.push(errorId(field));
     return parts.length ? parts.join(' ') : undefined;
@@ -135,6 +145,84 @@
   }
 </script>
 
+{#snippet control(field: FieldSpec, error: Msg | undefined)}
+  {#if field.type === 'choice'}
+    <select
+      id={controlId(field)}
+      class="form-control"
+      value={selectedIndex(field)}
+      disabled={field.readOnly === true}
+      aria-required={field.required ? 'true' : undefined}
+      aria-invalid={error ? 'true' : undefined}
+      aria-describedby={describedBy(field)}
+      onchange={(e) => onChoice(field, e.currentTarget.value)}
+    >
+      {#if selectedIndex(field) === ''}
+        <option value="" disabled>
+          {choicesOf(field).length ? t('forms.choosePlaceholder') : t('forms.noChoices')}
+        </option>
+      {/if}
+      {#each choicesOf(field) as choice, i (i)}
+        <option value={String(i)}>{choice.label}</option>
+      {/each}
+    </select>
+  {:else if field.type === 'number' || field.type === 'integer'}
+    <input
+      id={controlId(field)}
+      class="form-control"
+      type="text"
+      inputmode={field.type === 'integer' ? 'numeric' : 'decimal'}
+      autocomplete="off"
+      spellcheck="false"
+      value={numericText(field)}
+      readonly={field.readOnly === true}
+      aria-required={field.required ? 'true' : undefined}
+      aria-invalid={error ? 'true' : undefined}
+      aria-describedby={describedBy(field)}
+      oninput={(e) => onNumericInput(field, e.currentTarget.value)}
+    />
+  {:else if field.type === 'file' || field.type === 'folder'}
+    <div class="form-path">
+      <input
+        id={controlId(field)}
+        class="form-control"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        value={textOf(field)}
+        readonly={field.readOnly === true}
+        aria-required={field.required ? 'true' : undefined}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={describedBy(field)}
+        oninput={(e) => onChange(field.id, e.currentTarget.value)}
+      />
+      <button
+        type="button"
+        class="form-browse"
+        aria-label={t('forms.browseFor', { label: field.label })}
+        onclick={() => void browse(field)}
+      >
+        {t('common.browse')}
+      </button>
+    </div>
+  {:else}
+    <input
+      id={controlId(field)}
+      class="form-control"
+      type="text"
+      autocomplete="off"
+      spellcheck="false"
+      value={textOf(field)}
+      readonly={field.readOnly === true}
+      aria-readonly={field.readOnly === true ? 'true' : undefined}
+      aria-required={field.required ? 'true' : undefined}
+      aria-invalid={error ? 'true' : undefined}
+      aria-describedby={describedBy(field)}
+      oninput={(e) => onChange(field.id, e.currentTarget.value)}
+    />
+  {/if}
+{/snippet}
+
 {#each fields as field (field.id)}
   {@const error = errors[field.id]}
   {#if field.type === 'address-list'}
@@ -184,80 +272,14 @@
         </label>
       {:else}
         <label class="form-label" for={controlId(field)}>{field.label}</label>
-        {#if field.type === 'choice'}
-          <select
-            id={controlId(field)}
-            class="form-control"
-            value={selectedIndex(field)}
-            disabled={field.readOnly === true}
-            aria-required={field.required ? 'true' : undefined}
-            aria-invalid={error ? 'true' : undefined}
-            aria-describedby={describedBy(field)}
-            onchange={(e) => onChoice(field, e.currentTarget.value)}
-          >
-            {#if selectedIndex(field) === ''}
-              <option value="" disabled>
-                {choicesOf(field).length ? t('forms.choosePlaceholder') : t('forms.noChoices')}
-              </option>
-            {/if}
-            {#each choicesOf(field) as choice, i (i)}
-              <option value={String(i)}>{choice.label}</option>
-            {/each}
-          </select>
-        {:else if field.type === 'number' || field.type === 'integer'}
-          <input
-            id={controlId(field)}
-            class="form-control"
-            type="text"
-            inputmode={field.type === 'integer' ? 'numeric' : 'decimal'}
-            autocomplete="off"
-            spellcheck="false"
-            value={numericText(field)}
-            readonly={field.readOnly === true}
-            aria-required={field.required ? 'true' : undefined}
-            aria-invalid={error ? 'true' : undefined}
-            aria-describedby={describedBy(field)}
-            oninput={(e) => onNumericInput(field, e.currentTarget.value)}
-          />
-        {:else if field.type === 'file' || field.type === 'folder'}
-          <div class="form-path">
-            <input
-              id={controlId(field)}
-              class="form-control"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              value={textOf(field)}
-              readonly={field.readOnly === true}
-              aria-required={field.required ? 'true' : undefined}
-              aria-invalid={error ? 'true' : undefined}
-              aria-describedby={describedBy(field)}
-              oninput={(e) => onChange(field.id, e.currentTarget.value)}
-            />
-            <button
-              type="button"
-              class="form-browse"
-              aria-label={t('forms.browseFor', { label: field.label })}
-              onclick={() => void browse(field)}
-            >
-              {t('common.browse')}
-            </button>
+        {#if field.unit}
+          <!-- T154: the unit of a template value, shown beside it (display only). -->
+          <div class="form-unit-row">
+            {@render control(field, error)}
+            <span class="form-unit" id={unitId(field)} data-testid="form-unit">{field.unit}</span>
           </div>
         {:else}
-          <input
-            id={controlId(field)}
-            class="form-control"
-            type="text"
-            autocomplete="off"
-            spellcheck="false"
-            value={textOf(field)}
-            readonly={field.readOnly === true}
-            aria-readonly={field.readOnly === true ? 'true' : undefined}
-            aria-required={field.required ? 'true' : undefined}
-            aria-invalid={error ? 'true' : undefined}
-            aria-describedby={describedBy(field)}
-            oninput={(e) => onChange(field.id, e.currentTarget.value)}
-          />
+          {@render control(field, error)}
         {/if}
       {/if}
       {#if field.help}<p class="form-help" id={helpId(field)}>{field.help}</p>{/if}
@@ -322,6 +344,24 @@
 
   .form-control[aria-invalid='true'] {
     border-color: var(--danger);
+  }
+
+  .form-unit-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .form-unit-row > :global(.form-control) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .form-unit {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 12px;
+    white-space: nowrap;
   }
 
   .form-path {

@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Fanuc: N10 G0 X10 5 would join into N10G0X105, one word instead of two, so the guard keeps the line and says why.",
+  "profile": "fanuc-gcode",
+  "options": {}
+}

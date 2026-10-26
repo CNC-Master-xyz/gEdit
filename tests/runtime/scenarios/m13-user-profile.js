@@ -125,7 +125,9 @@ scenario('m13-user-profile', { timeout: 420 }, async (h) => {
   h.check('and the detection by folder: gEdit would open this text as the profile', /Shop lathe/.test(String(report?.message)) && /would open this text as/.test(String(report?.message)), report?.message)
   const lineRows = h.qa('results-row').filter((e) => (e.dataset.line ?? '') !== '')
   h.check('every finding of a line carries its line; the setting chosen for the whole program has none', lineRows.length > 0 && lineRows.length < (report?.rows ?? []).length && (report?.rows ?? []).filter((/** @type {any} */ r) => r.line === null).length >= 1, { lines: lineRows.length, all: (report?.rows ?? []).length })
-  const toolRow = h.qa('results-row').find((e) => /Tool change/.test(e.textContent ?? ''))
+  // The row of the tool change **of a line**: the Fanuc lathe has a setting called "Tool change" since the manual-check
+  // round (D3-4a), so its "Setting chosen" row, which has no line, says "Tool change" too and comes first.
+  const toolRow = lineRows.find((e) => /Tool change/.test(e.textContent ?? ''))
   await revealLine(h, part.id, 1, 1)
   if (toolRow) h.click(toolRow)
   await h.waitFor(() => h.app.cursor().line === 3, { timeout: 4000 })

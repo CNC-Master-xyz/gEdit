@@ -481,6 +481,14 @@ class TestLatheRules(ModalTestCase):
             interp.update(tokens, number)
             self.assertEqual(interp.diameter_reading("X"), expected, line)
 
+    def test_d5_9_diamcycof_reads_the_cross_axis_as_a_radius_in_the_shipped_database(self) -> None:
+        # v1.2.0 manual-check fix round (D5-9; SINUMERIK programming manual, diameter
+        # programming): DIAMCYCOF switches diameter programming off for the work of a cycle.
+        context = helpers.effective_context("sinumerik")
+        states = self.walk(context["profile"], context["codes"], ["DIAMON", "DIAMCYCOF", "DIAMON"])
+        self.assertEqual([render(state)["diameter"] for state in states], ["on", "off", "on"])
+        self.assertEqual([state["groups"]["diametermode"]["code"] for state in states], ["DIAMON", "DIAMCYCOF", "DIAMON"])
+
     def test_a_mill_profile_has_no_diameter_mode_at_all(self) -> None:
         state = self.walk(profile_with(), LATHE_CODES, [""])[0]
         self.assertIsNone(state["diameter"])
@@ -553,6 +561,27 @@ class TestGeneralRules(ModalTestCase):
         self.assertEqual([state["tool"] and state["tool"]["station"] for state in states],
                          [None, "5", "5"])
         self.assertEqual(states[1]["tool"]["line"], 2)
+
+    def test_d3_4c_with_last_before_the_tool_line_loads_the_t_written_before_it(self) -> None:
+        # v1.2.0 manual-check fix round (D3-4c, the twin of modal.test.ts rule 7): a T on the
+        # M6 line is the next tool; nothing selected before the first M6 leaves no tool known.
+        profile = profile_with(toolCall={"trigger": "(?<![A-Z])M0*6(?!\\d)", "tool": "(?<![A-Z])T(?<tool>\\d+)",
+                                         "toolFrom": "last-before"})
+        states = self.walk(profile, LATHE_CODES, ["M6 T1", "M6 T2", "G0 X1.", "M6 T3", "T4 M6"])
+        self.assertEqual([state["tool"] and state["tool"]["station"] for state in states],
+                         [None, "1", "1", "2", "3"])
+        self.assertEqual(states[1]["tool"], {"station": "1", "written": "T1", "line": 2})
+        self.assertEqual([state["block"]["toolChange"] for state in states], [True, True, False, True, True])
+
+    def test_code_6_with_last_before_an_m6_after_a_selected_t0_is_an_unload_no_tool_change(self) -> None:
+        # Review CODE-6: the program map and the tool list read `M6 T0` / `M6` as an unload
+        # (no tool change). The modal state agreed on neither the tool "0" nor the flag.
+        profile = profile_with(toolCall={"trigger": "(?<![A-Z])M0*6(?!\\d)", "tool": "(?<![A-Z])T(?<tool>\\d+)",
+                                         "ignore": "(?<![A-Z])T0+(?!\\d)", "toolFrom": "last-before"})
+        states = self.walk(profile, LATHE_CODES, ["T1", "M6 T0", "M6", "T2", "M6"])
+        self.assertEqual([state["tool"] and state["tool"]["station"] for state in states],
+                         [None, "1", None, None, "2"])
+        self.assertEqual([state["block"]["toolChange"] for state in states], [False, True, False, False, True])
 
     def test_a_tool_group_that_took_no_part_in_the_match_names_no_tool(self) -> None:
         # B1: a variant of the Klartext profile whose tool pattern makes the number optional,
@@ -1447,6 +1476,75 @@ class TestFramesAndTcp(ModalTestCase):
             [None, "CYCLE800", "ROT", "ROT", "ROT", None, None, "SCALE", None, "MIRROR", None],
         )
         self.assertEqual([f["code"] for f in self.open_frames("sinumerik-mill", ['CYCLE800(1,"",0,57,0,0,0,30,0,0,0,0,0,-1,100,1)', "ROT RPL=45", "CYCLE800()"])], ["ROT"])
+
+    def test_d6_5_a_swivel_to_the_home_position_closes_the_tilt(self) -> None:
+        # v1.2.0 manual-check fix round (D6-5, the call twin of M10-2): the Siemens operating
+        # manual starts every program with a swivel to the home position, a new swivel (_ST ones
+        # digit 0) with every angle and reference point at 0; the data set name "0" deselects.
+        # An angle, a swivel on top of the active one, a variable or an empty argument keep it.
+        states = self.run_lines(
+            "sinumerik-mill",
+            [
+                'CYCLE800(1,"TC1",0,57,0,0,0,0,30,0,0,0,0,-1,100,1)',
+                'CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)',
+                'CYCLE800(2,"TC1",100000,57,0,0,0,0,30,0,0,0,0,-1,100,1)',
+                'CYCLE800(2,"TC1",100000,57,0.0,0,-0,0,0.000,0,0,0,0,-1,100,1)',
+                'CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)',
+                'CYCLE800(1,"",1,57,0,0,0,0,0,0,0,0,0,1,0,1)',
+                'CYCLE800(1,"0",0,57,0,0,0,0,30,0,0,0,0,1,0,1)',
+                'CYCLE800(1,"",0,57,0,0,0,0,R1,0,0,0,0,1,0,1)',
+                'CYCLE800(1,"",0,57,0,0,0,0,,0,0,0,0,1,0,1)',
+                'CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,5,1,0,1)',
+                'CYCLE800(1,"",0.5,57,0,0,0,0,0,0,0,0,0,1,0,1)',
+            ],
+        )
+        self.assertEqual(
+            self.frames(states),
+            ["CYCLE800", None, "CYCLE800", None, None, "CYCLE800", None, "CYCLE800", "CYCLE800", "CYCLE800", "CYCLE800"],
+        )
+        # A ROT stays: the swivel's group is its own ('tilt').
+        frames = self.open_frames("sinumerik-mill", ["ROT RPL=45", 'CYCLE800(1,"TC1",0,57,0,0,0,0,30,0,0,0,0,-1,100,1)', 'CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)'])
+        self.assertEqual([f["code"] for f in frames], ["ROT"])
+
+    def test_code_7_the_zero_call_closing_does_not_depend_on_frame_without_values(self) -> None:
+        # Review CODE-7: a database that declares `frameZero` / `frameCloses` but no code with
+        # `frameWithoutValues` never closed (the call arguments were read only beside it).
+        context = helpers.effective_context("sinumerik-mill")
+        codes = [{key: value for key, value in entry.items() if key != "frameWithoutValues"} for entry in context["codes"]]
+        self.assertFalse(any("frameWithoutValues" in entry for entry in codes))
+        cp = gedit_nc.compile_profile(context["profile"])
+        interp = gedit_nc.ModalInterpreter(cp, codes)
+        state = None
+        seen = []
+        for number, line in enumerate(
+            [
+                'CYCLE800(1,"TC1",0,57,0,0,0,0,30,0,0,0,0,-1,100,1)',
+                'CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)',
+                'CYCLE800(1,"TC1",0,57,0,0,0,0,30,0,0,0,0,-1,100,1)',
+                'CYCLE800(1,"0",0,57,0,0,0,0,30,0,0,0,0,1,0,1)',
+            ],
+            1,
+        ):
+            tokens, state = gedit_nc.tokenize_line(line, cp, state)
+            interp.update(tokens, number, gedit_nc.mask_comments(line, cp))
+            seen.append([f["code"] for f in interp.open_frames])
+        self.assertEqual(seen, [["CYCLE800"], [], ["CYCLE800"], []])
+
+    def test_d6_1_the_frames_by_solid_angles_along_the_tool_and_on_the_workpiece(self) -> None:
+        # v1.2.0 manual-check fix round (D6-1, SINUMERIK programming manual, frames): ROTS, AROTS
+        # and CROTS turn by solid angles in the programmable frame that ROT or TRANS alone clears;
+        # TOFRAME and TOROT along the tool, ended by TOROTOF (ROT or TRANS alone ends them on the
+        # control too; gEdit waits for TOROTOF, the safe reading). PAROT ends with PAROTOF only.
+        states = self.run_lines(
+            "sinumerik-mill",
+            ["ROTS X30 Y45", "ROT", "AROTS X10", "TRANS", "CROTS Y20", "ROT", "TOFRAME", "ROT", "TOROTOF", "TOROTX", "TOROTOF",
+             "PAROT", "ROT", "TOROT", "PAROTOF", "TOROTOF", "PAROT", "TOROTOF", "PAROTOF"],
+        )
+        self.assertEqual(
+            self.frames(states),
+            ["ROTS", None, "AROTS", None, "CROTS", None, "TOFRAME", "TOFRAME", None, "TOROTX", None,
+             "PAROT", "PAROT", "TOROT", "TOROT", None, "PAROT", "PAROT", None],
+        )
 
     def open_frames(self, profile_id: str, lines: Sequence[str]) -> List[Dict[str, Any]]:
         context = helpers.effective_context(profile_id)

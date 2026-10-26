@@ -1,0 +1,17 @@
+{
+  "message": "Estimated time 0:36.3 for 1 tool: feed 0:29.4, rapid 0:01.8, dwell 0:02.1, tool changes 0:03.0. 1 block is not estimated: 1 move whose start or end is not known. 1 move is timed at the top feed. The estimate is a lower bound: it counts 100 % feed and rapid override, no acceleration, no time to read a block and no look-ahead. No machine chosen: a value whose reading depends on the machine is not estimated.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "warning",
+      "message": "N50 G0 X0 Y0 Z50: not estimated: where the move starts or ends is not known (the start of X: the program's first move of the axis, or the first after a move to a machine position, a roughing cycle's contour or a block gEdit cannot place).",
+      "reason": "position-unknown"
+    },
+    {
+      "line": 9,
+      "severity": "info",
+      "message": "N80 X200 F1: timed at the top feed of the form; the programmed feed is faster.",
+      "reason": "clamped"
+    }
+  ]
+}

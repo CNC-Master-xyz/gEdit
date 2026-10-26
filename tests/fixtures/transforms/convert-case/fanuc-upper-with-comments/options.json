@@ -1,1 +1,8 @@
-{ "case": "upper", "excludeComments": false }
+{
+  "note": "Fanuc, to upper case with excludeComments off: the comments change too.",
+  "profile": "fanuc-gcode",
+  "options": {
+    "case": "upper",
+    "excludeComments": false
+  }
+}

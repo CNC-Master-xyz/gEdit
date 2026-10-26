@@ -57,7 +57,7 @@
         "check": "Machine reading",
         "checkId": "machineReading",
         "severity": "info",
-        "message": "Z2000: read as 2000 mm by 'As written' (the assumed default), 2 mm by 'Increments of 0.001 mm (IS-B)' or 0.2 mm by 'Increments of 0.0001 mm (IS-C)'; choose a machine"
+        "message": "Z2000: read as 2000 mm by 'As written' (the assumed default), 20 mm by 'Increments of 0.01 mm (IS-A)', 2 mm by 'Increments of 0.001 mm (IS-B)' or 0.2 mm by 'Increments of 0.0001 mm (IS-C)'; choose a machine"
       },
       {
         "line": 32,

@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Fanuc: packed blocks get a space between their words; variables, IF and GOTO, a skip mark and a comment with a double space keep their form.",
+  "profile": "fanuc-gcode",
+  "options": {}
+}

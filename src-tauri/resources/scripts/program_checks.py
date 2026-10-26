@@ -63,6 +63,20 @@
 # default = true
 #
 # [[params]]
+# id = "speedLimit"
+# type = "bool"
+# label = "Spindle speed limit"
+# help = "A spindle speed or a speed clamp above the top speed set for the machine (Machines, Motion and limits)."
+# default = true
+#
+# [[params]]
+# id = "travelLimit"
+# type = "bool"
+# label = "Travel"
+# help = "A position in machine coordinates outside the travel set for the machine (an error), or positions in work coordinates that span more of an axis than its travel (a warning: no work offset brings them all inside)."
+# default = true
+#
+# [[params]]
 # id = "stateConflicts"
 # type = "bool"
 # label = "Refused in this state"
@@ -123,6 +137,20 @@
 # type = "bool"
 # label = "Call in a profile"
 # help = "Lathe: a subprogram call inside the P to Q profile of a cycle."
+# default = true
+#
+# [[params]]
+# id = "passRepeat"
+# type = "bool"
+# label = "Pass repeated"
+# help = "Fanuc lathe: a block that moves nothing (empty, or only M, S, T, F or a modal G code such as G40 or G97) while a single pass (G90, G92, G94) is in force. The control runs the pass again."
+# default = true
+#
+# [[params]]
+# id = "gcodeSystemC"
+# type = "bool"
+# label = "G-code system"
+# help = "Lathe: blocks written the way G-code system C writes them, which gEdit does not read (G70 or G71 alone, G20, G21 or G24 with a position and a feed)."
 # default = true
 #
 # [[params]]
@@ -273,6 +301,42 @@ Sinumerik control addresses spindle 1 and 2), and not stopped since. A cut is ju
 the spindle state before **and** after its own block, so `M3` and `M5` written in the cut's
 own block never decide against it. An M code the database does not know may start or stop a
 spindle, so after one the spindle state is unknown until the next code the database knows.
+
+The machine's limits (P4b, plan §6.4 rule 7)
+--------------------------------------------
+`speedLimit` and `travelLimit` read the machine's limits block (`context.machine.limits`,
+through `_nc_cycles.machine_limits`, which loads no geometry module). Without a block (no
+machine chosen, none set, or a broken one the app leaves out) both stay silent, like every
+check whose data is missing. With a block, a value the machine lacks is said once as a run
+note (no top speed for a spindle the program uses, no travel for an axis it positions), and
+so is a stretch the check cannot read (the distance mode not known); a check never guesses a
+limit.
+
+* `speedLimit` (warning): a speed in rpm above the top speed of its spindle — the plain
+  speed word and `S1=` where `addresses.mainSpindle` is 1 against `spindle.main`, `S2=`,
+  `S[2]=` and any other address the limits name (`SB`) against their own entry — and a clamp
+  (`sets.speedLimit` with an upper bound, `addresses.speedLimitWords`) above it. A speed
+  under constant surface speed is no rpm and is not compared; a dwell's revolutions and a
+  lower limit are no speed either. A speed written before the program sets the speed unit
+  runs in the control's power-on mode, rpm, and its row says it was read so where the database
+  has a code that sets rpm (not Klartext, whose `TOOL CALL … S` is always rpm). The control holds
+  the spindle at its top speed or stops.
+* `travelLimit`: an axis position written absolutely. In machine coordinates (a code with
+  `axisWords: 'machine'` whose parameters do not describe the word as something else) a
+  position outside `travel` of its axis is an **error**. In work coordinates the work offset
+  is not known, so a single position is never judged; where a program's positions of one axis
+  span more than the axis's travel (its highest minus its lowest), no work offset brings them
+  all inside: a **warning**, once per axis and program, on the line where the span first
+  grows past the travel, naming the lowest and the highest position (the owner's answer to
+  P4b Q3, 2026-10-21; fix batch 2, CODE-10). Incremental words, words the machine reads
+  differently, positions under a frame or tool centre point control and the blocks of a
+  contour definition are not compared.
+  Lengths are converted to the travel's units; on a lathe whose `X` is a diameter word the
+  `X` travel is a diameter, as the path tracker keeps it.
+
+`travelTime` (T085) is not a check: the SINUMERIK manuals list `G931` only in the tables of
+G group 15 and say that a feed value stays in force until the next one is written, so
+nothing confirms that the travel time counts for its own block only (plan §7).
 """
 
 from __future__ import annotations
@@ -280,9 +344,11 @@ from __future__ import annotations
 import re
 import sys
 import unicodedata
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import gedit_nc
+import _nc_cycles  # the machine's limits (plan §6.4); it imports gedit_nc only, no geometry module
 
 TITLE = "Program checks"
 
@@ -311,6 +377,8 @@ CHECKS: List[Tuple[str, str]] = [
     ("speedAfterTapping", "Speed after tapping"),
     ("cssClamp", "Speed clamp"),
     ("threadUnderCss", "Thread under surface speed"),
+    ("speedLimit", "Spindle speed limit"),
+    ("travelLimit", "Travel"),
     ("stateConflicts", "Refused in this state"),
     ("requiredWords", "Missing word"),
     ("aloneInBlock", "Alone in its block"),
@@ -320,6 +388,8 @@ CHECKS: List[Tuple[str, str]] = [
     ("languageSwitch", "Control language"),
     ("profileTargets", "Profile targets"),
     ("callInProfile", "Call in a profile"),
+    ("passRepeat", "Pass repeated"),
+    ("gcodeSystemC", "G-code system"),
     ("jumpTargets", "Jump target"),
     ("doEnd", "DO and END"),
     ("blockWords", "Words in a block"),
@@ -339,7 +409,10 @@ CHECKS: List[Tuple[str, str]] = [
 ORDER = {check_id: index for index, (check_id, _) in enumerate(CHECKS)}
 LABEL = dict(CHECKS)
 
-#: The conditions `CodeEntry.conflicts` may name (with `frame:<group>` and a leading `!`). The
+#: The conditions `CodeEntry.conflicts` may name (with `frame:<group>`, `code:<code>` and a
+#: leading `!`; `code:G68`, manual-check fix D6-3: that one code is in force, a frame it opened
+#: or the code of its modal group, so `G43.4` can refuse `G68` and not `G68.2`, which shares its
+#: frame group). The
 #: script reads them by name (`CONDITION_TEXT`); the data tests hold the shipped databases to
 #: this list, so a condition the script has no sentence for cannot ship.
 CONDITIONS = ("tcp", "radiusComp", "lengthComp", "cycle", "surfaceSpeed", "feedNotPerMinute")
@@ -348,7 +421,7 @@ CONDITIONS = ("tcp", "radiusComp", "lengthComp", "cycle", "surfaceSpeed", "feedN
 CONDITION_TEXT = {
     "tcp": "tool centre point control is on",
     "radiusComp": "radius compensation is on",
-    "lengthComp": "a tool length offset is on",
+    "lengthComp": "a tool length offset is on, unless your control allows a tilted plane under tool length compensation",
     "cycle": "a modal cycle is in force",
     "surfaceSpeed": "constant surface speed is on",
     "feedNotPerMinute": "the feed is not a feed per minute",
@@ -449,6 +522,14 @@ def unclosed(count: int, bracket: str) -> str:
     if count == 1:
         return "a %s is opened and not closed on its line" % bracket
     return "%d %s are opened and not closed on its line" % (count, bracket)
+
+
+def all_of(items: Sequence[str]) -> str:
+    """``a``, ``a and b``, ``a, b and c``."""
+    items = list(items)
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def listing(items: Sequence[str]) -> str:
@@ -588,7 +669,7 @@ class Run:
         self.readings_dropped = 0
         self.last_tool: Optional[str] = None
         #: `toolWordFormat`: the lengths of the tool words seen, with the first line of each.
-        self.tool_lengths: Dict[int, int] = {}
+        self.tool_lengths: Dict[int, Tuple[int, int]] = {}
         self.tool_mix_reported = False
         self.notes: List[Dict[str, Any]] = []
         self._noted: Set[str] = set()
@@ -601,6 +682,7 @@ class Run:
         self._readings: Dict[Tuple[Any, ...], Any] = {}
         self._read_profile()
         self._read_database()
+        self._read_limits()
         self._reset_program()
         units = as_dict(self.interp.state.get("units")).get("value")
         if units not in ("mm", "inch"):
@@ -659,6 +741,9 @@ class Run:
         self.tool_trigger = patterns.get("tool_trigger")
         self.tool_ignore = patterns.get("tool_ignore")
         self.tool_pattern = patterns.get("tool")
+        #: D3-4c ``toolFrom: last-before``: the `T` on a tool line is the next tool, not the
+        #: one loaded, so it never says "the tool already in the spindle".
+        self.tool_from_before = as_dict(profile.get("toolCall")).get("toolFrom") == "last-before"
         self.program_start = list(patterns.get("program_start") or [])
         self.program_end = list(patterns.get("program_end") or [])
         outline = patterns.get("outline") or []
@@ -669,7 +754,12 @@ class Run:
         self.references: List[Tuple[Any, List[str], bool]] = []
         for (trigger, addrs), raw in zip(patterns.get("references") or [], raw_refs):
             if trigger is not None:
-                self.references.append((trigger, [a.upper() for a in addrs], raw.get("rewrite") is not False))
+                # A jump inside its own program: rewritten by a renumber (`rewrite` not false)
+                # and naming a block of the program it stands in. P4d (plan §6.6 rule 8): a
+                # rule with `program: "called"` or `"caller"` names a block of another
+                # program (`M98 P1000 Q30`, `M99 P30`), which this file may not hold.
+                local = raw.get("rewrite") is not False and raw.get("program", "own") == "own"
+                self.references.append((trigger, [a.upper() for a in addrs], local))
 
         # A program name has to stand alone where every start pattern ends the line.
         self.name_alone = bool(self.program_start) and all(
@@ -680,11 +770,24 @@ class Run:
         tokens, _ = gedit_nc.tokenize_line("%", self.cp)
         self.tape_marker = not self.has_header and len(tokens) == 1 and tokens[0].kind == "programMarker"
 
-        # A tool rule that takes exactly two lengths of tool word (four and six digits: with
-        # and without a nose-radius set) names two forms of one equipment, and a file keeps
-        # to one of them; a rule that takes a range (leading zeros optional) has no forms.
-        lengths = [n for n in range(1, 11) if self.tool_trigger is not None and self.tool_trigger.search("T" + "1" * n)]
-        self.tool_forms = len(lengths) == 2
+        # A tool rule that takes two runs of tool-word lengths (three or four digits, and six:
+        # without and with a nose-radius set) names two forms of one equipment, and a file
+        # keeps to one of them; a run is one form with its leading zero optional (`T101` is
+        # `T0101`), and a rule that takes one range has no forms (manual-check fix D3-2, handed
+        # over by batch B3).
+        #: The tool rule's trigger reads the tool word itself (a turret); with a tool changer
+        #: (`M6` triggers) the `tool` pattern says which tool words there are (D3-4a).
+        self.trigger_reads_tool = self.tool_trigger is not None and any(self.tool_trigger.search("T" + "1" * n) for n in range(1, 11))
+        lengths = [n for n in range(1, 11) if describes_tool_word(self, "T" + "1" * n)]
+        runs: List[List[int]] = []
+        for n in lengths:
+            if runs and runs[-1][-1] == n - 1:
+                runs[-1].append(n)
+            else:
+                runs.append([n])
+        #: Tool-word length -> the form it belongs to (the index of its run).
+        self.tool_form_of: Dict[int, int] = {n: i for i, run in enumerate(runs) for n in run}
+        self.tool_forms = len(runs) == 2
         decl = as_dict(profile.get("machineParams"))
         # A profile whose presets disagree about a number written with a point is a unit
         # system: every number depends on the machine, so `machineReading` says it once.
@@ -692,6 +795,9 @@ class Run:
         value, readings = gedit_nc.resolve_value(sample, "length", gedit_nc.machine_params(self.context), profile, "mm")
         self.unit_system = value is None and bool(readings)
         self.tool_word_variant = any(as_dict(v).get("id") == "toolWord" for v in as_list(decl.get("variants")))
+        #: `gcodeSystemC`: the profile offers G-code systems (`gcodeSystem` variant) and none of
+        #: them is system C, so a program written in it is read wrongly (D5-4).
+        self.gcode_systems = any(as_dict(v).get("id") == "gcodeSystem" for v in as_list(decl.get("variants")))
         #: Whether the machine itself says how its tool word is written. Only then is a tool
         #: word the rule does not describe a finding: a machining-centre program opened with
         #: a lathe profile writes `T1 M6`, which no lathe tool word describes (R7, R9).
@@ -749,6 +855,45 @@ class Run:
             reading = len(self.presets) > 1
         self.reads_numbers = (self.on("machineReading") and reading) or (self.on("wordDigits") and self.max_digits is not None)
 
+    def _read_limits(self) -> None:
+        """`speedLimit` and `travelLimit`: the machine's limits block (plan §6.4), as numbers."""
+        limits = _nc_cycles.machine_limits(self.context)
+        #: Whether the machine has a limits block at all: without one both checks are silent.
+        self.has_limits = limits is not None
+        limits = limits or {}
+        #: The top speeds in rpm: `main` and the speed addresses (`S2`, `SB`), upper case.
+        self.spindle_limits: Dict[str, Decimal] = {}
+        for key, value in as_dict(limits.get("spindle")).items():
+            number = limit_number(value)
+            if isinstance(key, str) and key and number is not None and number > 0:
+                self.spindle_limits[key if key == "main" else key.upper()] = number
+        units = limits.get("units")
+        self.travel_units: Optional[str] = units if units in ("mm", "inch") else None
+        #: axis -> (min, max), in `travel_units` (degrees for a rotary axis).
+        self.travel: Dict[str, Tuple[Decimal, Decimal]] = {}
+        for key, value in as_dict(limits.get("travel")).items():
+            span = as_dict(value)
+            low, high = limit_number(span.get("min")), limit_number(span.get("max"))
+            if isinstance(key, str) and key and low is not None and high is not None and low < high:
+                self.travel[key.upper()] = (low, high)
+        self.check_speeds = self.has_limits and self.on("speedLimit")
+        self.check_travel = self.has_limits and self.on("travelLimit")
+        #: Constant surface speed exists in this database: a speed word is rpm only while the
+        #: modal state says so. A database with no such code has every speed in rpm.
+        self.has_surface = any(sets_of(e).get("speedUnit") == "surface" for e in self.codes)
+        #: A code that sets the speed unit to rpm exists (`G97`): only then can a speed be
+        #: written before the program says it is rpm. Klartext has none: `TOOL CALL … S` is
+        #: always rpm, and its row says nothing of how it was read (fix batch 2, NC-14).
+        self.has_rpm = any(sets_of(e).get("speedUnit") == "rpm" for e in self.codes)
+        addresses = as_dict(self.profile.get("addresses"))
+        self.twins = gedit_nc.incremental_axes(self.profile)
+        self.diameter_words = {a.upper() for a in gedit_nc.diameter_axes(self.profile)}
+        self.angular = {str(a).upper() for a in as_list(addresses.get("angular")) if isinstance(a, str)}
+        #: The spindles with no top speed and the axes with no travel that the program used
+        #: (key -> first line), for the run notes.
+        self.speed_missing: Dict[str, int] = {}
+        self.travel_missing: Dict[str, int] = {}
+
     def facts_of(self, entry: Optional[Dict[str, Any]]) -> Optional["Facts"]:
         """The :class:`Facts` of a database entry, worked out once."""
         if entry is None:
@@ -788,10 +933,20 @@ class Run:
         self.css_thread_reported = False
         self.defined_seen = False
         self.defined_known = known
+        #: `passRepeat`: the single pass that ran last while its mode is in force and the values
+        #: the passes share are not cleared, as (code, line); None otherwise.
+        self.pass_live: Optional[Tuple[str, int]] = None
+        #: `gcodeSystemC`: said once per program.
+        self.system_c_reported = False
         self.iso_reported = False
         #: Cuts before any spindle start, kept until the program shows whether it starts a
         #: spindle at all: a subprogram runs under the caller's spindle and starts none.
         self.never_rows: List[Tuple[int, str]] = []
+        self.flush_work_travel()
+        #: `travelLimit`: per axis the lowest and the highest position in work coordinates of
+        #: this program, and the line where their span first grew past the travel: [lowest,
+        #: its line, its word as shown, highest, its line, its word as shown, line or None].
+        self.work_range: Dict[str, List[Any]] = {}
 
     def flush_never(self) -> None:
         """Reports the cuts before the first spindle start of a program that starts one."""
@@ -800,6 +955,24 @@ class Run:
             for line, message in rows:
                 self.add("spindleOff", line, "warning", message)
         self.never_rows = []
+
+    def flush_work_travel(self) -> None:
+        """Reports, once per axis, the positions in work coordinates that span more than the
+        axis's travel: no work offset brings them all inside (CODE-10)."""
+        found = getattr(self, "work_range", None)
+        if not found:
+            return
+        over = [(axis, kept) for axis, kept in found.items() if kept[6] is not None]
+        for axis, (lowest, low_line, low_word, highest, high_line, high_word, line) in sorted(over, key=lambda item: item[1][6]):
+            low, high = self.travel[axis]
+            self.add(
+                "travelLimit",
+                line,
+                "warning",
+                "%s (line %d) to %s (line %d): the positions of %s in work coordinates span %s, more than the travel of this machine, %s (%s), so no work offset brings them all inside"
+                % (low_word, low_line, high_word, high_line, axis_label(self, axis), span_text(self, axis, highest - lowest), travel_text(self, axis, low, high), span_text(self, axis, high - low)),
+            )
+        self.work_range = {}
 
     # -- output ---------------------------------------------------------------
 
@@ -999,9 +1172,7 @@ def check_tool_words(run: Run, number: int, tokens: Sequence[gedit_nc.Token]) ->
         digits = (token.value_text or "").strip()
         if not digits.isdigit():
             continue
-        described = run.tool_trigger.search(token.text) is not None or (
-            run.tool_ignore is not None and run.tool_ignore.search(token.text) is not None
-        )
+        described = describes_tool_word(run, token.text)
         if not described:
             if not run.tool_word_stated:
                 continue
@@ -1012,17 +1183,37 @@ def check_tool_words(run: Run, number: int, tokens: Sequence[gedit_nc.Token]) ->
                 "%s: not a tool word this machine's tool-word format describes (%d digits)" % (token.text, len(digits)),
             )
             continue
-        if run.tool_forms and run.tool_lengths and len(digits) not in run.tool_lengths and not run.tool_mix_reported:
-            first = min(run.tool_lengths.values())
+        form = run.tool_form_of.get(len(digits))
+        if form is None:
+            # CODE-12: a word the rule describes only by its digits (an `ignore` pattern that
+            # takes `T0` but no other one-digit word) is of neither form; its length is no form
+            # index either (a one-digit word read as the second form).
+            continue
+        if run.tool_forms and run.tool_lengths and form not in run.tool_lengths and not run.tool_mix_reported:
+            first_line, first_length = min(run.tool_lengths.values())
             run.add(
                 "toolWordFormat",
                 number,
                 "warning",
                 "%s: a %d-digit tool word after %d-digit ones (line %d); one file should keep to one form"
-                % (token.text, len(digits), next(k for k, v in run.tool_lengths.items() if v == first), first),
+                % (token.text, len(digits), first_length, first_line),
             )
             run.tool_mix_reported = True
-        run.tool_lengths.setdefault(len(digits), number)
+        run.tool_lengths.setdefault(form, (number, len(digits)))
+
+
+def describes_tool_word(run: Any, text: str) -> bool:
+    """A tool word (``T0101``) the effective tool rule describes: its trigger or its ``ignore``
+    matches it, or, where the trigger is another code (a tool changer's ``M6``, D3-4a), its
+    ``tool`` pattern reads the whole word."""
+    if run.tool_trigger is not None and run.tool_trigger.search(text) is not None:
+        return True
+    if run.tool_ignore is not None and run.tool_ignore.search(text) is not None:
+        return True
+    if getattr(run, "trigger_reads_tool", True) or run.tool_pattern is None:
+        return False
+    match = run.tool_pattern.search(text)
+    return match is not None and match.group(0) == text and bool(match.groupdict().get("tool"))
 
 
 def check_brackets(run: Run, number: int, masked: str) -> None:
@@ -1246,7 +1437,7 @@ def finish_block(run: Run, block: Block, doc: "Document") -> None:
     tool_change = is_tool_change(run, block)
     tool_called = tool_change
     if tool_change:
-        tool = tool_of(run, block)
+        tool = None if run.tool_from_before else tool_of(run, block)
         if tool is not None and tool == run.last_tool:
             # The tool that is already in the spindle: a new speed or a new length, no change.
             tool_change = False
@@ -1432,6 +1623,16 @@ def finish_block(run: Run, block: Block, doc: "Document") -> None:
                 run.defined_seen = True
                 run.defined_known = True
 
+    # -- a single pass run again, a program in G-code system C (lathe) -------
+    if run.gcode_systems and run.lathe and run.on("passRepeat"):
+        # NC-7: the rule is the Fanuc lathe's (0i-F Plus lathe manual, restrictions on canned
+        # cycles); the Okuma fixed thread cycles G31-G33 are whole passes too, and no Okuma
+        # source says a block without a move runs them again. The profile that offers G-code
+        # systems is the Fanuc lathe family, the same gate as `gcodeSystemC`.
+        check_pass_repeat(run, block, written, moves, emit)
+    if run.gcode_systems and run.lathe and run.on("gcodeSystemC") and not run.system_c_reported:
+        check_system_c(run, block, written, words, emit)
+
     # -- several S or T words, too many M codes ------------------------------
     if emit and words and run.on("blockWords"):
         check_block_words(run, block, words)
@@ -1440,6 +1641,468 @@ def finish_block(run: Run, block: Block, doc: "Document") -> None:
     if emit and run.reads_numbers:
         read_numbers(run, block, words)
 
+    # -- the machine's limits: top speeds and travel (plan §6.4) -------------
+    if emit and words and (run.check_speeds or run.check_travel):
+        if run.check_speeds:
+            check_speeds(run, block, words)
+        if run.check_travel and not contour:
+            check_travel(run, block, words)
+
+
+# -- the single passes (manual-check fixes D5-5, D5-4) -------------------------
+
+#: The token kinds a block may hold and still be "empty" to the control: no command at all.
+EMPTY_KINDS = ("whitespace", "comment", "blockNumber", "blockSkip")
+
+
+def pass_entry(run: Run) -> Optional[Dict[str, Any]]:
+    """The modal single pass in force (`sets.path: 'cycle'` in the motion group), or None."""
+    code = run.motion_code
+    entry = run.interp.entry(code) if isinstance(code, str) and code else None
+    if isinstance(entry, dict) and entry.get("modal") is True and sets_of(entry).get("path") == "cycle":
+        return entry
+    return None
+
+
+def check_pass_repeat(run: Run, block: Block, written: Sequence[Written], moves: bool, emit: bool) -> None:
+    """`passRepeat` (warning, D5-5, widened by the owner on 2026-10-26, NC-2): a block that
+    moves nothing while a single pass is in force (`G90`, `G92`, `G94`; system B `G77`-`G79`: a
+    code of the motion group with `sets.path: 'cycle'`). Such a block is empty or writes only
+    M, S, T or F words and modal codes (`F0.15`, `G40`, `G97`, `G99`, `G96 S200`); the control
+    runs the pass again in it, together with the M, S or T function; a G00 or G01 before it
+    ends the pass mode (FANUC 0i-F Plus lathe manual, restrictions on canned cycles). A
+    one-shot code other than a dwell, or a plane code, clears the values the passes share,
+    after which such a block runs nothing; a dwell block runs no pass. A block with any other
+    word (a code the database does not know, an address of a call) is left alone: gEdit does
+    not guess what the control makes of it. Only on the Fanuc lathe profiles (NC-7)."""
+    entry = pass_entry(run)
+    if entry is None:
+        run.pass_live = None
+        return
+    code = code_of(entry)
+    for w in written:
+        e = w.entry
+        if e is None:
+            continue
+        if e.get("group") == "nonmodal" or sets_of(e).get("plane") is not None:
+            dwell = any(isinstance(p, dict) and p.get("unit") == "dwell" for p in as_list(e.get("params")))
+            if not dwell:
+                run.pass_live = None
+            return
+    lengths = {
+        str(p.get("address")).upper()
+        for p in as_list(entry.get("params"))
+        if isinstance(p, dict) and isinstance(p.get("address"), str) and p.get("lengthAlong")
+    }
+    runs = moves or any(w.facts is not None and w.facts.modal and w.facts.group == "motion" for w in written)
+    if not runs:
+        runs = any(
+            t.kind == "word" and (t.address or "").upper() in lengths and (t.value_text or "") != "" for _, t in block.tokens
+        )
+    if runs:
+        run.pass_live = (code, block.line)
+        return
+    if run.pass_live is None:
+        return
+    allowed = {"M", run.speed_address, run.tool_address, run.feed_address}
+    # NC-2: the modal codes the block writes (the database knows them, not one-shot codes;
+    # those and the plane codes returned above).
+    modal = {
+        id(w.token) for w in written if w.entry is not None and w.entry.get("modal") is True and w.entry.get("group") != "nonmodal"
+    }
+    plain = True
+    commands: List[str] = []
+    for _, t in block.tokens:
+        if t.kind in EMPTY_KINDS:
+            continue
+        if (
+            t.kind == "word"
+            and not is_assignment(t)
+            and (t.value_text or "") != ""
+            and ((t.address or "").upper() in allowed or id(t) in modal)
+        ):
+            commands.append(t.text)
+            continue
+        plain = False
+        break
+    if not plain:
+        return
+    ends = any(pattern.search(masked) for _, _, masked, _ in block.lines for pattern in run.program_end)
+    if emit:
+        what = "%s:" % " ".join(commands) if commands else "An empty block:"
+        run.add(
+            "passRepeat",
+            block.line,
+            "warning",
+            "%s the single pass %s is still in force (last pass on line %d), so the control runs that pass again here; write G00 or G01 before this block"
+            % (what, run.pass_live[0], run.pass_live[1]),
+        )
+    if ends:
+        run.pass_live = None
+
+
+#: D5-4: what a program written in G-code system C looks like to a control set to system A or
+#: B. System C numbers inch and metric input G70/G71 (A: G20/G21) and the single passes
+#: G20/G21/G24 (A: G90/G92/G94). gEdit reads systems A and B only, so this is a hint, never a
+#: reading: the codes as the profile's database has them, the words as written.
+SYSTEM_C_UNITS = ("G70", "G71")
+SYSTEM_C_PASSES = ("G20", "G21", "G24")
+
+
+def _g_number(token: gedit_nc.Token) -> Optional[str]:
+    """``G70`` for a `G` word whose number is 70 (`G070` too), else None."""
+    if token.kind != "word" or (token.address or "").upper() != "G":
+        return None
+    value = (token.value_text or "").strip()
+    if not value.isdigit():
+        return None
+    return "G%d" % int(value, 10)
+
+
+def check_system_c(run: Run, block: Block, written: Sequence[Written], words: Sequence[Tuple[int, gedit_nc.Token]], emit: bool) -> None:
+    """`gcodeSystemC` (warning, once per program, D5-4): a block written the way G-code system C
+    writes it, on a lathe profile that offers G-code systems: `G70` or `G71` with no other word
+    than codes and a block number (inch or metric input in system C; system A's finishing and
+    roughing cycles need P and Q or U and R), or `G20`, `G21` or `G24` with a position or a taper
+    and a feed (a single pass in system C; inch or metric input, which takes no words, in A)."""
+    addresses = [((t.address or "").upper(), t) for _, t in words if not is_assignment(t)]
+    codes = [g for _, t in words if (g := _g_number(t)) is not None]
+    others = [a for a, t in addresses if a not in ("G", "N") and (t.value_text or "") != ""]
+    found: Optional[str] = None
+    unit = next((c for c in codes if c in SYSTEM_C_UNITS), None)
+    passes = next((c for c in codes if c in SYSTEM_C_PASSES), None)
+    if unit is not None and not others:
+        found = "written alone, as G-code system C writes inch or metric input"
+    elif passes is not None:
+        positions = {a for a in others if a in run.axes or a == "R"}
+        if positions and run.feed_address in others:
+            found = "%s written with %s and %s, as G-code system C writes a single pass" % (
+                passes,
+                all_of(sorted(positions)),
+                run.feed_address,
+            )
+    if found is None:
+        return
+    run.system_c_reported = True
+    if emit:
+        run.add(
+            "gcodeSystemC",
+            block.line,
+            "warning",
+            "%s: %s. This program may be written in G-code system C, which gEdit does not read; check the G-code system of the machine"
+            % (shown(block.text()), found),
+        )
+
+
+# -- the machine's limits (plan §6.4 rule 7) -------------------------------------
+
+#: Sinumerik's value functions: ``X=AC(10)`` is absolute and ``X=IC(2)`` incremental whatever
+#: the distance mode says (the path tracker's ``VALUE_FUNCTIONS``). Only a plain number
+#: inside is read.
+VALUE_FUNCTIONS = {"AC": "absolute", "IC": "incremental"}
+INCH = Decimal("25.4")
+
+
+def limit_number(value: Any) -> Optional[Decimal]:
+    """A number of the limits block as a :class:`Decimal`, or ``None`` (a bool is no number)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return number if number.is_finite() else None
+
+
+def number_text(value: Decimal) -> str:
+    """``600``, ``-12.5``, ``0``: a limit or a value as plain text, no exponent."""
+    return "0" if value == 0 else format(value.normalize(), "f")
+
+
+def literal_of(token: gedit_nc.Token) -> Tuple[Any, Optional[str]]:
+    """The number a word is written with and ``'absolute'``/``'incremental'`` from a value
+    function, or ``(None, None)`` for anything else (an expression, a variable)."""
+    if token.value is not None:
+        return token.value, None
+    text = (token.value_text or "").strip()
+    open_at = text.find("(")
+    if open_at <= 0 or not text.endswith(")"):
+        return None, None
+    mode = VALUE_FUNCTIONS.get(text[:open_at].strip().upper())
+    literal = gedit_nc.parse_number(text[open_at + 1 : -1].strip()) if mode is not None else None
+    return (literal, mode) if literal is not None else (None, None)
+
+
+def spindle_text(key: str) -> str:
+    return "this machine" if key == "main" else "spindle %s on this machine" % key
+
+
+def speed_target(run: Run, token: gedit_nc.Token) -> Optional[Tuple[str, List[str]]]:
+    """Which spindle a speed or clamp word is for: ``('main' | address, the limit keys to try)``,
+    or ``None`` for a word that names no spindle speed.
+
+    The plain speed word (and ``S=``) and a word that names the main spindle by its number
+    (``S1=``, ``S[1]=`` where ``addresses.mainSpindle`` is 1) are the main spindle's; ``S2=``
+    and ``S[2]=`` name spindle 2; any other address is a spindle only where the limits name it
+    (``SB``). The limit of the exact address wins over ``main``.
+    """
+    speed = run.speed_address
+    address = (token.address or "").upper()
+    index = token.index
+    if index is None and address == speed:
+        return ("main", ["main", speed])
+    if gedit_nc.names_main_spindle(token, speed, run.main_spindle):
+        exact = speed + index.strip() if index is not None else address
+        return ("main", [exact.upper(), "main"])
+    if index is not None and address == speed and index.strip().isdigit():
+        key = speed + str(int(index.strip(), 10))
+        return (key, [key])
+    if index is None and is_assignment(token) and address.startswith(speed) and address[len(speed):].isdigit():
+        return (address, [address])
+    if index is None and address in run.spindle_limits:
+        return (address, [address])
+    return None
+
+
+def check_speeds(run: Run, block: Block, words: Sequence[Tuple[int, gedit_nc.Token]]) -> None:
+    """`speedLimit`: a speed in rpm or a clamp above the top speed of its spindle (warning)."""
+    entries = block.entries
+    upper = lower = unset = False
+    clamp_code = ""
+    for w in block.written:
+        bound = gedit_nc.speed_limit_bound_of(w.entry)
+        if bound == "upper":
+            upper = True
+            clamp_code = clamp_code or code_of(w.entry, w.code)
+        elif bound == "lower":
+            lower = True
+    dwell = any(e.get("fNotFeed") is True for e in entries)
+    interp = run.interp
+    for line, t in words:
+        if t.kind != "word" or not t.address:
+            continue
+        address = t.address.upper()
+        if address in run.speed_limit_words:
+            # `LIMS=3000`, `LIMS[2]=1800`: a clamp of the main spindle or of the indexed one.
+            if t.index is None or (run.main_spindle is not None and gedit_nc.same_spindle(t.index, run.main_spindle)):
+                target: Optional[Tuple[str, List[str]]] = ("main", ["main", run.speed_address])
+            elif t.index.strip().isdigit():
+                key = run.speed_address + str(int(t.index.strip(), 10))
+                target = (key, [key])
+            else:
+                target = None
+            if target is None:
+                continue
+            kind = "clamp"
+            written = t.text
+            unset = False
+        else:
+            unset = False
+            target = speed_target(run, t)
+            if target is None:
+                continue
+            plain = target[0] == "main"
+            if plain and dwell:
+                continue  # a dwell's revolutions (`G4 S2`)
+            if upper or lower:
+                if not upper:
+                    continue  # a lower limit alone (`G25 S100`) is neither a speed nor a clamp
+                kind = "clamp"
+                written = "%s %s" % (clamp_code, t.text) if clamp_code else t.text
+            else:
+                kind = "speed"
+                if plain and run.has_surface and interp.speed_unit == "surface":
+                    continue  # a surface speed is no rpm
+                unset = plain and run.has_surface and run.has_rpm and interp.speed_unit != "rpm"
+        literal = t.value
+        value = gedit_nc.decimal_of(literal) if literal is not None else None
+        if value is None:
+            continue
+        key, tries = target
+        limit_key = next((k for k in tries if k in run.spindle_limits), None)
+        if limit_key is None:
+            run.speed_missing.setdefault(key, line)
+            continue
+        limit = run.spindle_limits[limit_key]
+        if value <= limit:
+            continue
+        where = spindle_text("main" if limit_key in ("main", run.speed_address) else limit_key)
+        if kind == "speed":
+            message = "%s is above the top speed of %s, %s rpm" % (t.text, where, number_text(limit))
+            if unset:
+                # Before the program sets the speed unit the spindle runs in its power-on
+                # mode, a speed in rpm; the row says how it was read.
+                message += " (read as rpm: no speed unit is set before it)"
+        else:
+            message = "%s: the speed clamp is above the top speed of %s, %s rpm" % (shown(written), where, number_text(limit))
+        run.add("speedLimit", line, "warning", message)
+
+
+def axis_label(run: Run, axis: str) -> str:
+    """``X (diameter)`` for a lathe's diameter X, else the axis."""
+    return "X (diameter)" if axis == "X" and run.lathe and "X" in run.diameter_words else axis
+
+
+def travel_text(run: Run, axis: str, low: Decimal, high: Decimal) -> str:
+    unit = "°" if axis in run.angular else " " + (run.travel_units or "")
+    if unit == "°":
+        return "%s %s° to %s°" % (axis_label(run, axis), number_text(low), number_text(high))
+    return "%s %s to %s%s" % (axis_label(run, axis), number_text(low), number_text(high), unit)
+
+
+def word_text(token: gedit_nc.Token, literal: Any, value: Decimal, run: Run, axis: str) -> str:
+    """The word as written, with `` (-650 mm)`` behind it where its value is not the number it
+    says (an increment, an inch value against a travel in mm, a diameter read as a radius)."""
+    written = gedit_nc.decimal_of(literal)
+    if written is not None and written == value:
+        return token.text
+    if axis in run.angular:
+        return "%s (%s°)" % (token.text, number_text(value.quantize(Decimal("0.001"))))
+    # A converted length to the tenth of a micrometre or the ten-thousandth of an inch.
+    places = Decimal("0.0001") if run.travel_units == "inch" else Decimal("0.001")
+    return "%s (%s %s)" % (token.text, number_text(value.quantize(places)), run.travel_units or "")
+
+
+def check_travel(run: Run, block: Block, words: Sequence[Tuple[int, gedit_nc.Token]]) -> None:
+    """`travelLimit`: an absolute axis position outside the machine's travel.
+
+    In machine coordinates (a code with ``axisWords: 'machine'`` that does not describe the
+    word as a parameter of its own: ``G53``, ``SUPA``, ``M91``) an error; in work coordinates
+    the lowest and the highest position per axis, kept for the end of the program, where a span
+    longer than the travel is a warning (:meth:`Run.flush_work_travel`).
+    """
+    machine: Optional[str] = None
+    declared: Set[str] = set()
+    for w in block.written:
+        f = w.facts
+        if f is None or f.axis_words is None:
+            continue
+        if f.axis_words == "data":
+            return  # values, not positions (a coordinate set, a shift, a blank form)
+        machine = machine or code_of(w.entry, w.code)
+        for param in as_list(as_dict(w.entry).get("params")):
+            address = as_dict(param).get("address")
+            if isinstance(address, str):
+                declared.add(address.upper())
+    interp = run.interp
+    state: Optional[Dict[str, Any]] = None
+    entries: Optional[List[Dict[str, Any]]] = None
+    in_force: Optional[List[Dict[str, Any]]] = None
+    for line, t in words:
+        address = (t.address or "").upper()
+        if t.index is not None or address not in run.axes or address in run.twins or (t.value_text or "") == "":
+            continue
+        literal, function = literal_of(t)
+        if literal is None:
+            continue
+        in_machine = machine is not None and address not in declared
+        if not in_machine and (interp.frame is not None or interp.tcp is not None):
+            continue  # a rotated or tilted frame, or the tool tip under TCP: no axis position
+        if t.incremental or function == "incremental":
+            continue
+        if function != "absolute":
+            if state is None:
+                state = interp.state
+            distance = state.get("distance")
+            if distance == "incremental":
+                continue
+            if distance != "absolute":
+                run.note(
+                    "travel-distance",
+                    line,
+                    "Travel: at line %d it is not known whether the positions are absolute or incremental, so they are compared only where the program sets it." % line,
+                )
+                continue
+        if address not in run.travel:
+            run.travel_missing.setdefault(address, line)
+            continue
+        if address not in run.angular and run.travel_units is None:
+            continue
+        if entries is None:
+            entries = block.entries
+            cycle = interp.active_cycle
+            entry = interp.entry(cycle) if cycle else None
+            in_force = [entry] if entry is not None else []
+        value = axis_value(run, t, literal, entries, in_force or [])
+        if value is None:
+            continue
+        if address in run.diameter_words and run.lathe:
+            reading = interp.diameter_reading(address)
+            if reading == "radius":
+                value = value * 2
+            elif reading != "diameter":
+                continue
+        low, high = run.travel[address]
+        if not in_machine:
+            work_position(run, address, value, line, t, literal, high - low)
+            continue
+        if low <= value <= high:
+            continue
+        run.add(
+            "travelLimit",
+            line,
+            "error",
+            "%s is outside the travel of this machine, %s (in machine coordinates, %s)"
+            % (word_text(t, literal, value, run, address), travel_text(run, address, low, high), machine),
+        )
+
+
+def work_position(run: Run, axis: str, value: Decimal, line: int, token: gedit_nc.Token, literal: Any, travel: Decimal) -> None:
+    """Keeps the lowest and the highest position of ``axis`` in work coordinates, and the line
+    where their span first grows past ``travel`` (the length of the axis's travel)."""
+    kept = run.work_range.get(axis)
+    if kept is None:
+        word = word_text(token, literal, value, run, axis)
+        run.work_range[axis] = [value, line, word, value, line, word, None]
+        return
+    if value < kept[0]:
+        kept[0:3] = [value, line, word_text(token, literal, value, run, axis)]
+    elif value > kept[3]:
+        kept[3:6] = [value, line, word_text(token, literal, value, run, axis)]
+    if kept[6] is None and kept[3] - kept[0] > travel:
+        kept[6] = line
+
+
+def span_text(run: Run, axis: str, value: Decimal) -> str:
+    """A length of an axis in the travel's units (degrees for a rotary axis): ``1000 mm``."""
+    if axis in run.angular:
+        return "%s°" % number_text(value)
+    return "%s %s" % (number_text(value), run.travel_units or "")
+
+
+def axis_value(run: Run, token: gedit_nc.Token, literal: Any, entries: List[Dict[str, Any]], in_force: List[Dict[str, Any]]) -> Optional[Decimal]:
+    """The value of an axis word in the travel's units (degrees for a rotary axis), or
+    ``None`` where the machine decides and none is chosen (`machineReading` says so)."""
+    interp = run.interp
+    address = (token.address or "").upper()
+    block_key = (tuple(id(e) for e in entries), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed)
+    class_key = (token.address, block_key)
+    if class_key in run._classes:
+        cls = run._classes[class_key]
+    else:
+        cls = gedit_nc.number_class_of(token.address, run.profile, interp.feed_unit, entries, interp.pitch_feed, in_force)
+        run._classes[class_key] = cls
+    if cls not in DIMENSION_CLASSES:
+        return None
+    units = run.units
+    reading_key = (literal.raw, bool(literal.has_point), cls, units)
+    if reading_key in run._readings:
+        text, _ = run._readings[reading_key]
+    else:
+        text, readings = gedit_nc.resolve_value(literal, cls, run.machine, run.profile, units)
+        run._readings[reading_key] = (text, readings)
+    if text is None:
+        return None
+    try:
+        value = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+    if cls == "length" and address not in run.angular:
+        if units == "inch" and run.travel_units == "mm":
+            value = value * INCH
+        elif units == "mm" and run.travel_units == "inch":
+            value = value / INCH
+    return value
 
 
 def check_alone(run: Run, block: Block, w: "Written") -> None:
@@ -1546,7 +2209,7 @@ def is_tool_change(run: Run, block: Block) -> bool:
     if run.tool_trigger is None:
         return False
     for _, _, masked, _ in block.lines:
-        if run.tool_trigger.search(masked) and not (run.tool_ignore is not None and run.tool_ignore.search(masked)):
+        if run.tool_trigger.search(masked) and (run.tool_from_before or not (run.tool_ignore is not None and run.tool_ignore.search(masked))):
             return True
     return False
 
@@ -1683,6 +2346,9 @@ def conflict_in_force(run: Run, w: Written, conflicts: Sequence[Any]) -> Optiona
             if negate:
                 if name.startswith("frame:"):
                     return "the control takes it only while a frame of the group '%s' is open, and none is" % name.split(":", 1)[1]
+                if name.startswith("code:"):
+                    # CODE-10: one code by name (`!code:G68`), never the raw condition text.
+                    return "the control takes it only while %s is in force, and it is not" % name.split(":", 1)[1]
                 return "the control takes it only while %s, and that is not so" % CONDITION_TEXT.get(name, name)
             text = detail or CONDITION_TEXT.get(name, name)
             return "the control refuses it while %s" % text
@@ -1704,7 +2370,15 @@ def condition(run: Run, w: Written, name: str) -> Tuple[Optional[bool], Optional
     if name == "lengthComp":
         if run.length_comp is None:
             return (False, None)
-        return (True, "a tool length offset is on (%s, line %d)" % run.length_comp)
+        # D6-3 (handed over by batch B1): an offset in force that is tool centre point control
+        # (`G43.4`, `sets.tcp: 'on'`) is judged by `tcp`, not as a plain length offset.
+        if sets_of(interp.entry(run.length_comp[0])).get("tcp") == "on":
+            return (False, None)
+        return (
+            True,
+            "a tool length offset is on (%s, line %d), unless your control allows a tilted plane under tool length compensation"
+            % run.length_comp,
+        )
     if name == "cycle":
         cycle = interp.active_cycle
         if cycle is not None and cycle != code_of(w.entry, w.code):
@@ -1722,6 +2396,21 @@ def condition(run: Run, w: Written, name: str) -> Tuple[Optional[bool], Optional
         if unit == "unknown":
             return (None, None)
         return (unit != "per-minute", "the feed is %s, not per minute" % unit.replace("-", " "))
+    if name.startswith("code:"):
+        raw = name.split(":", 1)[1]
+        wanted = code_of(interp.entry(raw), raw)
+        own = code_of(w.entry, w.code)
+        for frame in reversed(interp.open_frames):
+            if frame["code"] == own and frame["line"] == w.line:
+                continue
+            if code_of(interp.entry(frame["code"]), frame["code"]).upper() == wanted.upper():
+                return (True, "%s (line %d) is in force" % (frame["code"], frame["line"]))
+        for value in as_dict(interp.state.get("groups")).values():
+            code = as_dict(value).get("code")
+            if isinstance(code, str) and code != own and code_of(interp.entry(code), code).upper() == wanted.upper():
+                line = as_dict(value).get("line")
+                return (True, "%s%s is in force" % (code, " (line %d)" % line if isinstance(line, int) and line > 0 else ""))
+        return (False, None)
     if name.startswith("frame:"):
         group = name.split(":", 1)[1]
         own = code_of(w.entry, w.code)
@@ -1857,6 +2546,9 @@ def read_numbers(run: Run, block: Block, words: Sequence[Tuple[int, gedit_nc.Tok
             cycle = interp.active_cycle
             entry = interp.entry(cycle) if cycle else None
             in_force = [entry] if entry is not None else []
+            # T120 / FB-2: under Fanuc `G43.5` (`G41.6`, `G42.6`) I, J and K are the tool
+            # direction, a count, read alike on every machine.
+            in_force += gedit_nc.arc_centre_modes(interp.state.get("groups"), interp.entry, profile, entries)
             block_key = (tuple(id(e) for e in entries), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed)
         class_key = (t.address, block_key)
         if class_key in run._classes:
@@ -1923,7 +2615,12 @@ def check_digits(run: Run, line: int, t: gedit_nc.Token, cls: Optional[str], uni
     if chosen:
         readings = [run.machine]
     else:
-        readings = [{"numberInput": as_dict(p.get("value"))} for p in run.presets] or [run.machine]
+        # T083 (owner, 2026-10-19): a preset marked `digitCheck: false` (Fanuc IS-A) is left
+        # out. A word is reported only when it has too many digits on every preset, and the
+        # coarse increment system few machines run would hide every such word on the others.
+        readings = [
+            {"numberInput": as_dict(p.get("value"))} for p in run.presets if p.get("digitCheck") is not False
+        ] or [run.machine]
     counts = []
     for machine in readings:
         count = increments_of(literal, cls, machine, units)
@@ -2476,6 +3173,27 @@ def finish(run: Run) -> None:
             "The lines above the selection were not sent, so the spindle, the cycles and the clamp in force at line %d are not known; those checks start judging where the selection sets them."
             % run.first,
         )
+    run.flush_work_travel()
+    if run.check_speeds and run.speed_missing:
+        line = min(run.speed_missing.values())
+        if not run.spindle_limits:
+            text = "Spindle speed limit: no top spindle speed is set for this machine, so the speeds are not checked."
+        else:
+            names = ["the main spindle" if key == "main" else "spindle %s" % key for key in sorted(run.speed_missing, key=run.speed_missing.get)]
+            text = "Spindle speed limit: no top speed is set for %s on this machine, so %s not checked." % (
+                all_of(names), "its speeds are" if len(names) == 1 else "their speeds are")
+        run.note("speed-missing", line, text)
+    if run.check_travel and run.travel_missing:
+        line = min(run.travel_missing.values())
+        if not run.travel:
+            text = "Travel: no travel is set for this machine, so the positions are not checked."
+        else:
+            axes = sorted(run.travel_missing, key=run.travel_missing.get)
+            text = "Travel: no travel is set for %s on this machine, so %s not checked." % (
+                all_of(axes), "its positions are" if len(axes) == 1 else "their positions are")
+        run.note("travel-missing", line, text)
+    if run.check_travel and run.travel and run.travel_units is None and any(a not in run.angular for a in run.travel):
+        run.note("travel-units", run.first, "Travel: the machine's travel has no units, so the linear positions are not checked.")
     if (run.on("spindleOff") or run.on("toolChangeSpindle")) and not (run.has_spindle and run.has_motion) and run.codes:
         run.note(
             "spindle-data",

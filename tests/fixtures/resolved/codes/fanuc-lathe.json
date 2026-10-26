@@ -1001,6 +1001,40 @@
       "review": "pending"
     },
     {
+      "code": "G53.6",
+      "conflicts": [
+        "!frame:frame"
+      ],
+      "description": "Written after G68.2 or G68.4: the rotary axes move so that the tool stands at right angles to the tilted plane, while the tool tip stays where it is on the workpiece. On a lathe D names the tool offset (a machining centre writes H), R the distance from the tool tip to the centre of rotation as a radius value; X, Y and Z, if written, are where the tool tip ends up.",
+      "group": "nonmodal",
+      "label": "Turn the tool axis to the tilted plane, tool tip kept",
+      "params": [
+        {
+          "address": "D",
+          "label": "Tool offset number",
+          "min": 0
+        },
+        {
+          "address": "R",
+          "label": "Distance from the tool tip to the centre of rotation, a radius value"
+        },
+        {
+          "address": "X",
+          "label": "End point of the tool tip, X"
+        },
+        {
+          "address": "Y",
+          "label": "End point of the tool tip, Y"
+        },
+        {
+          "address": "Z",
+          "label": "End point of the tool tip, Z"
+        }
+      ],
+      "positionsRotary": true,
+      "review": "pending"
+    },
+    {
       "code": "G54",
       "description": "Selects the first work coordinate system.",
       "group": "offset",
@@ -1169,7 +1203,6 @@
       "axisWords": "data",
       "code": "G68.2",
       "conflicts": [
-        "tcp",
         "radiusComp",
         "lengthComp",
         "cycle",
@@ -1218,13 +1251,13 @@
           "label": "Turn about the new Z axis (P2)",
           "unit": "angle"
         }
-      ]
+      ],
+      "review": "pending"
     },
     {
       "axisWords": "data",
       "code": "G68.3",
       "conflicts": [
-        "tcp",
         "radiusComp",
         "lengthComp",
         "cycle",
@@ -1245,18 +1278,18 @@
           "label": "Turn about the new Z axis",
           "unit": "angle"
         }
-      ]
+      ],
+      "review": "pending"
     },
     {
       "axisWords": "data",
       "code": "G68.4",
       "conflicts": [
-        "tcp",
         "radiusComp",
         "lengthComp",
         "cycle",
         "surfaceSpeed",
-        "frame:frame",
+        "code:G68.1",
         "frame:mirror",
         "frame:scaling",
         "frame:polar",
@@ -1300,7 +1333,8 @@
           "label": "Turn about the new Z axis (P2)",
           "unit": "angle"
         }
-      ]
+      ],
+      "review": "pending"
     },
     {
       "code": "G69",
@@ -1349,6 +1383,7 @@
           "label": "Block number of the first profile block",
           "min": 0,
           "position": "none",
+          "required": true,
           "unit": "count"
         },
         {
@@ -1357,6 +1392,7 @@
           "label": "Block number of the last profile block",
           "min": 0,
           "position": "none",
+          "required": true,
           "unit": "count"
         },
         {
@@ -1575,34 +1611,40 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
+          "position": "none",
           "required": true
         },
         {
           "address": "Q",
           "label": "Peck depth in least increments, without a point (µm on a metric IS-B machine)",
           "min": 0,
+          "position": "none",
           "unit": "increment"
         },
         {
           "address": "P",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
           "address": "F",
           "label": "Drilling feed",
           "min": 0,
+          "position": "none",
           "required": true
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
+          "position": "none",
           "unit": "count"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -1621,28 +1663,33 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental"
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
+          "position": "none"
         },
         {
           "address": "P",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
           "address": "F",
           "label": "Thread lead",
           "min": 0,
+          "position": "none",
           "required": true
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
+          "position": "none",
           "unit": "count"
         }
       ],
       "pitchFeed": true,
+      "review": "pending",
       "sets": {
         "cycle": "start"
       },
@@ -1674,28 +1721,33 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
+          "position": "none",
           "required": true
         },
         {
           "address": "P",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
           "address": "F",
           "label": "Boring feed",
           "min": 0,
+          "position": "none",
           "required": true
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
+          "position": "none",
           "unit": "count"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -1714,34 +1766,40 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
+          "position": "none",
           "required": true
         },
         {
           "address": "Q",
           "label": "Peck depth in least increments, without a point (µm on a metric IS-B machine)",
           "min": 0,
+          "position": "none",
           "unit": "increment"
         },
         {
           "address": "P",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
           "address": "F",
           "label": "Drilling feed",
           "min": 0,
+          "position": "none",
           "required": true
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
+          "position": "none",
           "unit": "count"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -1760,28 +1818,33 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental"
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
+          "position": "none"
         },
         {
           "address": "P",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
           "address": "F",
           "label": "Thread lead",
           "min": 0,
+          "position": "none",
           "required": true
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
+          "position": "none",
           "unit": "count"
         }
       ],
       "pitchFeed": true,
+      "review": "pending",
       "sets": {
         "cycle": "start"
       },
@@ -1801,28 +1864,33 @@
         },
         {
           "address": "R",
-          "label": "Distance from the start level to the R point, incremental",
+          "label": "R point: the distance from the start level to the R point, with sign; incremental in G-code system A in the standard drilling format (a machine set to the Series 15 format can read it as an absolute position, parameter 5102 bit 6)",
+          "position": "none",
           "required": true
         },
         {
           "address": "P",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
+          "position": "none",
           "unit": "count"
         },
         {
           "address": "F",
           "label": "Boring feed",
           "min": 0,
+          "position": "none",
           "required": true
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
+          "position": "none",
           "unit": "count"
         }
       ],
+      "review": "pending",
       "sets": {
         "cycle": "start"
       }
@@ -1885,6 +1953,14 @@
           "min": 0,
           "required": true,
           "unit": "feedPerRev"
+        },
+        {
+          "address": "Q",
+          "label": "Shift of the thread start angle, in 0.001° without a point (Q180000 is 180°); 0 to 360°",
+          "max": 360000,
+          "min": 0,
+          "position": "none",
+          "unit": "count"
         }
       ],
       "pitchFeed": true,
@@ -2498,6 +2574,7 @@
           "label": "Block number of the first profile block",
           "min": 0,
           "position": "none",
+          "required": true,
           "unit": "count"
         },
         {
@@ -2506,6 +2583,7 @@
           "label": "Block number of the last profile block",
           "min": 0,
           "position": "none",
+          "required": true,
           "unit": "count"
         },
         {
@@ -2568,6 +2646,7 @@
           "label": "Block number of the first profile block",
           "min": 0,
           "position": "none",
+          "required": true,
           "unit": "count"
         },
         {
@@ -2576,6 +2655,7 @@
           "label": "Block number of the last profile block",
           "min": 0,
           "position": "none",
+          "required": true,
           "unit": "count"
         },
         {
@@ -2740,6 +2820,14 @@
           "min": 0,
           "required": true,
           "unit": "feedPerRev"
+        },
+        {
+          "address": "Q",
+          "label": "Shift of the thread start angle, in 0.001° without a point (Q180000 is 180°); 0 to 360°",
+          "max": 360000,
+          "min": 0,
+          "position": "none",
+          "unit": "count"
         }
       ],
       "pitchFeed": true,

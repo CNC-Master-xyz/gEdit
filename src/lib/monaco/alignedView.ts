@@ -14,7 +14,8 @@
 //    (`gedit-aligned-arrow-right` on the left pane copies the block to the document,
 //    `-left` on the right pane copies it to the original). A side with no line in the block has
 //    the arrow inside its filler instead. Shift+click copies one row.
-//  - **Words.** `gedit-word-changed` (`wordMarks.css`, P4.24) on each whole word that differs, in
+//  - **Words.** `gedit-word-changed` (`wordMarks.css`, P4.24) on each whole word that differs, and
+//    `gedit-word-part` on the parts that differ inside a long one (review NC-8), in
 //    slices of `MARK_SLICE_MS` so a program with 100,000 changed lines never blocks typing; a
 //    run ends when the text changes again.
 //
@@ -25,7 +26,8 @@
 // merge and the alignment itself.
 //
 // Freshness: any change of either text makes `isCurrent()` false until the alignment has been
-// recomputed (`RECOMPUTE_DELAY_MS` after the last change), and a merge planned from a stale
+// recomputed (`realignDelay` after the last change: `RECOMPUTE_DELAY_MS`, or twice what the
+// last alignment took on a long program, review CODE-4), and a merge planned from a stale
 // alignment is refused by the caller (`compare.copyBusy`), as in the raw view. The zones follow
 // an edit meanwhile (Monaco moves them with their line).
 //
@@ -67,6 +69,8 @@ import {
   fillers,
   lineChangeOf,
   neighbourBlock,
+  realignDelay,
+  REALIGN_DELAY_MS,
   type AlignedBlock,
   type AlignedDiff,
   type AlignedSide,
@@ -77,12 +81,15 @@ import { docs } from '$lib/stores/documents';
 import { t } from '$lib/i18n';
 import type { Disposable, DocId } from '$lib/app/types';
 import type { EditableModel } from '$lib/monaco/applyLines';
-import { WORD_CHANGED_CLASS, type DiffCursor, type DiffHandle, type DiffLineChange, type DiffSide, type DiffSides } from './diff';
+import { WORD_CHANGED_CLASS, WORD_PART_CLASS, type DiffCursor, type DiffHandle, type DiffLineChange, type DiffSide, type DiffSides } from './diff';
 import './wordMarks.css';
 import './alignedView.css';
 
-/** Wait after the last change of either text before the alignment is recomputed. */
-export const RECOMPUTE_DELAY_MS = 150;
+/**
+ * The shortest wait after the last change of either text before the alignment is recomputed;
+ * it grows with the time the last alignment took (`realignDelay`, review CODE-4).
+ */
+export const RECOMPUTE_DELAY_MS = REALIGN_DELAY_MS;
 
 /** The longest a slice of word-mark work runs before it yields to the browser. */
 const MARK_SLICE_MS = 12;
@@ -317,6 +324,8 @@ export async function createAlignedView(req: AlignedRequest): Promise<AlignedHan
   /** False from any change of either text until the alignment has been redone. */
   let fresh = false;
   let recomputeTimer: ReturnType<typeof setTimeout> | undefined;
+  /** What the last alignment and its drawing took, in ms (the word marks are drawn in slices and do not count). */
+  let lastCost = 0;
   let pendingNext: Disposable | null = null;
   const updated = new Set<() => void>();
 
@@ -581,6 +590,19 @@ export async function createAlignedView(req: AlignedRequest): Promise<AlignedHan
             options: { inlineClassName: WORD_CHANGED_CLASS },
           });
         }
+        // Inside a long marked word, the parts that differ (review NC-8).
+        for (const span of marks.parts?.original ?? []) {
+          forOriginal.push({
+            range: new monaco.Range(originalLine, span.start + 1, originalLine, span.end + 1),
+            options: { inlineClassName: WORD_PART_CLASS },
+          });
+        }
+        for (const span of marks.parts?.modified ?? []) {
+          forModified.push({
+            range: new monaco.Range(modifiedLine, span.start + 1, modifiedLine, span.end + 1),
+            options: { inlineClassName: WORD_PART_CLASS },
+          });
+        }
       } while (performance.now() < until);
       if (forOriginal.length > 0) collections.original.append(forOriginal);
       if (forModified.length > 0) collections.modified.append(forModified);
@@ -589,18 +611,26 @@ export async function createAlignedView(req: AlignedRequest): Promise<AlignedHan
     slice();
   };
 
+  /** The alignment `lineChangeList` was made from. */
+  let lineChangesFor: AlignedResult | null = null;
+  let lineChangeList: DiffLineChange[] = [];
+
   const recompute = (o: { reuse?: boolean } = {}): void => {
     clearTimeout(recomputeTimer);
     if (disposed) return;
     stopMarks();
+    const started = performance.now();
     const result = req.align({ reuse: o.reuse === true });
     current = result;
+    lineChangesFor = null;
     fresh = result !== null;
     if (result) {
       drawBlocks(result);
       drawFillers(result);
+      lastCost = performance.now() - started;
       startMarks(result);
     } else {
+      lastCost = performance.now() - started;
       blockMarks.original.clear();
       blockMarks.modified.clear();
     }
@@ -612,7 +642,7 @@ export async function createAlignedView(req: AlignedRequest): Promise<AlignedHan
     fresh = false;
     stopMarks();
     clearTimeout(recomputeTimer);
-    recomputeTimer = setTimeout(() => recompute(), RECOMPUTE_DELAY_MS);
+    recomputeTimer = setTimeout(() => recompute(), realignDelay(lastCost));
   };
 
   // -- the mouse ------------------------------------------------------------
@@ -688,11 +718,20 @@ export async function createAlignedView(req: AlignedRequest): Promise<AlignedHan
     }),
   );
 
-  const trackFocus = (['original', 'modified'] as const).map((side) =>
+  // The copy buttons follow the cursor (`onDidChangeState`, M11 CODE-18).
+  const stateListeners = new Set<() => void>();
+  const stateChanged = (): void => {
+    if (disposed) return;
+    for (const listener of [...stateListeners]) listener();
+  };
+  updated.add(stateChanged);
+  const trackFocus = (['original', 'modified'] as const).flatMap((side) => [
     editors[side].onDidFocusEditorText(() => {
       lastSide = side;
+      stateChanged();
     }),
-  );
+    editors[side].onDidChangeCursorPosition(stateChanged),
+  ]);
   // The scrollbar can change width (a scrollbar setting, a pane resize): the arrows follow.
   const trackLayout = (['original', 'modified'] as const).flatMap((side) => [
     editors[side].onDidLayoutChange(placeFillerArrows),
@@ -761,7 +800,13 @@ export async function createAlignedView(req: AlignedRequest): Promise<AlignedHan
     },
     lineChanges(): DiffLineChange[] | null {
       if (disposed || current === null) return null;
-      return current.diff.changed.map(lineChangeOf);
+      // One list per alignment (WX-CODE-2): the cursor asks on every move, and a long program
+      // has tens of thousands of blocks. A new alignment (`recompute`) makes a new list.
+      if (lineChangesFor !== current) {
+        lineChangesFor = current;
+        lineChangeList = current.diff.changed.map(lineChangeOf);
+      }
+      return lineChangeList;
     },
     isCurrent(): boolean {
       return !disposed && fresh && current !== null;
@@ -797,9 +842,14 @@ export async function createAlignedView(req: AlignedRequest): Promise<AlignedHan
       lastSide = side;
       editors[side].focus();
     },
+    onDidChangeState(listener: () => void): Disposable {
+      stateListeners.add(listener);
+      return () => void stateListeners.delete(listener);
+    },
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      stateListeners.clear();
       clearTimeout(recomputeTimer);
       pendingNext?.();
       updated.clear();

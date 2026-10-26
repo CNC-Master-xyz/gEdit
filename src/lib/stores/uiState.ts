@@ -16,6 +16,7 @@
 
 import { derived, writable } from 'svelte/store';
 import { status as appStatus } from '$lib/app/status';
+import { cleanBookmarkNames } from '$lib/core/nav/bookmarks';
 import { configLoad, uiStateSave, type ConfigLoad } from '$lib/platform/commands';
 import { isTauriRuntime } from '$lib/utils/platform';
 import { t } from '$lib/i18n';
@@ -168,12 +169,20 @@ function filesOf(value: unknown): Record<string, FileMemo> {
     if (!isLine(entry.line) || !isLine(entry.column) || !isLine(entry.top)) continue;
     if (typeof entry.at !== 'number' || !Number.isFinite(entry.at)) continue;
     const bookmarks = Array.isArray(entry.bookmarks) ? entry.bookmarks.filter(isLine) : [];
+    const memo: Record<string, unknown> = { ...entry, bookmarks };
+    // The names of the bookmarks (P4c, §6.5 rule 4) are untrusted like the lines: whatever is
+    // not a `{ line, name }` of a line in `bookmarks` is dropped, a member that is not an array
+    // becomes `[]`. A memo without the member stays without it.
+    if ('bookmarkNames' in entry) memo.bookmarkNames = cleanBookmarkNames(entry.bookmarkNames, bookmarks);
     // `put` writes an own property, so a path spelled `__proto__` cannot reach
     // `Object.prototype`'s setter (the G8 M2 finding, same fix as `lastParams`).
-    put(files, path, { ...entry, bookmarks });
+    put(files, path, memo as unknown as FileMemo);
   }
   return files;
 }
+
+/** The longest ribbon tab id that is kept (WX-CODE-12). */
+const MAX_RIBBON_TAB = 32;
 
 /** A `ui` member straight from disk, reduced to the shape `UiState` promises. */
 export function sanitizeUiState(raw: unknown): UiState {
@@ -183,6 +192,9 @@ export function sanitizeUiState(raw: unknown): UiState {
     lastParams: lastParamsOf(source.lastParams),
     lastScript: typeof source.lastScript === 'string' ? source.lastScript : null,
     files: filesOf(source.files),
+    // Any short text is kept: `resolveTab` decides whether the tab still exists. The tab ids are
+    // all short, so a longer value is not a tab (WX-CODE-12) and does not go back into state.json.
+    ...(typeof source.ribbonTab === 'string' && source.ribbonTab.length <= MAX_RIBBON_TAB ? { ribbonTab: source.ribbonTab } : {}),
   };
 }
 
@@ -229,6 +241,7 @@ export function createUiStateStore(deps: UiStateDeps): UiStateStore {
       lastParams: current.lastParams,
       lastScript: current.lastScript,
       files: current.files,
+      ...(current.ribbonTab === undefined ? {} : { ribbonTab: current.ribbonTab }),
     };
     writing = writing.then(() => deps.save(payload)).catch((err: unknown) => {
       // A warning, not an error: the runtime harness fails a scenario on a console error,

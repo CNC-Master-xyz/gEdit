@@ -1,0 +1,35 @@
+{
+  "title": "Program checks",
+  "columns": [
+    {
+      "key": "line",
+      "label": "Line"
+    },
+    {
+      "key": "check",
+      "label": "Check"
+    },
+    {
+      "key": "severity",
+      "label": "Severity"
+    },
+    {
+      "key": "message",
+      "label": "Finding"
+    }
+  ],
+  "rows": [],
+  "message": "No findings. Machine 'Lathe 3'.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "info",
+      "message": "Spindle speed limit: no top speed is set for spindle S2 on this machine, so its speeds are not checked."
+    },
+    {
+      "line": 6,
+      "severity": "info",
+      "message": "Travel: no travel is set for this machine, so the positions are not checked."
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "peckRetract": 0.5,
+  "peckClearance": 1,
+  "motionUnits": "mm",
+  "rapidX": 30000,
+  "rapidY": 30000,
+  "rapidZ": 20000,
+  "rapidKind": "straight",
+  "maxFeed": 5000,
+  "toolChange": 4,
+  "format": "csv"
+}

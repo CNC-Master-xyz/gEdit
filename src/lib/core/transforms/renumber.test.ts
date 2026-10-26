@@ -26,14 +26,16 @@
 // The rest of the file covers what a fixture cannot: the option fields, the preflight,
 // the identity `lineMap`, and the 100k-line budget.
 
-import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readTransformCases } from '../../../../tests/unit/helpers/transformCases';
+import type { CaseMeta } from '../../../../tests/unit/helpers/transformCases';
 import { noMachine } from '$lib/core/machines/effective';
 import { BUILTIN_PROFILE_JSON } from '$lib/data/profiles';
 import { compileProfile } from '$lib/core/profiles/compile';
 import { validateProfile } from '$lib/core/profiles/validate';
+import { t } from '$lib/i18n';
 import { renumber } from './renumber';
 import type { CodeDb } from '$lib/core/codes/types';
 import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
@@ -69,22 +71,6 @@ function context(
   return { cp, codes: NO_CODES, options, firstLine, document, machine: noMachine(cp.profile) };
 }
 
-interface CaseMeta {
-  note: string;
-  profile?: string;
-  /** A real selection run: `input.nc` is the whole program and this is the scope. */
-  scope?: { startLine: number; endLine: number };
-  /** A bare fragment with no document behind it. */
-  firstLine?: number;
-  options?: Record<string, unknown>;
-  expect?: {
-    summary?: string;
-    skipped?: { line: number; severity: string }[];
-    warnings?: string[];
-    preflight?: string | null;
-  };
-}
-
 interface GoldenCase {
   name: string;
   meta: CaseMeta;
@@ -101,36 +87,15 @@ interface GoldenCase {
 
 /** Every case folder, sorted; the text is split the way `TransformService` splits it. */
 function goldenCases(): GoldenCase[] {
-  return readdirSync(CASES_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()
-    .map((name) => {
-      const meta = JSON.parse(readFileSync(join(CASES_DIR, name, 'options.json'), 'utf8')) as CaseMeta;
-      const document = readFileSync(join(CASES_DIR, name, 'input.nc'), 'utf8').split('\n');
-      const expectedDocument = readFileSync(join(CASES_DIR, name, 'expected.nc'), 'utf8').split('\n');
-      if (meta.scope) {
-        const { startLine, endLine } = meta.scope;
-        return {
-          name,
-          meta,
-          input: document.slice(startLine - 1, endLine),
-          expected: expectedDocument.slice(startLine - 1, endLine),
-          firstLine: startLine,
-          document,
-          expectedDocument,
-        };
-      }
-      return {
-        name,
-        meta,
-        input: document,
-        expected: expectedDocument,
-        firstLine: meta.firstLine ?? 1,
-        document: undefined,
-        expectedDocument,
-      };
-    });
+  return readTransformCases(CASES_DIR).map((golden) => ({
+    name: golden.name,
+    meta: golden.meta,
+    input: golden.input,
+    expected: golden.expected,
+    firstLine: golden.firstLine,
+    document: golden.scoped ? golden.document : undefined,
+    expectedDocument: golden.expectedDocument,
+  }));
 }
 
 const CASES = goldenCases();
@@ -202,9 +167,17 @@ describe('availability and options', () => {
       'step',
       'digits',
       'max',
+      'fitToMax',
       'onOverflow',
       'spacesAfter',
+      'alignColumn',
+      'everyNth',
       'skipStartingWith',
+      'skipContaining',
+      'skipFirst',
+      'skipLast',
+      'startTrigger',
+      'startAfterTrigger',
       'skipEmpty',
       'restartAtProgramStart',
       'onlyNumbered',
@@ -218,6 +191,15 @@ describe('availability and options', () => {
     expect(byId.get('skipEmpty')?.default).toBe(true);
     expect(byId.get('restartAtProgramStart')?.default).toBe(true);
     expect(byId.get('onlyNumbered')?.default).toBe(false);
+    // P4d (§6.6 rules 1–6): a profile without the advanced options gets them off.
+    expect(byId.get('fitToMax')?.default).toBe(false);
+    expect(byId.get('alignColumn')).toMatchObject({ default: 0, min: 0, max: 120 });
+    expect(byId.get('everyNth')).toMatchObject({ default: 1, min: 1, max: 1000 });
+    expect(byId.get('skipContaining')?.default).toBe('');
+    expect(byId.get('skipFirst')).toMatchObject({ default: 0, min: 0, max: 1_000_000 });
+    expect(byId.get('skipLast')).toMatchObject({ default: 0, min: 0, max: 1_000_000 });
+    expect(byId.get('startTrigger')).toMatchObject({ default: '', maxLength: 200 });
+    expect(byId.get('startAfterTrigger')?.default).toBe(false);
     expect(fields.every((field) => field.label.trim() !== '' && !field.label.includes('ncNumbering.'))).toBe(true);
   });
 
@@ -385,11 +367,13 @@ describe('references', () => {
   });
 
   it('leaves a value alone where the rule says report only (F42)', () => {
-    // The shipped profiles carry `rewrite: false` on `M99 P` (WP6.2) and on a `M98` block
-    // that also names a program (I6), and the goldens `m99-p-caller` and
-    // `m98-subprogram-start` pin both. What this proves is the machinery underneath: with
-    // the flag set, the value is reported and never touched, although the number exists in
-    // this very program — which is the case that makes a silent rewrite dangerous.
+    // The shipped Fanuc profiles carry `rewrite: false` on a `M98` block that also names a
+    // program (I6; the owner 2026-10-19: `M98 P… Q…` stays report-only), and the goldens
+    // `m98-subprogram-start` and `m98-p-before-call` pin it. `M99 P` is no longer one of
+    // them since P4d: it is resolved in the calling program (`program: caller`, golden
+    // `m99-p-caller`). What this proves is the machinery underneath: with the flag set, the
+    // value is reported and never touched, although the number exists in this very program
+    // — which is the case that makes a silent rewrite dangerous.
     const report = withReferences([{ trigger: M99, addresses: ['P'], rewrite: false }]);
     const rewrite = withReferences([{ trigger: M99, addresses: ['P'] }]);
     const lines = ['N5 G0 X0', 'N6 M99 P5'];
@@ -457,7 +441,9 @@ describe('references', () => {
   });
 
   describe('a value left as written whose block got another number (M13 review NC-8)', () => {
-    // The shipped profile: `M99 P` is never rewritten, it names a block of the caller.
+    // The shipped profile: `M99 P` names a block of the caller (`program: caller`). No
+    // program of these files calls `O2`, so the value is refused (noCaller) and left as
+    // written, and the one block of the file that carries the number is where it lands.
     const RUN = { start: 10, step: 10, skipStartingWith: '% O (', restartAtProgramStart: true, onlyNumbered: true };
     const SUB = ['%', 'O2', 'G0 X5.', 'M99 P30'];
 
@@ -493,6 +479,41 @@ describe('references', () => {
       // Only the row every kept reference gets.
       expect(result.skipped.filter((row) => row.line === 4 && row.severity === 'warning')).toHaveLength(1);
     });
+
+    // P4d integration (§6.6 rule 10): `M98 P… Q…` stays report-only, but where the program
+    // it calls is in the file, its `Q` is looked for in that program and nowhere else.
+    it('looks for a report-only value in the program its line calls', () => {
+      // O2000 and O3000 both carry an N50: M6's answer ("the one block of the file with that
+      // number") had none, so the run said nothing although O2000's N50 is gone.
+      const lines = ['O1000', 'N10 M98 P2000 Q50', 'N20 M30', 'O2000', 'N50 G0 X0', 'N60 M99', 'O3000', 'N50 G0 X1.', 'N60 M99'];
+      const result = renumber.run(lines, context(fanuc, RUN, 1, lines));
+      expect(result.lines).toEqual(['O1000', 'N10 M98 P2000 Q50', 'N20 M30', 'O2000', 'N10 G0 X0', 'N20 M99', 'O3000', 'N10 G0 X1.', 'N20 M99']);
+      const rows = result.skipped.filter((row) => row.line === 2).map((row) => row.message);
+      expect(rows).toContain(
+        'N10 M98 P2000 Q50 named N50 on line 5; after this renumber no block N50 is left, so the control will stop with an alarm.',
+      );
+    });
+
+    it('says nothing about a block of another program when the called one is not in the file', () => {
+      // O4000 is not here, so O2000's N50 is not what `Q50` names (M6 took it for the answer).
+      const lines = ['O1000', 'N10 M98 P4000 Q50', 'N20 M30', 'O2000', 'N50 G0 X0', 'N60 M99'];
+      const result = renumber.run(lines, context(fanuc, RUN, 1, lines));
+      expect(result.lines[4]).toBe('N10 G0 X0');
+      expect(result.skipped.filter((row) => row.line === 2).map((row) => row.message)).toEqual([
+        'This line points at a block of another program (M98 P… Q… starts the called program at block Q). This dialect never rewrites such a value, so it was left as it is; check it.',
+      ]);
+    });
+  });
+
+  it('says why a return of a program that is in the file twice is left as it is', () => {
+    // The row fits a call (`M98 P2011 Q…`) and a return (`M99 P…`) alike: the name is the trouble.
+    const lines = ['O2010', 'N10 G0 X100. Z100.', 'N15 M98 P2011', 'N20 M30', 'O2011', 'N10 G0 X60.', 'N20 M99 P20', 'O2011', 'N10 G0 X70.', 'N20 M99 P20'];
+    const result = renumber.run(lines, context(fanuc, { start: 10, step: 10, skipStartingWith: 'O', restartAtProgramStart: true }, 1, lines));
+    const text = 'Two programs in this file have the same name, so which program this line points into cannot be told; it was left as it is.';
+    expect(result.skipped.filter((row) => row.severity === 'warning').map((row) => [row.line, row.message])).toEqual([
+      [7, text],
+      [10, text],
+    ]);
   });
 
   it('follows the block numbers of the program the jump stands in', () => {
@@ -556,7 +577,8 @@ describe('sequence numbers that are names (G10 M8)', () => {
     const document = ['O1001', 'N10 G00 X0', 'N0050 G01 X1', 'N0060 GOTO N0050', 'N0070 M02'];
     const result = renumber.run(document.slice(2), context(okuma, FREE, 3, document));
     expect(result.lines).toEqual(['N10 G01 X1', 'N20 GOTO N0050', 'N30 M02']);
-    expect(result.warnings.map((w) => w.key)).toEqual(['ncNumbering.renumber.referencesUnresolved']);
+    // P4d review NC-4: and says that N10 is on two blocks now.
+    expect(result.warnings.map((w) => w.key)).toEqual(['ncNumbering.renumber.duplicatesMade', 'ncNumbering.renumber.referencesUnresolved']);
   });
 });
 
@@ -593,5 +615,63 @@ describe('Sinumerik jump targets (M11 review NC-3)', () => {
     expect(result.lines).toEqual(['N10 LOOP_A: G0 X0', 'N20 GOTOB LOOP_A', 'N30 M30']);
     expect(result.warnings).toEqual([]);
     expect(renumber.preflight?.(lines, context(cp, FREE))).toBeNull();
+  });
+});
+
+// P4d review NC-3: a reference outside the run's lines whose program cannot be told used to
+// be dropped in silence, also where a program it may name has the block among those lines.
+describe('a reference outside the lines that may point into them (P4d review NC-3)', () => {
+  const fanuc = compiled(FANUC);
+  const RUN = { start: 100, step: 10, skipStartingWith: '', restartAtProgramStart: true };
+
+  /** The run over `[from, to]` (1-based, inclusive) of `document`, its rows and its preflight. */
+  function runOver(document: string[], from: number, to: number) {
+    const ctx = context(fanuc, RUN, from, document);
+    const lines = document.slice(from - 1, to);
+    return { result: renumber.run(lines, ctx), preflight: renumber.preflight?.(lines, ctx) ?? null };
+  }
+
+  it('reports a call through a variable whose Q may name a block of the selected program', () => {
+    const document = ['O0001', 'N10 M98 P#1 Q20', 'N20 M30', 'O1000', 'N10 G0 X1.', 'N20 G0 X2.', 'N30 M99'];
+    const { result, preflight } = runOver(document, 4, 7);
+    expect(result.lines).toEqual(['O1000', 'N100 G0 X1.', 'N110 G0 X2.', 'N120 M99']);
+    expect(result.skipped.filter((row) => row.line === 2).map((row) => row.message)).toEqual([t('ncNumbering.renumber.referenceNoCallRow')]);
+    expect(preflight).toEqual({ key: 'ncNumbering.renumber.references', params: { count: 1, first: 2 } });
+  });
+
+  it('reports a return nobody calls whose own program has the block among the lines (a main program jumps inside it)', () => {
+    const document = ['O1000', 'N10 G0 X1.', 'N20 G0 X2.', 'N30 G0 X3.', 'N40 M99 P20'];
+    const { result, preflight } = runOver(document, 1, 4);
+    expect(result.skipped.filter((row) => row.line === 5).map((row) => row.message)).toEqual([t('ncNumbering.renumber.referenceNoCallerRow')]);
+    expect(preflight?.key).toBe('ncNumbering.renumber.references');
+  });
+
+  it('says nothing where no program the reference may name has the block among the lines', () => {
+    // O3000 does not call O1000 and has no unknown call: its N20 is not where M99 P20 returns to.
+    const document = ['O0001', 'N10 M98 P1000', 'N20 M30', 'O0002', 'N10 M98 P1000', 'N20 M30', 'O1000', 'N10 M99 P20', 'O3000', 'N10 G0 X0', 'N20 M30'];
+    const { result, preflight } = runOver(document, 9, 11);
+    expect(result.skipped.filter((row) => row.line === 8)).toEqual([]);
+    expect(preflight).toBeNull();
+  });
+
+  it('reports a return of a program an interrupt starts where any program has the block among the lines', () => {
+    const document = ['O0001', 'N10 M96 P1000', 'N20 M30', 'O1000', 'N10 M99 P20', 'O3000', 'N10 G0 X0', 'N20 M30'];
+    const { result, preflight } = runOver(document, 6, 8);
+    expect(result.skipped.filter((row) => row.line === 5).map((row) => row.message)).toEqual([t('ncNumbering.renumber.referenceInterruptRow')]);
+    expect(preflight?.key).toBe('ncNumbering.renumber.references');
+  });
+});
+
+// P4d review NC-9: the row of a value the dialect never rewrites says which of the two it is.
+describe('the row of a value that is never rewritten (P4d review NC-9)', () => {
+  it('says "another program" for M98 P… Q… and "a milling profile" for a G70–G73 cycle on the mill', () => {
+    const fanuc = compiled(FANUC);
+    const lines = ['O1000', 'N10 M98 P2000 Q50', 'N20 G71 P30 Q40 U0.2 W0.1', 'N30 G0 X1.', 'N40 G1 X2.', 'N50 M30'];
+    const result = renumber.run(lines, context(fanuc, {}, 1, lines));
+    expect(result.skipped.filter((row) => row.line === 2).map((row) => row.message)).toEqual([t('ncNumbering.renumber.referenceKeptRow')]);
+    expect(result.skipped.filter((row) => row.line === 3).map((row) => row.message)[0]).toBe(t('ncNumbering.renumber.referenceKeptOwnRow'));
+    expect(t('ncNumbering.renumber.referenceKeptRow')).toContain('M98 P… Q…');
+    expect(t('ncNumbering.renumber.referenceKeptRow')).not.toContain('milling');
+    expect(t('ncNumbering.renumber.referenceKeptOwnRow')).toContain('G70–G73');
   });
 });

@@ -1,0 +1,20 @@
+# P4d: "Renumber, all of it" - the options of Renumber Blocks, the references across programs, and the references in the other open
+# documents with "Update References in Other Documents" (plan docs/planning/phase-4-implementation.md section 6.6, H4d; P4.18, P4.19, P4.20a, P4.20b).
+# m6-lathe-renumber (suites/m6.txt) was brought up to P4.19 with this suite: its part B follows the single caller of a subprogram instead of asking about it.
+# Run with: tests/runtime/suites/m0.txt tests/runtime/suites/m1.txt tests/runtime/suites/m2.txt tests/runtime/suites/m3.txt tests/runtime/suites/m4.txt tests/runtime/suites/m5.txt tests/runtime/suites/m6.txt tests/runtime/suites/m7.txt tests/runtime/suites/m8.txt tests/runtime/suites/m9.txt tests/runtime/suites/m10.txt tests/runtime/suites/m11.txt tests/runtime/suites/m12.txt tests/runtime/suites/rp.txt tests/runtime/suites/m13.txt tests/runtime/suites/p3a.txt tests/runtime/suites/p3b.txt tests/runtime/suites/b1.txt tests/runtime/suites/p4a.txt tests/runtime/suites/p4d.txt tests/runtime/suites/p4e.txt
+#
+# Every program is a golden of tests/fixtures/transforms/renumber/ (copied into the run folder and read) or, for the other-documents scenario, written
+# in p4-renumber-common.js with the text after the renumber and after the update worked out from the rules. The counts in the expected messages are
+# held to the real transform by tests/unit/p4dHarness.test.ts. Expected texts are ctx.t(...) of the keys, never read from what the app shows.
+
+# X: the options of Renumber Blocks (P4.18) and the references across programs (P4.19), through the form. The new fields and their bounds, the values
+# remembered per dialect, Fit to maximum (the largest whole step), Every Nth block, Skip lines containing, Start trigger, Align to a column, Skip the
+# first and last lines; the three refusals that write nothing; a return into the one program that calls this one (also through a packed M98 P21010, a
+# program name, a macro call and the local call), the questions asked for two callers, no caller and a program in the file twice, the kept row of
+# M98 P Q, Continue and Cancel, one undo.
+p4-renumber
+
+# X: References in other open documents (P4.20): the list after a renumber (rows with their own document and line, a document of another dialect left
+# out, a click on a row), Update References in Other Documents (one question, one undo step per document, the rest left as it is), all or nothing
+# (a changed document, a locked one, Cancel, a closed one) and the enabled state of the command and its ribbon button throughout.
+p4-renumber-others

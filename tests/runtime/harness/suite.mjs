@@ -17,8 +17,8 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { mayRetry } from '../lib/retry.js'
-import { expandSuiteArgs, focusStats, loadScenarios, rhDir, robustEnabled, runScenario, screenLocked, summarize, withLock } from './core.mjs'
+import { inheritBlock, isTransientBlock, mayRetry } from '../lib/retry.js'
+import { expandSuiteArgs, focusStats, foreignBuild, loadScenarios, rhDir, robustEnabled, runScenario, screenLocked, summarize, withLock } from './core.mjs'
 
 const argv = process.argv.slice(2)
 const args = []
@@ -41,6 +41,12 @@ const known = await loadScenarios()
 const unknown = names.filter((n) => !known.has(n))
 if (unknown.length) {
   console.error(`unknown scenarios: ${unknown.join(', ')}`)
+  process.exit(2)
+}
+
+const foreign = foreignBuild(rh)
+if (foreign) {
+  console.error(foreign)
   process.exit(2)
 }
 
@@ -79,29 +85,25 @@ function retryGroup(name, all) {
  * Runs one scenario, once more if it failed.
  * @param {string} name
  * @param {Set<string>} blockedSoFar scenarios this round could not be carried out
- * @returns {{ status: string, result: any, first: any | null }}
+ * @returns {Promise<{ status: string, result: any, first: any | null }>}
  */
 async function runOnce(name, blockedSoFar) {
   const first = await runScenario(rh, name, known)
-  console.log(summarize(first))
   // `…-2` reads the HOME `…-1` wrote. When `…-1` was blocked that HOME was never
-  // written, so what `…-2` reports is the block, not the app.
-  if (first.status === 'fail') {
-    const blocker = retryGroup(name, names).find((m) => m !== name && blockedSoFar.has(m))
-    if (blocker) {
-      first.status = 'blocked'
-      first.blocked.push({ reason: `${blocker}, which writes its HOME, was blocked`, where: 'suite' })
-      // runScenario wrote the file before this was known; keep the two in step.
-      fs.writeFileSync(path.join(rh, 'out', `${name}.json`), JSON.stringify(first, null, 2) + '\n')
-      console.log(`  (blocked, not failed: ${blocker} never ran)`)
-    }
+  // written, so what `…-2` reports is the block, not the app. The verdict is settled
+  // before anything is printed: a FAIL line followed by "blocked, not failed" reads as two answers.
+  const blocker = retryGroup(name, names).find((m) => m !== name && blockedSoFar.has(m))
+  const inherited = first.status === 'fail' && blocker !== undefined
+  inheritBlock(first, blocker)
+  if (inherited) {
+    // runScenario wrote the file before this was known; keep the two in step.
+    fs.writeFileSync(path.join(rh, 'out', `${name}.json`), JSON.stringify(first, null, 2) + '\n')
   }
+  console.log(summarize(first))
+  if (inherited) console.log(`  (blocked, not failed: ${blocker} never ran)`)
   // A block a retry can clear: the screen was not locked, and no predecessor that writes
   // this scenario's HOME was blocked (that block is not this scenario's to clear).
-  const transientBlock =
-    first.status === 'blocked' &&
-    first.screenLocked !== true &&
-    !first.blocked.some((/** @type {{ where?: string }} */ b) => b.where === 'suite')
+  const transientBlock = isTransientBlock(first)
   const retries = mayRetry(retry, known.get(name)?.options)
   if (first.status === 'pass' || (first.status === 'blocked' && !transientBlock) || !retries) {
     return { status: first.status.toUpperCase(), result: first, first: null }

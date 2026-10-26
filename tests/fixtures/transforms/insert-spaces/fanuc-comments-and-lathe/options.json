@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Fanuc: comments and the comma-prefixed lathe words (,R and ,C) stay intact while the other words get their spaces.",
+  "profile": "fanuc-gcode",
+  "options": {}
+}

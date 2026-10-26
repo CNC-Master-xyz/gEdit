@@ -34,6 +34,18 @@
     texts: Record<string, string>;
   }
 
+  /**
+   * How many packages the list shows at first, and how many each press of "show more"
+   * adds (T219). The list has several hundred entries, and each is a row of buttons with
+   * its own listeners: drawing them all at once slowed the dialog and the window with it.
+   */
+  export const NOTICE_PAGE = 50;
+
+  /** The packages to draw when `shown` of them have been asked for. */
+  export function visiblePackages<T>(all: readonly T[], shown: number): T[] {
+    return all.slice(0, Math.max(0, shown));
+  }
+
   /** Stable per package, so the expanded state survives a re-render. */
   export function packageKey(pkg: LicensePackage): string {
     return `${pkg.source}:${pkg.name}@${pkg.version}`;
@@ -57,6 +69,7 @@
   // `$state.raw`: the parsed file is ~1.5 MB and is never mutated, so it must not be proxied.
   let notices = $state.raw<LicenseData | null>(null);
   let expanded = $state<Record<string, boolean>>({});
+  let shown = $state(NOTICE_PAGE);
 
   async function loadNotices(): Promise<void> {
     if (noticeState === 'loading' || noticeState === 'ready') return;
@@ -81,6 +94,8 @@
   }
 
   const packages = $derived(notices?.packages ?? []);
+  const drawn = $derived(visiblePackages(packages, shown));
+  const remaining = $derived(packages.length - drawn.length);
 </script>
 
 <Modal id="about" title={t('help.aboutTitle')} hideOk cancelLabel={t('common.close')} onCancel={() => close()}>
@@ -121,7 +136,7 @@
         {t('help.packages', { count: packages.length })}
       </p>
       <div class="notices">
-        {#each packages as pkg (packageKey(pkg))}
+        {#each drawn as pkg (packageKey(pkg))}
           {@const key = packageKey(pkg)}
           {@const open = Boolean(expanded[key])}
           <div class="notice" data-testid="license-entry" data-package={key} data-open={open ? '1' : '0'}>
@@ -142,6 +157,11 @@
             {/if}
           </div>
         {/each}
+        {#if remaining > 0}
+          <button type="button" class="more" data-testid="about-notices-more" onclick={() => (shown += NOTICE_PAGE)}>
+            {t('help.showMoreNotices', { left: remaining })}
+          </button>
+        {/if}
       </div>
     {/if}
   </div>
@@ -223,6 +243,24 @@
     border: 1px solid var(--border-color);
     border-radius: 3px;
     overflow-y: auto;
+  }
+
+  .more {
+    display: block;
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-top: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--accent-text);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .more:hover {
+    background: var(--surface-hover);
   }
 
   .notice + .notice {

@@ -49,19 +49,28 @@ class PositionGoldenTest(unittest.TestCase):
                 count += 1
         self.assertGreaterEqual(count, 35)
 
-    def test_a_lathe_database_carries_roles_on_the_repetitive_cycles_only(self) -> None:
-        # The R of a lathe drilling cycle is a machine parameter in G-code system A; those
-        # cycles are refused. P4a integration (plan §7 #305): G70 to G76 are reviewed (their
-        # parameters are no positions), on both G-code systems; Okuma has no role.
+    def test_a_lathe_database_carries_roles_on_the_repetitive_drilling_and_thread_cycles(self) -> None:
+        # P4a integration (plan §7 #305): G70 to G76 are reviewed (their parameters are no
+        # positions), on both G-code systems; Okuma only the phase shift C of G31-G33 (NC-6:
+        # an angle and no position). Manual-check fix D5-8: the
+        # drilling cycles G83 to G89 too, R incremental in system A ("none") and following
+        # G90/G91 in system B ("other": refused); D5-9: the start angle Q of G92 and G78.
         repetitive = ["G70", "G71", "G72", "G73", "G74", "G75", "G76"]
-        for dialect in ("fanuc-lathe", "fanuc-lathe-b", "okuma"):
+        drilling = ["G83", "G84", "G85", "G87", "G88", "G89"]
+        wanted = {
+            "fanuc-lathe": sorted(repetitive + drilling + ["G78", "G92"]),
+            "fanuc-lathe-b": sorted(repetitive + drilling + ["G78"]),
+            "okuma": ["G31", "G32", "G33"],
+        }
+        for dialect, codes in wanted.items():
             with self.subTest(dialect=dialect):
-                found = [
-                    e["code"]
-                    for e in helpers.resolved_codes(dialect)
-                    if any(gedit_nc.position_of(p) is not None for p in e.get("params") or [])
-                ]
-                self.assertEqual(sorted(found), [] if dialect == "okuma" else repetitive)
+                entries = helpers.resolved_codes(dialect)
+                found = [e["code"] for e in entries if any(gedit_nc.position_of(p) is not None for p in e.get("params") or [])]
+                self.assertEqual(sorted(found), codes)
+                for e in entries:
+                    if e["code"] in drilling and dialect != "okuma":
+                        r = next(p for p in e["params"] if p["address"] == "R")
+                        self.assertEqual(gedit_nc.position_of(r), "none" if dialect == "fanuc-lathe" else "other")
 
 
 class OkumaHomeReturnTest(unittest.TestCase):

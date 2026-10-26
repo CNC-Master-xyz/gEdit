@@ -18,6 +18,7 @@ import {
   FIELD_NAME,
   FIELD_NOTES,
   FIELD_NUMBER_INPUT,
+  FIELD_POINTLESS_FEEDS,
   FIELD_UNITS,
   PROFILE_DEFAULT,
   diameterLabel,
@@ -30,13 +31,17 @@ import {
   modalGroupOf,
   presetIdOf,
   presetOf,
+  pointlessFeedsIdOf,
   pruneModalValues,
+  followVariantDefaults,
   variantFieldId,
   variantIdOf,
 } from './fields';
 import { effectiveMachine, noMachine } from './effective';
 import { codes } from '$lib/stores/codes';
 import { profiles } from '$lib/stores/profiles';
+import { valueOf } from './numbers';
+import { parseNumber } from '$lib/core/nc/numbers';
 import { initialValues } from '$lib/core/forms/values';
 import { validateFields } from '$lib/core/forms/validate';
 import { hasKey, t } from '$lib/i18n';
@@ -345,6 +350,37 @@ describe('machineFromValues', () => {
   });
 });
 
+// v1.2.0 manual-check fix round (D5-3): in G-code system B the U/W field defaults to "none".
+describe('a variant default that follows another (defaultBy)', () => {
+  const lathe = declOf('fanuc-lathe');
+  const inc = variantFieldId('incrementalAddresses');
+  const sys = variantFieldId('gcodeSystem');
+
+  it('is the form default of a machine in system B that has no choice stored', () => {
+    const stored = machine({ params: { variants: { gcodeSystem: 'B' } } });
+    expect(byId(machineFields(lathe, dbOf('fanuc-lathe'), stored), inc)?.default).toBe('none');
+    expect(byId(machineFields(lathe, dbOf('fanuc-lathe')), inc)?.default).toBe('uw');
+    const chosen = machine({ params: { variants: { gcodeSystem: 'B', incrementalAddresses: 'uwvh' } } });
+    expect(byId(machineFields(lathe, dbOf('fanuc-lathe'), chosen), inc)?.default).toBe('uwvh');
+  });
+
+  it('moves with a switch of the G-code system, but not a value chosen by hand', () => {
+    const before = initialValues(machineFields(lathe, dbOf('fanuc-lathe')));
+    const after: Record<string, unknown> = { ...before, [sys]: 'B' };
+    expect(followVariantDefaults(lathe, sys, before, after)).toEqual([inc]);
+    expect(after[inc]).toBe('none');
+    const back: Record<string, unknown> = { ...after, [sys]: 'A' };
+    followVariantDefaults(lathe, sys, after, back);
+    expect(back[inc]).toBe('uw');
+    const byHand: Record<string, unknown> = { ...before, [inc]: 'uwvh' };
+    const switched: Record<string, unknown> = { ...byHand, [sys]: 'B' };
+    expect(followVariantDefaults(lathe, sys, byHand, switched)).toEqual([]);
+    expect(switched[inc]).toBe('uwvh');
+    // Another field moves nothing.
+    expect(followVariantDefaults(lathe, inc, before, { ...before })).toEqual([]);
+  });
+});
+
 describe('pruneModalValues', () => {
   const decl = declOf('fanuc-lathe');
 
@@ -473,5 +509,209 @@ describe('presets nobody has confirmed (B1 A4)', () => {
   it('keeps the Fanuc mill label short and true', () => {
     const preset = (declOf('fanuc-gcode').numberInput?.presets ?? []).find((p) => p.id === 'calculator');
     expect(preset?.label).toBe('As written: X50 and X50. are both 50 mm');
+  });
+});
+
+// T084 (the owner's decision of 2026-10-19): "Point-less feeds" is a machine option on the
+// Machines page, beside the number-input preset. The machine stores the steps in its own number
+// rules, so every reader (numbers.ts, _nc_machine.py and the scripts) reads them without
+// knowing the option; with no machine it is never assumed.
+describe('the point-less feeds option (T084)', () => {
+  it('has a help text that names no one step, since the choices differ between mill and lathe (manual-check D4-1, D4-2)', () => {
+    const help = t('machines.param.pointlessFeedsHelp');
+    expect(help).not.toMatch(/\d\.\d/);
+    for (const id of ['fanuc-gcode', 'fanuc-lathe']) {
+      expect(byId(machineFields(declOf(id), dbOf(id)), FIELD_POINTLESS_FEEDS)?.help, id).toBe(help);
+    }
+  });
+
+  const mill = declOf('fanuc-gcode');
+  const lathe = declOf('fanuc-lathe');
+  const choicesOf = (decl: MachineParamsDecl) => (decl.numberInput?.pointlessFeeds?.choices ?? []).map((c) => c.value);
+  const F = (text: string) => parseNumber(text)!;
+  const presetValue = (decl: MachineParamsDecl, id: string): NumberInput =>
+    structuredClone(decl.numberInput!.presets.find((preset) => preset.id === id)!.value);
+
+  it('is offered on both Fanuc profiles, after the number-input preset, with the default first', () => {
+    for (const decl of [mill, lathe]) {
+      const fields = machineFields(decl, dbOf('fanuc-gcode'));
+      const ids = fields.map((field) => field.id);
+      expect(ids.indexOf(FIELD_POINTLESS_FEEDS)).toBe(ids.indexOf(FIELD_NUMBER_INPUT) + 1);
+      const field = byId(fields, FIELD_POINTLESS_FEEDS);
+      expect(field?.type).toBe('choice');
+      expect(field?.label).toBe('Point-less feeds');
+      // Manual-check fix D4-2: each profile states the choices its control has.
+      expect(field?.choices?.map((choice) => choice.value)).toEqual(choicesOf(decl));
+      expect(field?.choices?.[0].value).toBe('standard');
+      expect(field?.default).toBe('standard');
+      // A documented default nobody has confirmed: every choice says so.
+      for (const choice of field?.choices ?? []) expect(choice.label).toContain('(unconfirmed)');
+    }
+  });
+
+  it('D4-2: the lathe offers its own choices, independent of the mill', () => {
+    expect(choicesOf(lathe)).toEqual(['standard', 'per-minute', 'series-15', 'both']);
+    expect(lathe.numberInput?.pointlessFeeds?.choices).not.toEqual(mill.numberInput?.pointlessFeeds?.choices);
+  });
+
+  it('is not offered where the profile declares no such option', () => {
+    for (const id of ['okuma-osp', 'sinumerik']) {
+      expect(choicesOf(declOf(id))).toEqual([]);
+      expect(byId(machineFields(declOf(id), dbOf(id)), FIELD_POINTLESS_FEEDS)).toBeUndefined();
+    }
+  });
+
+  it('writes the chosen steps into the machine number rules, and the reading follows', () => {
+    // Manual-check fix D4-2: on the lathe, whose choices name the per-minute feed (the mill
+    // has none for it).
+    const values = { ...initialValues(machineFields(lathe, dbOf('fanuc-lathe'))), [FIELD_NAME]: 'Lathe 1' };
+    const plain = machineFromValues(lathe, { ...values, [FIELD_NUMBER_INPUT]: 'is-b' }).params.numberInput!;
+    expect(plain).toEqual(presetValue(lathe, 'is-b'));
+    expect(valueOf(F('200'), 'feedPerMin', { numberInput: plain } as never, 'mm')).toBe('200');
+    // D4-1: a point-less feed per revolution in 0.0001 mm/rev on the lathe.
+    expect(valueOf(F('12345'), 'feedPerRev', { numberInput: plain } as never, 'mm')).toBe('1.2345');
+
+    const perMinute = machineFromValues(lathe, { ...values, [FIELD_NUMBER_INPUT]: 'is-b', [FIELD_POINTLESS_FEEDS]: 'per-minute' })
+      .params.numberInput!;
+    expect(perMinute.classes?.feedPerMin).toEqual({ mode: 'increment', increment: '0.001', incrementInch: '0.00001' });
+    expect(perMinute.classes?.feedPerRev).toEqual(presetValue(lathe, 'is-b').classes?.feedPerRev);
+    expect(valueOf(F('200'), 'feedPerMin', { numberInput: perMinute } as never, 'mm')).toBe('0.2');
+    expect(valueOf(F('200'), 'feedPerMin', { numberInput: perMinute } as never, 'inch')).toBe('0.002');
+    expect(valueOf(F('2500'), 'feedPerRev', { numberInput: perMinute } as never, 'mm')).toBe('0.25');
+    // A feed with a point is as written, and a length keeps its step.
+    expect(valueOf(F('200.'), 'feedPerMin', { numberInput: perMinute } as never, 'mm')).toBe('200');
+    expect(valueOf(F('50'), 'length', { numberInput: perMinute } as never, 'mm')).toBe('0.05');
+    // Inverse-time and per-tooth feeds stay without a value (no machine declares them).
+    expect(valueOf(F('125'), 'inverseTime', { numberInput: perMinute } as never, 'mm')).toBeNull();
+    expect(valueOf(F('12'), 'feedPerTooth', { numberInput: perMinute } as never, 'mm')).toBeNull();
+
+    // "both": the per-minute thousandths and the Series 15 format of the feed per revolution.
+    const both = machineFromValues(lathe, { ...values, [FIELD_NUMBER_INPUT]: 'is-a', [FIELD_POINTLESS_FEEDS]: 'both' })
+      .params.numberInput!;
+    expect(valueOf(F('25'), 'feedPerRev', { numberInput: both } as never, 'mm')).toBe('0.25');
+    expect(valueOf(F('25'), 'feedPerRev', { numberInput: both } as never, 'inch')).toBe('0.0025');
+    expect(valueOf(F('200'), 'feedPerMin', { numberInput: both } as never, 'mm')).toBe('0.2');
+  });
+
+  it('changes nothing under "as written": calculator-type input reads every feed as written', () => {
+    const values = { [FIELD_NAME]: 'Lathe 1', [FIELD_NUMBER_INPUT]: 'calculator', [FIELD_POINTLESS_FEEDS]: 'both' };
+    expect(machineFromValues(lathe, values).params.numberInput).toEqual(presetValue(lathe, 'calculator'));
+  });
+
+  it('reads a stored machine back as its preset and its choice, not as "Custom"', () => {
+    const values = { [FIELD_NAME]: 'Mill 1', [FIELD_NUMBER_INPUT]: 'is-c', [FIELD_POINTLESS_FEEDS]: 'per-rev' };
+    const stored = machine({ profile: 'fanuc-gcode', params: machineFromValues(mill, values).params });
+    expect(presetIdOf(mill, stored)).toBe('is-c');
+    expect(presetOf(mill, stored.params.numberInput)?.id).toBe('is-c');
+    expect(pointlessFeedsIdOf(mill, stored)).toBe('per-rev');
+    const fields = machineFields(mill, dbOf('fanuc-gcode'), stored);
+    expect(byId(fields, FIELD_NUMBER_INPUT)?.default).toBe('is-c');
+    expect(byId(fields, FIELD_POINTLESS_FEEDS)?.default).toBe('per-rev');
+    // An edit of the name keeps the choice.
+    const again = machineFromValues(mill, { ...initialValues(fields), [FIELD_NAME]: 'Mill 2' }, stored);
+    expect(again.params.numberInput).toEqual(stored.params.numberInput);
+  });
+
+  it('leaves a hand-written rule set alone and does not offer the option over it', () => {
+    const custom: NumberInput = { mode: 'increment', incrementMm: '0.001', classes: { feedPerMin: { increment: '0.1' } } };
+    const stored = machine({ profile: 'fanuc-gcode', params: { numberInput: custom } });
+    expect(presetIdOf(mill, stored)).toBe(CUSTOM_PRESET);
+    expect(byId(machineFields(mill, dbOf('fanuc-gcode'), stored), FIELD_POINTLESS_FEEDS)).toBeUndefined();
+    const kept = machineFromValues(mill, { [FIELD_NAME]: 'x', [FIELD_NUMBER_INPUT]: CUSTOM_PRESET, [FIELD_POINTLESS_FEEDS]: 'both' }, stored);
+    expect(kept.params.numberInput).toEqual(custom);
+  });
+
+  it('says in the summary how a point-less feed counts, with its source', () => {
+    // Manual-check fix D4-2: the lathe's own choice (the mill has no per-minute one).
+    const latheProfile = profiles.profile('fanuc-lathe');
+    const values = { [FIELD_NAME]: 'Lathe 1', [FIELD_NUMBER_INPUT]: 'is-b', [FIELD_POINTLESS_FEEDS]: 'per-minute' };
+    const eff = effectiveMachine(latheProfile, machine({ profile: 'fanuc-lathe', params: machineFromValues(lathe, values).params }), 'document', {});
+    const lines = machineSummaryLines(eff, lathe);
+    expect(lines).toContain(
+      'How the control reads numbers: Increments of 0.001 mm (IS-B): X50 is 0.050 mm, X50. is 50 mm, C90000 is 90°; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution and a thread lead in 0.0001 mm/rev (F2500 is 0.25 mm/rev) — set by the machine',
+    );
+    expect(lines).toContain(
+      'Point-less feeds: Feed per minute in 0.001 mm/min (F200000 is 200 mm/min), feed per revolution and thread lead in 0.0001 mm/rev (F2500 is 0.25 mm/rev) — set by the machine',
+    );
+    // With no machine the default is listed as assumed; on "as written" there is no such line.
+    const profile = profiles.profile('fanuc-gcode');
+    const standard = mill.numberInput?.pointlessFeeds?.choices.find((c) => c.value === 'standard')?.label;
+    expect(machineSummaryLines(noMachine(profile), mill).join('\n')).toContain(`Point-less feeds: ${standard} — dialect default, assumed`);
+    const lathePlain = machineSummaryLines(noMachine(profiles.profile('fanuc-lathe')), lathe);
+    expect(lathePlain.some((line) => line.startsWith('Point-less feeds'))).toBe(false);
+  });
+});
+
+describe('machines stored before the point-less feeds options changed (review CODE-5)', () => {
+  // The rule sets exactly as the shipped presets stored them before the manual-check fix
+  // round: a machine keeps the whole rule set (§7.15), so these are what old files hold.
+  const oldIncrement = (mm: string, inch: string, deg: string, perRev: { mm: string; inch: string }, perMin = { mm: '1', inch: '0.01' }): NumberInput => ({
+    mode: 'increment',
+    incrementMm: mm,
+    incrementInch: inch,
+    incrementDeg: deg,
+    incrementSec: deg,
+    classes: {
+      feedPerMin: { mode: 'increment', increment: perMin.mm, incrementInch: perMin.inch },
+      feedPerRev: { mode: 'increment', increment: perRev.mm, incrementInch: perRev.inch },
+    },
+  });
+  const oldPerRev = { mm: '0.01', inch: '0.0001' };
+  const latheDecl = declOf('fanuc-lathe');
+  const millDecl = declOf('fanuc-gcode');
+
+  it('an old lathe machine is its IS preset with "Series 15 format", and reads as before', () => {
+    const olds: [string, NumberInput][] = [
+      ['is-a', oldIncrement('0.01', '0.001', '0.01', oldPerRev)],
+      ['is-b', oldIncrement('0.001', '0.0001', '0.001', oldPerRev)],
+      ['is-c', oldIncrement('0.0001', '0.00001', '0.0001', oldPerRev)],
+    ];
+    for (const [id, value] of olds) {
+      const stored = machine({ profile: 'fanuc-lathe', params: { numberInput: value } });
+      expect(presetOf(latheDecl, value)?.id, id).toBe(id);
+      expect(presetIdOf(latheDecl, stored), id).toBe(id);
+      expect(pointlessFeedsIdOf(latheDecl, stored), id).toBe('series-15');
+      const fields = machineFields(latheDecl, dbOf('fanuc-lathe'), stored);
+      expect(byId(fields, FIELD_NUMBER_INPUT)?.default, id).toBe(id);
+      expect(byId(fields, FIELD_POINTLESS_FEEDS)?.default, id).toBe('series-15');
+      // Saving the form without a change keeps the old rules, number for number.
+      const again = machineFromValues(latheDecl, { ...initialValues(fields), [FIELD_NAME]: 'Lathe 2' }, stored);
+      expect(again.params.numberInput, id).toEqual(value);
+    }
+    // And the numbers read as before: a point-less feed per revolution in 0.01 mm/rev.
+    const stored = olds[1][1];
+    expect(valueOf(parseNumber('25')!, 'feedPerRev', { numberInput: stored } as never, 'mm')).toBe('0.25');
+    expect(valueOf(parseNumber('200')!, 'feedPerMin', { numberInput: stored } as never, 'mm')).toBe('200');
+  });
+
+  it('an old mill machine with the per-minute or both choice shows "Custom", with no feeds choice beside it, and keeps its rules', () => {
+    const perMin = { mm: '0.001', inch: '0.00001' };
+    const olds: Record<string, NumberInput> = {
+      'per-minute': oldIncrement('0.001', '0.0001', '0.001', oldPerRev, perMin),
+      both: oldIncrement('0.001', '0.0001', '0.001', { mm: '0.001', inch: '0.00001' }, perMin),
+    };
+    for (const [choice, value] of Object.entries(olds)) {
+      const stored = machine({ profile: 'fanuc-gcode', params: { numberInput: value } });
+      expect(presetOf(millDecl, value), choice).toBeNull();
+      expect(presetIdOf(millDecl, stored), choice).toBe(CUSTOM_PRESET);
+      const fields = machineFields(millDecl, dbOf('fanuc-gcode'), stored);
+      const numberInput = byId(fields, FIELD_NUMBER_INPUT);
+      expect(numberInput?.default, choice).toBe(CUSTOM_PRESET);
+      expect(numberInput?.help, choice).toBe(t('machines.value.customDetail'));
+      // The form does not show a feeds choice ("Standard") the rules do not follow.
+      expect(byId(fields, FIELD_POINTLESS_FEEDS), choice).toBeUndefined();
+      // The summary says so too.
+      const eff = effectiveMachine(profiles.profile('fanuc-gcode'), stored, 'document', {});
+      const lines = machineSummaryLines(eff, millDecl);
+      expect(lines.some((line) => line.startsWith(`${t('machines.param.numberInput')}: ${t('machines.value.custom')}`)), choice).toBe(true);
+      expect(lines.some((line) => line.startsWith(t('machines.param.pointlessFeeds'))), choice).toBe(false);
+      // Saving keeps the rules untouched.
+      const again = machineFromValues(millDecl, { ...initialValues(fields), [FIELD_NAME]: 'Mill 2' }, stored);
+      expect(again.params.numberInput, choice).toEqual(value);
+    }
+    // The old per-rev choice and the standard one still match a preset and a choice.
+    const perRev = oldIncrement('0.001', '0.0001', '0.001', { mm: '0.001', inch: '0.00001' });
+    expect(pointlessFeedsIdOf(millDecl, machine({ profile: 'fanuc-gcode', params: { numberInput: perRev } }))).toBe('per-rev');
+    expect(pointlessFeedsIdOf(millDecl, machine({ profile: 'fanuc-gcode', params: { numberInput: oldIncrement('0.001', '0.0001', '0.001', oldPerRev) } }))).toBe('standard');
   });
 });

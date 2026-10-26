@@ -48,8 +48,8 @@ import { tokenizeLine } from '$lib/core/nc/tokenizer';
 import { parseNumber } from '$lib/core/nc/numbers';
 import { readingsOf, valueOf } from '$lib/core/machines/numbers';
 import { axisWordsOf, isAssignmentWord, lookupCode, lookupWord, normalizeCode } from './lookup';
-import { paramOfBlock, type CycleBlock } from './blocks';
-import { inspectBlock, type InspectInput, type InspectView, type InspectedCycle } from './inspect';
+import { cycleBlockOf, declaresBlocks, paramOfBlock, paramsOfBlock, type CycleBlock } from './blocks';
+import { inspectBlock, splitFeedKeyword, type InspectInput, type InspectView, type InspectedCycle } from './inspect';
 import {
   blockEntries,
   feedUnitSource,
@@ -60,6 +60,7 @@ import {
   paramOf,
   readWord,
   unitsAfter,
+  valueWordEntry,
   type WordReading,
 } from './wordValue';
 import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
@@ -143,6 +144,12 @@ export interface HoverOptions {
   waitCode?: WaitCodeLookup;
   /** Phase 3 (P3.3): the modal context and the machine; see `HoverContext`. */
   context?: HoverContext;
+  /**
+   * Which block of a two-block cycle (`G71 U… R…` / `G71 P… Q… …`) the hovered line is, read from
+   * the words it writes (`cycleBlockOf`); null when they do not say. Only the required-words line
+   * reads it: of a two-block code it lists the words of this block. Absent, as null.
+   */
+  cycleBlock?: CycleBlock | null;
 }
 
 /** Characters markdown would read as formatting. */
@@ -279,7 +286,8 @@ function joinWithNumber(tokens: NcToken[], index: number, line: string, db: Code
 }
 
 /**
- * The token a hover at `offset` describes, with a Klartext cycle joined into one token.
+ * The token a hover at `offset` describes, with a Klartext cycle joined into one token, and a
+ * feed keyword written apart (`F MAX`) too.
  *
  * `offset` is a UTF-16 offset into `line` (Monaco's `column - 1`).
  */
@@ -293,6 +301,9 @@ export function hoverTarget(
   const { tokens } = tokenizeLine(line, cp, prev);
   const index = tokenAt(tokens, offset);
   if (index < 0 || tokens[index].kind === 'whitespace') return null;
+  // T166: Klartext `F MAX` is the feed keyword `FMAX` on either half, never `MAX` of its own.
+  const feed = splitFeedKeyword(tokens, index, line, cp.profile, db);
+  if (feed) return feed.token;
   return joinWithNumber(tokens, index, line, db) ?? tokens[index];
 }
 
@@ -313,20 +324,6 @@ function lookupFor(db: CodeDb, token: NcToken): CodeLookup | null {
   return lookupWord(db, { ...token, kind: 'word', address: token.address ?? token.text.toUpperCase() });
 }
 
-/**
- * The entry of a word written with `=` under a name the database describes as an entry of
- * its own, not as an address (`CTOL=0.02`, `ADIS=0.5`, `SVC=100`): the value behind the `=`
- * is data, so the entry is the name's whatever value follows, and the hover is headed by the
- * name. Null for every other token, for an indexed word (`S[2]=500`, read by its address) and
- * for an entry marked for verification.
- */
-function valueWordEntry(db: CodeDb, token: NcToken, lookup: CodeLookup | null): CodeEntry | null {
-  if (token.kind !== 'word' || token.address === undefined || token.index !== undefined) return null;
-  if (!isAssignmentWord(token) || lookup?.entry || lookup?.address) return null;
-  const entry = lookupCode(db, token.address);
-  return entry && entry.verify !== true ? entry : null;
-}
-
 /** The whole hover for a position in a line, or null when there is nothing to say. */
 export function hoverAt(
   line: string,
@@ -345,12 +342,29 @@ export function hoverAt(
     extendedAddresses: extendedAddressesOf(cp),
     waitCode: o.waitCode,
   };
+  const cycleBlock = writtenBlock(line, cp, db, prev, token, lookup);
+  if (cycleBlock !== undefined) o2.cycleBlock = cycleBlock;
   const named = valueWordEntry(db, token, lookup);
   const markdown = named ? codeHover(token.address as string, named, t) : hoverText(token, lookup, t, o2);
   if (markdown === null) return null;
   // M12.5: a wait code of the machine says what the machine says, and nothing more.
   const context = o.context && !answersAsWaitCode(token, o2) ? contextParagraphs(token, line, cp, db, t, o.context) : [];
   return { markdown: paragraphs([markdown, ...context]), start: token.start, end: token.end };
+}
+
+/**
+ * Which block of a two-block cycle the line is, when the hovered token is the code of such a
+ * cycle (`G71`): read from the addresses the line writes. `undefined` for every other token,
+ * so the hover of a single-block code is built exactly as before.
+ */
+function writtenBlock(line: string, cp: CompiledProfile, db: CodeDb, prev: LineState | undefined, token: NcToken, lookup: CodeLookup | null): CycleBlock | null | undefined {
+  const entry = lookup?.entry ?? null;
+  if (entry === null || !declaresBlocks(entry) || entryOfToken(token, db) !== entry) return undefined;
+  const written: string[] = [];
+  for (const other of tokenizeLine(line, cp, prev).tokens) {
+    if (other.kind === 'word' && other.address !== undefined) written.push(other.address);
+  }
+  return cycleBlockOf(entry, written);
 }
 
 /** The machine's wait list answers for this word (the hover then shows the wait, not the database). */
@@ -390,21 +404,37 @@ function groupLine(entry: CodeEntry, t: Translate): string | null {
   return parts.length === 0 ? null : `_${parts.join(' · ')}_`;
 }
 
-/** `Required: Z, R, Q, F`, or null when the code has no required parameter. */
-function requiredLine(entry: CodeEntry, t: Translate): string | null {
-  const required = (entry.params ?? []).filter((param) => param.required).map((param) => param.address);
-  if (required.length === 0) return null;
-  return escapeMarkdown(t('assistant.hover.required', { list: required.join(', ') }));
+/**
+ * `Required: Z, R, Q, F`, or null when there is no required parameter to name. Of a two-block cycle
+ * (`blocks: 2`) the words of the block the line is: the first `G71` block has none (`P`, `Q` belong
+ * to the second). When the line does not say which block it is, the words of each block are named
+ * with their block (`Required in the second block: P, Q`) instead of being given to both.
+ */
+function requiredLine(entry: CodeEntry, t: Translate, block: CycleBlock | null | undefined): string | null {
+  const addresses = (b: CycleBlock | null): string[] => paramsOfBlock(entry, b).filter((param) => param.required).map((param) => param.address);
+  if (!declaresBlocks(entry) || block === 1 || block === 2) {
+    const required = addresses(block ?? null);
+    return required.length === 0 ? null : escapeMarkdown(t('assistant.hover.required', { list: required.join(', ') }));
+  }
+  // A required word of a two-block code that belongs to one block only: say whose it is.
+  const lines: string[] = [];
+  for (const b of [1, 2] as const) {
+    const own = (entry.params ?? []).filter((param) => param.required && param.block === b).map((param) => param.address);
+    if (own.length > 0) lines.push(escapeMarkdown(t(b === 1 ? 'assistant.hover.requiredFirst' : 'assistant.hover.requiredSecond', { list: own.join(', ') })));
+  }
+  const both = (entry.params ?? []).filter((param) => param.required && param.block === undefined).map((param) => param.address);
+  if (both.length > 0) lines.unshift(escapeMarkdown(t('assistant.hover.required', { list: both.join(', ') })));
+  return lines.length === 0 ? null : lines.join('\n\n');
 }
 
 /** A code the database describes: label, description, group and required parameters. */
-function codeHover(display: string, entry: CodeEntry, t: Translate): string {
+function codeHover(display: string, entry: CodeEntry, t: Translate, block?: CycleBlock | null): string {
   return paragraphs([
     heading(display, entry.label),
     entry.description ? escapeMarkdown(entry.description) : null,
     entry.pitchFeed ? escapeMarkdown(t('assistant.hover.pitchFeed')) : null,
     groupLine(entry, t),
-    requiredLine(entry, t),
+    requiredLine(entry, t, block),
   ]);
 }
 
@@ -515,14 +545,14 @@ export function hoverText(
 
     case 'keyword': {
       const display = token.address ?? token.text;
-      return described ? codeHover(display, described, t) : unknownHover(display, t);
+      return described ? codeHover(display, described, t, o.cycleBlock) : unknownHover(display, t);
     }
 
     case 'call': {
       // A cycle or a function the database has an entry for; a subprogram the program
       // calls by its own name (`PROBE_DIA(1,,3)`) is not a code of the dialect.
       const display = token.address ?? token.text;
-      if (described) return codeHover(display, described, t);
+      if (described) return codeHover(display, described, t, o.cycleBlock);
       return entry ? unknownHover(display, t) : null;
     }
 
@@ -533,7 +563,7 @@ export function hoverText(
       const wait = o.waitCode ? waitCodeWord(token) : null;
       const answer = wait && o.waitCode ? o.waitCode(wait.letter, wait.value) : null;
       if (answer) return waitCodeHover(display, answer, entry !== null, t);
-      if (described) return codeHover(display, described, t);
+      if (described) return codeHover(display, described, t, o.cycleBlock);
       const address = lookup?.address;
       if (entry) return unknownHover(display, t, address); // an unverified entry
       if (address) {
@@ -717,7 +747,7 @@ function paramIn(x: LineInputs, entry: CodeEntry | null, address: string): CodeP
 
 function feedPart(x: LineInputs, address: string, t: Translate): string | null {
   const { reading, after, view, blockCodes } = x;
-  const inForce = inForceEntries(after, blockCodes, view.db);
+  const inForce = inForceEntries(after, blockCodes, view.db, view.profile);
   if (reading.lead) {
     const code = [...blockCodes, ...inForce].find((e) => e.pitchFeed === true && paramOf(e, address)?.unit === 'feedPerRev')?.code ?? '';
     return say(t, 'lead', { code });
@@ -816,6 +846,17 @@ function axisParts(x: LineInputs, address: string, t: Translate): string[] {
   if (target && after.activeCycle) {
     const move = lookupCode(view.db, after.activeCycle.code)?.group === 'motion';
     push(say(t, move ? 'threadInForce' : 'cycleInForce', { code: after.activeCycle.code, line: after.activeCycle.line }));
+  } else if (target) {
+    // T167: a single-pass cycle that is the motion in force (a lathe turning pass `G90`, a
+    // facing pass `G94`, system B `G77`, `G79`: `sets.path` 'cycle') runs again at every
+    // position written under it, so the position is the next pass of that cycle. The modal
+    // index keeps no `activeCycle` for it (only a threading pass is one), so it is read off
+    // the motion group. In the block that writes it, the code stands in the block itself.
+    const motion = after.groups.motion;
+    const entry = motion ? lookupCode(view.db, motion.code) : null;
+    if (motion && entry?.sets?.path === 'cycle' && !blockCodes.includes(entry)) {
+      push(say(t, 'cycleInForce', { code: motion.code, line: motion.line }));
+    }
   }
   return parts;
 }
@@ -841,7 +882,7 @@ function contextLine(x: LineInputs, t: Translate): string | null {
   } else if (isAxisWord(profile, address)) {
     parts = axisParts(x, address, t);
   } else {
-    const owner = paramOwner(x, address, [cycleEntry, ...blockCodes, ...inForceEntries(after, blockCodes, view.db)]);
+    const owner = paramOwner(x, address, [cycleEntry, ...blockCodes, ...inForceEntries(after, blockCodes, view.db, view.profile)]);
     if (owner) parts.push(say(t, 'param', { label: owner.param.label, code: owner.entry.code }));
   }
   if (parts.length === 0) return null;

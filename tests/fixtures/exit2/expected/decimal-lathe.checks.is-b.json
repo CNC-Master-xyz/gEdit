@@ -30,7 +30,9 @@
       "variants": {
         "gcodeSystem": "B",
         "incrementalAddresses": "uw",
-        "toolWord": "byLength"
+        "toolWord": "byLength",
+        "toolChange": "turret",
+        "counterSpindleY": "turns"
       },
       "modalInitial": {
         "feedmode": "G95"

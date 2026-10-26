@@ -202,6 +202,46 @@ def effective_context(
     return context
 
 
+def with_pointless_feeds(context: Dict[str, Any], choice: str) -> Dict[str, Any]:
+    """``context`` (a machine's, from :func:`effective_context` with a preset) with the profile's
+    "Point-less feeds" choice ``choice`` over its number rules (T084).
+
+    It does what the Machines page does when it stores the choice (``withPointlessFeeds`` in
+    ``src/lib/core/machines/fields.ts``): the choice's steps replace a feed class's own where the
+    machine counts that class in increments, and an inch step the choice does not name is
+    dropped. Scripts never do this — the app stores the result and they read the number rules
+    as always; a test needs it to put such a machine into a context. ``test_machine`` checks the
+    result against the inputs ``tests/fixtures/machines/numbers.json`` writes out, which the
+    TypeScript side checks against ``withPointlessFeeds``.
+    """
+    decl = context["profile"]["machineParams"]["numberInput"]["pointlessFeeds"]
+    found = [entry for entry in decl["choices"] if entry.get("value") == choice]
+    if len(found) != 1:
+        raise AssertionError("no point-less-feeds choice %r in %s" % (choice, context["profile"].get("id")))
+    machine = json.loads(json.dumps(context["machine"]))
+    number_input = machine["params"]["numberInput"]
+    number_input.update(apply_pointless_feeds(number_input, found[0]))
+    context = dict(context)
+    context["machine"] = machine
+    return context
+
+
+def apply_pointless_feeds(number_input: Dict[str, Any], choice: Dict[str, Any]) -> Dict[str, Any]:
+    """A copy of ``number_input`` with the steps of one point-less-feeds ``choice`` over it."""
+    out = json.loads(json.dumps(number_input))
+    for cls, step in (choice.get("classes") or {}).items():
+        own = (out.get("classes") or {}).get(cls) or {}
+        if (own.get("mode") or out.get("mode")) != "increment" or not isinstance(step.get("increment"), str):
+            continue
+        entry = dict(own, increment=step["increment"])
+        if isinstance(step.get("incrementInch"), str):
+            entry["incrementInch"] = step["incrementInch"]
+        else:
+            entry.pop("incrementInch", None)
+        out.setdefault("classes", {})[cls] = entry
+    return out
+
+
 def channel_context(golden: Any, **overrides: Any) -> Dict[str, Any]:
     """The ``ScriptContextV2`` of one channel golden, ``channels`` member included (plan §7.17).
 

@@ -23,6 +23,12 @@
 // model); it is the work of the code, which is where a pass over the whole program per keystroke
 // would show.
 //
+// A second test, for the line break (v1.2.0 channel-enter): a program of 300,000 lines with 20,000 waits, where a
+// line break below changes the line of every wait after it. A character costs the pane edit and the mapping; a line
+// break also re-projects, re-aligns and paints the marks of 20,000 waits, which cost 2.6 s a time before the hovers
+// were made on demand, the resolution's comparison was structural, its owners of lines were built only for a wait
+// and the alignment was made from the one before it.
+//
 // A wall-clock test on a shared machine: one stall of the machine is not the code's. The 200
 // keystrokes run in three rounds and each measure is judged on its **best** round.
 
@@ -51,6 +57,8 @@ const SECTION = 501;
 const BLOCKS = 300;
 const KEYSTROKES = 200;
 const ROUNDS = 3;
+/** A line break with 20,000 waits: the budget of the owner's machine, not of the typing (a line break moves every wait below it). */
+const ENTER_BUDGET_MS = 100;
 
 /** A two-channel lathe program that alternates the channels, 300 × 2 × 501 + 3 lines = 300,603 lines. */
 function program(): string[] {
@@ -212,7 +220,7 @@ describe('typing in the channel view on a 300k-line two-channel program', () => 
     expect(doc.getLineContent(docLineOf(line))).toBe(pane2.getLineContent(line));
     const g1 = w.editorOf('g1').getModel() as unknown as ITextModel;
     expect(g1.getLineCount() + pane2.getLineCount()).toBe(doc.getLineCount() + 3);
-    expect(get(w.panes.state).marks).toEqual({ matched: BLOCKS * 2, unmatched: 0, none: 0 });
+    expect(get(w.panes.state).marks).toEqual({ matched: BLOCKS * 2, unmatched: 0, none: 0, unknown: 0 });
     expect(get(w.panes.state).open).toBe(true);
 
     // The motion colours kept up: one update per frame at most, in both panes, and once the index has
@@ -228,5 +236,68 @@ describe('typing in the channel view on a 300k-line two-channel program', () => 
     expect(lastMarks(ed1).length, 'motion marks in the first pane').toBeGreaterThan(0);
     expect(lastMarks(ed2).length, 'motion marks in the second pane').toBeGreaterThan(0);
     expect(motionSets(ed1)).toBeGreaterThanOrEqual(g1Before);
+  }, 240_000);
+});
+
+/** 20,000 waits in 300,003 lines: 10,000 blocks of two sections of 15 lines, each with a wait in the middle. */
+function manyWaits(): string[] {
+  const lines = ['%', 'O0100', '(MANY WAITS)'];
+  for (let block = 0; block < 10_000; block++) {
+    for (const channel of [1, 2]) {
+      lines.push(`CH${channel}`);
+      for (let i = 0; i < 14; i++) lines.push(i === 7 ? 'M901P12' : `G1 X${(i % 90) + 1}. Z-${(block + i) % 70}. F0.2`);
+    }
+  }
+  return lines;
+}
+
+describe('typing a character and a line break in the channel view on a program with 20,000 waits', () => {
+  it('keeps a character within the typing budget and a line break within a second of the machine, and the panes agree with the program afterwards', async () => {
+    const lines = manyWaits();
+    expect(lines.length).toBeGreaterThan(300_000);
+    const w = await paneWorld(sectionParams(2), { now: () => 0 });
+    const id = w.addDoc(lines.join('\n'));
+    expect(await w.panes.open(id)).toEqual({ ok: true });
+    await w.mountAll();
+    w.panes.flush();
+    expect(get(w.panes.state).marks.matched).toBe(20_000);
+    const pane2 = w.editorOf('g2').getModel() as unknown as ITextModel;
+    const doc = w.model(id);
+    const docLineOf = (paneLine: number): number => w.editor.groupViews().find((v) => v.id === 'g2')?.pane?.docLine(paneLine) ?? -1;
+    // Near the middle of pane 2, a few lines into a section, above its wait.
+    let line = 3 + 5000 * 15 + 2;
+
+    const rounds: { char: number[]; enter: number[] }[] = [];
+    for (let round = 0; round < ROUNDS; round++) {
+      const char: number[] = [];
+      const enter: number[] = [];
+      for (let i = 0; i < 60; i++) {
+        const isEnter = i % 6 === 5;
+        const started = performance.now();
+        if (isEnter) {
+          w.type(pane2, line, pane2.getLineMaxColumn(line), '\nG1 X1. Z-1.');
+          line++;
+        } else {
+          w.type(pane2, line, pane2.getLineMaxColumn(line), String.fromCharCode(97 + (i % 26)));
+        }
+        w.panes.flush();
+        (isEnter ? enter : char).push(performance.now() - started);
+      }
+      rounds.push({ char, enter });
+    }
+    const best = (measure: (r: (typeof rounds)[number]) => number): number => Math.min(...rounds.map(measure));
+    expectWithin(best((r) => p95(r.char)), 50, `characters in pane 2 with 20,000 waits, p95, best of ${ROUNDS} rounds`);
+    // One garbage collection of the 300,000-line program's models falls into a few of the 120 characters; the Phase 1 p95 is the bound for the slowest.
+    expectWithin(best((r) => Math.max(...r.char)), 50, `the slowest character in pane 2 with 20,000 waits, best of ${ROUNDS} rounds`);
+    expectWithin(best((r) => p95(r.enter)), ENTER_BUDGET_MS, `line breaks in pane 2 with 20,000 waits, p95, best of ${ROUNDS} rounds`);
+
+    // The panes are the program's, and all 20,000 waits still meet, on their new lines.
+    expect(doc.getLineContent(docLineOf(line))).toBe(pane2.getLineContent(line));
+    expect(get(w.panes.state).marks).toEqual({ matched: 20_000, unmatched: 0, none: 0, unknown: 0 });
+    const g2 = w.editorOf('g2');
+    expect(g2.marks()).toHaveLength(10_000);
+    // Hovering the wait just below the typed line: it names the other channel's wait on its line of the program.
+    const below = g2.marks().find((m) => m.range.startLineNumber > line)!.range.startLineNumber;
+    expect(w.hover('g2', below)).toHaveLength(1);
   }, 240_000);
 });

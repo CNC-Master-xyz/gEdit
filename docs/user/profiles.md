@@ -181,6 +181,61 @@ members is whatever a built-in profile file contains; the built-ins are the refe
 **Test on document** is how you find out what a pattern does. Patterns (`pattern` members)
 are [regular expressions](regex.md) in the part that JavaScript and Python share.
 
+### Renumbering members of a profile
+
+Besides `start`, `step`, `digits`, `max`, `onOverflow`, `spacesAfter`, `skipStartingWith`,
+`skipEmpty`, `restartAtProgramStart` and the prefixes, `numbering` holds the defaults of the
+other Renumber Blocks options (see [transformations.md](transformations.md#renumber-blocks)).
+The Renumber dialog opens with these until you change them, then with your last answers.
+
+| Member | Value | Renumber Blocks option |
+|---|---|---|
+| `fitToMax` | `true` / `false` | Fit the increment to the maximum (needs a `max`) |
+| `alignColumn` | whole number 0 to 120, 0 = off | Start the code at column |
+| `everyNth` | whole number 1 to 1000, 1 = every block | Number every Nth block |
+| `skipContaining` | list of texts, each at most 200 characters and without a blank (a text with a blank is refused when the profile is loaded) | Skip lines containing |
+| `skipFirst`, `skipLast` | whole number 0 to 1,000,000 | Skip the first lines, Skip the last lines |
+| `startTrigger`, `startAfterTrigger` | text (empty = off), `true` / `false` | Start at the line containing, Start at the line after it |
+
+A profile that leaves them out renumbers as before.
+
+**References and calls.** `references` lists the lines whose addresses hold block numbers
+and `calls` the lines that call another program. Both are lists, so a list you write
+replaces the parent's whole.
+
+```json
+"references": [
+  { "trigger": "(?<![A-Z])M\\s*0*99(?!\\d)", "addresses": ["P"], "program": "caller" },
+  { "trigger": "(?<![A-Z])M\\s*0*98(?!\\d)", "addresses": ["Q"], "program": "called", "rewrite": false }
+],
+"calls": [
+  { "trigger": "(?<![A-Z])M\\s*0*98(?!\\d)", "address": "P", "maxDigits": 4, "repeatAddress": "L", "localAddress": "Q" },
+  { "trigger": "(?<![A-Z])M\\s*0*96(?!\\d)", "address": "P", "interrupt": true }
+]
+```
+
+| Member | |
+|---|---|
+| `references[].trigger`, `.addresses` | The pattern a line must match, and the addresses on it whose values are block numbers (as before) |
+| `references[].rewrite` | `false`: the value is reported and never rewritten |
+| `references[].program` | Whose block the value names: `own` (the program the line stands in; the default), `called` (the program the same line calls) or `caller` (the program that calls the one the line stands in) |
+| `calls[].trigger`, `.address` | A line that matches calls a program; the program is the number in this address (or a program name such as `<SHAFT_T12>`) |
+| `calls[].maxDigits` | Up to this many digits the value is the program number; a longer value without the repeat word is a repeat count followed by a program number of this many digits (Fanuc `M98 P21010` is `O1010` twice, with `4`) |
+| `calls[].repeatAddress` | The address that holds the repeat count (`L`); with it, a longer program number is read whole |
+| `calls[].localAddress` | The address that makes a line without the program word a **local call** (Fanuc `M98 Q30`: the program runs its own blocks from `N30` up to the next return). A local call proves the caller only of a `caller` reference inside the part it runs. A rule without it calls nothing on a line that lacks its program word (a bare `M96` or `G65`) |
+| `calls[].interrupt` | `true`: the called program is started by an interrupt (Fanuc `M96 P2000`) and returns into whichever program it interrupted, so this call never proves the caller of a `caller` reference |
+
+If two rules fire on one word and name different programs, the word is reported and left
+as it is. A profile without `calls` cannot resolve `called` or `caller` references: they
+are reported with the reason, never rewritten. The built-in Fanuc profiles carry rules for
+`M98`, `M98 Q`, `M98 P… Q…`, `M99 P`, `G65`, `G66`, `G66.1`, `G72.1`, `G72.2`, `M96` and
+`M198`; Okuma and Sinumerik need no call rules for their jumps.
+
+`numbering.calls`, `program` and `rewrite` are read by Renumber Blocks only. The scripts
+(Python) read just the `trigger` and `addresses` of `numbering.references`, so a script that
+asks where block numbers are named does not know which program a value belongs to or whether
+a rule never rewrites it.
+
 ## When your profile is used
 
 A program is opened with a profile of yours in one of two ways: **you pick it**, or **a rule
@@ -306,6 +361,8 @@ used.
 | `params` | The words the code takes: a list of `{ "address": "P", "label": "…" }`, with `"required": true`, `"min"` and `"max"` where they apply. `"unit": "count"` says the value is shown and kept exactly as written, never converted, and is a whole number (a repeat count, a block number); add `"decimals": true` when such a value is a real number all the same (an angle or a direction component such as the `I`, `J`, `K` of `G68.2`), so the inspector and the cycle form accept `45.5`. `decimals` without `"unit": "count"` is reported. On a cycle written in two blocks, `"block": 1` or `"block": 2` says which block a word belongs to ([below](#cycles-written-in-two-blocks)) |
 | `blocks` | `2` for a cycle written in two blocks with the same code, such as the lathe's `G71` and `G76` |
 | `ownWords` | A list of addresses, such as `["F"]`: words of those addresses written **behind** the code in its block belong to the code itself and are not ordinary values. The built-in Klartext set uses it for the `F` of `M128`, `M140`, `PLANE …` and cycle 19, which is a feed for that function only; Scale Feed leaves such a word as written, the tool list does not count it as a feed, and the inspector's state, the hover and the state scripts read keep showing the feed of the path |
+| `call` | `true` says the code runs another program, or a section of this one, and comes back (Fanuc `G65`, `G66`, Klartext `CALL LBL`, `CALL PGM`, Sinumerik `CALL`, Okuma `CALL`). Address arithmetic refuses a block of such a code that writes a chosen address with a number, because the called program may read it as a position; Expand Drilling Cycles refuses such a block while a cycle is in force, and the time estimate leaves it out. A cycle code is never read as a call |
+| `blockFeed` | `true` says the `F` word of a block with this code is the feed of that block only (Klartext `CYCL CALL POS X… Y… Z… F300`: the feed of the move to the point). The block after it runs at the feed that was in force before the block. The built-in Klartext set uses it for `CYCL CALL POS` |
 | `verify` | `true` marks an entry you are not sure about: it is kept out of the hover and marked in the completion list, as the built-in "not verified yet" entries are |
 | `review` | `"pending"` marks an entry that is still waiting for a review; the built-in sets use it for entries filled in from the control manuals. It changes nothing gEdit shows or does |
 
@@ -466,16 +523,25 @@ back.
 ## Typing options in a profile
 
 A profile can switch the two [typing options](README.md#typing-forced-upper-case-and-no-accidental-joins)
-on or off, in its `editing` group:
+on or off, in its `editing` group, and it can switch on two more helps, [Auto Space](editing.md#auto-space)
+and the [Automatic Block Number](editing.md#automatic-block-number):
 
 ```json
 "editing": {
   "forceUppercase": true,
-  "preventLineJoin": true
+  "preventLineJoin": true,
+  "autoSpace": true,
+  "autoNumber": true
 }
 ```
 
-Every built-in profile has both on, so a profile that starts from one has them on too. Typing
+Every built-in profile has `forceUppercase` and `preventLineJoin` on, so a profile that
+starts from one has them on too. **`autoSpace` and `autoNumber` are off** in every built-in
+profile, and a profile that leaves them out has them off: write `true` to switch one on for
+a machine or a folder. Each takes `true` or `false` only; any other value is reported in
+Results with its place (`editing.autoSpace`) and the profile is not used. The **Auto Space**
+and **Automatic Block Number** buttons on the Edit tab override the profile for every
+document until gEdit closes; they are never saved. Typing
 options apply to NC programs only: in a `.json` or `.py` file (your profile files, `machines.json`,
 a script) a key is never changed, and the status bar says so when you switch Upper-Case
 Typing on there. The

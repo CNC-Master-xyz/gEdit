@@ -524,6 +524,7 @@
     {
       "code": "CALL LBL",
       "group": "subprogram",
+      "call": true,
       "label": "Call label",
       "description": "Runs the section from that label up to the next LBL 0 and then carries on. REP runs the section that many extra times.",
       "params": [
@@ -537,6 +538,7 @@
     {
       "code": "CALL PGM",
       "group": "subprogram",
+      "call": true,
       "label": "Call program",
       "description": "Runs another program as a subprogram. The called program must not contain M2 or M30, Q parameters stay shared, and active transformations stay on after the call."
     },
@@ -628,8 +630,12 @@
     {
       "code": "CYCL DEF 9",
       "group": "nonmodal",
+      "review": "pending",
       "label": "Dwell time",
-      "description": "Stops the program for the time in seconds that sub-block 9.1 gives, then goes on. It acts where it is defined and is never called, and it leaves states such as the spindle as they are."
+      "description": "Stops the program for the time in seconds that sub-block 9.1 gives, then goes on. It acts where it is defined and is never called, and it leaves states such as the spindle as they are.",
+      "dwell": {
+        "lines": ["CYCL DEF 9.0 DWELL TIME", "CYCL DEF 9.1 DWELL {s}"]
+      }
     },
     {
       "code": "CYCL DEF 10",
@@ -658,20 +664,23 @@
       "frameZeroWords": ["A", "B", "C"],
       "frameEmptyCloses": "1",
       "ownWords": ["F"],
+      "positionsRotary": true,
       "review": "pending",
       "label": "Working plane (older tilt cycle)",
-      "description": "Tilts the working plane: sub-block 19.1 gives the angles of the swivel axes A, B and C, and with them the feed and the safety distance for the control's own positioning. Whether the angles are axis positions or solid angles depends on the machine. Define it again with all angles at 0 and then once more without an angle to end it; PLANE RESET ends it as well. gEdit reads the plane as untilted from the sub-block that sets every angle to 0, and from a 19.1 sub-block that writes no angle at all; an angle that is not written keeps its value. It acts from its definition on and is never called.",
+      "description": "Tilts the working plane: sub-block 19.1 gives the angles of the swivel axes A, B and C, and with them the feed and the safety distance for the control's own positioning. Whether the angles are axis positions or solid angles depends on the machine. Define it again with all angles at 0 and then once more without an angle to end it; PLANE RESET ends it as well. gEdit reads the plane as untilted from the sub-block that sets every angle to 0, and from a 19.1 sub-block that writes no angle at all; an angle that is not written keeps its value. A 19.1 sub-block with a feed or a set-up clearance makes the machine turn the rotary axes itself, so gEdit no longer knows where they stand until the program writes them again. It acts from its definition on and is never called.",
       "params": [
         {
           "address": "F",
           "label": "Feed for positioning the rotary axes automatically",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "turnsRotary": true
         },
         {
           "address": "ABST",
           "label": "Set-up clearance for positioning the rotary axes automatically, an incremental distance along the tool axis",
-          "position": "none"
+          "position": "none",
+          "turnsRotary": true
         }
       ]
     },
@@ -750,8 +759,10 @@
       "code": "CYCL CALL POS",
       "group": "cycle",
       "sets": { "cycle": "call" },
+      "blockFeed": true,
+      "review": "pending",
       "label": "Cycle call at a position",
-      "description": "Moves to the position written in the block and runs the cycle that was defined last there. The block names all three axes, and its positions are absolute.",
+      "description": "Moves to the position written in the block and runs the cycle that was defined last there. The block names all three axes, and its positions are absolute. Its F is the feed of the move to that position and counts for this block only: the next block runs at the feed in force before it.",
       "params": [
         {
           "address": "X",
@@ -774,6 +785,7 @@
       "code": "CYCL DEF 200",
       "group": "cycle",
       "sets": { "cycle": "define" },
+      "review": "pending",
       "label": "Drilling cycle",
       "description": "Drills to depth, in pecks when an infeed is given, and pulls back fully between the pecks. It pre-positions in the tool axis itself.",
       "params": [
@@ -781,63 +793,86 @@
           "address": "Q200",
           "label": "Safety clearance above the surface",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "expandRole": "clearance"
         },
         {
           "address": "Q201",
           "label": "Depth, negative into the material",
           "required": true,
           "max": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "depth-relative"
         },
         {
           "address": "Q206",
           "label": "Plunging feed",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed"
         },
         {
           "address": "Q202",
           "label": "Infeed per peck",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "expandRole": "peck"
         },
         {
           "address": "Q210",
           "label": "Dwell at the top after each retract",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "expandRole": "dwell-top"
         },
         {
           "address": "Q203",
           "label": "Workpiece surface in the tool axis",
           "required": true,
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "expandRole": "surface"
         },
         {
           "address": "Q204",
           "label": "Second clearance for retracting",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "expandRole": "return-relative"
         },
         {
           "address": "Q211",
           "label": "Dwell at the hole bottom",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "expandRole": "default"
         },
         {
           "address": "Q395",
           "label": "Depth reference: 0 tool tip, 1 full diameter",
-          "position": "none"
+          "position": "none",
+          "expandRole": "default"
         }
-      ]
+      ],
+      "expand": {
+        "kind": "peck",
+        "steps": [
+          { "step": "rapid", "to": "clearance" },
+          { "step": "pecks", "mode": "full-retract", "back": "clearance", "reentry": { "role": "clearance" } },
+          { "step": "rapid", "to": "clearance" },
+          { "step": "rapid", "to": "return" }
+        ],
+        "returnBy": "role",
+        "relativeDepth": "signed",
+        "leaves": { "motion": "cycle", "feed": "before" },
+        "defaults": { "Q211": "0", "Q395": "0" }
+      }
     },
     {
       "code": "CYCL DEF 201",
       "group": "cycle",
       "sets": { "cycle": "define" },
+      "review": "pending",
       "label": "Reaming cycle",
       "description": "Feeds down to depth and feeds back out again, so the reamer leaves a clean wall.",
       "params": [
@@ -845,48 +880,69 @@
           "address": "Q200",
           "label": "Safety clearance above the surface",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "expandRole": "clearance"
         },
         {
           "address": "Q201",
           "label": "Depth, negative into the material",
           "required": true,
           "max": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "depth-relative"
         },
         {
           "address": "Q206",
           "label": "Plunging feed",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed"
         },
         {
           "address": "Q211",
           "label": "Dwell at the hole bottom",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "expandRole": "dwell"
         },
         {
           "address": "Q208",
-          "label": "Retract feed",
+          "label": "Retract feed (0: the plunging feed Q206)",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed-out"
         },
         {
           "address": "Q203",
           "label": "Workpiece surface in the tool axis",
           "required": true,
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "expandRole": "surface"
         },
         {
           "address": "Q204",
           "label": "Second clearance for retracting",
           "required": true,
-          "position": "none"
+          "position": "none",
+          "expandRole": "return-relative"
         }
-      ]
+      ],
+      "expand": {
+        "kind": "bore",
+        "steps": [
+          { "step": "rapid", "to": "clearance" },
+          { "step": "feed", "to": "depth" },
+          { "step": "dwell", "at": "bottom" },
+          { "step": "feed", "to": "clearance", "feed": "feed-out" },
+          { "step": "rapid", "to": "return" }
+        ],
+        "returnBy": "role",
+        "relativeDepth": "signed",
+        "leaves": { "motion": "cycle", "feed": "before" },
+        "feedOutZero": "feed"
+      }
     },
     {
       "code": "CYCL DEF 202",
@@ -3028,14 +3084,30 @@
     {
       "code": "SEQ+",
       "group": "tilt",
+      "review": "pending",
       "label": "Solution with a positive master axis angle",
-      "description": "Of the two rotary axis positions that give the same plane, takes the one where the master axis (the first rotary axis counted from the tool, or the last counted from the table) has a positive angle. No effect on PLANE AXIAL."
+      "description": "A word of the PLANE functions. Of the two rotary axis positions that give the same plane, takes the one where the master axis (the first rotary axis counted from the tool, or the last counted from the table) has a positive angle, counted from its home position (0). No effect on PLANE AXIAL. gEdit reads it as written and does not work out the axis positions."
     },
     {
       "code": "SEQ-",
       "group": "tilt",
+      "review": "pending",
       "label": "Solution with a negative master axis angle",
-      "description": "Of the two rotary axis positions that give the same plane, takes the one where the master axis has a negative angle. If it is outside the travel range the control reports an error. No effect on PLANE AXIAL."
+      "description": "A word of the PLANE functions. Of the two rotary axis positions that give the same plane, takes the one where the master axis has a negative angle, counted from its home position (0). If it is outside the travel range the control reports an error. No effect on PLANE AXIAL. gEdit reads it as written and does not work out the axis positions."
+    },
+    {
+      "code": "SYM+",
+      "group": "tilt",
+      "review": "pending",
+      "label": "Solution on the positive side of the symmetry point",
+      "description": "A word of the PLANE functions. Of the two rotary axis positions that give the same plane, takes the one where the master axis lies on the positive side of its symmetry point. Without SYM or SEQ the control takes the solution with the shorter way from where the rotary axes stand. If it is outside the travel range the control reports an error. No effect on PLANE AXIAL. gEdit reads it as written and does not work out the axis positions."
+    },
+    {
+      "code": "SYM-",
+      "group": "tilt",
+      "review": "pending",
+      "label": "Solution on the negative side of the symmetry point",
+      "description": "A word of the PLANE functions. Of the two rotary axis positions that give the same plane, takes the one where the master axis lies on the negative side of its symmetry point. If it is outside the travel range the control reports an error. No effect on PLANE AXIAL. gEdit reads it as written and does not work out the axis positions."
     },
     {
       "code": "MB",

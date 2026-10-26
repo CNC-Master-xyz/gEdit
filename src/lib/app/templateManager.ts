@@ -56,7 +56,7 @@ import {
   type TemplateParamType,
   type TemplateProblem,
 } from '$lib/core/templates';
-import type { Msg } from '$lib/app/types';
+import type { ModalOptions, Msg } from '$lib/app/types';
 
 // ---------------------------------------------------------------------------------------------
 // The shapes
@@ -190,13 +190,22 @@ export interface TemplateManagerDeps {
 // Pure helpers (also used by the dialog)
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * How the manager is opened (`modals.open`): a wide panel, and the host asks the model before it
+ * closes the dialog by itself (Esc with the focus outside the panel, a press outside it), so
+ * unsaved changes are never lost without a question (`leave`; T153 proves the chain).
+ */
+export function managerModalOptions(model: Pick<TemplateManager, 'leave'>): ModalOptions {
+  return { wide: true, mayClose: () => model.leave() };
+}
+
 /** The members a parameter of each type may carry (the loader refuses the others). */
 export const PARAM_MEMBERS: Readonly<Record<TemplateParamType, readonly string[]>> = {
-  number: ['id', 'label', 'type', 'help', 'required', 'min', 'max', 'default', 'decimals', 'prefix', 'suffix', 'plusSign', 'remember'],
-  integer: ['id', 'label', 'type', 'help', 'required', 'min', 'max', 'default', 'digits', 'prefix', 'suffix', 'plusSign', 'remember'],
-  text: ['id', 'label', 'type', 'help', 'required', 'default', 'prefix', 'suffix', 'uppercase', 'comment', 'remember'],
+  number: ['id', 'label', 'type', 'help', 'required', 'min', 'max', 'default', 'decimals', 'prefix', 'suffix', 'plusSign', 'remember', 'unit'],
+  integer: ['id', 'label', 'type', 'help', 'required', 'min', 'max', 'default', 'digits', 'prefix', 'suffix', 'plusSign', 'remember', 'unit'],
+  text: ['id', 'label', 'type', 'help', 'required', 'default', 'prefix', 'suffix', 'uppercase', 'comment', 'remember', 'maxLength', 'charset'],
   choice: ['id', 'label', 'type', 'help', 'required', 'default', 'choices', 'prefix', 'suffix', 'remember'],
-  formula: ['id', 'label', 'type', 'help', 'formula', 'decimals', 'digits', 'prefix', 'suffix', 'plusSign', 'hidden'],
+  formula: ['id', 'label', 'type', 'help', 'formula', 'decimals', 'digits', 'prefix', 'suffix', 'plusSign', 'hidden', 'unit'],
 };
 
 export const PARAM_TYPES: readonly TemplateParamType[] = ['number', 'integer', 'text', 'choice', 'formula'];

@@ -167,6 +167,9 @@ describe('the shipped Okuma database', () => {
       'M17', 'M19', 'M22', 'M23', 'M24', 'M25', 'M26', 'M27', 'M32', 'M33', 'M34', ...range(40, 44, 'M'),
       'M48', 'M49', 'M55', 'M56', 'M60', 'M61', 'M73', 'M74', 'M75', 'M83', 'M84', 'M85', 'M88', 'M89',
       'M98', 'M99', 'M109', 'M110', 'M146', 'M147',
+      // NC-5: the turret wait of the two-turret models (programming manual, simultaneous
+      // machining), so Check Program can refuse it under nose radius compensation.
+      'M100',
     ];
     const codes = new Set(ENTRIES.map((e) => e.code));
     expect(expected.filter((code) => !codes.has(code))).toEqual([]);
@@ -423,9 +426,10 @@ const PARAM_UNITS: Record<string, Record<string, Unit>> = {
   G21: { HP: 'count' },
   // M9 (WP9.5a): the F of every thread code is its lead, a feed per revolution whatever the
   // feed mode says; a tap's F (G77, G78, G184) is not, it follows the feed unit in force.
-  G31: { F: 'feedPerRev', A: 'angle', L: 'length', J: 'count' },
-  G32: { F: 'feedPerRev', A: 'angle', L: 'length', J: 'count' },
-  G33: { F: 'feedPerRev', A: 'angle', L: 'length', J: 'count' },
+  // NC-6: the lead change E and the phase shift C of the fixed thread cycles.
+  G31: { F: 'feedPerRev', A: 'angle', E: 'feedPerRev', L: 'length', J: 'count', C: 'angle' },
+  G32: { F: 'feedPerRev', A: 'angle', E: 'feedPerRev', L: 'length', J: 'count', C: 'angle' },
+  G33: { F: 'feedPerRev', A: 'angle', E: 'feedPerRev', L: 'length', J: 'count', C: 'angle' },
   G34: { F: 'feedPerRev', E: 'feedPerRev', J: 'count' },
   G35: { F: 'feedPerRev', E: 'feedPerRev', J: 'count' },
   G71: { A: 'angle', B: 'angle', D: 'length', U: 'length', H: 'length', L: 'length', E: 'feedPerRev', F: 'feedPerRev', J: 'count', Q: 'count' },
@@ -626,7 +630,9 @@ describe('B1: the lathe codes added from the manuals', () => {
     expect(codesWith((e) => reviewOf(e) !== undefined)).toEqual([
       // P4a fix B1 (§7 #312, #316): the chamfer and corner round (G75, G76) and the jumps.
       // v1.2 NC fix round (NCF-A follow-up): the thread passes and the L-radius arcs (lengthAlong).
-      'G2', 'G3', 'G20', 'G21', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'GOTO', 'IF', 'M85',
+      // Manual-check fix D5-1: the change points of G84 as coordinates.
+      // NC-5: the turret wait M100 refused under nose radius compensation.
+      'G2', 'G3', 'G20', 'G21', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'GOTO', 'IF', 'M85', 'M100',
     ]);
     for (const e of ENTRIES.filter((row) => reviewOf(row) !== undefined)) expect(reviewOf(e), e.code).toBe('pending');
   });
@@ -643,5 +649,75 @@ describe('B1 fix NC (NC-09): Okuma details', () => {
   });
   it('refuses a plane change while nose-radius compensation is on (G17, G18, G119)', () => {
     for (const code of ['G17', 'G18', 'G119']) expect(entry(code).conflicts, code).toEqual(['radiusComp']);
+  });
+});
+
+describe('manual-check fixes (2026-10-25): LAP, the fixed thread cycles and the third turret', () => {
+  it('reads the change points of G84 as coordinates of X and Z, so a shift moves them (D5-1)', () => {
+    // XA=/XB= are X coordinates written as a diameter, ZA=/ZB= Z coordinates (lathe manual,
+    // LAP parameters). Address arithmetic and translate move them with their axis.
+    const axes = Object.fromEntries((entry('G84').params ?? []).map((p) => [p.address, p.axis]));
+    expect(axes).toEqual({ XA: 'X', ZA: 'Z', DA: undefined, FA: undefined, XB: 'X', ZB: 'Z', DB: undefined, FB: undefined });
+    for (const address of ['XA', 'ZA', 'XB', 'ZB']) {
+      expect(lookupCode(db, 'G84')?.params?.find((p) => p.address === address)?.axis, address).toBe(address[0]);
+    }
+  });
+
+  it('reads G31, G32 and G33 as fixed thread cycles that go back to their start (D5-6)', () => {
+    for (const code of ['G31', 'G32', 'G33']) {
+      expect(entry(code).sets, code).toEqual({ motion: 'feed', path: 'cycle' });
+      expect(lookupCode(db, code)?.sets?.path, code).toBe('cycle');
+      expect(entry(code).description, code).toMatch(/goes back to the point it started from/);
+      expect(entry(code).description, code).toMatch(/does not work out where a tapered pass starts/);
+      expect(entry(code).pitchFeed, code).toBe(true);
+    }
+    // The sign of the taper says rising or falling, which is not the rule of other lathes.
+    expect(entry('G33').params?.find((p) => p.address === 'I')?.label).toMatch(/plus for a rising taper, minus for a falling one/);
+    expect(entry('G31').params?.find((p) => p.address === 'I')?.label).toMatch(/plus for a rising taper/);
+    expect(entry('G32').params?.find((p) => p.address === 'K')?.label).toMatch(/plus for a rising slope/);
+  });
+
+  it('describes the start shift, the lead change and the phase shift of G31, G32 and G33 (NC-6)', () => {
+    // OSP-P300 programming manual, fixed thread cycles: G33/G31 shift the start along Z by K,
+    // G32 along X by I; E changes the lead per lead; C shifts the phase for a thread with
+    // several starts. C is an angle and no position, so it is no move of a C axis.
+    const param = (code: string, address: string) => lookupCode(db, code)?.params?.find((p) => p.address === address);
+    for (const code of ['G31', 'G33']) {
+      expect(param(code, 'K'), code).toMatchObject({ lengthAlong: 'Z' });
+      expect(param(code, 'K')?.label, code).toMatch(/start along Z/);
+    }
+    expect(param('G32', 'I')).toMatchObject({ lengthAlong: 'X' });
+    expect(param('G32', 'I')?.label).toMatch(/start along X/);
+    for (const code of ['G31', 'G32', 'G33']) {
+      expect(param(code, 'E'), code).toMatchObject({ unit: 'feedPerRev' });
+      expect(param(code, 'C'), code).toMatchObject({ unit: 'angle', position: 'none' });
+    }
+  });
+
+  it('refuses the turret wait M100 while nose radius compensation is on (NC-5, D2-4 b)', () => {
+    // OSP-P300 programming manual, simultaneous machining: M100 during nose radius
+    // compensation is an alarm. Check Program reports it as a state conflict.
+    expect(entry('M100').conflicts).toEqual(['radiusComp']);
+    expect(lookupCode(db, 'M100')?.conflicts).toEqual(['radiusComp']);
+    expect((entry('M100') as { review?: unknown }).review).toBe('pending');
+  });
+
+  it('says which LAP values are diameters and increments (D5-9)', () => {
+    const label = (code: string, address: string): string =>
+      entry(code).params?.find((p) => p.address === address)?.label ?? '';
+    for (const [code, address] of [
+      ['G85', 'D'], ['G86', 'D'], ['G84', 'DA'], ['G84', 'DB'], ['G88', 'D'], ['G88', 'H'],
+    ]) {
+      expect(label(code, address), `${code} ${address}`).toMatch(/as a diameter and incremental$/);
+    }
+    for (const [code, address] of [['G84', 'XA'], ['G84', 'XB'], ['G85', 'U'], ['G86', 'U'], ['G87', 'U'], ['G88', 'U']]) {
+      expect(label(code, address), `${code} ${address}`).toMatch(/as a diameter/);
+    }
+  });
+
+  it('keeps G313 as turret C for review and says where the number means something else (D2-6)', () => {
+    expect((entry('G313') as { review?: unknown }).review).toBe('pending');
+    expect(entry('G313').description).toMatch(/G312 and G313 are contour codes for the side face/);
+    expect(entry('G313').description).toMatch(/G314 for turret D/);
   });
 });

@@ -79,6 +79,18 @@ describe('settings schema', () => {
     expect(mergeSettings({ 'scripts.python': '' }).warnings).toEqual([]);
   });
 
+  // T214: Enter-accepts-a-suggestion is a switch in the dialog, Assistance page, off by default.
+  it('offers assist.acceptOnEnter as a switch on the Assistance page, off', () => {
+    const row = SETTING_FIELDS.find((f) => f.key === 'assist.acceptOnEnter');
+    expect(row?.field.type).toBe('bool');
+    expect(row?.category).toBe('assistance');
+    expect(row?.dialog).toBe(true);
+    expect(DEFAULTS['assist.acceptOnEnter']).toBe(false);
+    // a hand-edited file with a word instead of a switch gets the default back
+    expect(mergeSettings({ 'assist.acceptOnEnter': 'yes' }).values['assist.acceptOnEnter']).toBe(false);
+    expect(mergeSettings({ 'assist.acceptOnEnter': true }).values['assist.acceptOnEnter']).toBe(true);
+  });
+
   it('keeps every key out of the dialog only on purpose', () => {
     expect(SETTING_FIELDS.filter((f) => !f.dialog).map((f) => f.key)).toEqual(['editor.rulers']);
   });

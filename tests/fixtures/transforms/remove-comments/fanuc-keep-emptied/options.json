@@ -1,1 +1,7 @@
-{ "dropEmptied": false }
+{
+  "note": "Fanuc with dropEmptied off: a line the removal leaves empty stays as an empty line.",
+  "profile": "fanuc-gcode",
+  "options": {
+    "dropEmptied": false
+  }
+}

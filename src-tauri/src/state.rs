@@ -10,7 +10,10 @@
 //! [`grant_recent_on_startup`] re-grants the entries that still exist, so a file
 //! from the last session reopens without a dialog (D6, a bounded widening of the
 //! fs scope), and [`recent_touch`] refuses a path the scope does not already
-//! allow, so the webview cannot smuggle an arbitrary path into that list.
+//! allow *and* that is an absolute path to an existing regular file other than
+//! `state.json` itself (T135), so the webview cannot smuggle an arbitrary path into
+//! that list — and a folder the user picked (which the scope allows as a whole) does not
+//! make the folder, or this file, a recent entry.
 //!
 //! M7 adds a third owner, [`crate::session`], writing `session`. Every write of
 //! this file is therefore a read-modify-write of a document three owners share,
@@ -349,10 +352,12 @@ pub fn grant_file(app: &AppHandle, path: &Path) {
 /// missing one. The grants themselves run within the same budget, in its last third.
 pub fn grant_paths(scope: &tauri::fs::Scope, paths: &[String], max: usize) -> usize {
     grant_paths_with(scope, paths, max, GRANT_BUDGET, |path| {
-        // Both, as before: a file can exist and still not canonicalize (some virtual
-        // drives on Windows), and it is granted as written then.
+        // A regular file, like the session's grant (T135): a hand-edited list could
+        // otherwise have a folder or a device node (`/dev/zero`, a pipe) granted at the
+        // next start, and nothing the user opened is either. A file can be one and still
+        // not canonicalize (some virtual drives on Windows); it is granted as written then.
         Path::new(path)
-            .exists()
+            .is_file()
             .then(|| std::fs::canonicalize(path).ok())
     })
     .len()
@@ -362,8 +367,22 @@ pub fn grant_paths(scope: &tauri::fs::Scope, paths: &[String], max: usize) -> us
 /// count (the webview never opens a folder), and the answer is which paths were
 /// granted, so the caller can count the others as missing. Same budget, and a path
 /// that does not answer in it is not granted — to the session it is offline.
-pub fn grant_files(scope: &tauri::fs::Scope, paths: &[String], max: usize) -> HashSet<String> {
-    grant_files_within(scope, paths, max, GRANT_BUDGET, |path| {
+///
+/// `state_file` is `state.json` itself, which is never granted, however the list spells
+/// it (T135, see [`is_state_file`]): to the session it counts as missing. Entries are
+/// cut before the cap is applied, so a refused one does not use up a place.
+pub fn grant_files(
+    scope: &tauri::fs::Scope,
+    paths: &[String],
+    max: usize,
+    state_file: &Path,
+) -> HashSet<String> {
+    let grantable: Vec<String> = paths
+        .iter()
+        .filter(|path| !is_state_file(Path::new(path), state_file))
+        .cloned()
+        .collect();
+    grant_files_within(scope, &grantable, max, GRANT_BUDGET, |path| {
         Path::new(path)
             .is_file()
             .then(|| std::fs::canonicalize(path).ok())
@@ -515,16 +534,70 @@ pub fn recent_list(app: AppHandle) -> Vec<RecentEntry> {
     }
 }
 
-/// Moves `path` to the front of the list and truncates it to `max` entries.
-/// Errors unless `fs_scope().is_allowed(path)` is already true, so only a file
-/// the user picked, dropped or reopened can get in. Deduplication is
-/// case-insensitive on macOS and Windows.
-#[tauri::command]
-pub fn recent_touch(app: AppHandle, path: String, max: u32) -> Result<Vec<RecentEntry>, String> {
-    if !app.fs_scope().is_allowed(&path) {
-        return Err(format!("{path} is not in the file scope"));
+/// Whether `path` is this build's own `state.json` (T135), however it is spelled: the
+/// recent list and the session are Rust's, and a file the webview can write through the
+/// fs scope would let it rewrite them behind this module's lock and its size and shape
+/// rules. Compared by the resolved path when both resolve, so a link to it counts too.
+pub fn is_state_file(path: &Path, state_file: &Path) -> bool {
+    if path == state_file {
+        return true;
     }
-    touch_recent(&paths::app_dirs(&app)?, &path, max)
+    match (
+        std::fs::canonicalize(path),
+        std::fs::canonicalize(state_file),
+    ) {
+        (Ok(path), Ok(state)) => path == state,
+        _ => false,
+    }
+}
+
+/// What a path must be before it can enter the recent list, besides being in the fs
+/// scope (T135): absolute, an existing regular file, and not `state.json`.
+///
+/// The scope alone says too much. A folder the user picked (the scripts folder, a
+/// parameter's folder) is allowed as a whole, so every path under it passes
+/// `is_allowed`, a relative one is resolved against whatever directory the process
+/// happens to run in, and the next start grants the entry again — a longer lived widening
+/// than the pick that earned it. `recent_touch` is called after a file was opened or
+/// saved, so the file is there; anything else is not something to reopen from a menu.
+pub fn recent_candidate(path: &str, state_file: &Path) -> Result<(), String> {
+    let candidate = Path::new(path);
+    if !candidate.is_absolute() {
+        return Err(format!("{path} is not an absolute path"));
+    }
+    if !candidate.is_file() {
+        return Err(format!("{path} is not an existing file"));
+    }
+    if is_state_file(candidate, state_file) {
+        return Err(format!("{path} is not a file for the recent list"));
+    }
+    Ok(())
+}
+
+/// Moves `path` to the front of the list and truncates it to `max` entries.
+/// Errors unless `fs_scope().is_allowed(path)` is already true **and** the path passes
+/// [`recent_candidate`], so only a file the user picked, dropped or reopened can get in.
+/// Deduplication is case-insensitive on macOS and Windows.
+///
+/// `async`, on the blocking pool: the scope check and the file check touch the path,
+/// which can be on a share that has gone away (see [`crate::session`]'s `session_save`).
+#[tauri::command]
+pub async fn recent_touch(
+    app: AppHandle,
+    path: String,
+    max: u32,
+) -> Result<Vec<RecentEntry>, String> {
+    let scope = app.fs_scope();
+    tauri::async_runtime::spawn_blocking(move || {
+        if !scope.is_allowed(&path) {
+            return Err(format!("{path} is not in the file scope"));
+        }
+        let dirs = paths::app_dirs(&app)?;
+        recent_candidate(&path, &dirs.state_file())?;
+        touch_recent(&dirs, &path, max)
+    })
+    .await
+    .map_err(|err| format!("the recent list could not be updated: {err}"))?
 }
 
 /// Drops `path` from the list and answers with what is left. Rejects when
@@ -549,7 +622,15 @@ pub fn grant_recent_on_startup(app: &AppHandle) {
         return;
     };
     let state = read_state(&dirs.state_file());
-    grant_recent(&app.fs_scope(), &state.recent);
+    // The list is cut before the cap is applied, so a refused entry does not use up a
+    // place of the fifty.
+    let own = dirs.state_file();
+    let grantable: Vec<String> = state
+        .recent
+        .into_iter()
+        .filter(|path| !is_state_file(Path::new(path), &own))
+        .collect();
+    grant_recent(&app.fs_scope(), &grantable);
 }
 
 #[cfg(test)]
@@ -901,6 +982,39 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// T135. The startup grant used to take anything that `exists()`: a folder in a
+    /// hand-edited list was put into the scope, as was a device node. Only a regular file
+    /// is granted now, and the file next to it still is.
+    #[test]
+    fn the_startup_grant_takes_regular_files_only() {
+        let dir = scratch("grant-files-only");
+        let file = dir.join("a.nc");
+        fs::write(&file, b"G0\n").unwrap();
+        let folder = dir.join("sub");
+        fs::create_dir_all(&folder).unwrap();
+
+        let app = mock_app();
+        let scope = app.fs_scope();
+        let granted = grant_recent(
+            &scope,
+            &list(&[folder.to_str().unwrap(), file.to_str().unwrap()]),
+        );
+        assert_eq!(granted, 1);
+        assert!(
+            scope.is_allowed(&file),
+            "the file the user opened is granted"
+        );
+        assert!(!scope.is_allowed(&folder), "a folder was granted");
+        #[cfg(unix)]
+        {
+            let device = Path::new("/dev/null");
+            let granted = grant_recent(&scope, &list(&[device.to_str().unwrap()]));
+            assert_eq!(granted, 0);
+            assert!(!scope.is_allowed(device), "a device node was granted");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_startup_grant_stops_at_fifty_entries() {
         let dir = scratch("cap");
@@ -918,6 +1032,95 @@ mod tests {
         assert!(scope.is_allowed(&paths[MAX_GRANTED_ON_STARTUP - 1]));
         assert!(!scope.is_allowed(&paths[MAX_GRANTED_ON_STARTUP]));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // --- what may enter the recent list (T135) --------------------------------
+
+    /// The scope check alone let through whatever lies under a folder the user picked;
+    /// the candidate check then refuses what is not a file to reopen, and still passes
+    /// the file that is.
+    #[test]
+    fn a_recent_candidate_is_an_absolute_existing_regular_file() {
+        let (root, dirs) = scratch_dirs("candidate");
+        let state_file = dirs.state_file();
+        let file = root.join("a.nc");
+        fs::write(&file, b"G0\n").unwrap();
+        let folder = root.join("sub");
+        fs::create_dir_all(&folder).unwrap();
+
+        // The needed access still works.
+        assert_eq!(
+            recent_candidate(file.to_str().unwrap(), &state_file),
+            Ok(())
+        );
+
+        // The old over-wide access is refused: a folder, a file that is not there, a
+        // path that depends on the process's working directory.
+        let refused = |path: &str| recent_candidate(path, &state_file).unwrap_err();
+        assert!(refused(folder.to_str().unwrap()).contains("not an existing file"));
+        assert!(refused(root.join("gone.nc").to_str().unwrap()).contains("not an existing file"));
+        assert!(refused("a.nc").contains("not an absolute path"));
+        assert!(refused("").contains("not an absolute path"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_state_file_is_never_a_recent_candidate() {
+        let (root, dirs) = scratch_dirs("candidate-state");
+        let state_file = dirs.state_file();
+        touch_recent(&dirs, "/x.nc", 15).unwrap();
+        assert!(state_file.is_file());
+
+        let err = recent_candidate(state_file.to_str().unwrap(), &state_file).unwrap_err();
+        assert!(err.contains("not a file for the recent list"), "{err}");
+        assert!(is_state_file(&state_file, &state_file));
+        // Another file next to it is not caught by mistake.
+        let other = dirs.data.join("other.json");
+        fs::write(&other, b"{}").unwrap();
+        assert_eq!(
+            recent_candidate(other.to_str().unwrap(), &state_file),
+            Ok(())
+        );
+        assert!(!is_state_file(&other, &state_file));
+
+        // …and a link to it does not get round the rule.
+        #[cfg(unix)]
+        {
+            let link = root.join("link.json");
+            std::os::unix::fs::symlink(&state_file, &link).unwrap();
+            assert!(is_state_file(&link, &state_file));
+            assert!(recent_candidate(link.to_str().unwrap(), &state_file).is_err());
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The command takes the scope check and the file check in that order and does both
+    /// off the main thread; removing either leaves the helpers above correct and the
+    /// command open.
+    #[test]
+    fn the_recent_touch_command_asks_the_scope_and_the_candidate_check() {
+        let source = crate::source_scan::lf(include_str!("state.rs"));
+        let signature = concat!("pub async fn recent_", "touch(");
+        let at = source.find(signature).expect("the signature changed");
+        let after = &source[at..];
+        let body = &after[..after.find("\n}\n").expect("the body does not end")];
+        let scope = body
+            .find(concat!("scope.is_", "allowed(&path)"))
+            .expect("no scope check");
+        let candidate = body
+            .find(concat!("recent_", "candidate(&path"))
+            .expect("no candidate check");
+        let touch = body
+            .find(concat!("touch_", "recent(&dirs"))
+            .expect("no touch");
+        assert!(
+            scope < candidate && candidate < touch,
+            "the checks are out of order"
+        );
+        assert!(
+            body.contains(concat!("spawn_", "blocking(")),
+            "not on the blocking pool"
+        );
     }
 
     // --- a hung share ----------------------------------------

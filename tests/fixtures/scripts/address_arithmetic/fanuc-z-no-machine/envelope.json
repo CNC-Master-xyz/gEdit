@@ -4,7 +4,7 @@
     {
       "line": 7,
       "severity": "info",
-      "message": "Z1000: the reading depends on the machine (1 mm under \"Increments of 0.001 mm (IS-B)\", 0.1 mm under \"Increments of 0.0001 mm (IS-C)\" or 1000 mm under \"As written\"); choose a machine.",
+      "message": "Z1000: the reading depends on the machine (1 mm under \"Increments of 0.001 mm (IS-B)\", 10 mm under \"Increments of 0.01 mm (IS-A)\", 0.1 mm under \"Increments of 0.0001 mm (IS-C)\" or 1000 mm under \"As written\"); choose a machine.",
       "reason": "machine-dependent"
     }
   ]

@@ -1,0 +1,11 @@
+{
+  "message": "Expanded 6 cycles (6 holes) into 55 blocks. The cycle definitions are left as written; without a call they do nothing. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 9,
+      "severity": "info",
+      "message": "The cycle definitions are left as written; without a call they do nothing.",
+      "reason": "definition-kept"
+    }
+  ]
+}

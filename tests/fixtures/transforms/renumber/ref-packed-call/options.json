@@ -1,0 +1,22 @@
+{
+  "note": "P4.19 (plan 6.6 rule 9): M98 P21010 has more than four digits and no L word, so it calls O1010 twice (the 30i manuals: a count in front of a four-digit program number). O0001 is the one caller of O1010, so M99 P30 follows the caller's N30, which is N40 after the run.",
+  "profile": "fanuc-gcode",
+  "options": {},
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 7,
+        "severity": "info"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.referencesRewritten"
+    ],
+    "preflight": null
+  }
+}

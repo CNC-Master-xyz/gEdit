@@ -72,6 +72,7 @@ export function compileProfile(p: Profile): CompiledProfile {
   const program = p.program ?? ({ start: [], end: [] } as Profile['program']);
   const outline: { kind: OutlineKind; pattern: Pattern }[] = p.outline ?? [];
   const references = p.numbering?.references ?? [];
+  const calls = p.numbering?.calls ?? [];
 
   // M12.5 (§7.16 #179): the tokenizer compiles `syntax.freeText` and `syntax.callTargets`
   // once per compiled profile with the sticky and indices flags it needs (`lexSpec`, as it
@@ -114,6 +115,16 @@ export function compileProfile(p: Profile): CompiledProfile {
       references: references.map((rule, i) => ({
         trigger: compilePattern(rule?.trigger, `numbering.references[${i}].trigger`, flags),
         addresses: [...(rule?.addresses ?? [])],
+      })),
+      // P4d (§6.6 rule 9): the call rules, compiled once like the reference rules.
+      calls: calls.map((rule, i) => ({
+        trigger: compilePattern(rule?.trigger, `numbering.calls[${i}].trigger`, flags),
+        address: rule?.address ?? '',
+        maxDigits: typeof rule?.maxDigits === 'number' ? rule.maxDigits : null,
+        repeatAddress: typeof rule?.repeatAddress === 'string' && rule.repeatAddress !== '' ? rule.repeatAddress : null,
+        // P4d review NC-1 and NC-2: the local call and the interrupt.
+        localAddress: typeof rule?.localAddress === 'string' && rule.localAddress !== '' ? rule.localAddress : null,
+        interrupt: rule?.interrupt === true,
       })),
       commentFilter: compileOptional(p.toolList?.commentFilter, 'toolList.commentFilter', flags),
     },

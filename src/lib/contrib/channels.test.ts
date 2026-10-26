@@ -23,7 +23,7 @@ vi.mock('$lib/stores/documents', () => ({ docs: { getActiveId: () => 'd1', get: 
 vi.mock('$lib/stores/machines', () => ({ machines: {} }));
 vi.mock('$lib/stores/results', () => ({ results: {} }));
 
-const { default: contribution, stepSync, findPartner, splitTexts, selectItems, checkReport, markName } = await import('./channels');
+const { default: contribution, stepSync, findPartner, splitTexts, selectItems, checkReport, markName, testerProblemRow } = await import('./channels');
 
 const hit = (line: number, mark: string, channel: string, ruleId = 'w', partners = ['1', '2', '3']): SyncHit => ({ ruleId, mark, line, channel, partners, blocking: true });
 const ref = (id: string, index: number) => ({ id, name: `Channel ${id}`, index });
@@ -181,6 +181,38 @@ describe('findPartner', () => {
     });
   });
 
+  // T174: the jump between a WAITM and the SETM that answers it, both ways.
+  const setmAt = (line: number, mark: string, channel: string): SyncHit => ({ ruleId: 'setm', mark, line, channel, partners: ['1', '2', '3'], blocking: false });
+
+  it('goes from the n-th WAITM to the n-th answering SETM, and to the last when there are fewer (T174)', () => {
+    const mine = [waitm(2, '7', '1', ['1', '2']), waitm(8, '7', '1', ['1', '2']), waitm(12, '7', '1', ['1', '2'])];
+    const theirs = [setmAt(3, '7', '2'), setmAt(9, '7', '2')];
+    const marksOf = (c: string) => (c === '2' ? { docId: 'd2', marks: theirs } : null);
+    const line = (mark: SyncHit) => {
+      const answer = findPartner({ order, self: '1', mark, ownMarks: mine, marksOf, rules: siemens });
+      return answer.kind === 'found' ? answer.hit.line : null;
+    };
+    expect(mine.map(line)).toEqual([3, 9, 9]);
+  });
+
+  it('goes back from a SETM to the n-th WAITM of its id that waits for this channel (T174)', () => {
+    // Channel 2 sets mark 7 twice; channel 1 waits for it twice, and once in a WAITM that does not name channel 2.
+    const mine = [setmAt(3, '7', '2'), setmAt(9, '7', '2')];
+    const theirs = [waitm(2, '7', '1', ['1', '2']), waitm(5, '7', '1', ['1', '3']), waitm(8, '7', '1', ['1', '2'])];
+    const marksOf = (c: string) => (c === '1' ? { docId: 'd1', marks: theirs } : null);
+    expect(findPartner({ order, self: '2', mark: mine[0], ownMarks: mine, marksOf, rules: siemens })).toMatchObject({ kind: 'found', channel: { id: '1' }, docId: 'd1', hit: { line: 2 } });
+    expect(findPartner({ order, self: '2', mark: mine[1], ownMarks: mine, marksOf, rules: siemens })).toMatchObject({ kind: 'found', channel: { id: '1' }, hit: { line: 8 } });
+    // No wait for mark 7 names channel 2: nothing answers back; channel 3 is not open.
+    const none = (c: string) => (c === '1' ? { docId: 'd1', marks: [waitm(5, '7', '1', ['1', '3'])] } : c === '3' ? { docId: 'd3', marks: [] as SyncHit[] } : null);
+    expect(findPartner({ order, self: '2', mark: mine[0], ownMarks: mine, marksOf: none, rules: siemens })).toEqual({ kind: 'none' });
+  });
+
+  it('does not treat a SETM as an answer without the machine\'s rules (T174)', () => {
+    const mine = [setmAt(3, '7', '2')];
+    const marksOf = (c: string) => (c === '1' ? { docId: 'd1', marks: [waitm(2, '7', '1', ['1', '2'])] } : { docId: `d${c}`, marks: [] as SyncHit[] });
+    expect(findPartner({ order, self: '2', mark: mine[0], ownMarks: mine, marksOf })).toEqual({ kind: 'none' });
+  });
+
   it('keeps the same-P key for a P-word rule without samePartners, and keys a P-less Fanuc wait apart (NC-3, NC-4)', () => {
     const word: SyncRule[] = [{ id: 'w', label: 'Waits', match: { kind: 'codes', codes: 'M900-M999' }, partners: { kind: 'word', address: 'P', decode: 'digits' } }];
     const mine12 = [hit(5, 'M901', '1', 'w', ['1', '2'])];
@@ -314,5 +346,18 @@ describe('markName (M13 review NC-10)', () => {
     }
     // No machine block: the id as it is keyed.
     expect(markName('d1', hit(5, '30', '1', 'p'))).toBe('30');
+  });
+});
+
+// T127 (the owner, 2026-10-19): Test Channel Rules says a channel without a section as the status item does.
+describe('testerProblemRow', () => {
+  const missing = { path: 'list[1]', message: { key: 'channels.problems.channelNotFound', params: { channel: 'Turret B' } } };
+  it('shows a channel without a section in one program with sections as a note, not a problem', () => {
+    expect(testerProblemRow({ layout: 'single-file' }, missing)).toEqual({ what: 'Note', text: 'Turret B: not used in this program' });
+  });
+  it('keeps every other problem a problem', () => {
+    const odd = { path: 'line:7', message: { key: 'channels.problems.unknownChannel', params: { line: 7, token: 'G15' } } };
+    expect(testerProblemRow({ layout: 'single-file' }, odd)).toEqual({ what: 'Problem', text: 'Line 7 names “G15”, which is not a channel or alias of this machine.' });
+    expect(testerProblemRow({ layout: 'none' }, missing).what).toBe('Problem');
   });
 });

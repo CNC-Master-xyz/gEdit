@@ -1,0 +1,17 @@
+{
+  "message": "Estimated time 0:29.2 for 1 tool: feed 0:20.4, rapid 0:01.2, dwell 0:01.5, tool changes 0:06.0. 2 blocks are not estimated: 2 moves whose start or end is not known. The estimate is a lower bound: it counts 100 % feed and rapid override, no acceleration, no time to read a block and no look-ahead. No machine chosen: a value whose reading depends on the machine is not estimated.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "warning",
+      "message": "4 L Z+50 R0 FMAX M3: not estimated: where the move starts or ends is not known (the start of Z: the program's first move of the axis, or the first after a move to a machine position, a roughing cycle's contour or a block gEdit cannot place).",
+      "reason": "position-unknown"
+    },
+    {
+      "line": 6,
+      "severity": "warning",
+      "message": "5 L X+20 Y+10 R0 FMAX: not estimated: where the move starts or ends is not known (the start of X: the program's first move of the axis, or the first after a move to a machine position, a roughing cycle's contour or a block gEdit cannot place).",
+      "reason": "position-unknown"
+    }
+  ]
+}

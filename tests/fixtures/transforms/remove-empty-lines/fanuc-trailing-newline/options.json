@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Fanuc, the trailing-state rule: a file that ends with a newline and blank lines comes back with exactly the one final newline.",
+  "profile": "fanuc-gcode",
+  "options": {}
+}

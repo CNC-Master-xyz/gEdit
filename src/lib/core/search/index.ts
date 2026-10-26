@@ -145,7 +145,7 @@ function sameAddress(a: string, b: string, caseSensitive: boolean): boolean {
 /** The compiled pattern of a text query, once per query object. */
 const PATTERNS = new WeakMap<SearchQuery, RegExp>();
 
-function patternOf(q: Extract<SearchQuery, { kind: 'text' }>): RegExp {
+export function patternOf(q: Extract<SearchQuery, { kind: 'text' }>): RegExp {
   let pattern = PATTERNS.get(q);
   if (!pattern) {
     const source = q.regex ? q.text : escapeRegex(q.text);

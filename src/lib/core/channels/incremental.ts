@@ -15,7 +15,7 @@
 // holds it to `resolveDocument` over random edits.
 
 import type { CompiledProfile } from '$lib/core/profiles/types';
-import { findMarks, maskForMarks, sectionOwners } from './marks';
+import { findMarks, maskForMarks, sectionOwners, type MacroCalls } from './marks';
 import { compileChannelPattern, complementRanges } from './resolve';
 import { lookbehindPrefilter } from './prefilter';
 import { CHANNEL_CAPS, type ChannelBudget, type ChannelParams, type ChannelRef, type ChannelSection, type SyncHit } from './types';
@@ -82,7 +82,7 @@ export function patchResolution(
   readLines: (from: number, to: number) => string[],
   cp: CompiledProfile,
   p: ChannelParams,
-  o: ChannelBudget = {},
+  o: ChannelBudget & MacroCalls = {},
 ): LineResolution | null {
   const delta = d.endLineNew - d.endLineOld;
   if (prev.problems.length > 0 || prev.dropped > 0) return null;
@@ -124,9 +124,13 @@ export function patchResolution(
     }
   }
 
+  // The owners of the lines are asked for only when an edited line holds a wait: the sweep over every section
+  // is built then, not before (v1.2.0 channel-enter: at 20,000 waits it was most of the cost of a line break
+  // typed in an ordinary line, and the patch of every pause in typing).
+  let sectionOwnersOf: ((line: number) => readonly string[]) | null = null;
   const owners =
     prev.layout === 'single-file'
-      ? sectionOwners(sections)
+      ? (line: number): readonly string[] => (sectionOwnersOf ??= sectionOwners(sections))(line)
       : (() => {
           const id = (prev.self as ChannelRef).id;
           return () => id;
@@ -143,7 +147,8 @@ export function patchResolution(
   for (const hit of found.marks) marks.push({ ...hit, line: hit.line + offset });
   for (let i = to; i < prev.marks.length; i++) {
     const hit = prev.marks[i];
-    marks.push(delta === 0 ? hit : { ...hit, line: hit.line + delta, partners: [...hit.partners] });
+    // The partners of a mark are never changed in place, so the moved copy shares them (v1.2.0 channel-enter: 20,000 arrays per line break).
+    marks.push(delta === 0 ? hit : { ...hit, line: hit.line + delta });
   }
 
   return {

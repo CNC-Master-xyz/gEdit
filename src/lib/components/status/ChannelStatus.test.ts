@@ -46,9 +46,9 @@ describe('ChannelStatus', () => {
     expect(html).toContain('Turret A');
   });
 
-  it('says "not found" for a channel without a section, not "could not be checked" (CODE-8)', () => {
+  it('says a channel without a section is not used, not "could not be checked" (CODE-8, T127)', () => {
     const title = /title="([^"]*)"/.exec(html)?.[1] ?? '';
-    expect(title).toContain('Turret B: not found');
+    expect(title).toContain('Turret B: not used in this program');
     expect(title).not.toContain('could not be checked');
   });
 

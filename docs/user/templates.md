@@ -323,9 +323,14 @@ form:
 (*There is no cycle at the cursor. Choose a cycle to insert*; every cycle with parameters in
 the program's code database), opens the same form empty, and **Insert** writes a new block
 after the current one, with the next block number and the Klartext renumber as for a template
-([Block numbers](#block-numbers)), in one undo step. A Sinumerik turning cycle is also listed
-in a milling program and the other way round: the code database is shared and the list is not
-filtered by machine type.
+([Block numbers](#block-numbers)), in one undo step. The list follows the program's machine
+type where the code database marks a cycle with one: the Sinumerik turning cycles (`CYCLE92`,
+`CYCLE93`, `CYCLE95`, `CYCLE97`, `CYCLE98`, `CYCLE99`, `CYCLE930`, `CYCLE940`, `CYCLE951`,
+`CYCLE952`) are marked as lathe cycles and are not offered in a milling program. The Sinumerik
+milling cycles (`CYCLE61`, `POCKET3`, `POCKET4`, `SLOT1`, `SLOT2`, `CYCLE72`) carry no mark and
+stay on the list of the Sinumerik turning profile, because a lathe with driven tools runs them
+(they were marked as milling cycles for a while in v1.2.0 and taken back). A cycle without a
+mark is offered to every program.
 
 - **A cycle that stays on gets its end.** A Fanuc drilling cycle (`G73` to `G89`) or an Okuma
   `G181` and the like stays on until it is cancelled: every following position would drill.
@@ -486,8 +491,18 @@ The manager opens on **New template from the selection**, with the lines in a bo
   `{{N}}`. It is always a field (there is nothing to tick: a `P` without its `N` would point
   nowhere), and when you insert the template the form offers a number the program does not
   use ([Contour numbers](#contour-numbers)). A pointer to a block **outside** the selection
-  (`G70 P100 Q200` without its contour) stays as written, and the draft says so. A Klartext
-  label (`LBL`, `CALL LBL`) stays as written as well.
+  (`G70 P100 Q200` without its contour) stays as written, and the draft says so. So does
+  a value that names a block of **another program** (`M99 P30`, `M98 P1000 Q10`) or that
+  the profile never rewrites (a milling `G73 Q… P…`, where the words are a peck and a dwell
+  or a contour): it stays as written and the draft says so, even when the selection has a
+  block with that number. The form for inserting a template still refuses a number that
+  such a word uses in the program (*Q60 on line 4 already points at 60. Choose a number nothing in the program points at.*): it does not guess that the
+  word names no block of this program. A Klartext label (`LBL`, `CALL LBL`) stays as written
+  as well. That includes every label that a **contour list** (`CYCL DEF 14.1`) names, in any
+  spelling the control or a post uses (`KONTURLABEL1`, `KONTURLABEL1/2`,
+  `CONTOUR LABEL1 /2`, `KONTURLABEL 1/2/3`). If a contour list cannot be read (no number in
+  it, a parameter, a list carried on to the next line), the template keeps **all** labels of
+  the selection as written, because none of them can be told safe.
 - **The numbers in the lines are buttons you can tick** (*Click the numbers that should become
   values you fill in when you insert the template.*). Tick the `Z-5.` and it becomes a field,
   `{{z}}`, with `-5.` as its starting value and *Hole bottom (Z)* or the cycle's own parameter

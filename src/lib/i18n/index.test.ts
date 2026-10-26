@@ -88,10 +88,11 @@ describe('default translator', () => {
 });
 
 describe('the development warning for a missing message', () => {
-  it('names a key that is missing, once, and stays quiet for a text with blanks (a template label used as a title)', () => {
+  it('names a key that is missing, once, and stays quiet for a text that is no key, with or without blanks (a template label used as a title; T149)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       expect(t('Program start')).toBe('Program start');
+      expect(t('Facing')).toBe('Facing');
       expect(warn).not.toHaveBeenCalled();
       t('demo.nowhere.once');
       t('demo.nowhere.once');

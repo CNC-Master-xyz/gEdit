@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be written out as plain moves: 2 cycle calls that are not written out. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 19,
+      "severity": "error",
+      "message": "7 CYCL CALL PAT FMAX: this way of calling the cycle is not written out yet (CYCL CALL PAT).",
+      "reason": "call-form"
+    },
+    {
+      "line": 21,
+      "severity": "error",
+      "message": "9 CYCL CALL POS X+60 Y+20 Z+0 FMAX: this way of calling the cycle is not written out yet (the tool stands below the surface; the control goes to a safe height first).",
+      "reason": "call-form"
+    }
+  ]
+}

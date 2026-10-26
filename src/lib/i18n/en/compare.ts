@@ -112,6 +112,20 @@ export default {
   wordMoved: 'The words of this line moved, so copying this word would leave a letter twice or drop one. Copy the line instead (Shift+click the arrow).',
   /** Review NC-13: the copied words would run into the words next to them. */
   wordJoins: 'The copied word would run into the word next to it. Copy the line instead (Shift+click the arrow).',
+  /** Review NC-6: a warning after the copy, never a refusal; `original`/`modified` list the modes in force there (`G91, inch`). */
+  modesDiffer: 'Copied, but the two programs are in different modes at this place: {original} in the original, {modified} in the current document. Check what the copied text means here.',
+  /** The owner, 2026-10-20: the copy changed the modes the target's lines below it run in; `before`/`after` list them (`G90, mm`). */
+  modesChangeBelow: 'Copied, but the lines below the copy now run in other modes: {after} instead of {before}. Check the lines that follow.',
+  /** Both at once, in one message: the modes differ in front of the copy, and the copy changed those of the lines below it. */
+  modesDifferAndChange: 'Copied, but the two programs are in different modes at this place ({original} in the original, {modified} in the current document), and the lines below the copy now run in {after} instead of {before}. Check what the copied text means here and the lines that follow.',
+  /** The owner, 2026-10-22: a mode one program knows at the place of a copy and the other does not; `mode` is one of the names below. In front of the copy: "G91 in the original, absolute/incremental mode not known in the current document". */
+  modeNotKnown: '{mode} not known',
+  /** The same for the lines below the copy: "now run in G91 instead of an unknown absolute/incremental mode". */
+  modeWasUnknown: 'an unknown {mode}',
+  modeKindDistance: 'absolute/incremental mode',
+  modeKindUnits: 'inch/mm unit',
+  modeKindPlane: 'plane',
+  modeKindOffset: 'work offset',
   noSuchLine: 'There is no such line in this comparison.',
   noDifferences: 'There are no differences.',
   sideSaved: '{name} (saved version)',

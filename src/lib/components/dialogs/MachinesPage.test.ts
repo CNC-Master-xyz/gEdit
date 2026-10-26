@@ -108,7 +108,9 @@ const MachinesPage = (await import('./MachinesPage.svelte')).default;
 const {
   FIELD_PROFILE,
   addDraft,
+  axesOf,
   channelErrors,
+  channelProblemsOf,
   codeDbFor,
   draftErrors,
   duplicateDraft,
@@ -117,6 +119,8 @@ const {
   fileProblems,
   formReadable,
   hasChannelsStep,
+  motionErrors,
+  motionProblemsOf,
   openMachinesFile,
   profileChoices,
   profileField,
@@ -139,11 +143,13 @@ const {
   FIELD_NAME,
   FIELD_NOTES,
   FIELD_NUMBER_INPUT,
+  FIELD_POINTLESS_FEEDS,
   FIELD_UNITS,
   modalFieldId,
   variantFieldId,
 } = await import('$lib/core/machines/fields');
 const { initialValues } = await import('$lib/core/forms/values');
+const { MV } = await import('$lib/core/machines/motion');
 const { ReportedError } = await import('$lib/core/machines/types');
 
 const deps = { machines, profiles, codes, docs, dialogs, status, t };
@@ -367,24 +373,33 @@ describe('Add', () => {
     expect(ids).toEqual([
       FIELD_NAME,
       FIELD_NUMBER_INPUT,
+      // T084: the point-less feeds option of the Fanuc profiles, right after the preset.
+      FIELD_POINTLESS_FEEDS,
       FIELD_UNITS,
       FIELD_DIAMETER,
       variantFieldId('gcodeSystem'),
       // M9 (R6): the two machine choices come with the form for free, from the declaration.
       variantFieldId('incrementalAddresses'),
       variantFieldId('toolWord'),
+      // Manual-check fix D3-4a: the lathe's tool change, turret or tool changer.
+      variantFieldId('toolChange'),
+      // Review round D5-7: the counter spindle, Y turns with Z (default) or stays.
+      variantFieldId('counterSpindleY'),
       modalFieldId('feedmode'),
       modalFieldId('spindlemode'),
       modalFieldId('plane'),
       FIELD_NOTES,
     ]);
-    // The mill has no diameter parameter and no variant.
+    // The mill has no diameter parameter and no G-code system (its one variant, since D3-4c, is
+    // what a T on the M6 line is).
     const mill = fieldsFor(addDraft('fanuc-gcode', deps), deps).map((field) => field.id);
     expect(mill).not.toContain(FIELD_DIAMETER);
     expect(mill).not.toContain(variantFieldId('gcodeSystem'));
-    // M12.5 decision 5: the Siemens mill offers its tool-change mode; the turning profile does not.
+    expect(mill).toContain(variantFieldId('toolOnChangeLine'));
+    // M12.5 decision 5: the Siemens mill offers its tool-change mode; since the manual-check fix
+    // D3-4b the turning profile does too (T, or M6 after machine data 22550).
     expect(fieldsFor(addDraft('sinumerik-mill', deps), deps).map((field) => field.id)).toContain(variantFieldId('toolChange'));
-    expect(fieldsFor(addDraft('sinumerik', deps), deps).map((field) => field.id)).not.toContain(variantFieldId('toolChange'));
+    expect(fieldsFor(addDraft('sinumerik', deps), deps).map((field) => field.id)).toContain(variantFieldId('toolChange'));
   });
 
   it('saves what the form holds, under the dialect it was built for', async () => {
@@ -398,7 +413,7 @@ describe('Add', () => {
     expect(saved.notes).toBe('turret 1');
     // The preset's whole rule set is stored, not its id (§7.15).
     expect(saved.params.numberInput).toMatchObject({ mode: expect.any(String) });
-    expect(saved.params.variants).toEqual({ gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength' });
+    expect(saved.params.variants).toEqual({ gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength', toolChange: 'turret', counterSpindleY: 'turns' });
     expect(fake.shown.at(-1)?.text).toBe(t('machines.page.added', { name: 'Lathe 2' }));
   });
 
@@ -437,7 +452,8 @@ describe('Edit', () => {
     expect(fake.update).toHaveBeenCalledWith('lathe-2', {
       name: 'Lathe 2a',
       params: expect.objectContaining({
-        variants: { gcodeSystem: 'B', incrementalAddresses: 'uw', toolWord: 'byLength' },
+        // D5-3: the record stores no U/W choice, so system B's default (none, G91 only) is saved.
+        variants: { gcodeSystem: 'B', incrementalAddresses: 'none', toolWord: 'byLength', toolChange: 'turret', counterSpindleY: 'turns' },
         diameter: 'on',
       }),
       notes: '',
@@ -671,5 +687,178 @@ describe('the Channels step (M12)', () => {
     expect(formReadable({ ...preset(), syncMarks: [{ id: 'w', label: 'W' }] })).toBe(false);
     expect(formReadable({ ...preset(), syncMarks: ['x'] })).toBe(false);
     expect(formReadable({ ...preset(), list: ['x'] })).toBe(false);
+  });
+});
+
+describe('the Motion and limits page (P4.8, plan §6.4 rule 4)', () => {
+  const MOTION = { units: 'mm', rapid: { X: 30_000, C: 12_000 }, rapidKind: 'per-axis', maxFeed: 9000, toolChange: 4.5, peckRetract: 0.5 };
+  const LIMITS = { units: 'mm', spindle: { main: 6000, S2: 3000 }, travel: { X: { min: -300, max: 300 } } };
+  const withBlocks = (params: Record<string, unknown> = {}): MachineConfig =>
+    ({ ...MILL_1, params: { ...MILL_1.params, ...params } }) as MachineConfig;
+  const sent = (n = 0): { params: Record<string, unknown> } => (fake.update.mock.calls[n] as unknown as [string, { params: Record<string, unknown> }])[1];
+  const touch = (draft: ReturnType<typeof editDraft>, values: Record<string, unknown>) =>
+    ({ ...draft, motion: { values: { ...draft.motion!.values, ...values }, touched: true } });
+
+  it('reads the axes of the machine’s dialect', () => {
+    expect(axesOf('fanuc-gcode', deps).axes).toEqual(['X', 'Y', 'Z', 'A', 'B', 'C', 'U', 'V', 'W']);
+    expect(axesOf('fanuc-gcode', deps).angular).toEqual(['A', 'B', 'C']);
+    expect(axesOf('fanuc-lathe', deps).axes).toContain('Z');
+    expect(axesOf('fanuc-lathe', deps).diameter).toContain('X'); // the lathe's X travel is a diameter
+    expect(axesOf('fanuc-gcode', deps).diameter).toEqual([]);
+  });
+
+  it('is empty for Add and for a machine without blocks, and is never offered to Duplicate', () => {
+    expect(addDraft('fanuc-gcode', deps).motion).toEqual({ values: expect.objectContaining({ units: '' }), touched: false });
+    expect(duplicateDraft(MILL_1, deps).motion).toBeUndefined();
+    const draft = editDraft(withBlocks(), deps);
+    expect(draft.motion?.touched).toBe(false);
+    expect(draft.motion?.values.maxFeed).toBeUndefined();
+  });
+
+  it('opens the stored blocks in the fields', () => {
+    const draft = editDraft(withBlocks({ motion: MOTION, limits: LIMITS }), deps);
+    expect(draft.motion?.values).toMatchObject({
+      units: 'mm',
+      'rapid.X': 30_000,
+      'rapid.C': 12_000,
+      rapidKind: 'per-axis',
+      maxFeed: 9000,
+      toolChange: 4.5,
+      peckRetract: 0.5,
+      'spindle.main': 6000,
+      'spindle.others': 'S2=3000',
+      'travel.X.min': -300,
+      'travel.X.max': 300,
+    });
+  });
+
+  it('saves a machine whose page was not touched with both blocks exactly as stored, valid or not', async () => {
+    for (const params of [{ motion: MOTION, limits: LIMITS }, { motion: { maxFeed: 'fast', unknownMember: { a: 1 } }, limits: 'junk' }]) {
+      fake.update.mockClear();
+      const stored = withBlocks(params);
+      fake.setList([stored]);
+      const draft = editDraft(stored, deps);
+      expect(await submitDraft({ ...draft, values: { ...draft.values, [FIELD_NAME]: 'Renamed' } }, deps)).toBe(true);
+      expect(sent().params.motion).toEqual(params.motion);
+      expect(sent().params.limits).toEqual(params.limits);
+    }
+  });
+
+  it('writes the page into the record: a field changed, a field emptied, the units shared by both blocks', async () => {
+    const stored = withBlocks({ motion: MOTION, limits: LIMITS });
+    fake.setList([stored]);
+    const draft = touch(editDraft(stored, deps), { maxFeed: 300, toolChange: undefined, [MV.rapid('X')]: undefined, [MV.units]: 'inch', [MV.travelMax('X')]: 25 });
+    expect(motionErrors(draft, deps)).toEqual([]);
+    expect(await submitDraft(draft, deps)).toBe(true);
+    expect(sent().params.motion).toEqual({ units: 'inch', rapid: { C: 12_000 }, rapidKind: 'per-axis', maxFeed: 300, peckRetract: 0.5 });
+    expect(sent().params.limits).toEqual({ units: 'inch', spindle: { main: 6000, S2: 3000 }, travel: { X: { min: -300, max: 25 } } });
+  });
+
+  it('removes the member of an empty field and the block of an empty page; the other parameters stay', async () => {
+    const stored = withBlocks({ units: 'mm', motion: MOTION, limits: LIMITS });
+    fake.setList([stored]);
+    const draft = editDraft(stored, deps);
+    const empty = { ...draft, motion: { values: motionToValuesEmpty(), touched: true } };
+    expect(await submitDraft(empty, deps)).toBe(true);
+    expect(sent().params).not.toHaveProperty('motion');
+    expect(sent().params).not.toHaveProperty('limits');
+    expect(sent().params.units).toBe('mm');
+  });
+
+  it('removes a block that was broken once the page is started again', async () => {
+    const stored = withBlocks({ motion: { maxFeed: -1, units: 'mm' } });
+    fake.setList([stored]);
+    const draft = editDraft(stored, deps);
+    expect(await submitDraft({ ...draft, motion: { values: motionToValuesEmpty(), touched: true } }, deps)).toBe(true);
+    expect(sent().params).not.toHaveProperty('motion');
+  });
+
+  it('adds a machine with a block, and one without when the page is left alone', async () => {
+    const draft = addDraft('fanuc-gcode', deps);
+    const values = { ...draft.values, [FIELD_NAME]: 'Fresh mill' };
+    expect(await submitDraft({ ...draft, values }, deps)).toBe(true);
+    expect((fake.add.mock.calls[0][0] as unknown as MachineConfig).params).not.toHaveProperty('motion');
+    const filled = { ...draft, values, motion: { values: { ...draft.motion!.values, units: 'mm', maxFeed: 5000 }, touched: true } };
+    expect(await submitDraft(filled, deps)).toBe(true);
+    expect((fake.add.mock.calls[1][0] as unknown as MachineConfig).params.motion).toEqual({ units: 'mm', maxFeed: 5000 });
+  });
+
+  it('refuses to save a page with a negative or absurd value, and says what to fix', async () => {
+    const stored = withBlocks();
+    fake.setList([stored]);
+    for (const bad of [{ maxFeed: -3, units: 'mm' }, { maxFeed: 200_001, units: 'mm' }, { maxFeed: 5000 }, { toolChange: 601 }, { [MV.spindleMain]: 0 }]) {
+      const draft = touch(editDraft(stored, deps), bad);
+      expect(motionErrors(draft, deps).length).toBeGreaterThan(0);
+      expect(await submitDraft(draft, deps)).toBe(false);
+    }
+    expect(fake.update).not.toHaveBeenCalled();
+    expect(fake.shown.at(-1)).toEqual({ text: t('machines.motion.title'), error: true });
+  });
+
+  it('checks nothing on a page the user has not touched, so a broken block never blocks the other settings', () => {
+    const stored = withBlocks({ motion: { maxFeed: -1, units: 'mm' } });
+    expect(motionErrors(editDraft(stored, deps), deps)).toEqual([]);
+  });
+
+  it('lists the problems of a stored broken block on its row, with the machine still usable', () => {
+    const stored = withBlocks({ motion: { units: 'mm', maxFeed: -1 }, limits: { travel: { X: { min: 5, max: 1 } } } });
+    fake.setList([stored]);
+    const [row] = rowsOf([stored], deps);
+    expect(row.usable).toBe(true);
+    expect(row.problems).toHaveLength(3);
+    expect(row.problems[0]).toContain('machines[0].params.motion.maxFeed');
+    expect(row.problems.some((p) => p.includes('machines[0].params.limits.travel.X'))).toBe(true);
+    expect(row.problems.some((p) => p.includes('machines[0].params.limits.units'))).toBe(true);
+    expect(motionProblemsOf(withBlocks({ motion: MOTION, limits: LIMITS }), 0, deps)).toEqual([]);
+    expect(motionProblemsOf(withBlocks(), 0, deps)).toEqual([]);
+  });
+
+  it('judges the blocks against the machine’s own dialect', () => {
+    // C is an axis of the Fanuc lathe, A is not
+    const lathe = (rapid: Record<string, number>) => ({ ...LATHE_2, params: { ...LATHE_2.params, motion: { units: 'mm', rapid } } }) as MachineConfig;
+    expect(motionProblemsOf(lathe({ X: 5000, C: 1000 }), 0, deps)).toEqual([]);
+    expect(motionProblemsOf(lathe({ A: 5000 }), 0, deps)).toHaveLength(1);
+  });
+});
+
+function motionToValuesEmpty(): Record<string, unknown> {
+  return { units: '' };
+}
+
+describe('problem paths name the record in the file, not in the list shown (H4B-2)', () => {
+  // The list shown is sorted by name; the file keeps its own order, and an unreadable record
+  // before it also moves the index. The path has to be the line the user would open.
+  async function stored(): Promise<MachineConfig[]> {
+    const preset = () =>
+      structuredClone(profiles.profile('fanuc-lathe').machineParams!.channels!.presets.find((p) => p.id === 'fanuc-2path')!.value);
+    const { parseMachinesFile } = await import('$lib/core/machines/file');
+    const file = parseMachinesFile({
+      machines: [
+        { nonsense: true },
+        { ...LATHE_2, params: { ...LATHE_2.params, channels: { ...preset(), layout: 'sideways' } } },
+        { ...MILL_1, params: { motion: { units: 'mm', maxFeed: -1 } } },
+      ],
+      defaults: {},
+    });
+    return file.machines;
+  }
+
+  it('motionProblemsOf and channelProblemsOf use the position in the file', async () => {
+    const [lathe, mill] = await stored();
+    expect(motionProblemsOf(mill, 0, deps)[0]).toContain('machines[2].params.motion.maxFeed');
+    expect(channelProblemsOf(lathe, 5, deps)[0]).toContain('machines[1].params.channels');
+  });
+
+  it('rowsOf takes it from the record, whatever its place in the sorted list', async () => {
+    const [lathe, mill] = await stored();
+    const rows = rowsOf([mill, lathe], deps);
+    expect(rows[0].problems.some((p) => p.includes('machines[2].params.motion.maxFeed'))).toBe(true);
+    expect(rows[1].problems.some((p) => p.includes('machines[1].params.channels'))).toBe(true);
+    expect(rows.flatMap((r) => r.problems).some((p) => p.includes('machines[0].params'))).toBe(false);
+  });
+
+  it('falls back to the index for a record added in this session', () => {
+    const added = { ...MILL_1, params: { motion: { units: 'mm', maxFeed: -1 } } } as unknown as MachineConfig;
+    expect(motionProblemsOf(added, 4, deps)[0]).toContain('machines[4].params.motion.maxFeed');
   });
 });

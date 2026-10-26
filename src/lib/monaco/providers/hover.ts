@@ -43,6 +43,7 @@ import type { CodeDb } from '$lib/core/codes/types';
 import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
 import type { LineState } from '$lib/core/nc/types';
 import type * as MonacoApi from 'monaco-editor/esm/vs/editor/editor.api.js';
+import '../hover.css';
 
 /**
  * What the line above leaves behind, which is all the tokenizer needs from it: a Klartext

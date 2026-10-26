@@ -50,7 +50,7 @@ The core has a TypeScript version. Bundled scripts share a small standard-librar
 ### Renumber blocks
 `P1 · M · Core` (basic) · `P2 · S · Core` (advanced options)
 
-**Status:** basic options shipped in Phase 1 and M6; since bug-fix round 1 a line that continues the block above it (an Okuma `$` line) is never numbered, also when `$` is not in the skip list; the advanced options (spaces or column, `everyNth`, skip rules, start trigger and the like) are deferred to Phase 4. Klartext has no dialog; see [Renumber Blocks…](../user/transformations.md#renumber-blocks).
+**Status:** basic options shipped in Phase 1 and M6; since bug-fix round 1 a line that continues the block above it (an Okuma `$` line) is never numbered, also when `$` is not in the skip list; the advanced options (fit to maximum, align to a column, `everyNth`, skip rules, start trigger) shipped in Phase 4 (P4d, plan §6.6 rules 1–7). Klartext has no dialog; see [Renumber Blocks…](../user/transformations.md#renumber-blocks).
 
 Adds block numbers where missing and makes existing ones consecutive. It uses the profile's numbering settings. A small form can open before the run to change start and increment for this run only (setting).
 
@@ -58,12 +58,14 @@ Options:
 
 - Prefix (`N`) and alternative prefixes that also count as block numbers (`:` on some ISO controls)
 - Start value, increment, fixed digit count with zero padding (`N0010`)
-- Maximum value, and what happens beyond it: wrap to the start value, or stop with a warning. "Fit to maximum" picks the largest even increment so that the last block stays below the maximum.
-- Spaces after the number, or pad to a fixed column so the code after the number lines up
+- Maximum value (blank: the dialect's maximum, 99999 on Fanuc; a dialect that sets none has no maximum), and what happens beyond it: wrap to the start value, or stop with a warning. "Fit to maximum" picks the largest whole increment (not rounded, at least 1) so that the last numbered block stays at or below the maximum; without a maximum, or when even an increment of 1 does not fit, the run is refused and writes nothing.
+- Spaces after the number, or pad to a fixed column so the code after the number lines up (a head that reaches the column gets one space; a tab counts as one character)
+- Number every Nth block: the blocks in between lose their number, except the ones a reference names and main blocks (owner, 2026-10-19)
 - Number only lines that already have a number, or all eligible lines
 - Lines to skip: lines starting with any listed prefix (`%`, `O`, `(`), lines containing any listed text, empty lines, and a number of leading or trailing lines (protects a header and the final `%`)
 - Restart the sequence at lines matching the program-start pattern (several programs in one file)
-- Start trigger: begin at the first line containing a given text, or at the line after it
+- Start trigger: begin at the first line containing a given text, or at the line after it; once per run, and a text that is not there refuses the run
+- Order of the per-line decisions (plan §6.6 rule 7): continuation, empty line, program marker, first/last lines, before the trigger, skipped prefix, skipped text, block name, only-numbered, stopped at the maximum, every Nth, number
 
 Edge cases:
 
@@ -83,9 +85,13 @@ Removes the block number and the space after it at the start of each block, in t
 ### Reference-aware renumbering
 `P3 · L · Core`
 
-**Status:** shipped in M6 (pulled forward from Phase 3) for references inside the program. `M99 P`, `M98 P… Q…` and references across files are deferred to Phase 4.
+**Status:** shipped in M6 (pulled forward from Phase 3) for references inside the program; references across programs and files shipped in Phase 4 (P4d, plan §6.6 rules 8–13) and are described below. The user guide ([Transformations](../user/transformations.md#renumber-blocks)) is right where this note differs.
 
 Renumbers and also rewrites references to block numbers, so jumps and cycle ranges still point to the right blocks. The profile lists reference rules: a trigger (for example a jump keyword, a subprogram return with a target, or a turning cycle with start/end blocks) and the addresses whose values are block numbers. It runs in two passes: build an old → new map, then rewrite the references. It warns about references to numbers that do not exist or that appear twice. Plain CAM milling output rarely needs it. Lathe cycles with start/end block ranges do.
+
+**Across programs (P4d).** Each reference rule says whose block the value names: the program it stands in (`own`), the program the same line calls (`called`) or the program that calls the one it stands in (`caller`); a profile's `calls` rules say which lines call a program and in which address. A reference is rewritten only when its program is resolved and provable, one by one: `M99 P` when exactly one program of the file calls this one (the caller is looked for in this file only; owner E, 2026-10-22: callers in other open documents are not looked at); `M98 P… Q…` is followed into the called program but stays report-only (owner decision, 2026-10-19). A local call (`M98 Q30`, `CallRule.localAddress`) proves the caller only for an `M99 P` inside the part it runs, from block 30 to the next `M99`; a call code without its program word (`M96`, `G65` alone) is no call; an interrupt (`M96 P…`, `CallRule.interrupt`) never proves a caller and has its own row (owner D, 2026-10-22); `M198` stays a call (`P` is a file number on a control with parameter 3404 bit 2 off and a Handy File or floppy, a machine fact). A reference of a program whose block cannot be told is also reported, and asked about before the run, when it may point into the renumbered lines. The Fanuc packed `P` is read as the 30i manual does (`M98 P21010` = count 2, `O1010`). Every refusal has its own row: no readable call, program not in the file, program twice, no caller, several callers, interrupt. A kept reference has two wordings: another program's block (`M98 P… Q…`) and a turning cycle read with a milling profile. A number that the run put on more than one block of a program (a skipped line, or the lines above the start text, kept it) is a warning with a row on each block.
+
+**Other open documents (P4d).** After a run that wrote, the references of other open documents of the same profile that point into the renumbered programs are listed in Results, and *Update References in Other Documents* writes the provable ones, each document as one undo step, all or nothing; a file that is not open is never read. Update finds the references again before it writes (changed rows: the fresh list is shown and nothing is written; the renumbered document changed: nothing is written and the status bar advises undoing the changes or the renumber); any later renumber that writes replaces the list, with a warning and a Results row when references of the earlier list were never updated (owner C); the command is enabled only while some row is marked to update. Kinds of row: update, gone, duplicate, lands, kept (reference never rewritten), several callers. Not covered, on purpose: a caller without a name (nameless main program), and a program that two open documents both hold (nothing is listed for it).
 
 ## Cleanup
 

@@ -233,6 +233,87 @@ def _is_identity(value: str, identity: float) -> bool:
         return False
 
 
+#: A number written plainly: a sign, digits and a point, nothing else (no variable, no exponent).
+_PLAIN_NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)\Z")
+
+
+def _zero_args_of(entry: Optional[Dict[str, Any]]) -> List[Tuple[int, str]]:
+    """``CodeParam.frameZero`` (v1.2.0 manual-check fix round, D6-5): the arguments of a call,
+    by their place, that have to read as none for the call to read as no frame at all —
+    ``'zero'`` written as a plain 0, ``'onesDigit'`` a whole number whose ones digit is 0
+    (Sinumerik ``CYCLE800`` ``_ST``: 0 a new swivel, 1 one on top of the active one)."""
+    params = entry.get("params") if isinstance(entry, dict) else None
+    if not isinstance(params, list):
+        return []
+    return [(i, p["frameZero"]) for i, p in enumerate(params) if isinstance(p, dict) and p.get("frameZero") in ("zero", "onesDigit")]
+
+
+def _close_args_of(entry: Optional[Dict[str, Any]]) -> List[Tuple[int, str]]:
+    """``CodeParam.frameCloses`` (D6-5): an argument that, written as exactly this text, ends the
+    frames of the code's group whatever else the call writes (``CYCLE800`` ``_TC "0"``)."""
+    params = entry.get("params") if isinstance(entry, dict) else None
+    if not isinstance(params, list):
+        return []
+    return [(i, p["frameCloses"]) for i, p in enumerate(params) if isinstance(p, dict) and isinstance(p.get("frameCloses"), str) and p["frameCloses"] != ""]
+
+
+def _split_call_args(text: str) -> List[str]:
+    """The arguments of a call as written, stripped: commas inside quotes or brackets do not
+    split (the same reading as ``_nc_path._split_args``)."""
+    out: List[str] = []
+    depth = 0
+    quoted = False
+    start = 0
+    for i, ch in enumerate(text):
+        if ch == '"':
+            quoted = not quoted
+        elif quoted:
+            continue
+        elif ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            out.append(text[start:i].strip())
+            start = i + 1
+    out.append(text[start:].strip())
+    return out
+
+
+def _arg_reads_none(value: str, kind: str) -> bool:
+    """D6-5: an argument written as the value at which it reads as no frame (:func:`_zero_args_of`).
+    Left empty, a variable or anything but a plain number is not: in doubt the frame stays open."""
+    if not _PLAIN_NUMBER.match(value):
+        return False
+    if kind == "zero":
+        return float(value) == 0.0
+    whole, _, fraction = value.lstrip("+-").partition(".")
+    if fraction.strip("0") != "" or whole == "":
+        return False
+    return whole[-1] == "0"
+
+
+def zero_call_closes(entry: Optional[Dict[str, Any]], args_text: Optional[str]) -> bool:
+    """D6-5 (owner decision of 2026-10-25, the call twin of M10-2's all-zero PLANE): a call whose
+    arguments read as no frame closes the frames of its group instead of opening one. True when
+    an argument of ``frameCloses`` is written as its text, or when every argument of
+    ``frameZero`` is written at its value. ``args_text`` is what stands between the brackets;
+    ``None`` (not written as a call) is never a close here."""
+    if args_text is None:
+        return False
+    zeros = _zero_args_of(entry)
+    closes = _close_args_of(entry)
+    if not zeros and not closes:
+        return False
+    args = _split_call_args(args_text)
+    for i, text in closes:
+        if i < len(args) and args[i] == text:
+            return True
+    if not zeros:
+        return False
+    return all(i < len(args) and _arg_reads_none(args[i], kind) for i, kind in zeros)
+
+
 def speed_limit_bound_of(entry: Optional[Dict[str, Any]]) -> Optional[str]:
     """Which side of the speed range this code's ``S`` bounds: ``'upper'``, ``'lower'`` or ``None``.
 
@@ -625,6 +706,12 @@ class ModalInterpreter:
         word in front of the code (``L X+50 F600 M128 F900``: ``F600``) and an assignment
         word are not owned. :meth:`owner_of` answers it per word; :class:`FeedModeTracker`
         (scale-feed, the tool list) reads the same marks.
+    17. **a feed for one block** (P4b fix batch 3, NC-6): the feed word of a block that holds
+        a ``blockFeed`` code (Klartext ``CYCL CALL POS … F300``, the feed of the move to the
+        cycle's start) is the feed of that block only. The block reads it as its feed
+        (``feed`` after the block is that word), and the next block that is not a
+        continuation of it starts with the feed, and the feed unit word, in force before
+        it again. A block without a feed word changes nothing.
 
     A defined cycle never makes a block's feed word a lead (``block.pitchFeed``,
     :attr:`pitch_feed`): it takes its values from its own parameters (``Q206``, ``Q239``),
@@ -686,7 +773,11 @@ class ModalInterpreter:
 
         tool_call = self._profile.get("toolCall")
         tool_call = tool_call if isinstance(tool_call, dict) else {}
-        self._tool_from_last = tool_call.get("toolFrom") == "same-line-or-last"
+        tool_from = tool_call.get("toolFrom")
+        #: D3-4c ``toolFrom: last-before``: the tool line loads the `T` written before it.
+        self._tool_from_before = tool_from == "last-before"
+        # Both read the `T` words of every line, not only those of the tool lines.
+        self._tool_from_last = tool_from == "same-line-or-last" or self._tool_from_before
 
         #: A database with no ``sets.distance`` anywhere allows only one reading (rule 8).
         self._has_distance = any(
@@ -696,6 +787,9 @@ class ModalInterpreter:
         #: written without any (`frameWithoutValues`, Siemens `TRANS`/`CYCLE800`); a database
         #: with no such code never asks, so no block pays for the walk.
         self._has_bare_frames = any(isinstance(entry, dict) and entry.get("frameWithoutValues") == "close" for entry in self.codes)
+        #: D6-5: a call that reads as no frame at its zero arguments (`CodeParam.frameZero`,
+        #: `frameCloses`); read on its own, whether or not a code has `frameWithoutValues`.
+        self._has_zero_calls = any(_zero_args_of(entry) or _close_args_of(entry) for entry in self.codes)
         #: Rule 13 (owner decision of 2026-10-08, M10-2): the same walk for a database with a
         #: tilt that reads as none when every angle is zero (`frameZeroWords`, Klartext cycle 19
         #: and `PLANE SPATIAL`).
@@ -708,6 +802,8 @@ class ModalInterpreter:
         #: M12.5 (`frameEmptyCloses`): the same walk reads the sub-block number of each
         #: keyword code (`CYCL DEF 19.1` is sub-block 1 of cycle 19).
         self._has_empty_closes = any(_empty_closes_of(entry) is not None for entry in self.codes)
+        #: Rule 17: only a database with a `blockFeed` code looks for one in a block.
+        self._has_block_feed = any(isinstance(entry, dict) and entry.get("blockFeed") is True for entry in self.codes)
         #: Rule 16: the codes that own words, by entry, and the first letters of their
         #: written forms; a database without any (every ISO one) never walks a block for it.
         self._owners: Dict[int, Tuple[str, FrozenSet[str]]] = {}
@@ -740,12 +836,17 @@ class ModalInterpreter:
 
         self._tool: Optional[Dict[str, Any]] = None
         self._last_tool: Optional[Dict[str, Any]] = None
+        #: ``_last_tool`` is written the way ``toolCall.ignore`` says a tool is unloaded (`T0`).
+        self._last_tool_unload = False
         #: How many program starts :meth:`program_start` has seen (M13, NC-4).
         self._programs = 0
         self._feed: Optional[Dict[str, Any]] = None
         self._speed: Optional[Dict[str, Any]] = None
         self._speed_limit: Optional[Dict[str, Any]] = None
         self._active_cycle: Optional[Dict[str, Any]] = None
+        #: Rule 17: the feed and the feed unit word in force before a ``blockFeed`` block, put
+        #: back when the next block starts; ``None`` while no such block is open.
+        self._feed_back: Optional[Tuple[Optional[Dict[str, Any]], Optional[str]]] = None
         # Rule 11 (plan section 7.4, the Klartext "defined cycle"): the cycle the last
         # `sets.cycle: 'define'` entry stored, and the modal call (`'call-modal'`, M89) in
         # force. A database without these values never sets either, so every ISO reading
@@ -769,6 +870,7 @@ class ModalInterpreter:
         self._axis_plane = False
         #: Rule 13: the block's calls without arguments, and whether it writes any value.
         self._calls_bare = {}
+        self._call_args = {}
         self._block_values = False
         #: Rule 13 (`frameZeroWords`): the block's words by address, ``(value, incremental)``;
         #: a word written without a value (`CYCL DEF 8.1 X Y`) has the value ``""``.
@@ -859,6 +961,10 @@ class ModalInterpreter:
         same_block = self._continued or continued
         self._continued = any(token.kind == "continuation" for token in tokens)
         if not same_block:
+            if self._feed_back is not None:
+                # Rule 17: the feed of a `blockFeed` block was that block's alone.
+                self._feed, self._feed_unit_word = self._feed_back
+                self._feed_back = None
             # The flags of a block belong to that block. A continued line is the same
             # block, so they are kept and added to instead.
             self._clear_block()
@@ -878,6 +984,11 @@ class ModalInterpreter:
             self._mcall = None
         for code in codes:
             self._apply_code(code, line)
+        if self._has_block_feed and self._feed_back is None and any(
+            (self._entries.get(normalize_code(code)) or {}).get("blockFeed") is True for code in codes
+        ):
+            # Rule 17: what is in force before the block's own feed word is read.
+            self._feed_back = (self._feed, self._feed_unit_word)
         if self._axis_plane:
             self._apply_tool_axis(tokens)
         self._apply_modal_call(tokens)
@@ -1072,11 +1183,13 @@ class ModalInterpreter:
                 joined = _joined_code(token.address or token.text, nxt.value_text, self._entries)
                 if dot == "." and part.isdigit() and joined is not None:
                     self._block_subs[normalize_code(joined)] = part
-        if not self._has_bare_frames:
+        self._call_args: Dict[str, str] = {}
+        if not (self._has_bare_frames or self._has_zero_calls):
             return
         for token in tokens:
             if token.kind == "call" and token.address:
                 self._calls_bare[normalize_code(token.address)] = (token.value_text or "").strip() == ""
+                self._call_args[normalize_code(token.address)] = token.value_text or ""
             elif token.kind == "word" and (token.value_text or "") != "":
                 address = token.address or ""
                 if address != "" and not is_assignment(token) and normalize_code(address + (token.value_text or "")) in self._entries:
@@ -1112,6 +1225,10 @@ class ModalInterpreter:
             return
         frame = frame_of(entry)
         if entry.get("frameWithoutValues") == "close" and self._written_bare(code):
+            frame = "close"
+        elif frame == "open" and self._has_zero_calls and zero_call_closes(entry, self._call_args.get(normalize_code(code))):
+            # D6-5: `CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)`, the swivel to the home
+            # position every program should start with, or `_TC "0"`: no tilt from here on.
             frame = "close"
         if frame == "open":
             self._frames = [f for f in self._frames if f["code"] != code]
@@ -1361,8 +1478,10 @@ class ModalInterpreter:
         if trigger is None:
             return
         ignore = self._patterns.get("tool_ignore")
-        is_tool = trigger.search(masked) is not None and not (
-            ignore is not None and ignore.search(masked) is not None
+        # D3-4c ``last-before``: the ignore rule does not stop a tool line (`M6 T0` loads the
+        # tool selected before it); its `T` is the next one, an unload.
+        is_tool = trigger.search(masked) is not None and (
+            self._tool_from_before or not (ignore is not None and ignore.search(masked) is not None)
         )
         found: Optional[Dict[str, Any]] = None
         pattern = self._patterns.get("tool")
@@ -1377,9 +1496,24 @@ class ModalInterpreter:
                 station = match.groupdict().get("tool")
                 if station is not None and station.strip() != "":
                     found = {"station": station.strip(), "written": match.group(0).strip(), "line": line}
+        before = self._last_tool
+        before_unload = self._last_tool_unload
         if found is not None:
             self._last_tool = found
+            self._last_tool_unload = self._tool_from_before and ignore is not None and ignore.search(masked) is not None
         if not is_tool:
+            return
+        if self._tool_from_before:
+            # D3-4c ``toolFrom: last-before``: the change loads the tool selected before this
+            # line; a `T` on the line itself is the next one (it is already ``_last_tool``).
+            # Nothing selected before: the tool in the spindle is not known. A selected `T0`
+            # (the ignore pattern) is an unload: the change that follows it empties the
+            # spindle and is no tool change, as the program map and the tool list read it.
+            if before is not None and before_unload:
+                self._tool = None
+                return
+            self._block["toolChange"] = True
+            self._tool = None if before is None else {"station": before["station"], "written": before["written"], "line": line}
             return
         self._block["toolChange"] = True
         if found is not None:
@@ -1412,6 +1546,7 @@ class ModalInterpreter:
             return False
         self._tool = None
         self._last_tool = None
+        self._last_tool_unload = False
         return True
 
     def fingerprint(self) -> Tuple[Any, ...]:

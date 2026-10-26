@@ -101,6 +101,7 @@ describe('a packed Fanuc mill block', () => {
     expect(x.value?.effective).toBeNull();
     expect(x.value?.readings.map((reading) => [reading.preset, reading.value])).toEqual([
       ['is-b', '0.05'],
+      ['is-a', '0.5'],
       ['is-c', '0.005'],
       ['calculator', '50'],
     ]);
@@ -385,6 +386,17 @@ describe('a Klartext cycle defined over several lines', () => {
     expect(row(r, 'Y+5,5').value?.effective).toBe('5.5');
     expect(row(r, 'L').kind).toBe('code');
   });
+
+  it('shows F MAX and F AUTO as one row each, as FMAX is (T166)', () => {
+    const after = state({ distance: 'absolute', feedUnit: 'per-minute' });
+    const r = inspectBlock(doc('7 L X+10 R0 F MAX M99', 1), view, null, after);
+    expect(r.words.map((w) => w.written)).toEqual(['L', 'X+10', 'R0', 'F MAX', 'M99']);
+    expect(row(r, 'F MAX')).toMatchObject({ kind: 'code', meaning: 'Rapid' });
+    expect(row(inspectBlock(doc('8 L Z+50 F AUTO', 1), view, null, after), 'F AUTO')).toMatchObject({ kind: 'code', meaning: 'Feed from the tool call' });
+    // A feed with a number is a feed word, and a word that joins to no feed keyword stays apart.
+    expect(row(inspectBlock(doc('9 L X+10 F500', 1), view, null, after), 'F500')).toMatchObject({ kind: 'address' });
+    expectKnownKeys(r);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -481,6 +493,18 @@ describe('Sinumerik', () => {
     expect(keys(row(r, 'LIMS=3000').notes)).toEqual(['note.speedLimit']);
     expect(row(r, 'S1=2400')).toMatchObject({ kind: 'assignment', meaning: 'Spindle speed' });
     expect(row(r, 'M1=3')).toMatchObject({ kind: 'code', edit: { ok: false } });
+  });
+
+  it('says what a word written NAME=value is by the entry of its name (ADIS=, CTOL=, OTOL=, SVC=; T138)', () => {
+    const r = inspectBlock(doc('N30 G641 ADIS=0.5 CTOL=0.02 OTOL=0.5 SVC=120', 1), view, null, state({ speedUnit: 'rpm' }));
+    expect(row(r, 'ADIS=0.5')).toMatchObject({ kind: 'assignment', meaning: expect.stringMatching(/^Rounding distance/) });
+    expect(row(r, 'CTOL=0.02').meaning).toMatch(/^Contour tolerance/);
+    expect(row(r, 'OTOL=0.5').meaning).toMatch(/^Orientation tolerance/);
+    expect(row(r, 'SVC=120').meaning).toMatch(/^Cutting speed of the tool/);
+    // The value behind `=` stays data you can edit as written; an address keeps its own label.
+    expect(row(r, 'ADIS=0.5').edit.ok).toBe(true);
+    expect(row(inspectBlock(doc('LIMS=3000', 1), view, null, state()), 'LIMS=3000').meaning).toBe('Spindle speed limit');
+    expectKnownKeys(r);
   });
 
   it('shows an expression as a variable, not editable', () => {
@@ -658,9 +682,11 @@ describe("a function's own F (B1 NC-01)", () => {
       'L X+50 F600 M128 F900',
     ].join('\n');
     const feedAt = (line: number) => inspectReal('heidenhain-klartext', text, line).state.find((s) => s.key === 'feed');
-    for (const line of [5, 6, 7]) expect(feedAt(line), `line ${line}`).toMatchObject({ value: 'F500', line: 3, setHere: false });
+    // The row names the feed mode in force with the feed, as on Fanuc (`G94 F200`): the profile's
+    // power-on M137 (P4.9), so its line is 0.
+    for (const line of [5, 6, 7]) expect(feedAt(line), `line ${line}`).toMatchObject({ value: 'M137 F500', line: 0, setHere: false });
     // F600 in front of M128 is the block's path feed; F900 behind it is M128's.
-    expect(feedAt(8)).toMatchObject({ value: 'F600', line: 8, setHere: true });
+    expect(feedAt(8)).toMatchObject({ value: 'M137 F600', setHere: true });
   });
 });
 
@@ -699,6 +725,39 @@ describe('B1 NC-04: I, J, K of G41.6 are the tool direction', () => {
       expect(keys(w.notes).some((k) => /point|increment/i.test(k)), `${word}: ${keys(w.notes).join(', ')}`).toBe(false);
     }
     expect(row(r, 'Q2.').param?.label).toMatch(/^Lead angle/);
+  });
+
+  // T120 (SK-04): in the blocks the mode governs, not only in the block that writes it.
+  it('reads I, J, K as the tool direction in the blocks after G41.6 and G43.5, until G40 or G49', () => {
+    const tcp = 'G90 G0 X0 Y0\nG43.5 X0 Y0 Z10. I0 J0 K1. H1\nG1 X10. Y5. I0.5 J0 K0.866 F500\nG49\nG2 X20. Y5. I5. J0';
+    const under = inspectReal('fanuc-gcode', tcp, 3);
+    for (const word of ['I0.5', 'J0', 'K0.866']) {
+      const w = row(under, word);
+      expect(w.meaning, word).toMatch(/^Tool axis direction/);
+      expect(w.value?.cls, word).toBe('count');
+    }
+    const after = row(inspectReal('fanuc-gcode', tcp, 5), 'I5.');
+    expect(after.meaning).not.toMatch(/direction/);
+    expect(after.value).toMatchObject({ cls: 'length', effective: '5' });
+
+    const comp = 'G90 G0 X0 Y0\nG41.6 X10. Y5. I0 J0 K1. D1\nG1 X20. I0.5 J0 K0.866\nG40 G1 X30.\nG3 X40. I5. J0';
+    expect(row(inspectReal('fanuc-gcode', comp, 3), 'I0.5').meaning).toMatch(/^Tool direction at the end of the block/);
+    expect(row(inspectReal('fanuc-gcode', comp, 5), 'I5.').meaning).not.toMatch(/direction/);
+  });
+
+  // FB-2 (WX-NC-6): the mode lends the block I, J and K only. G43.5 declares Q as an angle and
+  // G83 as a length; read whole, the two disagreed and Q lost its class.
+  it('keeps the Q of a modal G83 a length under G43.5', () => {
+    const text = 'G90 G54 G0 X0 Y0\nG43.5 X0 Y0 Z10. I0 J0 K1. H1\nG98 G83 X10. Y10. Z-20. R2. Q5. F100.\nX20. Y10. Q3.\nG80';
+    const q = row(inspectReal('fanuc-gcode', text, 4), 'Q3.');
+    expect(q.value).toMatchObject({ cls: 'length', effective: '3' });
+    expect(q.param?.label).not.toMatch(/angle/i);
+  });
+
+  it('leaves I, J, K arc centres under a mode that declares none of them (G41)', () => {
+    const r = inspectReal('fanuc-gcode', 'G90 G0 X0 Y0\nG41 G1 X10. D1 F500\nG2 X20. Y0 I5. J0', 3);
+    expect(row(r, 'I5.').meaning).not.toMatch(/direction/);
+    expect(row(r, 'I5.').value).toMatchObject({ cls: 'length', effective: '5' });
   });
 });
 

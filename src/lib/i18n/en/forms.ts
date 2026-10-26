@@ -23,6 +23,8 @@ export default {
   noFields: 'There is nothing to set here.',
   /** P3.5: under a template form while a value is refused, in place of the text OK would insert. */
   previewBlocked: 'Correct the marked values to see the text.',
+  /** v1.2.0 (T147): in place of the text while only required fields not filled in yet stop it. */
+  previewRequired: 'Fill in the required fields to see the text.',
   /** Accessible name of the single input of `modals.prompt()`. */
   promptValue: 'Value',
 

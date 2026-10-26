@@ -47,9 +47,10 @@
 //      angle typed with more decimals than the increment is refused (the control would round
 //      it). Without a machine neither applies: nothing is guessed.
 //
-// Known limit: a snippet template whose body uses `{{N}}` in a `consecutive` profile inserts
-// its numbers, but the following blocks are not renumbered (the snippet controller makes its own
-// edit); no built-in template is a snippet.
+// A snippet template whose body uses `{{N}}` in a `consecutive` profile (v1.2.0 T142): the blocks
+// behind it are renumbered in an edit of their own just before the snippet goes in, so the
+// program stays numbered one by one; the snippet controller makes its own edit, so Undo takes the
+// two back in two steps. No built-in template is a snippet.
 
 import { get, readable, writable, type Readable } from 'svelte/store';
 import { blockRange, type InspectInput } from '$lib/core/codes/inspect';
@@ -60,6 +61,7 @@ import { blockNumberOf } from '$lib/core/nc/tokenizer';
 import { isNcDocumentPath } from '$lib/core/profiles/ncDocument';
 import {
   evaluateFormulas,
+  formulaTexts,
   renderTemplate,
   templateFields,
   templateMemoKey,
@@ -74,6 +76,7 @@ import {
 import {
   blockNumberParams,
   blockValueErrors,
+  documentLabels,
   documentNumbers,
   freeBlockValues,
   namedOwnNumbers,
@@ -95,12 +98,12 @@ import { status as appStatus } from '$lib/app/status';
 import { t as translate } from '$lib/i18n';
 import type { EffectiveProfile } from '$lib/core/machines/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
+import type { FormLiveAnswer } from '$lib/core/forms/types';
 import type {
   Disposable,
   DocId,
   DocumentStore,
   EditorService,
-  FormLiveResult,
   Modals,
   Msg,
   StatusService,
@@ -437,17 +440,19 @@ export function createTemplateService(deps: TemplateServiceDeps): TemplateServic
    * at the version it was read at (the same text, whatever happened in between) and is dropped
    * when the insertion ends.
    */
-  let scanned: { id: DocId; version: number; cp: CompiledProfile; lineCount: number; doc: DocumentNumbers } | null = null;
+  let scanned: { id: DocId; version: number; cp: CompiledProfile; lineCount: number; labels: boolean; doc: DocumentNumbers } | null = null;
 
-  function numbersOf(id: DocId, view: EffectiveProfile, withBlocks: boolean): DocumentNumbers {
+  /** `labels`: the Klartext labels (T160) instead of the block numbers. */
+  function numbersOf(id: DocId, view: EffectiveProfile, withBlocks: boolean, labels = false): DocumentNumbers {
     const lineCount = Math.max(1, deps.editor.getLineCount(id));
     // A real version is above 0: the editor answers 0 for a document without a model, whose text can change at that same 0, so 0 (or anything that is no version) keeps nothing.
     const asked = deps.editor.versionId?.(id);
     const version = typeof asked === 'number' && Number.isFinite(asked) && asked > 0 ? asked : undefined;
     const kept = scanned;
-    if (kept !== null && version !== undefined && kept.id === id && kept.version === version && kept.cp === view.cp && kept.lineCount === lineCount && (kept.doc.withBlocks || !withBlocks)) return kept.doc;
-    const doc = documentNumbers(deps.editor.getLines(id, 1, lineCount), view.cp, withBlocks);
-    scanned = version === undefined ? null : { id, version, cp: view.cp, lineCount, doc };
+    if (kept !== null && version !== undefined && kept.id === id && kept.version === version && kept.cp === view.cp && kept.lineCount === lineCount && kept.labels === labels && (kept.doc.withBlocks || !withBlocks)) return kept.doc;
+    const lines = deps.editor.getLines(id, 1, lineCount);
+    const doc = labels ? documentLabels(lines, view.cp) : documentNumbers(lines, view.cp, withBlocks);
+    scanned = version === undefined ? null : { id, version, cp: view.cp, lineCount, labels, doc };
     return doc;
   }
 
@@ -458,6 +463,8 @@ export function createTemplateService(deps: TemplateServiceDeps): TemplateServic
     const own = ownNumbers(env, numberPlaceholders(tpl));
     // No block-number field and no number of its own (an unnumbered program): there is nothing to compare with the program's numbers.
     if (params.length === 0 && own.length === 0) return { params, doc: null, own };
+    // T160: a Klartext label field is read against the program's labels.
+    if (params.some((p) => p.kind === 'label')) return { params, doc: numbersOf(id, view, true, true), own };
     // The block numbers themselves matter to a template with a block-number field; without one only the numbers a P or a GOTO names do (SK-02).
     return { params, doc: numbersOf(id, view, params.length > 0), own };
   }
@@ -465,9 +472,11 @@ export function createTemplateService(deps: TemplateServiceDeps): TemplateServic
   /** Items 6 and 7: what the engine does not check, by parameter id (only for a value the engine took). */
   function contextErrors(tpl: TemplateDef, values: Record<string, unknown>, ctx: BlockContext, decimals: Record<string, number>, view: EffectiveProfile, engine: Record<string, Msg>): Record<string, Msg> {
     const out: Record<string, Msg> = {};
+    // T162: a formula that writes a block number is checked with the value it computes.
+    const written = ctx.doc === null || !ctx.params.some((bp) => tpl.params?.find((p) => p.id === bp.id)?.type === 'formula') ? values : { ...values, ...formulaTexts(tpl, values, view.cp) };
     const more = {
       ...machineDecimalErrors(tpl, values, decimals),
-      ...(ctx.doc === null ? {} : blockValueErrors(ctx.params, values, ctx.doc, ctx.own, view.cp)),
+      ...(ctx.doc === null ? {} : blockValueErrors(ctx.params, written, ctx.doc, ctx.own, view.cp)),
     };
     for (const [id, msg] of Object.entries(more)) if (engine[id] === undefined) out[id] = msg;
     return out;
@@ -484,10 +493,11 @@ export function createTemplateService(deps: TemplateServiceDeps): TemplateServic
 
   /** The `live` hook of the form of `tpl` in document `id`, the cursor on `line`. */
   function liveFor(id: DocId, view: EffectiveProfile, tpl: TemplateDef, fieldIds: Set<string>, line: number, ctx: BlockContext, decimals: Record<string, number>) {
-    return (current: Record<string, unknown>): FormLiveResult => {
+    return (current: Record<string, unknown>): FormLiveAnswer => {
       const engine = validateTemplateValues(tpl, current, view.cp);
       const errors = { ...engine, ...contextErrors(tpl, current, ctx, decimals, view, engine) };
-      const answer: FormLiveResult = {};
+      // T159: the note follows the values (the numbers the text writes depend on the lines they keep).
+      const answer: FormLiveAnswer = { note: noteFor(tpl, view, ctx, envFor(id, view, line), current) ?? '' };
       const computed = formulaValues(tpl, current, errors);
       if (computed !== undefined) answer.values = computed;
       const fieldErrors: Record<string, Msg> = {};
@@ -586,8 +596,25 @@ export function createTemplateService(deps: TemplateServiceDeps): TemplateServic
     // A snippet template has no form: the snippet controller owns the tab stops.
     if (tpl.snippet === true) {
       const target = targetOf(id, view);
-      const rendered = renderTemplate(tpl, {}, envFor(id, view, target.cursorLine));
+      const env = envFor(id, view, target.cursorLine);
+      const rendered = renderTemplate(tpl, {}, env);
       if (!rendered.ok) return refuse(rendered.errors);
+      // T142: a program numbered one by one (Klartext) moves the blocks behind the snippet up by the
+      // numbers it writes, in an edit of its own before the snippet goes in (the snippet controller
+      // makes its own edit, so the two are two undo steps).
+      if (view.cp.profile.numbering.mode === 'consecutive' && rendered.blocks > 0 && target.last < target.lineCount) {
+        const next = (env.prevBlockNumber ?? -1) + rendered.blocks + 1;
+        const shifted = renumberFollowing(deps.editor.getLines(id, target.last + 1, target.lineCount), next, (line) => blockNumberOf(line, view.cp));
+        if (shifted.length > 0) {
+          const done = deps.applyLines(id, target.last + 1, target.last + shifted.length, shifted);
+          if (done.locked === true) {
+            const now = deps.docs.get(id);
+            const refusal = now === undefined ? null : lockRefusal(now, t('readOnly.insertTemplate', { template: tpl.label }));
+            if (refusal !== null) sayMsg(refusal, true);
+            return false;
+          }
+        }
+      }
       deps.editor.insertSnippet(rendered.text, { line: target.last, replace: target.blank });
       return true;
     }
@@ -636,7 +663,11 @@ export function createTemplateService(deps: TemplateServiceDeps): TemplateServic
     return write(id, view, tpl, rendered, env);
   }
 
-  /** The form's note: the review mark, the scaled machine (item 7), the referenced numbers the template writes (item 6). */
+  /**
+   * The form's note: the review mark, the scaled machine (item 7), the referenced numbers the
+   * template writes with `values` (item 6). The form opens with it and its `live` hook gives it
+   * again for the values as they are typed (T159).
+   */
   function noteFor(tpl: TemplateDef, view: EffectiveProfile, ctx: BlockContext, env: TemplateEnv, start: Record<string, unknown>): string | undefined {
     const parts: string[] = [];
     if (tpl.review === 'pending') parts.push(t('templates.reviewPending'));

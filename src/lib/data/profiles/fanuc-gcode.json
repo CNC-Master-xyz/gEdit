@@ -38,6 +38,7 @@
     "wordSeparatorRequired": false,
     "variables": "#\\d+",
     "systemVariableNumbers": 1000,
+    "tcpTableCoordinates": true,
     "keywords": [
       "GOTO", "IF", "THEN", "WHILE", "DO", "END", "EQ", "NE", "GT", "LT", "GE", "LE", "AND", "OR", "XOR", "MOD",
       "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "ATN", "SQRT", "SQR", "ABS", "BIN", "BCD", "ROUND", "RND",
@@ -85,11 +86,18 @@
     "skipEmpty": true,
     "restartAtProgramStart": true,
     "references": [
-      { "trigger": "(?<![A-Z])M\\s*0*99(?!\\d)", "addresses": ["P"], "rewrite": false },
-      { "trigger": "^(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)", "addresses": ["Q"] },
-      { "trigger": "^(?=[^(]*P\\s*\\d)(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)", "addresses": ["Q"], "rewrite": false },
+      { "trigger": "(?<![A-Z])M\\s*0*99(?!\\d)", "addresses": ["P"], "program": "caller" },
+      { "trigger": "^(?![^(]*(?:(?<![A-Z])P|<))(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)", "addresses": ["Q"] },
+      { "trigger": "^(?=[^(]*(?:(?<![A-Z])P|<))(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)", "addresses": ["Q"], "rewrite": false, "program": "called" },
       { "trigger": "^(?=[^(]*P\\s*\\d)(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])G\\s*0*7[0-3](?:\\.7)?(?![\\d.])", "addresses": ["P", "Q"], "rewrite": false },
       { "trigger": "(?<![A-Z])GOTO", "addresses": ["GOTO"] }
+    ],
+    "calls": [
+      { "trigger": "(?<![A-Z])M\\s*0*98(?!\\d)", "address": "P", "maxDigits": 4, "repeatAddress": "L", "localAddress": "Q" },
+      { "trigger": "(?<![A-Z])G\\s*0*(?:65|66(?:\\.1)?)(?![\\d.])", "address": "P" },
+      { "trigger": "(?<![A-Z])G\\s*0*72\\.[12](?![\\d.])", "address": "P" },
+      { "trigger": "(?<![A-Z])M\\s*0*96(?!\\d)", "address": "P", "interrupt": true },
+      { "trigger": "(?<![A-Z])M\\s*0*198(?!\\d)", "address": "P", "maxDigits": 4, "repeatAddress": "L" }
     ]
   },
   "modal": { "initial": { "feedmode": "G94" } },
@@ -97,6 +105,24 @@
     "numberInput": {
       "default": "is-b",
       "presets": [
+        {
+          "id": "is-a",
+          "label": "Increments of 0.01 mm (IS-A): X50 is 0.50 mm, X50. is 50 mm, C9000 is 90\u00b0; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution in 0.01 mm/rev (F25 is 0.25 mm/rev)",
+          "source": "syntax-fanuc.md \u00a73.2",
+          "verify": true,
+          "digitCheck": false,
+          "value": {
+            "mode": "increment",
+            "incrementMm": "0.01",
+            "incrementInch": "0.001",
+            "incrementDeg": "0.01",
+            "incrementSec": "0.01",
+            "classes": {
+              "feedPerMin": { "mode": "increment", "increment": "1", "incrementInch": "0.01" },
+              "feedPerRev": { "mode": "increment", "increment": "0.01", "incrementInch": "0.0001" }
+            }
+          }
+        },
         {
           "id": "is-b",
           "label": "Increments of 0.001 mm (IS-B): X50 is 0.050 mm, X50. is 50 mm, C90000 is 90\u00b0; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution in 0.01 mm/rev (F25 is 0.25 mm/rev)",
@@ -138,10 +164,44 @@
           "verify": true,
           "value": { "mode": "calculator", "incrementMm": "0.001" }
         }
-      ]
+      ],
+      "pointlessFeeds": {
+        "default": "standard",
+        "source": "syntax-fanuc.md \u00a73.2",
+        "verify": true,
+        "choices": [
+          {
+            "value": "standard",
+            "label": "Feed per minute in 1 mm/min (F200 is 200 mm/min), feed per revolution in 0.01 mm/rev (F25 is 0.25 mm/rev)"
+          },
+          {
+            "value": "per-rev",
+            "label": "Feed per minute in 1 mm/min (F200 is 200 mm/min), feed per revolution in 0.001 mm/rev (F250 is 0.25 mm/rev; parameter 1405 bit 1)",
+            "classes": { "feedPerRev": { "increment": "0.001", "incrementInch": "0.00001" } }
+          }
+        ]
+      }
     },
     "units": "mm",
-    "modalGroups": ["feedmode", "distance", "plane"]
+    "modalGroups": ["feedmode", "distance", "plane"],
+    "variants": [
+      {
+        "id": "toolOnChangeLine",
+        "label": "T on the M6 line",
+        "default": "loaded",
+        "choices": [
+          {
+            "value": "loaded",
+            "label": "Is the tool M6 loads: T5 M6 changes to tool 5 (default, verify)"
+          },
+          {
+            "value": "next",
+            "label": "Is the next tool: M6 loads the T written before it, and M6 T5 preselects tool 5 for the next change (verify)",
+            "overlay": { "toolCall": { "toolFrom": "last-before" } }
+          }
+        ]
+      }
+    ]
   },
   "editing": { "forceUppercase": true, "preventLineJoin": true, "tabWidth": 4 },
   "onLoad": { "stripNul": true },

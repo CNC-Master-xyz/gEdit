@@ -1,0 +1,9 @@
+{
+  "profile": "fanuc-lathe",
+  "machineName": "Lathe 2",
+  "limits": {
+    "units": "mm",
+    "spindle": { "main": 4000 },
+    "travel": { "X": { "min": 0, "max": 600 }, "Z": { "min": -800, "max": 0 } }
+  }
+}

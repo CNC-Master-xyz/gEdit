@@ -1,0 +1,29 @@
+{
+  "message": "Estimated time 0:34.1 for 2 tools: feed 0:28.8, rapid 0:01.3, dwell 0:00.0, tool changes 0:04.0. 4 blocks are not estimated: 2 multi-pass cycles, 1 thread, 1 move whose start or end is not known. The estimate is a lower bound: it counts 100 % feed and rapid override, no acceleration, no time to read a block and no look-ahead. No machine chosen: a value whose reading depends on the machine is not estimated.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "warning",
+      "message": "N50 G0 X60. Z2.: not estimated: where the move starts or ends is not known (the start of X: the program's first move of the axis, or the first after a move to a machine position, a roughing cycle's contour or a block gEdit cannot place).",
+      "reason": "position-unknown"
+    },
+    {
+      "line": 13,
+      "severity": "warning",
+      "message": "N110 G32 Z-20. F1.5: not estimated: a thread move or pass is not timed (G32).",
+      "reason": "thread"
+    },
+    {
+      "line": 18,
+      "severity": "warning",
+      "message": "N160 G76 P010060 Q100 R0.05: not estimated: the control works out the passes of this cycle from its data (G76).",
+      "reason": "multi-pass"
+    },
+    {
+      "line": 19,
+      "severity": "warning",
+      "message": "N170 G76 X18. Z-20. P1000 Q300 F1.5: not estimated: the control works out the passes of this cycle from its data (G76).",
+      "reason": "multi-pass"
+    }
+  ]
+}

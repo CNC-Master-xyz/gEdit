@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Klartext: a ; inside a quoted path is part of the path, not the start of a comment.",
+  "profile": "heidenhain-klartext",
+  "options": {}
+}

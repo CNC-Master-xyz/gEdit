@@ -19,6 +19,9 @@
 // drilling cycle inserted as a call says that it drills at once, with the feed in force (SK-03);
 // a field of a word written without a point shows what the machine reads (NC-08) as its help.
 //
+// v1.2.0: the help follows the value as it is typed (T146: `cycleFormReadings`); a cycle written
+// in two blocks opens the form of the block at the cursor, its title says which block (T119).
+//
 // The values are typed as they are written (`10.` is not `10` on a control that reads a point),
 // so the fields are text fields; the engine checks every value (bounds, whole numbers, the
 // reading on the machine) and the form shows its answers as they are typed (`live`: the errors
@@ -33,7 +36,7 @@ import { lockRefusal } from '$lib/app/readOnlyLock';
 import { status as appStatus } from '$lib/app/status';
 import { planInsertion, templateEnv } from '$lib/app/templateService';
 import { blockRange, type InspectInput, type InspectView } from '$lib/core/codes/inspect';
-import type { FieldSpec } from '$lib/core/forms/types';
+import type { FieldSpec, FormLiveAnswer } from '$lib/core/forms/types';
 import { blockNumberOf } from '$lib/core/nc/tokenizer';
 import { isNcDocumentPath } from '$lib/core/profiles/ncDocument';
 import {
@@ -41,6 +44,7 @@ import {
   cycleEntries,
   cycleFormAt,
   cycleFormFor,
+  cycleFormReadings,
   CYCLE_FORM_WHOLE,
   TEMPLATE_TEST_IDS,
   type CycleForm,
@@ -56,7 +60,6 @@ import type {
   DocId,
   DocumentStore,
   EditorService,
-  FormLiveResult,
   Modals,
   ModalService,
   Msg,
@@ -165,10 +168,21 @@ export function createCycleEditor(deps: CycleEditDeps): { editCycle(): Promise<C
     const attempt = (values: Record<string, unknown>) => applyCycleForm(form, values, inputOf(id, cursorLine), view, stateAfter(), envFor());
 
     // 2. The form: the engine's answer to the values as they stand, shown as they are typed.
-    const live = (values: Record<string, unknown>): FormLiveResult => {
+    const readings = form.readings ?? {};
+    const live = (values: Record<string, unknown>): FormLiveAnswer => {
       const edit = attempt(values);
-      if (edit.ok) return { preview: edit.lines.join('\n') };
-      const answer: FormLiveResult = {};
+      if (edit.ok) {
+        // T146: beside each field, how the machine reads the value as typed; a reading that no longer applies goes.
+        const now = cycleFormReadings(edit, inputOf(id, cursorLine), view, stateAfter());
+        const help: Record<string, string> = {};
+        for (const field of form.fields) {
+          const reading = Object.prototype.hasOwnProperty.call(now, field.id) ? now[field.id] : undefined;
+          if (reading !== undefined) help[field.id] = t(reading.key, reading.params);
+          else if (Object.prototype.hasOwnProperty.call(readings, field.id)) help[field.id] = '';
+        }
+        return Object.keys(help).length > 0 ? { preview: edit.lines.join('\n'), help } : { preview: edit.lines.join('\n') };
+      }
+      const answer: FormLiveAnswer = {};
       const fieldErrors: Record<string, Msg> = {};
       for (const [address, msg] of Object.entries(edit.errors)) {
         if (address === CYCLE_FORM_WHOLE) answer.error = msg;
@@ -185,13 +199,12 @@ export function createCycleEditor(deps: CycleEditDeps): { editCycle(): Promise<C
       if (cancel !== null) notes.push(t('cycleForm.cancelAdded', { cancel }));
       if (DRILLS_AT_ONCE.test(form.entry.code) && form.entry.modal !== true) notes.push(t('cycleForm.runsAtOnce'));
     }
-    const readings = form.readings ?? {};
     const fields = textFields(form.fields).map((field) => {
       const reading = Object.prototype.hasOwnProperty.call(readings, field.id) ? readings[field.id] : undefined;
       return reading === undefined ? field : { ...field, help: t(reading.key, reading.params) };
     });
     const answered = await deps.modals.form({
-      title: t('cycleForm.title', { code: form.entry.code, label: form.entry.label }),
+      title: form.part === undefined ? t('cycleForm.title', { code: form.entry.code, label: form.entry.label }) : t('cycleForm.titlePart', { code: form.entry.code, label: form.entry.label, part: form.part }),
       fields,
       values: form.values,
       okLabel: form.mode === 'edit' ? t('cycleForm.okEdit') : t('cycleForm.okInsert'),

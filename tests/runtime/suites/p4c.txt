@@ -1,0 +1,19 @@
+# P4c: "Typing help and bookmarks" - auto space and the automatic block number on Enter, named bookmarks with their panel and
+# Bookmark All Matches, Select and Delete Block Range, Insert File and Append File, and Print and Export as HTML (plan
+# docs/planning/phase-4-implementation.md §6.5, P4.12 to P4.15 and H4c), and the Phase 4 exit criteria X26 and X27 that the running
+# app proves.
+# Run with: tests/runtime/suites/m0.txt tests/runtime/suites/m1.txt tests/runtime/suites/m2.txt tests/runtime/suites/m3.txt tests/runtime/suites/m4.txt tests/runtime/suites/m5.txt tests/runtime/suites/m6.txt tests/runtime/suites/m7.txt tests/runtime/suites/m8.txt tests/runtime/suites/m9.txt tests/runtime/suites/m10.txt tests/runtime/suites/m11.txt tests/runtime/suites/m12.txt tests/runtime/suites/rp.txt tests/runtime/suites/m13.txt tests/runtime/suites/p3a.txt tests/runtime/suites/p3b.txt tests/runtime/suites/b1.txt tests/runtime/suites/p4a.txt tests/runtime/suites/p4c.txt tests/runtime/suites/p4e.txt
+#
+# Every expected text comes from the programs themselves (tests/fixtures/p4c/harness/, whose README lists every line number the
+# checks rely on), from ctx.t(...) or from the plan's rules (§6.5). Nothing is read from what the app shows except through the test
+# ids and the editors' own models. No scenario opens a system dialog: the print function is a stub (h.app.ctx.print.setPrintFunction),
+# the file dialogs are the harness's queued answers.
+
+# Auto Space and the automatic block number (Fanuc and Klartext), named bookmarks, the bookmark panel, Bookmark All Matches and the
+# 201st bookmark, Select and Delete Block Range, Insert File and Append File, the print view and Export as HTML.
+p4-comfort
+
+# Named bookmarks across a restart: tabs that nobody has shown are listed from their waiting memo (pending rows), a click shows the
+# tab and jumps, a delete changes the memo, Clear All asks once.
+p4-comfort-names-1
+p4-comfort-names-2

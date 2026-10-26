@@ -94,7 +94,7 @@ Each row names the owning work package and the feature.
 | File | Owner | Feature |
 | --- | --- | --- |
 | `assistant.ts` | WP3.6 | hover and completion providers over the code database |
-| `bookmarks.ts` | WP4.4 | `bookmark.toggle` / `next` / `prev` / `clear` and the F2 removals |
+| `bookmarks.ts` | WP4.4, P4.13 | `bookmark.toggle` / `next` / `prev` / `clear` and the F2 removals; P4.13: named bookmarks (`bookmark.rename`), `bookmark.addAllMatches`, the Bookmarks panel (left region) and `view.toggleBookmarks` (Edit tab group Bookmarks, View tab group Panels; no new key) (Phase 4, P4c) |
 | `channels.ts` | WP12.5 | multi-channel programs: channel status item, sync-point navigation (`Alt+F7`, `Shift+Alt+F7`, `Mod+Alt+P`), `channels.checkSync`, `channels.assign`, `channels.splitToDocuments`, the `togglePreserveCase` removal |
 | `compare.ts` | WP2.5 | compare with a document, a file or the saved version (overlay) |
 | `cursor.ts` | WP1.2 | cursor status item |
@@ -106,6 +106,7 @@ Each row names the owning work package and the feature.
 | `help.ts` | WP2.4 | About and the shortcut reference |
 | `layoutPersist.ts` | WP2.3 | restores `ui.layout` and then follows it |
 | `inspector.ts` | P3.2b | the code inspector (left panel): `view.toggleInspector` (Mod+Alt+A), `inspector.editValue` (Phase 3, P3a; the prelude pinned them) |
+| `insertFile.ts` | P4.14b | `file.insertFile` and `file.appendFile` (File tab, group Insert; no key): one file from the dialog, read the way Open reads it, put in as one undo step and selected; the placement, the program-end warning and the Klartext numbering are `core/nc/insertFile.ts` (Phase 4, P4c) |
 | `machineSelect.ts` | WP6.10 | machine status item and picker, `file.setMachine`, `machines.manage`, `machines.openFile` |
 | `modal.ts` | P3.1 | starts the modal service (`app/modalService.ts`), which keeps the modal state of every open document for the inspector, the hover and the motion colors (Phase 3, P3a) |
 | `motionColors.ts` | P3.7 | the motion colors beside every line that moves, `view.toggleMotionColors` (Phase 3, P3a; the prelude pinned it) |
@@ -113,10 +114,13 @@ Each row names the owning work package and the feature.
 | `ncBlockSkip.ts` | WP10.1 | NC tab "Block Skip": `nc.blockSkip.add` / `nc.blockSkip.remove` |
 | `ncCleanup.ts` | WP4.3 | NC tab "Cleanup": spaces, empty lines, comments, case |
 | `ncNumbering.ts` | WP4.2 | NC tab "Numbering": `nc.renumber`, `nc.removeBlockNumbers` |
+| `renumberOthers.ts` | P4.20b | NC tab "Numbering": `nc.updateOtherReferences` (Update References in Other Documents…; no key; enabled while a list from the last Renumber Blocks is pending): rewrites the references into the renumbered program that other open documents of the dialect still hold, one confirmation, each document its own undo step, all or nothing (Phase 4, P4d; the prelude pinned it; service `app/renumberOthers.ts`, rules `core/transforms/otherReferences.ts`, P4.20a) |
 | `palette.ts` | WP1.1 | `view.commandPalette` (F1) |
 | `profileSelect.ts` | WP1.6 | dialect profile status item and picker |
 | `programMap.ts` | WP1.5 | program map (left panel) |
 | `quitGuard.ts` | WP6.5 | reports "any document dirty" to the macOS quit guard |
+| `print.ts` | P4.15 | `file.print` (`Mod+P`) and `file.exportHtml` (File tab, group Print): the options form, then the hidden print view and the system print dialog, or a saved HTML file (Phase 4, P4c; engine `app/print.ts`, view `components/print/`) |
+| `ranges.ts` | P4.14a | `edit.selectBlockRange` and `edit.deleteBlockRange` (Edit tab, group Block Range; no key): the range form with its remembered kind, the resolver in `core/nav/blockRange.ts` (Phase 4, P4c) |
 | `readOnly.ts` | WP7.3 | `file.toggleReadOnly` and the read-only status item |
 | `recent.ts` | WP2.3 | Recent dropdown, `file.openRecent`, `file.clearRecent` |
 | `recovery.ts` | WP7.4 | crash-recovery snapshots, the restore dialog, `recovery.showPending` |
@@ -132,6 +136,6 @@ Each row names the owning work package and the feature.
 | `templates.ts` | P3.5 | the Insert tab's templates of the active document's effective database, `insert.template:<id>` per template, `templates.insert`, templates in completion (Phase 3, P3b; the prelude pinned them) |
 | `templateManager.ts` | P3.9 | the template manager and New Template from Selection: `templates.manage`, `templates.fromSelection` (Phase 3, P3b; the prelude pinned them) |
 | `theme.ts` | WP2.6 | `view.setTheme`, the settings → editor-option bridge |
-| `typing.ts` | WP13.4 | upper-case typing and no join of two blocks (AD-30), `edit.toggleForceUppercase` (M13; P13 pinned it) |
+| `typing.ts` | WP13.4, P4.12 | upper-case typing and no join of two blocks (AD-30), `edit.toggleForceUppercase` (M13; P13 pinned it); P4.12: automatic space between words and the automatic block number on Enter, `edit.toggleAutoSpace` / `edit.toggleAutoNumber` (Edit tab group Typing; no key; engine `core/nc/{autoSpace,autoNumber,blockNumbering}.ts`) (Phase 4, P4c) |
 | `userConfig.ts` | WP13.3 | the user's own profiles and code files: `profile.*`, `machines.import` / `machines.export`, the reload after a save in either folder (M13; P13 pinned them) |
 | `view.ts` | WP1.5 | panel toggles |

@@ -561,4 +561,18 @@ describe('the preview’s environment', () => {
     fake.lines = ['BEGIN PGM X MM', 'TOOL CALL 1 Z S3000'];
     expect(documentEnv(id)?.numbered).toBe(true);
   });
+
+  it('T152: is the environment the insert builds (templateService.templateEnv), not a copy of it, far above and below the cursor too', async () => {
+    const { templateEnv } = await import('$lib/app/templateService');
+    const { editor } = await import('$lib/monaco/editorService');
+    const { machines } = await import('$lib/stores/machines');
+    const id = addDoc('fanuc-gcode');
+    // A number 1,999 lines above the cursor (inside the insert's reach) and none below.
+    fake.lines = ['O1000', 'N10 G0 X0', ...Array.from({ length: 1997 }, () => 'G1 X1'), 'G1 X2', 'M30'];
+    fake.cursor = { line: 2000 };
+    const now = new Date(2026, 9, 9, 8, 5);
+    const env = documentEnv(id, now);
+    expect(env).toEqual(templateEnv({ editor, docs, now: () => now }, id, machines.effective(id).cp, 2000));
+    expect(env?.prevBlockNumber).toBe(10);
+  });
 });

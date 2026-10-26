@@ -1,7 +1,7 @@
 // Remove spaces (plan §5 WP4.3).
 //
-// Goldens in `tests/fixtures/transforms/remove-spaces/<case>/` (plan §8.2); a case named
-// `klartext-…` is read with the Heidenhain profile, anything else with the Fanuc one.
+// Goldens in `tests/fixtures/transforms/remove-spaces/<case>/` (plan §8.2); the case's
+// `options.json` names its profile (`tests/unit/helpers/transformCases.ts`).
 // Every line in them is synthetic, written for gEdit from `docs/planning/syntax/`.
 //
 // The case that matters most is `fanuc-would-merge`: `N10 G0 X10 5` would join into
@@ -13,6 +13,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readTransformCases } from '../../../../tests/unit/helpers/transformCases';
 import { noMachine } from '$lib/core/machines/effective';
 import type { CodeDb } from '$lib/core/codes/types';
 import fanucJson from '$lib/data/profiles/fanuc-gcode.json';
@@ -41,17 +42,12 @@ interface Golden {
 }
 
 function goldens(): Golden[] {
-  return readdirSync(CASES, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()
-    .map((name) => ({
-      name,
-      cp: name.startsWith('klartext') ? klartext : fanuc,
-      input: readFileSync(join(CASES, name, 'input.nc'), 'utf8'),
-      options: JSON.parse(readFileSync(join(CASES, name, 'options.json'), 'utf8')) as Record<string, unknown>,
-      expected: readFileSync(join(CASES, name, 'expected.nc'), 'utf8'),
-    }));
+  const profiles: Record<string, CompiledProfile> = { 'fanuc-gcode': fanuc, 'heidenhain-klartext': klartext, 'okuma-osp': okuma, sinumerik: sinumerik };
+  return readTransformCases(CASES).map((golden) => {
+    const cp = profiles[golden.profile];
+    if (!cp) throw new Error(`${golden.name}: no profile ${golden.profile} in this test`);
+    return { name: golden.name, cp, input: golden.inputText, options: golden.options, expected: golden.expectedText };
+  });
 }
 
 function context(cp: CompiledProfile, options: Record<string, unknown> = {}): TransformContext {

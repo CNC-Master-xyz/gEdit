@@ -36,7 +36,7 @@
 import type { ChannelSet } from '$lib/core/channels/types';
 import type { DocMeta, EncodingName, Eol, Located, Msg, ReportData } from '$lib/app/types';
 import type { CodeEntry } from '$lib/core/codes/types';
-import type { EffectiveMachine, MachineParams } from '$lib/core/machines/types';
+import type { EffectiveMachine, MachineLimits, MachineMotion, MachineParams } from '$lib/core/machines/types';
 import type { Profile } from '$lib/core/profiles/types';
 
 // ---------------------------------------------------------------------------
@@ -138,6 +138,15 @@ export interface ScriptContextV2 {
     choice: 'document' | 'default' | 'none';
     params: MachineParams;
     source: EffectiveMachine['source'];
+    /**
+     * Phase 4 (P4b prelude; plan §6.4, AD-46): the machine's motion data and limits, each
+     * **absent** when the machine has none or its block is broken (`motionBlock`,
+     * `limitsBlock`); additive, `contract` stays 2. Filled by `buildContext` from
+     * `BuildContextInput.motion` / `.limits` (P4.8). Read by `_nc_cycles.machine_motion` and
+     * `machine_limits`.
+     */
+    motion?: MachineMotion;
+    limits?: MachineLimits;
   };
   /**
    * M12 (P12, §7.17, AD-32): the channel set of THIS document. **Absent** for a document
@@ -180,6 +189,9 @@ export interface BuildContextInput {
   params: Record<string, unknown>;
   /** M6: the document's effective machine; `buildContext` copies the §7.15 script member out of it. */
   machine: EffectiveMachine;
+  /** Phase 4 (P4b; plan §6.4): the valid motion and limits blocks of the document's machine (P4.8 fills them). */
+  motion?: MachineMotion;
+  limits?: MachineLimits;
   /** M12 (P12): the document's channel set (`channels.forDoc`); absent or `layout: 'none'` →
    *  no `channels` member in the context (WP12.6). */
   channels?: ChannelSet;

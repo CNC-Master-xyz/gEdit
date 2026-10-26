@@ -36,7 +36,7 @@ const fake = vi.hoisted(() => ({
   /** What each diff editor was last given. */
   shown: [] as unknown[],
   /** The listeners of the last diff editor: `content` (either pane's text), `model`, `diff` (updated). */
-  listeners: { content: [] as (() => void)[], model: [] as (() => void)[], diff: [] as (() => void)[] },
+  listeners: { content: [] as (() => void)[], model: [] as (() => void)[], diff: [] as (() => void)[], cursor: [] as (() => void)[] },
   /** Document ids that have no model. */
   noModel: new Set<string>(),
   /** What the diff editor shows right now, and the models that were shown while `setValue` filled them. */
@@ -137,9 +137,11 @@ vi.mock('$lib/monaco/setup', () => ({
         fake.listeners.content.length = 0;
         fake.listeners.model.length = 0;
         fake.listeners.diff.length = 0;
+        fake.listeners.cursor.length = 0;
         fake.collections.length = 0;
         const editorStub = (side: 'original' | 'modified') => ({
           onDidFocusEditorText: () => ({ dispose: () => {} }),
+          onDidChangeCursorPosition: (fn: () => void) => listen(fake.listeners.cursor, fn),
           onDidChangeModelContent: (fn: () => void) => listen(fake.listeners.content, fn),
           onDidChangeModel: (fn: () => void) => listen(fake.listeners.model, fn),
           getModel: () => (current?.model as Record<string, unknown> | undefined)?.[side] ?? null,
@@ -567,6 +569,18 @@ describe('word marks', () => {
     fake.lineChanges = [change([1, 1], [1, 1])];
     diffUpdated();
     expect(words(drawn('original'))).toEqual([{ line: 1, from: 6, to: 8, className: 'gedit-word-changed' }]);
+    handle.dispose();
+  });
+
+  it('marks the changed argument inside a cycle call with gedit-word-part, over the whole marked call (review NC-8)', async () => {
+    const handle = await shown('CYCLE81(10,0,2,-12)', 'CYCLE81(10,0,2,-15)', 'sinumerik');
+    fake.lineChanges = [change([1, 1], [1, 1])];
+    diffUpdated();
+    const parts = (rows: Drawn[]) => rows.filter((d) => d.className === 'gedit-word-part');
+    expect(words(drawn('original'))).toEqual([{ line: 1, from: 1, to: 20, className: 'gedit-word-changed' }]);
+    // `12` is offsets 16..18 of the line.
+    expect(parts(drawn('original'))).toEqual([{ line: 1, from: 17, to: 19, className: 'gedit-word-part' }]);
+    expect(parts(drawn('modified'))).toEqual([{ line: 1, from: 17, to: 19, className: 'gedit-word-part' }]);
     handle.dispose();
   });
 

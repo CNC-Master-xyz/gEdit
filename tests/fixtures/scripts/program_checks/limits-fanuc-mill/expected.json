@@ -1,0 +1,53 @@
+{
+  "title": "Program checks",
+  "columns": [
+    {
+      "key": "line",
+      "label": "Line"
+    },
+    {
+      "key": "check",
+      "label": "Check"
+    },
+    {
+      "key": "severity",
+      "label": "Severity"
+    },
+    {
+      "key": "message",
+      "label": "Finding"
+    }
+  ],
+  "rows": [
+    {
+      "line": 6,
+      "check": "Spindle speed limit",
+      "checkId": "speedLimit",
+      "severity": "warning",
+      "message": "S12000 is above the top speed of this machine, 10000 rpm (read as rpm: no speed unit is set before it)"
+    },
+    {
+      "line": 12,
+      "check": "Travel",
+      "checkId": "travelLimit",
+      "severity": "warning",
+      "message": "X-900. (line 12) to X-50. (line 7): the positions of X in work coordinates span 850 mm, more than the travel of this machine, X -800 to 0 mm (800 mm), so no work offset brings them all inside"
+    },
+    {
+      "line": 15,
+      "check": "Travel",
+      "checkId": "travelLimit",
+      "severity": "error",
+      "message": "Z-650. is outside the travel of this machine, Z -600 to 0 mm (in machine coordinates, G53)"
+    },
+    {
+      "line": 17,
+      "check": "Spindle speed limit",
+      "checkId": "speedLimit",
+      "severity": "warning",
+      "message": "G92 S15000: the speed clamp is above the top speed of this machine, 10000 rpm"
+    }
+  ],
+  "message": "4 findings in 2 checks. Machine 'Mill 1': where the presets read a number differently, the finding lists every reading.",
+  "findings": []
+}

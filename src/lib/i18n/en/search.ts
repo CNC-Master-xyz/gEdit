@@ -29,6 +29,8 @@ export default {
     'The editor\'s flavour; with "Whole address" the text is a word, not a pattern. A match that is empty (such as $ or ^ alone) is skipped.',
   /** Applies to text searches only (§7.6): a word never matches inside a comment or a string. */
   inComments: 'Also in comments (text searches only)',
+  /** Help of the greyed-out field while "Whole address" is ticked (T226). */
+  inCommentsWord: 'Not used with "Whole address": a word is never found inside a comment.',
   scope: 'Look in',
   scopeActive: 'The active document',
   scopeOpen: 'All open documents',
@@ -62,6 +64,8 @@ export default {
   errorWord: '"{query}" is not a word. Use an address with an optional value or condition: G1, T01, S>12000, SB=500.',
   errorValue: '"{query}" needs a number to compare with.',
   errorRegex: 'The regular expression is not valid: {message}',
+  /** T227: the expression ran past its time budget in the background reader and was stopped; nothing was found or changed. */
+  errorRegexSlow: 'The regular expression took longer than {seconds} seconds and was stopped. Nothing was found or changed. Make it simpler: avoid a repeat inside a repeat, such as (a+)+.',
 
   // Find Whole Address
   wholeAddressTitle: 'Find Whole Address',

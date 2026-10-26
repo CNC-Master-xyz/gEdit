@@ -69,7 +69,25 @@ const HEADER_FIELDS: &[&str] = &[
 /// The fields of one `[[params]]` table. Anything else is a warning.
 const PARAM_FIELDS: &[&str] = &[
     "id", "type", "label", "help", "default", "required", "min", "max", "decimals", "choices",
+    "prefill",
 ];
+
+/// The machine values a `prefill` may name (plan §6.4 rule 5): `machine.motion.` and one of
+/// these, or `rapid.<axis>`. A closed list, looked up by the webview and never evaluated.
+const PREFILL_MEMBERS: &[&str] = &[
+    "peckRetract",
+    "peckClearance",
+    "maxFeed",
+    "toolChange",
+    "rapidKind",
+    "units",
+];
+
+/// The parameter types a machine value can fill: a number, or the text of a choice. A `bool` or
+/// a path has no machine value, and a `text` field would be handed a number, which the form
+/// check rejects, leaving the field empty without a word. The same list as `PREFILL_TYPES` in
+/// `src/lib/core/machines/motion.ts`.
+const PREFILL_TYPES: &[&str] = &["number", "integer", "choice"];
 
 /// The `type` values a parameter may use; the same set as `FieldType` in
 /// `src/lib/core/forms/types.ts`.
@@ -151,6 +169,13 @@ pub struct ParamSpec {
     pub decimals: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choices: Option<Vec<ChoiceSpec>>,
+    /// P4b (plan §6.4 rule 5): `machine.motion.<member>`. The webview puts the document's
+    /// machine value into the field when the form opens; nothing is read behind the user's
+    /// back. Anything that is not on the closed list is dropped with a warning in
+    /// [`validate`] and never reaches the webview, so a header can only select one of a few
+    /// named values and cannot reach into the machine's record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill: Option<Value>,
 }
 
 /// One option of a `choice` or `address-list` parameter. `label` is display text.
@@ -396,7 +421,60 @@ fn validate(meta: &mut ScriptMeta, warnings: &mut Vec<String>) -> Result<(), Str
         }
         seen.push(&param.id);
     }
+    for param in &mut meta.params {
+        check_prefill(param, warnings);
+    }
     Ok(())
+}
+
+/// True for `machine.motion.<member>` with a member of the closed list: one of
+/// [`PREFILL_MEMBERS`], or `rapid.` and an axis written like a speed address (an upper-case
+/// letter and up to three upper-case letters or digits).
+fn is_prefill_path(text: &str) -> bool {
+    let Some(member) = text.strip_prefix("machine.motion.") else {
+        return false;
+    };
+    if PREFILL_MEMBERS.contains(&member) {
+        return true;
+    }
+    let Some(axis) = member.strip_prefix("rapid.") else {
+        return false;
+    };
+    let mut chars = axis.chars();
+    chars.next().is_some_and(|c| c.is_ascii_uppercase())
+        && axis.len() <= 4
+        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+}
+
+/// A `prefill` that is not on the closed list, or sits on a parameter no machine value can
+/// fill, is a warning and is dropped (never an error: the script still runs, its field is
+/// simply empty). The text is never evaluated, only compared.
+fn check_prefill(param: &mut ParamSpec, warnings: &mut Vec<String>) {
+    let Some(value) = param.prefill.take() else {
+        return;
+    };
+    let id = &param.id;
+    let Some(text) = value.as_str() else {
+        warnings.push(format!(
+            "parameter `{id}`: `prefill` must be text such as \"machine.motion.peckRetract\" and is ignored"
+        ));
+        return;
+    };
+    if !is_prefill_path(text) {
+        let shown: String = text.chars().take(60).collect();
+        warnings.push(format!(
+            "parameter `{id}`: `prefill` {shown:?} is not a machine value gEdit offers and is ignored"
+        ));
+        return;
+    }
+    if !PREFILL_TYPES.contains(&param.kind.as_str()) {
+        warnings.push(format!(
+            "parameter `{id}`: `prefill` fills a number, integer or choice parameter, not `{}`, and is ignored",
+            param.kind
+        ));
+        return;
+    }
+    param.prefill = Some(value);
 }
 
 fn validate_param(param: &ParamSpec) -> Result<(), String> {
@@ -797,6 +875,127 @@ print(sys.stdin.read())
         ] {
             assert_eq!(meta(&param(body)).params.len(), 1, "{body:?}");
         }
+    }
+
+    /// P4b (plan §6.4 rule 5): `prefill = "machine.motion.<member>"` names a machine value the
+    /// form opens with. Only the closed list is accepted, and the text is carried as written.
+    #[test]
+    fn accepts_a_prefill_from_the_closed_list_and_hands_it_on() {
+        let param = |kind: &str, prefill: &str| {
+            format!(
+                "# /// gedit\n# name = \"x\"\n# [[params]]\n# id = \"p\"\n# label = \"P\"\n# type = \"{kind}\"\n# prefill = \"{prefill}\"\n# ///\n"
+            )
+        };
+        for member in [
+            "peckRetract",
+            "peckClearance",
+            "maxFeed",
+            "toolChange",
+            "rapidKind",
+            "units",
+            "rapid.X",
+            "rapid.C",
+            "rapid.AR",
+            "rapid.S1B2",
+        ] {
+            let path = format!("machine.motion.{member}");
+            let meta = meta(&param("number", &path));
+            assert_eq!(meta.warnings, Vec::<String>::new(), "{path}");
+            assert_eq!(meta.params[0].prefill, Some(Value::from(path.clone())));
+            // ... and reaches the webview as a plain string next to the other field members.
+            let json = serde_json::to_value(&meta.params[0]).unwrap();
+            assert_eq!(json["prefill"], Value::from(path));
+        }
+        {
+            let meta = meta(&param("integer", "machine.motion.maxFeed"));
+            assert!(meta.warnings.is_empty(), "integer");
+            assert!(meta.params[0].prefill.is_some(), "integer");
+        }
+        let choice = meta(
+            "# /// gedit\n# name = \"x\"\n# [[params]]\n# id = \"p\"\n# label = \"P\"\n# type = \"choice\"\n# choices = [{ label = \"A\", value = \"straight\" }]\n# prefill = \"machine.motion.rapidKind\"\n# ///\n",
+        );
+        assert!(choice.warnings.is_empty());
+        assert!(choice.params[0].prefill.is_some());
+    }
+
+    /// A parameter without it serializes exactly as before: no `prefill` member at all.
+    #[test]
+    fn a_parameter_without_prefill_has_none_and_serializes_none() {
+        let meta = meta(FULL);
+        assert!(meta.params.iter().all(|p| p.prefill.is_none()));
+        let json = serde_json::to_value(&meta.params[0]).unwrap();
+        assert!(json.get("prefill").is_none());
+    }
+
+    /// Anything that is not on the list is a warning and is dropped: the script runs, the
+    /// field is empty, and the text never reaches the webview. Nothing here is evaluated.
+    #[test]
+    fn ignores_a_prefill_that_is_not_on_the_list_with_a_warning() {
+        let param = |prefill: &str| {
+            format!(
+                "# /// gedit\n# name = \"x\"\n# [[params]]\n# id = \"p\"\n# label = \"P\"\n# type = \"number\"\n# prefill = {prefill}\n# ///\n"
+            )
+        };
+        for bad in [
+            "\"machine.motion\"",
+            "\"machine.motion.\"",
+            "\"machine.motion.rapid\"",
+            "\"machine.motion.rapid.\"",
+            "\"machine.motion.rapid.x\"",
+            "\"machine.motion.rapid.X.Y\"",
+            "\"machine.motion.rapid.TOOLONG\"",
+            "\"machine.motion.constructor\"",
+            "\"machine.motion.__proto__\"",
+            "\"machine.motion.maxFeed \"",
+            "\" machine.motion.maxFeed\"",
+            "\"machine.motion.maxFeed; rm -rf /\"",
+            "\"machine.motion.maxFeed.x\"",
+            "\"machine.limits.spindle.main\"",
+            "\"motion.maxFeed\"",
+            "\"../../etc/passwd\"",
+            "\"${machine.motion.maxFeed}\"",
+            "\"\"",
+            "5",
+            "true",
+            "[\"machine.motion.maxFeed\"]",
+        ] {
+            let meta = meta(&param(bad));
+            assert_eq!(meta.warnings.len(), 1, "{bad}: {:?}", meta.warnings);
+            assert!(
+                meta.warnings[0].starts_with("parameter `p`: `prefill`"),
+                "{bad}: {}",
+                meta.warnings[0]
+            );
+            assert_eq!(meta.params[0].prefill, None, "{bad}");
+            // The script is still usable: a bad prefill is never a header error.
+            assert_eq!(meta.params.len(), 1);
+        }
+    }
+
+    /// A machine value cannot fill a checkbox or a path; the warning says which types can.
+    #[test]
+    fn ignores_a_prefill_on_a_parameter_a_machine_value_cannot_fill() {
+        for kind in ["bool", "file", "folder", "text"] {
+            let meta = meta(&format!(
+                "# /// gedit\n# name = \"x\"\n# [[params]]\n# id = \"p\"\n# label = \"P\"\n# type = \"{kind}\"\n# prefill = \"machine.motion.maxFeed\"\n# ///\n"
+            ));
+            assert_eq!(meta.warnings.len(), 1, "{kind}");
+            assert!(
+                meta.warnings[0].contains("number, integer or choice"),
+                "{kind}"
+            );
+            assert_eq!(meta.params[0].prefill, None, "{kind}");
+        }
+    }
+
+    /// A long text in `prefill` is cut in the warning, so a header cannot flood the message.
+    #[test]
+    fn a_long_unknown_prefill_is_cut_in_its_warning() {
+        let long = "x".repeat(500);
+        let meta = meta(&format!(
+            "# /// gedit\n# name = \"x\"\n# [[params]]\n# id = \"p\"\n# label = \"P\"\n# type = \"number\"\n# prefill = \"{long}\"\n# ///\n"
+        ));
+        assert!(meta.warnings[0].len() < 200, "{}", meta.warnings[0].len());
     }
 
     /// CRLF files, a bare `#` for a blank TOML line, and indentation after the marker.

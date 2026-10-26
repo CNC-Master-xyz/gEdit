@@ -29,7 +29,7 @@
         "check": "Machine reading",
         "checkId": "machineReading",
         "severity": "info",
-        "message": "X50: read as 0.05 mm by 'Increments of 0.001 mm (IS-B)' (the assumed default), 0.005 mm by 'Increments of 0.0001 mm (IS-C)' or 50 mm by 'As written'; choose a machine"
+        "message": "X50: read as 0.05 mm by 'Increments of 0.001 mm (IS-B)' (the assumed default), 0.5 mm by 'Increments of 0.01 mm (IS-A)', 0.005 mm by 'Increments of 0.0001 mm (IS-C)' or 50 mm by 'As written'; choose a machine"
       },
       {
         "line": 16,

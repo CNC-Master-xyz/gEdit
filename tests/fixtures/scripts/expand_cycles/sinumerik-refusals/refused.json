@@ -1,0 +1,47 @@
+{
+  "message": "Nothing was changed: 7 blocks cannot be written out as plain moves: 1 tapping or thread cycle, 2 cycles with a value other than its default, 2 cycles run in a way gEdit does not write out, 1 cycle missing a value, 1 cycle with a variable or a calculation. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N60 CYCLE83(10,0,2,-15,,-5,,0,0,0,1,2,,,,,1): this cycle runs in a way gEdit does not write out for this value (VARI=2).",
+      "reason": "variant-unknown"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "N80 CYCLE83(10,0,2,-15,,-5,,0,0,0,0.5,1,,,,,1): this value changes how the cycle moves in a way gEdit does not write out; only its default can be expanded (FRF=0.5).",
+      "reason": "param-not-default"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "N100 CYCLE81(10,0,,-5): a value the cycle needs is not written and has no default (the surface and the set-up clearance).",
+      "reason": "value-missing"
+    },
+    {
+      "line": 13,
+      "severity": "error",
+      "message": "N120 CYCLE84(10,0,2,-12,,0,3,,1.0,0,300,300): a tapping or thread cycle keeps the spindle and the feed in step, which plain moves cannot do.",
+      "reason": "tapping"
+    },
+    {
+      "line": 15,
+      "severity": "error",
+      "message": "N140 CYCLE81(R1,0,2,-5): a value of the cycle is a variable or a calculation (RTP=R1).",
+      "reason": "expression"
+    },
+    {
+      "line": 17,
+      "severity": "error",
+      "message": "N160 CYCLE83(10,0,2,-15,,-5,,0,0,0,1,0,,,0.5): this cycle runs in a way gEdit does not write out for this value (VARI=0).",
+      "reason": "variant-unknown"
+    },
+    {
+      "line": 19,
+      "severity": "error",
+      "message": "N180 CYCLE81(10,0,2,-5,,0,0,2,0): this value changes how the cycle moves in a way gEdit does not write out; only its default can be expanded (_DMODE=2).",
+      "reason": "param-not-default"
+    }
+  ]
+}

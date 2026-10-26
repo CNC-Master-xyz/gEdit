@@ -336,7 +336,7 @@
     },
     {
       "code": "G31",
-      "description": "Cuts one threading pass to the diameter in X, written the same way as G33. A following block with only a new X cuts the next pass. F is the lead of the thread, never a feed rate.",
+      "description": "A fixed thread cycle written the same way as G33: each block cuts one threading pass to the diameter in X and goes back to the point it started from. A following block with only a new X cuts the next pass. F is the lead of the thread, never a feed rate. gEdit does not work out where a tapered pass starts.",
       "group": "motion",
       "label": "Thread pass along Z",
       "modal": true,
@@ -358,13 +358,23 @@
         },
         {
           "address": "I",
-          "label": "Taper, as the difference in radius from start to end",
+          "label": "Taper, as the difference in radius from start to end: plus for a rising taper, minus for a falling one",
           "lengthAlong": "X"
         },
         {
           "address": "A",
           "label": "Taper angle, written instead of I",
           "unit": "angle"
+        },
+        {
+          "address": "E",
+          "label": "Change of the lead per lead, for a thread with a variable lead",
+          "unit": "feedPerRev"
+        },
+        {
+          "address": "K",
+          "label": "Shift of the thread start along Z",
+          "lengthAlong": "Z"
         },
         {
           "address": "L",
@@ -378,17 +388,24 @@
           "label": "Threads within the lead",
           "min": 1,
           "unit": "count"
+        },
+        {
+          "address": "C",
+          "label": "Phase shift of the start, for a thread with several starts; read in the first block only",
+          "position": "none",
+          "unit": "angle"
         }
       ],
       "pitchFeed": true,
       "review": "pending",
       "sets": {
-        "motion": "feed"
+        "motion": "feed",
+        "path": "cycle"
       }
     },
     {
       "code": "G32",
-      "description": "Cuts one threading pass across the face to the X in the block, at the Z of the pass; the lead runs along X. F is the lead of the thread, never a feed rate.",
+      "description": "A fixed thread cycle across the face: each block cuts one threading pass to the X in the block, at the Z of the pass, and goes back to the point it started from; the lead runs along X. F is the lead of the thread, never a feed rate. gEdit does not work out where a tapered pass starts.",
       "group": "motion",
       "label": "Face thread pass",
       "modal": true,
@@ -410,13 +427,23 @@
         },
         {
           "address": "K",
-          "label": "Taper, as the difference from start to end",
+          "label": "Taper, as the difference from start to end: plus for a rising slope, minus for a falling one",
           "lengthAlong": "Z"
         },
         {
           "address": "A",
           "label": "Taper angle, written instead of K",
           "unit": "angle"
+        },
+        {
+          "address": "E",
+          "label": "Change of the lead per lead, for a thread with a variable lead",
+          "unit": "feedPerRev"
+        },
+        {
+          "address": "I",
+          "label": "Shift of the thread start along X",
+          "lengthAlong": "X"
         },
         {
           "address": "L",
@@ -430,17 +457,24 @@
           "label": "Threads within the lead",
           "min": 1,
           "unit": "count"
+        },
+        {
+          "address": "C",
+          "label": "Phase shift of the start, for a thread with several starts; read in the first block only",
+          "position": "none",
+          "unit": "angle"
         }
       ],
       "pitchFeed": true,
       "review": "pending",
       "sets": {
-        "motion": "feed"
+        "motion": "feed",
+        "path": "cycle"
       }
     },
     {
       "code": "G33",
-      "description": "Cuts one threading pass to the diameter in X and ends at Z. A following block with only a new X cuts the next pass, which is how a post writes a list of passes. F is the lead of the thread, never a feed rate.",
+      "description": "A fixed thread cycle along Z: each block cuts one threading pass to the diameter in X, ends at Z and goes back to the point it started from. A following block with only a new X cuts the next pass, which is how a post writes a list of passes. F is the lead of the thread, never a feed rate. gEdit does not work out where a tapered pass starts.",
       "group": "motion",
       "label": "Thread pass along Z",
       "modal": true,
@@ -462,13 +496,23 @@
         },
         {
           "address": "I",
-          "label": "Taper, as the difference in radius from start to end",
+          "label": "Taper, as the difference in radius from start to end: plus for a rising taper, minus for a falling one",
           "lengthAlong": "X"
         },
         {
           "address": "A",
           "label": "Taper angle, written instead of I",
           "unit": "angle"
+        },
+        {
+          "address": "E",
+          "label": "Change of the lead per lead, for a thread with a variable lead",
+          "unit": "feedPerRev"
+        },
+        {
+          "address": "K",
+          "label": "Shift of the thread start along Z",
+          "lengthAlong": "Z"
         },
         {
           "address": "L",
@@ -482,12 +526,19 @@
           "label": "Threads within the lead",
           "min": 1,
           "unit": "count"
+        },
+        {
+          "address": "C",
+          "label": "Phase shift of the start, for a thread with several starts; read in the first block only",
+          "position": "none",
+          "unit": "angle"
         }
       ],
       "pitchFeed": true,
       "review": "pending",
       "sets": {
-        "motion": "feed"
+        "motion": "feed",
+        "path": "cycle"
       }
     },
     {
@@ -1088,17 +1139,19 @@
       "params": [
         {
           "address": "XA",
+          "axis": "X",
           "label": "First change point, as a diameter",
           "unit": "length"
         },
         {
           "address": "ZA",
+          "axis": "Z",
           "label": "First change point along Z, on the face",
           "unit": "length"
         },
         {
           "address": "DA",
-          "label": "Depth of cut after the first point",
+          "label": "Depth of cut after the first point, as a diameter and incremental",
           "min": 0,
           "unit": "length"
         },
@@ -1109,17 +1162,19 @@
         },
         {
           "address": "XB",
+          "axis": "X",
           "label": "Second change point, as a diameter",
           "unit": "length"
         },
         {
           "address": "ZB",
+          "axis": "Z",
           "label": "Second change point along Z, on the face",
           "unit": "length"
         },
         {
           "address": "DB",
-          "label": "Depth of cut after the second point",
+          "label": "Depth of cut after the second point, as a diameter and incremental",
           "min": 0,
           "unit": "length"
         },
@@ -1130,6 +1185,7 @@
         }
       ],
       "pitchFeedAmbiguous": true,
+      "review": "pending",
       "tappingElsewhere": true
     },
     {
@@ -1140,7 +1196,7 @@
       "params": [
         {
           "address": "D",
-          "label": "Depth of cut",
+          "label": "Depth of cut, as a diameter and incremental",
           "min": 0,
           "unit": "length"
         },
@@ -1172,7 +1228,7 @@
       "params": [
         {
           "address": "D",
-          "label": "Depth of cut",
+          "label": "Depth of cut, as a diameter and incremental",
           "min": 0,
           "unit": "length"
         },
@@ -1224,13 +1280,13 @@
       "params": [
         {
           "address": "D",
-          "label": "Depth of the first cut",
+          "label": "Depth of the first cut, as a diameter and incremental",
           "min": 0,
           "unit": "length"
         },
         {
           "address": "H",
-          "label": "Thread height",
+          "label": "Thread height, as a diameter and incremental",
           "min": 0,
           "unit": "length"
         },
@@ -1241,7 +1297,7 @@
         },
         {
           "address": "U",
-          "label": "Finish allowance on X",
+          "label": "Finish allowance on X, as a diameter",
           "min": 0,
           "unit": "length"
         },
@@ -2213,7 +2269,7 @@
     },
     {
       "code": "G313",
-      "description": "On a machine with three turrets, the blocks that follow are for turret C.",
+      "description": "On a machine with three turrets, the blocks that follow are for turret C. Not on every control: on the OSP-P200 G312 and G313 are contour codes for the side face, and the 2014 OSP-P300 list also has G314 for turret D.",
       "group": "turret",
       "label": "Turret C",
       "review": "pending"
@@ -2472,6 +2528,15 @@
       "label": "Tailstock quill, high pushing force"
     },
     {
+      "code": "M100",
+      "conflicts": [
+        "radiusComp"
+      ],
+      "description": "On a machine with two turrets cutting at the same time, each turret waits at its M100 until the other one reaches its own; both programs need the same number of M100. Not allowed while nose radius compensation is on, and not to be mixed with the P wait numbers.",
+      "label": "Wait for the other turret",
+      "review": "pending"
+    },
+    {
       "code": "M109",
       "description": "Returns the spindle from C-axis positioning to turning.",
       "group": "spindle",
@@ -2495,6 +2560,7 @@
       "label": "C-axis clamp"
     },
     {
+      "call": true,
       "code": "CALL",
       "description": "Runs the named program and comes back. Q repeats the call, and names written with an equals sign hand values over to the subprogram; RTS clears them again.",
       "group": "subprogram",
@@ -2516,6 +2582,7 @@
       "label": "End of subprogram"
     },
     {
+      "call": true,
       "code": "MODIN",
       "description": "Runs the named program after every following move block, until MODOUT ends it.",
       "group": "subprogram",

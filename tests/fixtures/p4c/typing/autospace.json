@@ -1,0 +1,833 @@
+{
+ "about": "Goldens of plan \u00a76.5 rule 1 (auto-space). Each row: the text before the cursor, the letter typed, the text after it, the line above (continuation state only), and whether a space goes in front of the letter. Synthetic, written for gEdit.",
+ "rows": [
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after a word with a literal value"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "N10",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after the block number"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1 X5.",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after a decimal value"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "g1",
+   "ch": "x",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "lower case, as typed with upper case off"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "(NOTE",
+   "ch": "A",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a comment"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G",
+   "ch": "O",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "G then O of GOTO: the word before has no value yet"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "IF[#1GT0]",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a bracket that is not a word value (IF[...]GOTO)"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1 ",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a blank"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "at the start of the line"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "G1",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after a word with a literal value"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "N10",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after the block number"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "G1 X5.",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after a decimal value"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "g1",
+   "ch": "x",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "lower case, as typed with upper case off"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "(NOTE",
+   "ch": "A",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a comment"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "G",
+   "ch": "O",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "G then O of GOTO: the word before has no value yet"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "IF[#1GT0]",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a bracket that is not a word value (IF[...]GOTO)"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "G1 ",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a blank"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "at the start of the line"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "X#101",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "after a word with a variable value"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "X[#1+1]",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "after a word with a closed bracket value"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1X-#1",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "after a signed variable value"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1X-[#2]",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "after a signed bracket value"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "M98",
+   "ch": "P",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "packed M98P"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G65 P9010",
+   "ch": "A",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a macro argument"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "/N10",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "after a block number behind a block-skip mark"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1 X10.",
+   "ch": "F",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a feed after a coordinate"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1 X10.",
+   "ch": "Y",
+   "after": "5.",
+   "previousLine": null,
+   "space": true,
+   "why": "a space only in front of the letter typed"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1 (CUT",
+   "ch": "S",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a comment opened earlier on the line"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "GO",
+   "ch": "T",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "inside GOTO"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "GOT",
+   "ch": "O",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "the last letter of GOTO"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "#1=#2+",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after an operator in a variable expression"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "#1=#2",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a variable, not a word"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "X[#1+",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "inside an open bracket expression"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "O1234",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after the program number"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "%",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after the tape mark"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "M98 <sub_a>",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a program name"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1X.",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "a value that is only a point: the tokenizer cannot tell"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1X-",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "a sign without a value"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1 X1.,",
+   "ch": "R",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "the R of ,R"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "WHILE[#1LT10]",
+   "ch": "D",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after WHILE[...]"
+  },
+  {
+   "profile": "fanuc-gcode",
+   "before": "G1 X1.(A)",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a comment"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "G1X10.",
+   "ch": "Z",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a lathe axis after a coordinate"
+  },
+  {
+   "profile": "fanuc-lathe",
+   "before": "G1 U",
+   "ch": "W",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "U has no value yet"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "G1",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after a word with a literal value"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "N10",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after the block number"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "$ X10",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "on a line that continues a block"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "G1 X[VC1+1]",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "after a closed bracket value"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "NLA",
+   "ch": "P",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "inside a sequence name (NLAP1)"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "N",
+   "ch": "L",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "the second letter of a sequence name"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "VAR1",
+   "ch": "A",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "a name with digits (VAR1A)"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "VC1=VC2*",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a variable expression"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "IF[VC1 EQ 1]",
+   "ch": "N",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after IF[...]"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "G1 X1 (CHECK",
+   "ch": "A",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a comment"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "$PART.MIN%",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after the file header"
+  },
+  {
+   "profile": "okuma-osp",
+   "before": "CALL OSUB",
+   "ch": "Q",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a called program name"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "G1",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after a word with a literal value"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "N10",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after the block number"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "MSG(\"ab",
+   "ch": "C",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a MSG string"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "CYCL",
+   "ch": "E",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "inside CYCLE81"
+  },
+  {
+   "profile": "sinumerik-mill",
+   "before": "G1",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after a word with a literal value"
+  },
+  {
+   "profile": "sinumerik-mill",
+   "before": "N10",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a letter after the block number"
+  },
+  {
+   "profile": "sinumerik-mill",
+   "before": "MSG(\"ab",
+   "ch": "C",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a MSG string"
+  },
+  {
+   "profile": "sinumerik-mill",
+   "before": "CYCL",
+   "ch": "E",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "inside CYCLE81"
+  },
+  {
+   "profile": "sinumerik",
+   "before": ":10",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "after a main block number"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "M6",
+   "ch": "T",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a tool after M6"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "T1",
+   "ch": "D",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "an offset after the tool"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "G1 X=R1",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after an assignment value: the tokenizer reads one word"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "LIM",
+   "ch": "S",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "inside LIMS[2]="
+  },
+  {
+   "profile": "sinumerik",
+   "before": "S",
+   "ch": "B",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "S then B of SB=: the word before has no value yet"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "SB=1200",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after SB=1200: the tokenizer reads one word"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "R1=R2*",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in an arithmetic expression (R1=R2*2)"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "R1=5",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a value of an assignment, not an address word"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "T=\"dri",
+   "ch": "L",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a tool name string"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "LOOP_A:",
+   "ch": "G",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a label definition"
+  },
+  {
+   "profile": "sinumerik",
+   "before": "X=IC(5)",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a value the tokenizer cannot finish"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L X+10",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "words must be separated: X+10 then Y"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L X+10 Y+5",
+   "ch": "R",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a radius word after a coordinate"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L X+Q1",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "after a coordinate with a Q parameter"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L IX+5",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "after an incremental coordinate"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L Z+100 R0 FMAX M3",
+   "ch": "M",
+   "after": "",
+   "previousLine": null,
+   "space": true,
+   "why": "a second M word"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "  Y+5",
+   "ch": "R",
+   "after": "",
+   "previousLine": "5 L X+10 ~",
+   "space": true,
+   "why": "on the tail of a continued block"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "L then X: L has no value"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "FMA",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "inside FMAX"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L X+10 FMA",
+   "ch": "X",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "inside FMAX after a coordinate"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "TOOL CAL",
+   "ch": "L",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "inside TOOL CALL"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "TOOL CALL 1",
+   "ch": "Z",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after the tool number, a value without an address: the tokenizer cannot tell"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "0 BEGIN PGM PAR",
+   "ch": "T",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in the program name"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "CYCL DEF 200 BOHRE",
+   "ch": "N",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a cycle name"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L X+10 ;COMMEN",
+   "ch": "T",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "in a comment"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L X+",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "a sign without a value"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "5",
+   "ch": "L",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "L is a keyword, not an address word"
+  },
+  {
+   "profile": "heidenhain-klartext",
+   "before": "L X+10 ",
+   "ch": "Y",
+   "after": "",
+   "previousLine": null,
+   "space": false,
+   "why": "after a blank"
+  }
+ ]
+}

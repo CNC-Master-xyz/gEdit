@@ -594,7 +594,27 @@ export function applyRuleEdit(value: ChannelParams, index: number, id: string, v
   const base = value.syncMarks[index];
   if (base === undefined) return value;
   const rule = ruleFromValues({ ...ruleToValues(base), [id]: v }, base);
-  return { ...value, syncMarks: value.syncMarks.map((r, k) => (k === index ? rule : r)) };
+  return { ...value, syncMarks: tidySharedWaits(value.syncMarks.map((r, k) => (k === index ? rule : r))) };
+}
+
+/** The block without wait rule `index`; a rule that shared its waits with it no longer does. */
+export function removeRuleAt(value: ChannelParams, index: number): ChannelParams {
+  const rules = Array.isArray(value.syncMarks) ? value.syncMarks : [];
+  return { ...value, syncMarks: tidySharedWaits(rules.filter((_, k) => k !== index)) };
+}
+
+/**
+ * Manual check D2-4 (a), integration: `sharesWaitsWith` names a rule that checks by count (the
+ * validator insists). The form shows no field for it, so a rule removed, or one whose check is
+ * no longer by count, takes the reference with it instead of leaving an error nobody can fix.
+ */
+function tidySharedWaits(rules: SyncRule[]): SyncRule[] {
+  const counted = new Set(rules.filter((r) => r.semantics === 'count').map((r) => r.id));
+  return rules.map((r) => {
+    if (r.sharesWaitsWith === undefined || counted.has(r.sharesWaitsWith)) return r;
+    const { sharesWaitsWith: _gone, ...rest } = r;
+    return rest;
+  });
 }
 
 /** A copy of `list` with item `i` moved by one place; the list itself when it cannot move. */

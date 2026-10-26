@@ -1,0 +1,45 @@
+{
+  "title": "Program checks",
+  "columns": [
+    {
+      "key": "line",
+      "label": "Line"
+    },
+    {
+      "key": "check",
+      "label": "Check"
+    },
+    {
+      "key": "severity",
+      "label": "Severity"
+    },
+    {
+      "key": "message",
+      "label": "Finding"
+    }
+  ],
+  "rows": [
+    {
+      "line": 11,
+      "check": "Spindle speed limit",
+      "checkId": "speedLimit",
+      "severity": "warning",
+      "message": "S4500 is above the top speed of this machine, 4000 rpm"
+    },
+    {
+      "line": 12,
+      "check": "Travel",
+      "checkId": "travelLimit",
+      "severity": "error",
+      "message": "X-5. is outside the travel of this machine, X (diameter) 0 to 600 mm (in machine coordinates, G53)"
+    }
+  ],
+  "message": "2 findings in 2 checks. Machine 'Lathe 4': where the presets read a number differently, the finding lists every reading.",
+  "findings": [
+    {
+      "line": 9,
+      "severity": "info",
+      "message": "The program frame, the jump targets and the profile targets need the whole program; they are not checked in a selection."
+    }
+  ]
+}

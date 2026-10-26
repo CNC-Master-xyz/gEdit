@@ -1,0 +1,24 @@
+{
+  "$format": 1,
+  "about": "v1.2.0 T119: the first block of the two-block G76 opens the form of that block (P packed, Q smallest cut, R finishing allowance). The allowance changes.",
+  "input": "../../nc/fanuc-lathe/l01-turning-a.nc",
+  "line": 32,
+  "form": {
+    "values": {
+      "P": "020060",
+      "Q": "80",
+      "R": "0.03"
+    },
+    "kept": []
+  },
+  "values": {
+    "R": "0.05"
+  },
+  "expected": {
+    "first": 32,
+    "last": 32,
+    "lines": [
+      "G76 P020060 Q80 R0.05"
+    ]
+  }
+}

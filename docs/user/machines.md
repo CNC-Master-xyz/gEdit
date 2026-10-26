@@ -105,9 +105,11 @@ A control can distinguish kinds of word, and gEdit follows it. The classes are:
 
 On the Fanuc presets that count increments, a feed written **without a point** is counted
 too, in its own unit: a feed per minute in steps of 1 mm/min (0.01 in/min), a feed per
-revolution in steps of 0.01 mm/rev (0.0001 in/rev). So `F155` is 155 mm/min whatever the
-decimal-point setting is, and `F25` as a feed per revolution is 0.25 mm/rev on IS-B or IS-C
-and 25 mm/rev with calculator-type input. A feed written with a point is read as written.
+revolution in steps of 0.01 mm/rev (0.0001 in/rev) on a mill and of 0.0001 mm/rev
+(0.000001 in/rev) on a lathe, where a thread lead counts the same way. So `F155` is 155
+mm/min whatever the decimal-point setting is, and `F25` as a feed per revolution is 0.25
+mm/rev on an IS-B or IS-C mill (on an IS-B lathe `F2500` is 0.25 mm/rev) and 25 mm/rev with
+calculator-type input. A feed written with a point is read as written.
 That is why the feed limits in the scaling script keep working for a feed per minute even
 with no machine chosen, and why a point-less feed per revolution has **no value** until a
 machine says which reading applies (the two presets disagree by a factor of a hundred). The
@@ -121,7 +123,10 @@ cycle's `F` follows the feed unit in force (under `G94` it is a feed per minute)
 the `F` of `G101`–`G103` is a feed per minute whatever the feed mode is.
 
 Angles and dwells do not follow the metric/inch switch: degrees are degrees and seconds are
-seconds in an inch program too. On a lathe control that counts in thousandths, `C90000` is
+seconds in an inch program too. On a Fanuc, a dwell `G04 X…` or `U…` is read as seconds, with
+the control's dwell parameters at their defaults; a control set to dwell in revolutions under
+feed per revolution (parameter 3405 bit 1), or to a fixed 1 ms step for `P` (parameter 1015
+bit 7), is not modelled. On a lathe control that counts in thousandths, `C90000` is
 90° and `G04 X2500` is a dwell of 2.5 seconds — in a millimetre program and in an inch
 program alike. The Fanuc mill lists `A`, `B` and `C` as angular words, so on an IS-B mill
 `C90000` is 90° as well, not 90 mm or 9 inches. The Okuma 10 µm preset has no inch reading
@@ -188,6 +193,13 @@ count of increments has **no** value. `G83 ... Q6000` is a six-millimetre peck o
 set to thousandths and something else entirely on a machine set up differently, and "as
 written" does not answer the question. gEdit says so instead of picking one.
 
+The **IS-A preset** (Fanuc mill and lathe: increments of 0.01 mm, 0.001 inch, 0.01 degree and
+0.01 second; feeds as on IS-B) is listed among the readings of a word with no machine, like
+IS-B and IS-C. The **Digits** check of Check Program leaves it out when no machine is
+chosen, because a word is reported only when it has too many digits under every reading,
+and the coarse IS-A reading, which few machines run, would hide every such word under the
+others. With a machine set to IS-A the check uses it.
+
 On **Okuma**, nothing with a unit has a value until you choose a machine, not even a word
 with a decimal point: the three unit systems read `X64.` as 64 mm, 0.64 mm or 0.064 mm, and
 none of them is safer to assume than the others. The scale-feed limits are therefore
@@ -212,13 +224,17 @@ that machine.
 |---|---|
 | **Name** | What the status bar and the picker call it. Yours to choose, up to 64 characters and different from every other machine's name, capitals aside: "Lathe 2", "Mill 3", "the old one" |
 | **How the control reads numbers** | One of the dialect's presets — on Okuma, the control's unit system; Sinumerik has only one. Every preset's name says what it does to a word with and without a point, so you can pick it without knowing the jargon. A preset the project has taken from a manual and not checked against a machine says **(unconfirmed)** after its name, and the help under the choice says it is the usual setting for this kind of control, not one checked against yours: compare it with your machine's parameters before you rely on it |
+| **Point-less feeds** | Fanuc only, and only with one of the increment presets (not *as written*): how the control counts a feed written without a decimal point. The choices differ for a mill and a lathe, because the control's two parameters for it belong to one kind of machine each. **Mill:** *Standard* is a feed per minute in 1 mm/min and a feed per revolution in 0.01 mm/rev; the other choice counts the feed per revolution in thousandths (0.001 mm/rev; parameter 1405 bit 1). **Lathe:** *Standard* is a feed per minute in 1 mm/min and a feed per revolution and thread lead in 0.0001 mm/rev (`F2500` is 0.25 mm/rev); *per minute in thousandths* counts the feed per minute in 0.001 mm/min (parameter 1404 bit 2); *Series 15 format* counts the feed per revolution and the thread lead in 0.01 mm/rev (the old format, parameter 0001 bit 1); *both* does both. You read the parameters off your machine; gEdit does not assume a change. A choice marked **(unconfirmed)** is a documented default, not one checked against a machine. A feed with an inverse-time or per-tooth meaning gets no value in any choice. Without a machine gEdit never applies it |
 | **Units at power-on** | Millimetres or inches — what the control measures in until the program says otherwise |
 | **X and U are diameters at power-on** (Fanuc lathe), **X is a diameter at power-on** (Okuma, Sinumerik turning and milling) | Off for a control set to radius programming. The label names the dialect's diameter words, and on Sinumerik this is the diameter programming (`DIAMON`) a program starts with; it defaults to on for turning and to off for the Sinumerik milling profile |
 | **G-code system** | Fanuc lathe only: A or B. See [the Fanuc lathe](#the-fanuc-lathe) |
-| **U, W, V and H move incrementally** | Fanuc lathe only: *U and W* (the default), *U, W, V and H*, or *none*. See [the Fanuc lathe](#the-fanuc-lathe) |
+| **U, W, V and H move incrementally** | Fanuc lathe only: *U and W* (the default in G-code system A), *U, W, V and H*, or *none* (the default in system B). See [the Fanuc lathe](#the-fanuc-lathe) |
 | **Tool word: offset digits** | Fanuc lathe and Okuma: how a `T` word splits into station and offset. See [the Fanuc lathe](#the-fanuc-lathe) and [Okuma](#okuma-the-unit-system-scales-every-number) |
-| **Tool change** | Sinumerik milling only: whether `M6` changes the tool, or a `T` alone does. See [Sinumerik](#sinumerik-diameter-programming-and-the-rest) |
+| **Tool change** | Fanuc lathe: *Turret* (the `T` word changes the tool; the default) or *Tool changer* (`T` selects, `M6` changes); see [the Fanuc lathe](#the-fanuc-lathe). Sinumerik turning (the `T` word changes the tool; the default) and milling (`M6` changes it; the default): whether `M6` changes the tool or a `T` alone does; see [Sinumerik](#sinumerik-diameter-programming-and-the-rest) |
+| **Counter spindle** | Lathes (Fanuc, Okuma, Sinumerik): *Y turns with Z* (the default, verify) or *Y stays*. What the Z mirror for the counter spindle does with `Y`, an incremental `Y` and `J`; see [the Z mirror](scripts.md#the-z-mirror-for-the-counter-spindle) |
+| **T on the M6 line** | Fanuc mill only: whether the `T` written on the `M6` line is the tool loaded (the default) or the next tool. See [the Fanuc mill](#the-fanuc-mill-the-t-word-and-m6) |
 | **Feed mode at power-on**, **Spindle-speed mode at power-on**, **Plane at power-on** and **Positioning at power-on** | What is in force before the program sets it, as far as the dialect offers them — Fanuc mill: feed mode, positioning, plane; Fanuc lathe: feed mode, spindle-speed mode, plane; Okuma: feed mode, positioning, spindle-speed mode; Sinumerik turning and milling: feed mode (the feed type), plane, positioning. "Dialect default" leaves it to the profile |
+| **Motion and limits** | A page of its own: rapid rates, top feed, tool-change time, peck values, top spindle speed and travel, all optional and none assumed. See [Motion and limits](#motion-and-limits) |
 | **Notes** | Your own note, up to 500 characters. gEdit only stores it |
 
 The feed modes a Fanuc lathe is offered follow its G-code system: `G98`/`G99` in A,
@@ -339,6 +355,23 @@ difference there; look at a program that is known to be right for that machine i
 
 **Your control's manual and its parameter list are the authority. gEdit is not.**
 
+## The Fanuc mill: the T word and M6
+
+A Fanuc machining centre selects a tool with `T` and changes it with `M6`, and the program
+map and the tool list show one entry for each change. Which tool the change loads is a
+matter of how the machine builder set up the changer, so gEdit offers two readings of the
+`T` that stands on the same line as `M6`, in **T on the M6 line**:
+
+- **Is the tool M6 loads** (the default, verify): `T5 M6` changes to tool 5, and a `T` on
+  an earlier line only prepares the next tool.
+- **Is the next tool**: `M6` loads the tool of the last `T` written before it, and
+  `M6 T5` or `T5 M6` preselects tool 5 for the *next* change. With this reading the first
+  `M6` of a program with no `T` before it loads a tool gEdit does not know, and `T0 M6` is
+  no tool change.
+
+Tool life management can change the meaning again (the tool going back, or the next tool of
+a group), so the machine builder's documentation decides which reading is yours.
+
 ## The Fanuc lathe
 
 Turning brings four things a mill program does not have.
@@ -377,6 +410,11 @@ digits are the station, three or four digits are the station and a two-digit off
 (`T101`, `T0101`), and five digits are a two-digit station and a three-digit offset
 (`T12012`, `T21000`). For most posts that is right, and you need not set anything.
 
+One reading here is a choice and not a fact. A control with two-digit offsets reads the short
+word `T12` as tool 0 with offset 12; gEdit reads it as station 12, because the posts that
+write short words mean the station (marked "verify"). If your machine reads `T12` the way
+the manual says, choose the setting that matches your offsets.
+
 Set the choice when your machine's offset memory is arranged otherwise:
 
 - **3 + 2** when five-digit words are three digits of station and two of offset, as on a
@@ -387,7 +425,9 @@ Set the choice when your machine's offset memory is arranged otherwise:
   machine that writes four-digit words with two-digit offsets.
 
 A word whose offset is all zeros (`T0100`, `T12000` by length, `T120` under the last-digit
-reading) cancels the offset and is no tool change, in every reading. Two more rules hold in
+reading) cancels the offset and is no tool change, in every reading. That holds for a `T0100`
+after a tool is in the turret; a program that begins with `T0300` and no tool before it
+still selects station 3 on the control, and gEdit does not show it as a change. Two more rules hold in
 every reading: **a zero offset next to `M6` is a tool change** (`M06 T21000` loads tool 21, as
 a mill-turn does for its milling spindle), and **a block with a three-digit `G` code has no
 tool change**, because the `T` in `G183 Z-5. T5 F20` belongs to the builder's cycle.
@@ -402,9 +442,50 @@ choose the machine for such a program rather than trust the guess.
 G-code system A, where `G90`/`G91` are cycles, and the documented default is that they are in
 system B as well. Some system-B machines do not accept them, and a lathe with a Y axis may
 also use `V` (for `Y`) and `H` (for `C`). *U, W, V and H move incrementally* has three
-choices: *U and W* (the default, verify), *U, W, V and H*, and *none* — `G91` is then the only
-incremental mode, and `U` is no longer an incremental diameter. The choice decides what a
-script or a check makes of those words; a program is never rewritten by it.
+choices: *U and W* (the default in system A, verify), *U, W, V and H*, and *none* — `G91` is
+then the only incremental mode, and `U` is no longer an incremental diameter. When you choose
+G-code system B, the choice moves to *none* by itself, as the cycle formats of system B have
+no `U` and `W`; set it by hand if your system-B machine accepts them, and your choice stays
+when you switch the system afterwards. The choice decides what a script or a check makes of
+those words; a program is never rewritten by it.
+
+**Turret or tool changer.** *Tool change* has two choices. **Turret** (the default, verify):
+the `T` word indexes the station and changes the tool, as described above. **Tool changer**:
+`T` only selects the tool and `M6` changes it (the control's parameter 5040 bit 3 says which
+your machine is). With the second choice the tool is the `T` on the `M6` line or the last one
+before it, and a `T0 M6` is no change.
+
+**The counter spindle.** The Z mirror turns a program for the main spindle into one for the
+counter spindle. On some machines `Y` changes sign with `Z` there, on others it stays as it
+is, and the manuals of the controls differ. *Counter spindle* sets which your machine does:
+**Y turns with Z** (the default, marked "verify": `Y`, an incremental `Y` and the arc centre
+word `J` change sign about the turning axis) or **Y stays**. Look at the counter spindle of
+your machine before you rely on a mirrored program that uses `Y`. With **Y stays** the Z mirror
+leaves `Y`, an incremental `Y` and `J` as written; `Z`, `W` and `K` turn in both cases. A machine
+that was saved before the setting existed reads as **Y turns with Z**.
+
+**Feeds without a decimal point.** On the increment presets a lathe counts a feed per
+revolution written without a point (and a thread lead) in steps of 0.0001 mm: `G99 F2500` is
+0.25 mm/rev, and the feed per minute in steps of 1 mm/min. A control set to the older Series
+15 format counts the feed per revolution in 0.01 mm/rev (`F25`); choose *Series 15 format* in
+**Point-less feeds** for it ([the field table](#defining-a-machine)). A lathe machine stored
+before this was a choice shows *Series 15 format*, so its program reads as before. On such a
+machine the `R` of a drilling cycle (`G83` to `G89`) can be an absolute position (parameter 5102
+bit 6), so [Translate](scripts.md#translate) leaves it as written and lists it in an information
+row, with no refusal.
+
+**Three things Check Program says about a lathe.** *Pass repeated* (Fanuc lathes only) warns about a block that
+moves nothing, such as an empty or blank line, a comment, a block with only `M`, `S`, `T` or `F` words or only a modal `G` code, while a single pass (`G90`, `G92`, `G94`; system B `G77`, `G78`, `G79`) is in
+force: the control runs the pass again there. *G-code system* warns once when a program is
+written the way G-code system C writes it (`G70` or `G71` alone, `G20`, `G21` or `G24` with a
+position and a feed), which gEdit does not read: the hint is in the check and not at file
+open, because a machine cannot be set to system C. And *Tool word* reports words the
+machine's tool-word format does not describe. See
+[Program checks](scripts.md#program-checks).
+
+**What the tool-word reading does not cover.** A Fanuc `T` word can have up to eight digits
+(parameter 3032); gEdit reads up to five. `T0300` with no tool before it still selects
+station 3 on the control, and gEdit does not show it as a tool change.
 
 **A feed can be a thread lead.** In a threading or tapping cycle the `F` word carries a lead
 rather than a feed rate, and scaling it cuts a different thread. Which codes those are
@@ -474,11 +555,22 @@ moving the machine.
 
 **Tool word: offset digits.** A machine with up to 99 tool offsets writes a tool as
 station plus a two-digit offset (`T0101`); the default is that reading, marked "verify", and
-the owner's lathes use two or three of about 64 offsets. A machine with 200 or more offsets
+it fits a lathe that uses a few of about 64 offsets. Under it a word has three, four or six
+digits: `T0101` and `T101` are station 1 with offset 01, and `T100` is a tool change too
+(station 1, offset 00), because the control indexes turret 1 on it; a word of one, two or five
+digits is not read, and `T012` (station 0) is no tool. A machine with 200 or more offsets
 writes the offset with three digits, and `T2000` is then station 2 and not tool 20: choose
 *Three-digit offsets*. Under that reading a word has three, four, five or seven digits
 (`T100`, `T2000`, `T12345`, `T0102003`); a six-digit word fits neither split and is not read
-as a tool change.
+as a tool change. So an Okuma `T010101` in a program for such a machine is no tool change in
+the program map or the tool list, and [Check Program](scripts.md#check-program) warns about
+it in its *Tool word* check ("not a tool word this machine's tool-word format describes").
+
+**Known limits of the Okuma tool word.** The multitask forms `TL=`, `TG=` and `TD=` with
+`M323` or `M423` are not read as tool changes. An Okuma **milling** program opens with this
+turning profile, and its tool list is not reliable: on those controls `T` only prepares the
+next tool and `M06` changes it, so the list shows preparations as changes and misses words
+this profile does not read ([Dialects](dialects.md#milling-on-okuma-and-sinumerik)).
 
 The other Okuma parameters are simpler: **X is a diameter**, in incremental mode too, and
 the profile assumes the state after a reset that the manual describes — feed per revolution
@@ -512,6 +604,13 @@ machine chosen. A program written for the control's ISO mode is Fanuc-style code
 usually opens with a Fanuc profile, whose presets cover the increment readings; if the
 status bar says Sinumerik, change it by hand.
 
+**Sinumerik turning: the tool change.** The turning profile has the same *Tool change* choice
+as milling, with the other default: **`T` changes the tool, no `M6`** (a turret, machine data
+`MD22550` = 0; verify). A machine with a chain, disc or plane magazine, where `T` selects and
+`M6` changes (`MD22550` = 1, which also happens on a mill-turn), chooses **`M6` loads the
+tool selected with `T`**. With tool management on, `T=5` is a magazine location and not
+tool number 5; gEdit shows it as tool 5.
+
 **Sinumerik milling.** The milling profile has the same parameters. Its diameter setting
 defaults to off, and it assumes the plane `G17` and feed per minute (`G94`) at power-on, where
 the turning profile assumes `G18` and `G95`.
@@ -539,6 +638,50 @@ mode.
 is set up to manage its tools by name — a setup of the control, like the others here — but
 it is not a setting in gEdit, because gEdit reads both forms as a tool change (see
 [dialects.md](dialects.md#the-sinumerik-840d-turning-profile)).
+
+## Motion and limits
+
+The page **Motion and limits** of the machine form holds what the machine's own documentation
+says about how fast it moves and how far it goes. Three scripts read it: [Statistics and
+Time](scripts.md#statistics-and-time) for the estimated time,
+[Expand Drilling Cycles](scripts.md#expand-drilling-cycles) for the two peck values, and the
+**Spindle speed limit** and **Travel** checks of
+[Program checks](scripts.md#program-checks).
+
+**Every value is optional and none has a default.** gEdit never fills in a typical rapid
+rate or a typical travel: the number is on your machine's data sheet or parameter list, or it
+is not set. A field left empty is *not set*, and whatever needs it says so, rather than
+assuming. The page never changes a program; it only decides what the scripts may tell you.
+
+| Field | What it is |
+|---|---|
+| **Units** | **Millimetres** or **Inches**, or *Not set*. Every length and rate on the page is read in it, the two peck values included. Choose it first: the numbers are refused until you have. Expand Drilling Cycles prefills its field **Units of the peck values** from it and converts the peck values to the units of the program |
+| **Rapid rate** of each axis (per minute; for a rotary axis, degrees per minute) | How fast that axis moves at rapid. The estimate needs the rate of every axis a rapid move uses |
+| **How a rapid move runs** | *Straight line: all axes arrive together*, or *Each axis at its own rate*. Left empty, a straight line is assumed and the time estimate says so |
+| **Top cutting feed** (per minute) | A programmed feed above it is cut back to it in the estimate |
+| **Tool change time** (seconds) | How long one tool change takes |
+| **Retract of a high-speed peck, G73** and **Clearance of a deep peck, G83** | The two settings of the control that a peck cycle needs. They only **fill in** the forms of Expand Drilling Cycles and Statistics and Time; you can change them there for a run (with their units, in Expand Drilling Cycles) |
+| **Top spindle speed**: main spindle (rpm), other spindles | The most the spindle turns. The main spindle is the one the plain `S` word drives. Other spindles are written one per entry as the speed address, `=`, the top speed: `S2=4000`, `SB=3000` |
+| **Travel** in machine coordinates, lowest and highest of each axis | How far the axis can go. Enter **both ends or neither**, and the lowest has to be below the highest. Program checks compares a position in machine coordinates (`G53`, `SUPA`, `M91`) with it (an error), and the span of the positions in work coordinates (a warning when the program spans more than the travel) |
+
+**A lathe's X travel is a diameter.** The X travel is entered the way the program writes X on
+that lathe, as a diameter, not as the radius the slide moves. A travel of 0 to 200 on a lathe
+whose `X` is a diameter means a part up to 200 mm across. On a machine whose `X` is a radius
+word, enter the radius.
+
+**Help from the form.** A number that cannot be right is stopped where you type it and says
+what is expected: a rate above 0, a time of 0 or more, both ends of a travel, a spindle
+entry that is not a speed address followed by `=` and a number.
+
+**A block that cannot be used.** If you edit the file by hand and the motion or limits block
+is broken, the machine keeps working without it, the scripts get no value from it, and the
+page shows the block in a box (*This block is kept as written but cannot be used*) so that
+nothing is lost silently. Changing a field rewrites the block from the fields, which removes
+what the fields do not show; **Start this page again** clears it.
+
+**What it is not.** It is not a simulation and it is not read from the control. The time
+estimate stays a lower bound however well the page is filled in
+([Statistics and Time](scripts.md#statistics-and-time)).
 
 ## Channels
 
@@ -772,13 +915,13 @@ shows it as "dialect default, assumed" — or, for a G-code system read off the 
 | | Fanuc (ISO) mill | Fanuc (ISO) lathe | Okuma OSP lathe | Sinumerik 840D (turning) | Sinumerik 840D (milling) |
 |---|---|---|---|---|---|
 | How numbers are read | Increments of 0.001 mm (IS-B); point-less feeds in 1 mm/min and 0.01 mm/rev | Positions as written; cycle parameters in microns | Unit 1 mm: everything as written | As written | As written |
-| Other presets offered | Increments of 0.0001 mm (IS-C); as written | Increments of 0.001 mm (IS-B); increments of 0.0001 mm (IS-C) | Unit 1 µm; Unit 10 µm (metric only) | none: the control's own language has only this reading | none |
+| Other presets offered | Increments of 0.01 mm (IS-A); increments of 0.0001 mm (IS-C); as written | Increments of 0.01 mm (IS-A); increments of 0.001 mm (IS-B); increments of 0.0001 mm (IS-C) | Unit 1 µm; Unit 10 µm (metric only) | none: the control's own language has only this reading | none |
 | Units at power-on | Millimetres | Millimetres | Millimetres | Millimetres | Millimetres |
 | X is a diameter | not a parameter of this dialect | on (`X` and `U`) | on | on (`DIAMON`) | off |
 | G-code system | not a parameter of this dialect | A | not a parameter of this dialect | not a parameter of this dialect | not a parameter of this dialect |
 | `U`, `W`, `V`, `H` incremental | not a parameter of this dialect | `U` and `W` (verify) | not a parameter of this dialect | not a parameter of this dialect | not a parameter of this dialect |
 | Tool word: offset digits | not a parameter of this dialect | by length: 1–2 digits station, 3–4 digits station + 2, 5 digits 2 + 3 (verify) | two-digit offsets (verify) | not a parameter of this dialect | not a parameter of this dialect |
-| Tool change | not a parameter of this dialect | not a parameter of this dialect | not a parameter of this dialect | not a parameter of this dialect | `M6` (verify) |
+| Tool change | `T` on the `M6` line is the tool loaded (verify) | turret: `T` changes the tool (verify) | not a parameter of this dialect | `T` changes the tool, no `M6` (verify) | `M6` (verify) |
 | Power-on codes | feed per minute (`G94`) | feed per revolution (`G99`), direct rpm (`G97`), ZX plane (`G18`) | feed per revolution (`G95`), absolute (`G90`); no spindle-speed mode | feed per revolution (`G95`), ZX plane (`G18`), absolute (`G90`) | feed per minute (`G94`), XY plane (`G17`), absolute (`G90`) |
 
 Known soft spots in that table, said plainly:
@@ -791,16 +934,17 @@ Known soft spots in that table, said plainly:
   steps still counted in microns — taken from turning manuals that write `G0 X40 W-40` for
   40 mm and `G4 U2` for two seconds. It is a reading of those manuals, not a measurement,
   and it is exactly the sort of thing to confirm per machine.
-- The **point-less feeds** of the two Fanuc increment presets — 1 mm/min per step for a feed
-  per minute and 0.01 mm/rev for a feed per revolution — are the documented defaults of the
-  control's two feed parameters. A control with those parameters changed, or with the
-  option that counts feeds in thousandths, reads them differently; gEdit has no setting for
-  that yet. Both presets say it in their own name.
+- The **point-less feeds** of the Fanuc increment presets — 1 mm/min per step for a feed
+  per minute, 0.01 mm/rev for a feed per revolution on a mill and 0.0001 mm/rev on a lathe —
+  are the documented defaults of the control's feed parameters, marked "verify". A machine whose control counts them in thousandths says so
+  in its **Point-less feeds** choice (see [the field table](#defining-a-machine)); the
+  presets alone do not know. The choice is marked unconfirmed like the presets, and the
+  Machine reading rows of Check Program do not list it yet.
 - The **`U`/`W` choice**, the **tool word** (by length on a Fanuc lathe) and the **Sinumerik
   milling tool change** (`M6`) defaults follow the documented default of both G-code systems,
   the usual two-digit offset and the common way a milling post writes a tool change; the
-  project has no machine data for them and marks all three "verify". The Okuma default of two-digit offsets matches the owner's lathes,
-  which use two or three of about 64 offsets.
+  project has no machine data for them and marks all three "verify". The Okuma default of two-digit offsets matches a lathe that uses a few of
+  about 64 offsets.
 - The **Okuma default of 1 mm** is the one of the three unit systems that reads a program
   the way it looks. It is **not** known to be what your Okuma machines are set to, and it
   is still to be checked. The metric values inside the three presets come from the unit
@@ -817,6 +961,8 @@ Known soft spots in that table, said plainly:
 - The Okuma **power-on state** — `G95` and `G90` — is the state after a reset that the
   manual describes. The Sinumerik one — `G95`, `G18` and `G90` — is what turning programs are
   written in, and it is machine data on the control. Neither has been checked on a machine.
+- **Motion and limits** have no defaults at all, by design: a rapid rate, a top feed or a travel
+  that is not set is shown as *not set* and never replaced by a typical number.
 - The **power-on modes** and the assumed **millimetres** of the other profiles are what the
   notes describe as usual, not what your machine does after a reset.
 - The default **G-code system A** is a fallback for a program that shows no sign either

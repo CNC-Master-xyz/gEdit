@@ -97,6 +97,14 @@
           "required": true,
           "min": 0,
           "unit": "feedPerRev"
+        },
+        {
+          "address": "Q",
+          "position": "none",
+          "label": "Shift of the thread start angle, in 0.001° without a point (Q180000 is 180°); 0 to 360°",
+          "min": 0,
+          "max": 360000,
+          "unit": "count"
         }
       ]
     },
@@ -193,6 +201,280 @@
       "modal": true,
       "label": "Cycle return to the retract plane",
       "description": "After each hole a drilling cycle pulls back only to the R plane, which is quicker. In G-code system A the same number means feed per revolution instead."
+    },
+    {
+      "code": "G83",
+      "group": "cycle",
+      "modal": true,
+      "sets": { "cycle": "start" },
+      "review": "pending",
+      "label": "Drilling cycle on the face",
+      "description": "Drills along Z into the face of the part, on centre or on a C position under a driven tool. With Q it pecks. It stays active, so the next block with a position drills another hole, until G80.",
+      "params": [
+        {
+          "address": "Z",
+          "label": "Hole bottom",
+          "required": true
+        },
+        {
+          "address": "R",
+          "position": "other",
+          "label": "R point: an absolute position under G90, a distance from the start level under G91 (G-code system B); gEdit does not follow which, so a shift of this cycle is refused",
+          "required": true
+        },
+        {
+          "address": "Q",
+          "position": "none",
+          "label": "Peck depth in least increments, without a point (µm on a metric IS-B machine)",
+          "min": 0,
+          "unit": "increment"
+        },
+        {
+          "address": "P",
+          "position": "none",
+          "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
+          "min": 0,
+          "unit": "count"
+        },
+        {
+          "address": "F",
+          "position": "none",
+          "label": "Drilling feed",
+          "required": true,
+          "min": 0
+        },
+        {
+          "address": "K",
+          "position": "none",
+          "label": "Repeat count",
+          "min": 0,
+          "unit": "count"
+        }
+      ]
+    },
+    {
+      "code": "G84",
+      "group": "cycle",
+      "modal": true,
+      "pitchFeed": true,
+      "tapping": true,
+      "sets": { "cycle": "start" },
+      "review": "pending",
+      "label": "Tapping cycle on the face",
+      "description": "Cuts a thread along Z into the face of the part: the spindle turns back at the bottom of the hole. F is the thread lead, so scaling the feed would change the thread.",
+      "params": [
+        {
+          "address": "Z",
+          "label": "Hole bottom",
+          "required": true
+        },
+        {
+          "address": "R",
+          "position": "other",
+          "label": "R point: an absolute position under G90, a distance from the start level under G91 (G-code system B); gEdit does not follow which, so a shift of this cycle is refused"
+        },
+        {
+          "address": "P",
+          "position": "none",
+          "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
+          "min": 0,
+          "unit": "count"
+        },
+        {
+          "address": "F",
+          "position": "none",
+          "label": "Thread lead",
+          "required": true,
+          "min": 0
+        },
+        {
+          "address": "K",
+          "position": "none",
+          "label": "Repeat count",
+          "min": 0,
+          "unit": "count"
+        }
+      ]
+    },
+    {
+      "code": "G85",
+      "group": "cycle",
+      "modal": true,
+      "sets": { "cycle": "start" },
+      "review": "pending",
+      "label": "Boring cycle on the face",
+      "description": "Feeds along Z into the face and feeds back out again, which leaves a cleaner wall than a rapid retract.",
+      "params": [
+        {
+          "address": "Z",
+          "label": "Hole bottom",
+          "required": true
+        },
+        {
+          "address": "R",
+          "position": "other",
+          "label": "R point: an absolute position under G90, a distance from the start level under G91 (G-code system B); gEdit does not follow which, so a shift of this cycle is refused",
+          "required": true
+        },
+        {
+          "address": "P",
+          "position": "none",
+          "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
+          "min": 0,
+          "unit": "count"
+        },
+        {
+          "address": "F",
+          "position": "none",
+          "label": "Boring feed",
+          "required": true,
+          "min": 0
+        },
+        {
+          "address": "K",
+          "position": "none",
+          "label": "Repeat count",
+          "min": 0,
+          "unit": "count"
+        }
+      ]
+    },
+    {
+      "code": "G87",
+      "group": "cycle",
+      "modal": true,
+      "sets": { "cycle": "start" },
+      "review": "pending",
+      "label": "Drilling cycle on the side",
+      "description": "Drills along X into the side of the part under a driven tool. With Q it pecks. It stays active, so the next block with a position drills another hole, until G80.",
+      "params": [
+        {
+          "address": "X",
+          "label": "Hole bottom diameter",
+          "required": true
+        },
+        {
+          "address": "R",
+          "position": "other",
+          "label": "R point: an absolute position under G90, a distance from the start level under G91 (G-code system B); gEdit does not follow which, so a shift of this cycle is refused",
+          "required": true
+        },
+        {
+          "address": "Q",
+          "position": "none",
+          "label": "Peck depth in least increments, without a point (µm on a metric IS-B machine)",
+          "min": 0,
+          "unit": "increment"
+        },
+        {
+          "address": "P",
+          "position": "none",
+          "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
+          "min": 0,
+          "unit": "count"
+        },
+        {
+          "address": "F",
+          "position": "none",
+          "label": "Drilling feed",
+          "required": true,
+          "min": 0
+        },
+        {
+          "address": "K",
+          "position": "none",
+          "label": "Repeat count",
+          "min": 0,
+          "unit": "count"
+        }
+      ]
+    },
+    {
+      "code": "G88",
+      "group": "cycle",
+      "modal": true,
+      "pitchFeed": true,
+      "tapping": true,
+      "sets": { "cycle": "start" },
+      "review": "pending",
+      "label": "Tapping cycle on the side",
+      "description": "Cuts a thread along X into the side of the part: the spindle turns back at the bottom of the hole. F is the thread lead, so scaling the feed would change the thread.",
+      "params": [
+        {
+          "address": "X",
+          "label": "Hole bottom diameter",
+          "required": true
+        },
+        {
+          "address": "R",
+          "position": "other",
+          "label": "R point: an absolute position under G90, a distance from the start level under G91 (G-code system B); gEdit does not follow which, so a shift of this cycle is refused"
+        },
+        {
+          "address": "P",
+          "position": "none",
+          "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
+          "min": 0,
+          "unit": "count"
+        },
+        {
+          "address": "F",
+          "position": "none",
+          "label": "Thread lead",
+          "required": true,
+          "min": 0
+        },
+        {
+          "address": "K",
+          "position": "none",
+          "label": "Repeat count",
+          "min": 0,
+          "unit": "count"
+        }
+      ]
+    },
+    {
+      "code": "G89",
+      "group": "cycle",
+      "modal": true,
+      "sets": { "cycle": "start" },
+      "review": "pending",
+      "label": "Boring cycle on the side",
+      "description": "Feeds along X into the side and feeds back out again, which leaves a cleaner wall than a rapid retract.",
+      "params": [
+        {
+          "address": "X",
+          "label": "Hole bottom diameter",
+          "required": true
+        },
+        {
+          "address": "R",
+          "position": "other",
+          "label": "R point: an absolute position under G90, a distance from the start level under G91 (G-code system B); gEdit does not follow which, so a shift of this cycle is refused",
+          "required": true
+        },
+        {
+          "address": "P",
+          "position": "none",
+          "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
+          "min": 0,
+          "unit": "count"
+        },
+        {
+          "address": "F",
+          "position": "none",
+          "label": "Boring feed",
+          "required": true,
+          "min": 0
+        },
+        {
+          "address": "K",
+          "position": "none",
+          "label": "Repeat count",
+          "min": 0,
+          "unit": "count"
+        }
+      ]
     }
   ],
   "templates": [

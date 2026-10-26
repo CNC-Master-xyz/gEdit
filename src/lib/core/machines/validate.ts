@@ -628,9 +628,30 @@ export function validateChannels(
       if (rules.length > CHANNEL_CAPS.rules) add(`${path}.syncMarks`, `at most ${CHANNEL_CAPS.rules} wait rules; this one has ${rules.length}`);
       const seen = new Set<string>();
       rules.forEach((rule, i) => ruleProblems(rule, i, `${path}.syncMarks[${i}]`, seen, declared, o, id, out));
+      sharedWaitProblems(rules, path, id, out);
     }
   }
   return out;
+}
+
+/**
+ * Manual check D2-4 (a): `sharesWaitsWith` names another rule of the same block, one that
+ * checks by count (the Okuma `M100` beside the `P` codes).
+ */
+function sharedWaitProblems(rules: readonly unknown[], path: string, id: string | null, out: MachineProblem[]): void {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const rule of rules) if (isRecord(rule) && typeof rule.id === 'string') byId.set(rule.id, rule);
+  rules.forEach((rule, i) => {
+    if (!isRecord(rule) || rule.sharesWaitsWith === undefined) return;
+    const at = `${path}.syncMarks[${i}].sharesWaitsWith`;
+    const label = `wait rule ${i + 1}`;
+    const name = rule.sharesWaitsWith;
+    const other = typeof name === 'string' ? byId.get(name) : undefined;
+    if (typeof name !== 'string' || name.trim() === '') out.push(problem(id, at, `${label}: name the id of the rule whose waits it shares`));
+    else if (name === rule.id) out.push(problem(id, at, `${label} cannot share its waits with itself`));
+    else if (other === undefined) out.push(problem(id, at, `${label}: there is no wait rule "${name}"`));
+    else if (other.semantics !== 'count') out.push(problem(id, at, `${label}: "${name}" has to be a rule that checks by count`));
+  });
 }
 
 /** One sync rule. `seen` collects the ids of the earlier rules. */
@@ -660,6 +681,25 @@ function ruleProblems(
     add(`${at}.semantics`, `what ${label} checks is one of ${SEMANTICS.join(', ')}`);
   }
   if (rule.blocking !== undefined && typeof rule.blocking !== 'boolean') add(`${at}.blocking`, `"blocking" of ${label} is on or off`);
+  // Manual check D2-4, D2-5: the members the channel check reads since then.
+  if (rule.markSeparator !== undefined && (typeof rule.markSeparator !== 'string' || rule.markSeparator === '')) {
+    add(`${at}.markSeparator`, `${label}: the separator between marks is text, for example ","`);
+  }
+  if (rule.markValues !== undefined) {
+    const v = rule.markValues;
+    const ok = isRecord(v) && Number.isInteger(v.min) && Number.isInteger(v.max) && (v.min as number) <= (v.max as number);
+    if (!ok) add(`${at}.markValues`, `${label}: the mark numbers are "min" and "max", whole numbers, with min not above max`);
+  }
+  if (rule.withCodes !== undefined) {
+    if (typeof rule.withCodes !== 'string') add(`${at}.withCodes`, `${label}: the codes that need the same mark are text, for example M03-M05, S`);
+    else {
+      // Any letter: the spindle commands are S, M and G words, not the machine's wait letters.
+      const parsed = parseWaitCodes(rule.withCodes);
+      for (const error of parsed.errors) add(`${at}.withCodes`, t(error.key, error.params));
+    }
+    // On a rule that does not check the order it is read by nothing, as `markSeparator` on a
+    // rule that is no pattern: kept, not refused, so the form can switch a rule back and forth.
+  }
 
   // what it matches
   const match = rule.match;

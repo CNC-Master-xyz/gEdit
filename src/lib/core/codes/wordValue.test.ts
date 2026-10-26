@@ -14,7 +14,7 @@ import { validateProfile } from '$lib/core/profiles/validate';
 import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
 import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
 import { profileOf } from '../../../../tests/unit/helpers/profiles';
-import { diameterReading, inForceEntries, readWord, type WordView } from './wordValue';
+import { arcCentreEntry, diameterReading, inForceEntries, readWord, type WordView } from './wordValue';
 import type { CodeDb } from './types';
 
 const DBS = resolveCodeDbFiles(BUILTIN_CODE_DB_JSON, (dialect, problem) => {
@@ -160,6 +160,7 @@ describe('readWord on a Fanuc lathe (G-code system A)', () => {
     expect(x?.unit).toBe('mm');
     expect(x?.readings.map((r) => [r.preset, r.value])).toEqual([
       ['calculator', '50'],
+      ['is-a', '0.5'],
       ['is-b', '0.05'],
       ['is-c', '0.005'],
     ]);
@@ -216,6 +217,7 @@ describe('readWord on a Fanuc mill', () => {
     expect(x?.value).toBeNull();
     expect(x?.readings.map((r) => [r.preset, r.value])).toEqual([
       ['is-b', '0.05'],
+      ['is-a', '0.5'],
       ['is-c', '0.005'],
       ['calculator', '50'],
     ]);
@@ -248,14 +250,51 @@ describe('readWord on a Fanuc mill', () => {
 
   it('counts the tapping mode G63 among the codes in force', () => {
     const tokens = tokensOf(none.cp, 'G1 Z-10. F150.');
-    const inForce = inForceEntries(g63, [], none.db).map((entry) => entry.code);
+    const inForce = inForceEntries(g63, [], none.db, none.profile).map((entry) => entry.code);
     expect(inForce).toContain('G63');
-    expect(inForceEntries(g94, [], none.db).map((entry) => entry.code)).not.toContain('G63');
+    expect(inForceEntries(g94, [], none.db, none.profile).map((entry) => entry.code)).not.toContain('G63');
     // Written in the block it is the block's code, not one in force.
-    const written = inForceEntries(g63, [none.db.codes.find((e) => e.code === 'G63')!], none.db);
+    const written = inForceEntries(g63, [none.db.codes.find((e) => e.code === 'G63')!], none.db, none.profile);
     expect(written.map((entry) => entry.code)).not.toContain('G63');
     // The shipped G63 declares no feed of its own: a tap's feed stays a feed per minute.
     expect(readWord(word(tokens, 'F150.'), tokens, g63, none)).toMatchObject({ cls: 'feedPerMin', lead: false });
+  });
+
+  // T120 (SK-04): a mode that declares the arc-centre words as its own parameters (G43.5,
+  // G41.6, G42.6) gives them its meaning in the blocks it is in force for.
+  const tcp = state({ ...g94, groups: { ...g94.groups, motion: mv('G1', 3), lengthComp: mv('G43.5', 2) } });
+
+  it('counts a mode that redefines I, J and K among the codes in force (T120)', () => {
+    expect(inForceEntries(tcp, [], none.db, none.profile).map((entry) => entry.code)).toContain('G43.5');
+    // Without the profile the rule is left out (the feed-unit search asks that way).
+    expect(inForceEntries(tcp, [], none.db, null).map((entry) => entry.code)).not.toContain('G43.5');
+    expect(read(none, tcp, 'I0.5', 'G1 X10. I0.5 J0 K0.866')).toMatchObject({ cls: 'count', value: null });
+    // A mode that declares none of the arc-centre words stays out (G41 declares only D).
+    const g41 = state({ ...g94, groups: { ...g94.groups, motion: mv('G2', 3), compensation: mv('G41', 2) } });
+    expect(inForceEntries(g41, [], none.db, none.profile).map((entry) => entry.code)).not.toContain('G41');
+    expect(read(none, g41, 'I5.', 'G2 X10. Y0 I5. J0')).toMatchObject({ cls: 'length', value: '5' });
+  });
+
+  // FB-2 (WX-NC-6): the mode lends I, J and K only, never its other parameters.
+  it('lends the block only the arc-centre words of the mode (G43.5 under a modal G83)', () => {
+    const lent = inForceEntries(tcp, [], none.db, none.profile).find((entry) => entry.code === 'G43.5');
+    expect(lent?.params?.map((param) => param.address)).toEqual(['I', 'J', 'K']);
+    // The same copy every block, so a cache by entry sees one entry.
+    expect(inForceEntries(tcp, [], none.db, none.profile).find((entry) => entry.code === 'G43.5')).toBe(lent);
+    const g43 = none.db.codes.find((entry) => entry.code === 'G43.5')!;
+    expect(arcCentreEntry(g43, none.profile)).toBe(lent);
+    expect(arcCentreEntry(none.db.codes.find((entry) => entry.code === 'G41')!, none.profile)).toBeNull();
+    const g83 = state({
+      ...tcp,
+      groups: { ...tcp.groups, cycle: mv('G83', 3) },
+      activeCycle: { code: 'G83', line: 3, pitchFeed: false },
+    });
+    expect(read(none, g83, 'Q3.', 'X20. Y10. Q3.')).toMatchObject({ cls: 'length', value: '3' });
+    expect(read(none, g83, 'K1', 'X20. Y10. K1')).toMatchObject({ cls: 'count' });
+    // After G49 the group names G49, which declares nothing: I is an arc centre again.
+    const g49 = state({ ...g94, groups: { ...g94.groups, motion: mv('G2', 5), lengthComp: mv('G49', 4) } });
+    expect(inForceEntries(g49, [], none.db, none.profile).map((entry) => entry.code)).not.toContain('G43.5');
+    expect(read(none, g49, 'I5.', 'G2 X20. Y5. I5. J0')).toMatchObject({ cls: 'length', value: '5' });
   });
 
   it("reads what G63 declares for the feed word in the blocks it is in force for", () => {

@@ -47,7 +47,8 @@ const HOME_2 = '{run}/../m6-machines-manage-1/machines-home'
 
 /** The three preset labels of the Fanuc number-input parameter, as the profile writes them. */
 const IS_B =
-  'Increments of 0.001 mm (IS-B): X50 is 0.050 mm, X50. is 50 mm, C90000 is 90\u00b0; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution in 0.01 mm/rev (F25 is 0.25 mm/rev)'
+  // Manual-check fix D4-1: on the lathe a point-less feed per revolution and a thread lead count in 0.0001 mm/rev.
+  'Increments of 0.001 mm (IS-B): X50 is 0.050 mm, X50. is 50 mm, C90000 is 90\u00b0; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution and a thread lead in 0.0001 mm/rev (F2500 is 0.25 mm/rev)'
 const AS_WRITTEN = 'As written: X50 and X50. are both 50 mm; G74/G75 P and Q, G76 Q and G83/G87 Q are in microns (Q6000 is 6 mm)'
 
 /** The `is-b` preset's rule set, as a machine stores it (resolved `fanuc-lathe.json`). */
@@ -57,10 +58,11 @@ const IS_B_RULES = {
   incrementInch: '0.0001',
   incrementDeg: '0.001',
   incrementSec: '0.001',
-  // M9 (WP9.5a): a point-less feed counts in 1 mm/min and 0.01 mm/rev (parameters 1404, 1405).
+  // M9 (WP9.5a): a point-less feed counts in 1 mm/min (parameter 1404); manual-check fix D4-1:
+  // per revolution in 0.0001 mm/rev (0.000001 in/rev) on the lathe presets.
   classes: {
     feedPerMin: { mode: 'increment', increment: '1', incrementInch: '0.01' },
-    feedPerRev: { mode: 'increment', increment: '0.01', incrementInch: '0.0001' },
+    feedPerRev: { mode: 'increment', increment: '0.0001', incrementInch: '0.000001' },
   },
 }
 
@@ -74,7 +76,9 @@ const AS_WRITTEN_RULES = { mode: 'calculator', incrementMm: '0.001' }
  * default in the dialect's data cannot silently change a machine set up before it.
  */
 // M12.5: the tool word's default is `byLength` (T12 and T12012 are stations, T0101 is tool 1 offset 01).
-const LATHE_VARIANTS = { gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength' }
+// Manual-check fix D3-4a: the tool change, turret (default) or tool changer.
+// Review round D5-7: the counter spindle, Y turns with Z (default) or stays.
+const LATHE_VARIANTS = { gcodeSystem: 'A', incrementalAddresses: 'uw', toolWord: 'byLength', toolChange: 'turret', counterSpindleY: 'turns' }
 
 /** A machine record, spelled the way the page writes one. */
 const record = (/** @type {string} */ id, /** @type {string} */ name, /** @type {object} */ numberInput, /** @type {object} */ rest = {}) => ({
@@ -163,21 +167,26 @@ scenario('m6-machines-manage-1', { timeout: 420, vars: { HOME: HOME_1 } }, async
     step: h.q('machine-form')?.dataset.step,
     kind: h.q('machine-form')?.dataset.kind,
   })
-  const formFields = h.qa('form-field').map((e) => e.dataset.field)
+  // P4.8 (Wave X) ended the machine form with the page "Motion and limits" (`machine-motion-step`, fields
+  // `units`, `rapid.*`, `travel.*`, ...); `p4-machines` drives it. The fields counted here are the machine's own.
+  const formFields = h.qa('form-field').filter((e) => !e.closest('[data-testid="machine-motion-step"]')).map((e) => e.dataset.field)
   // M12 (an intentional change, plan "Intentional behavior changes in M12"): a lathe machine's
   // form ends with the Channels step, whose layout choice is a field of the same form engine.
   // The step is the only addition; `m12-channels-config` drives it.
   h.check(
-    'it offers the name, the number rules, the units, diameter, the three variants (G-code system, which of U W V H are incremental, the tool word), the three power-on groups, the notes and, since M12, the Channels step with its layout choice',
+    'it offers the name, the number rules and (T084) the point-less feeds, the units, diameter, the five variants (G-code system, which of U W V H are incremental, the tool word, the tool change, the counter spindle), the three power-on groups, the notes and, since M12, the Channels step with its layout choice',
     JSON.stringify(formFields) ===
       JSON.stringify([
         'name',
         'numberInput',
+        'pointlessFeeds',
         'units',
         'diameter',
         'variant.gcodeSystem',
         'variant.incrementalAddresses',
         'variant.toolWord',
+        'variant.toolChange',
+        'variant.counterSpindleY',
         'modal.feedmode',
         'modal.spindlemode',
         'modal.plane',
@@ -309,8 +318,7 @@ scenario('m6-machines-manage-1', { timeout: 420, vars: { HOME: HOME_1 } }, async
   await closeSettings(h, page2)
 
   // A clean exit, so run 2 starts from a settled file.
-  h.expectExit({ within: 15000 })
-  await h.sleep(500)
+  await h.expectExit({ within: 15000 })
   await h.nativeKeys([{ key: 'w', mods: ['cmd', 'shift'] }])
 })
 

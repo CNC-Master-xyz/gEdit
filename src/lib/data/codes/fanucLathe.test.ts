@@ -81,6 +81,9 @@ function tableUnit(dialect: string, code: string, address: string): Unit | undef
   if (address === 'F' && dialect !== MILL && code === 'G76') return 'feedPerRev';
   // v1.2.0 (NCR-4): system A reads G78 as system B's threading pass, lead and all.
   if (address === 'F' && ((dialect === A && (code === 'G92' || code === 'G78')) || (dialect === B && code === 'G78'))) return 'feedPerRev';
+  // Manual-check fix D5-9: the start-angle shift Q of the threading pass, in 0.001° without a
+  // point whatever the increment system (0i-F Plus lathe, the threading cycle G92).
+  if (address === 'Q' && ((dialect === A && (code === 'G92' || code === 'G78')) || (dialect === B && code === 'G78'))) return 'count';
   // M9 (WP9.2), the 5-axis entries, wherever they are defined: a tool direction, a scale factor
   // and a rotation axis direction are plain numbers that no reading touches, and a rotation
   // or tilt is an angle.
@@ -229,6 +232,8 @@ describe('the shipped Fanuc databases', () => {
       // Phase 4 (P4a prelude, plan §6.2): what a mirror swaps, on G2/G3 and G41/G42.
       arcDirection: ['cw', 'ccw'],
       compSide: ['left', 'right'],
+      // Phase 4 (P4b prelude, plan §6.3): the return level of a drilling cycle (mill G98/G99).
+      cycleReturn: ['initial', 'r-plane'],
     };
     for (const e of entriesOf(dialect)) {
       for (const [member, value] of Object.entries(e.sets ?? {})) {
@@ -405,7 +410,9 @@ describe('the lathe database of G-code system A (§8.2)', () => {
         expect(e?.modal, `${dialect} ${code}`).toBe(true);
         expect(e?.sets?.path, `${dialect} ${code}`).toBe('cycle');
         expect(e?.sets?.motion, `${dialect} ${code}`).toBe('feed');
-        expect(e?.params?.map((p) => p.address), `${dialect} ${code}`).toEqual(['X', 'Z', 'R', 'F']);
+        // D5-9: a threading pass also takes the start-angle shift Q.
+        const thread = code === 'G92' || code === 'G78';
+        expect(e?.params?.map((p) => p.address), `${dialect} ${code}`).toEqual(thread ? ['X', 'Z', 'R', 'F', 'Q'] : ['X', 'Z', 'R', 'F']);
         expect(e?.params?.find((p) => p.address === 'R')?.lengthAlong, `${dialect} ${code}`).toBe(along);
         expect((e as (CodeEntry & { review?: string }) | undefined)?.review, `${dialect} ${code}`).toBe('pending');
       }
@@ -544,8 +551,24 @@ describe('the system-B variant database (§8.2)', () => {
     expect(entry(B, 'G50')?.verify).toBeUndefined();
     expect(entry(B, 'G50')?.label).toMatch(/^Scaling cancel/);
     // The multi-pass cycles are the same as in A (syntax-fanuc §4.1).
-    for (const code of ['G70', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76', 'G83', 'G87']) {
+    for (const code of ['G70', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76']) {
       expect(entry(B, code), code).toEqual(entry(A, code));
+    }
+    // Manual-check fix D5-8: the drilling cycles are the same but for their R point, which is
+    // incremental in A (the shift leaves it, `position: 'none'`) and follows G90/G91 in
+    // B, where gEdit cannot tell which, so a shift refuses the cycle (`'other'`).
+    for (const code of ['G83', 'G84', 'G85', 'G87', 'G88', 'G89']) {
+      const withoutR = (e: CodeEntry | undefined) => ({ ...e, params: e?.params?.filter((p) => p.address !== 'R') });
+      expect(withoutR(entry(B, code)), code).toEqual(withoutR(entry(A, code)));
+      expect(entry(A, code)?.params?.find((p) => p.address === 'R')?.position, code).toBe('none');
+      expect(entry(B, code)?.params?.find((p) => p.address === 'R')?.position, code).toBe('other');
+      // NC-9 (owner 2026-10-26): R is not always incremental in system A. In the Series 15
+      // drilling format with parameter 5102#6 = 1 it is absolute (0i-F Plus lathe B-64694EN-1
+      // p.97), so the label names the standard format and that machine setting.
+      const label = entry(A, code)?.params?.find((p) => p.address === 'R')?.label ?? '';
+      expect(label, code).not.toMatch(/always/);
+      expect(label, code).toMatch(/incremental in G-code system A in the standard drilling format/);
+      expect(label, code).toMatch(/Series 15 format .*absolute position, parameter 5102 bit 6/);
     }
   });
 
@@ -576,7 +599,11 @@ describe('the system-B variant database (§8.2)', () => {
     );
     expect(changed.every((code) => /^G\d+(\.\d+)?$/.test(code)), changed.join(', ')).toBe(true);
     // B1: the work coordinate system preset is G50.3 in system A and G92.1 in system B.
-    expect(changed.sort()).toEqual(['G33', 'G50', 'G50.3', 'G77', 'G78', 'G79', 'G90', 'G91', 'G92', 'G92.1', 'G94', 'G95', 'G98', 'G99']);
+    // D5-8: the R point of the drilling cycles G83–G89 follows G90/G91 in system B.
+    expect(changed.sort()).toEqual([
+      'G33', 'G50', 'G50.3', 'G77', 'G78', 'G79', 'G83', 'G84', 'G85', 'G87', 'G88', 'G89',
+      'G90', 'G91', 'G92', 'G92.1', 'G94', 'G95', 'G98', 'G99',
+    ]);
   });
 });
 

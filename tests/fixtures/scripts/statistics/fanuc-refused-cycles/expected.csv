@@ -1,0 +1,3 @@
+Tool,Feed length (mm),Rapid length (mm),Tool changes,Feed time (s),Rapid time (s),Dwell time (s),Tool-change time (s),Total time (s),Not estimated,"Not estimated, by kind and line"
+T1,12.00,118.00,1,7.2,0.3,0.0,4.0,11.5,7,"cycle 9, 11, 13; position-unknown 5-6, 15; dwell-unknown 7"
+Total,12.00,118.00,1,7.2,0.3,0.0,4.0,11.5,7,"cycle 9, 11, 13; position-unknown 5-6, 15; dwell-unknown 7"

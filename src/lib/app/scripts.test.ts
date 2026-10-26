@@ -16,7 +16,8 @@
 
 import { get, writable, type Writable } from 'svelte/store';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createScriptService, formKey, SCRIPT_OUTPUT_PANEL, SCRIPT_STATUS_KEYS } from './scripts';
+import { createScriptService, formKey, SCRIPT_OUTPUT_PANEL, SCRIPT_STATUS_KEYS, type ScriptDeps } from './scripts';
+import { PREFILL_TYPES, prefillMemberOf } from '$lib/core/machines/motion';
 import { createDocumentStore } from '$lib/stores/documents';
 import { noMachine } from '$lib/core/machines/effective';
 import type { ChannelSet } from '$lib/core/channels/types';
@@ -40,8 +41,10 @@ import type {
   Translate,
   UiState,
 } from '$lib/app/types';
+import type { MachineService } from '$lib/app/types';
 import type { FieldSpec } from '$lib/core/forms/types';
 import type { ScriptContextV2 } from '$lib/core/scripting/types';
+import type { MachineConfig } from '$lib/core/machines/types';
 import type {
   PythonStatus,
   RunRequest,
@@ -183,6 +186,8 @@ interface Harness {
   desktop: boolean;
   /** What the fake channel service answers for the document (M12); null = `layout: 'none'`. */
   channelSet: ChannelSet | null;
+  /** The machine chosen for the document (P4.8); null = none. */
+  machine: MachineConfig | null;
 }
 
 function noChannelSet(): ChannelSet {
@@ -229,6 +234,7 @@ function harness(o: { profileId?: string; entries?: ScriptEntry[] } = {}): Harne
     ui: uiStore,
     desktop: true,
     channelSet: null,
+    machine: null,
   };
 
   h.service = createScriptService({
@@ -255,9 +261,10 @@ function harness(o: { profileId?: string; entries?: ScriptEntry[] } = {}): Harne
             addresses: {},
             codes: [{ code: 'G84', label: 'Tapping cycle', group: 'cycle', pitchFeed: true }],
           },
-          machine: noMachine(profile),
+          machine: h.machine === null ? noMachine(profile) : { ...noMachine(profile), id: h.machine.id, name: h.machine.name, choice: 'document' as const },
         };
       },
+      get: (id) => (h.machine !== null && h.machine.id === id ? h.machine : undefined),
     },
     channels: { fresh: () => h.channelSet ?? noChannelSet() },
     modals: {
@@ -568,6 +575,208 @@ describe('ScriptService.run: parameters', () => {
     h.runs = [result({ stdout: 'N10' })];
     await h.service.run('bundled:scale_feed.py', { params: { percent: 55 } });
     expect(h.forms[0].values).toEqual({ percent: 55 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P4.8 (plan §6.4 rules 4 and 5): the machine's motion and limits, and the prefill
+// ---------------------------------------------------------------------------
+
+const MILL_1 = (params: Record<string, unknown>): MachineConfig =>
+  ({ id: 'mill-1', name: 'Mill 1', profile: 'fanuc-gcode', params }) as MachineConfig;
+
+const PECK = (over: Record<string, unknown> = {}): FieldSpec =>
+  ({ id: 'peckRetract', type: 'number', label: 'Peck retract', prefill: 'machine.motion.peckRetract', ...over }) as FieldSpec;
+const SCRIPT = 'bundled:expand.py';
+const withParams = (...params: FieldSpec[]): ScriptEntry[] => [entry(SCRIPT, { meta: meta({ params, output: 'panel' }) })];
+const MOTION = { units: 'mm', rapid: { X: 30_000 }, rapidKind: 'per-axis', maxFeed: 9000, peckRetract: 0.5 };
+
+describe('ScriptService.run: the machine motion and limits in the context', () => {
+  it('gives a document without a machine neither member', async () => {
+    const h = await ready();
+    h.runs = [result()];
+    await h.service.run('bundled:scale_feed.py');
+    const machine = (h.requests[0].context as ScriptContextV2).machine;
+    expect('motion' in machine).toBe(false);
+    expect('limits' in machine).toBe(false);
+  });
+
+  it('gives a machine without blocks neither member', async () => {
+    const h = await ready();
+    h.machine = MILL_1({});
+    h.runs = [result()];
+    await h.service.run('bundled:scale_feed.py');
+    const machine = (h.requests[0].context as ScriptContextV2).machine;
+    expect(machine.id).toBe('mill-1');
+    expect('motion' in machine).toBe(false);
+    expect('limits' in machine).toBe(false);
+  });
+
+  it('carries a valid block of the chosen machine, copied from the record', async () => {
+    const h = await ready();
+    h.machine = MILL_1({ motion: MOTION, limits: { spindle: { main: 6000 } } });
+    h.runs = [result()];
+    await h.service.run('bundled:scale_feed.py');
+    const machine = (h.requests[0].context as ScriptContextV2).machine;
+    expect(machine.motion).toEqual(MOTION);
+    expect(machine.limits).toEqual({ spindle: { main: 6000 } });
+    expect(machine.motion).not.toBe(MOTION);
+  });
+
+  it('a broken block gives no member, the other block and the run are unaffected', async () => {
+    const h = await ready();
+    h.machine = MILL_1({ motion: { maxFeed: -1, units: 'mm' }, limits: { spindle: { main: 6000 } } });
+    h.runs = [result()];
+    await h.service.run('bundled:scale_feed.py');
+    expect(h.requests).toHaveLength(1);
+    const machine = (h.requests[0].context as ScriptContextV2).machine;
+    expect('motion' in machine).toBe(false);
+    expect(machine.limits).toEqual({ spindle: { main: 6000 } });
+  });
+
+  it('judges an axis against the dialect of the document: a rate for an axis it lacks breaks the block', async () => {
+    const h = await ready();
+    h.machine = MILL_1({ motion: { units: 'mm', rapid: { Q: 1000 } } });
+    h.runs = [result()];
+    await h.service.run('bundled:scale_feed.py');
+    expect('motion' in (h.requests[0].context as ScriptContextV2).machine).toBe(false);
+  });
+});
+
+describe('ScriptService.run: prefill = "machine.motion.<member>"', () => {
+  it('opens the form with the machine value in the field', async () => {
+    const h = await ready({ entries: withParams(PECK()) });
+    h.machine = MILL_1({ motion: MOTION });
+    h.formAnswers = [{ peckRetract: 0.5 }];
+    h.runs = [result()];
+    await h.service.run(SCRIPT);
+    expect(h.forms[0].values).toEqual({ peckRetract: 0.5 });
+  });
+
+  it('leaves the field empty when the machine has no value, or no motion block, or no machine', async () => {
+    for (const machine of [MILL_1({ motion: { toolChange: 4 } }), MILL_1({}), null]) {
+      const h = await ready({ entries: withParams(PECK()) });
+      h.machine = machine;
+      h.formAnswers = [{ peckRetract: 1 }];
+      h.runs = [result()];
+      await h.service.run(SCRIPT);
+      expect(h.forms[0].values?.peckRetract).toBeUndefined();
+    }
+  });
+
+  it('leaves the field empty for a broken block: nothing is read from it', async () => {
+    const h = await ready({ entries: withParams(PECK()) });
+    h.machine = MILL_1({ motion: { units: 'mm', peckRetract: -5 } });
+    h.formAnswers = [{ peckRetract: 1 }];
+    h.runs = [result()];
+    await h.service.run(SCRIPT);
+    expect(h.forms[0].values?.peckRetract).toBeUndefined();
+  });
+
+  it('keeps the field editable: what the user answers is what the run gets', async () => {
+    const h = await ready({ entries: withParams(PECK()) });
+    h.machine = MILL_1({ motion: MOTION });
+    h.formAnswers = [{ peckRetract: 2 }];
+    h.runs = [result()];
+    await h.service.run(SCRIPT);
+    expect((h.requests[0].context as ScriptContextV2).params).toEqual({ peckRetract: 2 });
+  });
+
+  it('prefers the machine to a value remembered under another machine, and does not remember the machine for the next', async () => {
+    const h = await ready({ entries: withParams(PECK()) });
+    h.ui.update((state) => ({ ...state, lastParams: { [formKey(SCRIPT)]: { peckRetract: 9 } } }));
+    h.machine = MILL_1({ motion: MOTION });
+    h.formAnswers = [{ peckRetract: 0.5 }, { peckRetract: 3 }];
+    h.runs = [result(), result()];
+    await h.service.run(SCRIPT);
+    expect(h.forms[0].values?.peckRetract).toBe(0.5);
+    // another machine without a value: the 0.5 the first one put in is not carried over
+    h.machine = MILL_1({});
+    await h.service.run(SCRIPT);
+    expect(h.forms[1].values?.peckRetract).toBeUndefined();
+  });
+
+  it('fills a choice member, rapid.<axis> and the units', async () => {
+    const fields: FieldSpec[] = [
+      { id: 'kind', type: 'choice', label: 'Rapid kind', choices: [{ label: 'Straight', value: 'straight' }, { label: 'Per axis', value: 'per-axis' }], prefill: 'machine.motion.rapidKind' } as FieldSpec,
+      { id: 'rapidX', type: 'number', label: 'Rapid X', prefill: 'machine.motion.rapid.X' } as FieldSpec,
+      { id: 'rapidZ', type: 'number', label: 'Rapid Z', prefill: 'machine.motion.rapid.Z' } as FieldSpec,
+      { id: 'u', type: 'choice', label: 'Units', choices: [{ label: 'mm', value: 'mm' }, { label: 'inch', value: 'inch' }], prefill: 'machine.motion.units' } as FieldSpec,
+    ];
+    const h = await ready({ entries: withParams(...fields) });
+    h.machine = MILL_1({ motion: MOTION });
+    h.formAnswers = [undefined];
+    await h.service.run(SCRIPT);
+    expect(h.forms[0].values).toEqual({ kind: 'per-axis', rapidX: 30_000, rapidZ: undefined, u: 'mm' });
+  });
+
+  it('ignores a value that does not suit the field, and an unknown member, and never evaluates either', async () => {
+    const fields: FieldSpec[] = [
+      { id: 'a', type: 'number', label: 'A', prefill: 'machine.motion.units' } as FieldSpec, // 'mm' in a number field
+      { id: 'b', type: 'number', label: 'B', prefill: 'machine.motion.constructor' } as FieldSpec,
+      { id: 'c', type: 'number', label: 'C', prefill: 'machine.motion.maxFeed; process.exit()' } as FieldSpec,
+      { id: 'd', type: 'number', label: 'D', prefill: 'machine.limits.spindle' } as FieldSpec,
+      { id: 'e', type: 'number', label: 'E', default: 7, prefill: 'machine.motion.toolChange' } as FieldSpec,
+    ];
+    const h = await ready({ entries: withParams(...fields) });
+    h.machine = MILL_1({ motion: MOTION });
+    h.formAnswers = [undefined];
+    await h.service.run(SCRIPT);
+    expect(h.forms[0].values).toEqual({ a: undefined, b: undefined, c: undefined, d: undefined, e: 7 });
+  });
+
+  it('never prefills a text field: the machine value is a number and would be rejected without a word (CODE-7)', async () => {
+    const text = { id: 't', type: 'text', label: 'T', default: 'own', prefill: 'machine.motion.maxFeed' } as FieldSpec;
+    const h = await ready({ entries: withParams(text, PECK()) });
+    h.ui.update((state) => ({ ...state, lastParams: { [formKey(SCRIPT)]: { t: 'remembered' } } }));
+    h.machine = MILL_1({ motion: MOTION });
+    h.formAnswers = [undefined];
+    await h.service.run(SCRIPT);
+    // the text field is a plain field: its remembered value stays, only the number field is the machine's
+    expect(h.forms[0].values).toEqual({ t: 'remembered', peckRetract: 0.5 });
+  });
+
+  it('prefillMemberOf knows exactly the number, integer and choice types (CODE-7)', () => {
+    expect(PREFILL_TYPES).toEqual(['number', 'integer', 'choice']);
+    for (const type of ['number', 'integer', 'choice']) expect(prefillMemberOf({ type, prefill: 'machine.motion.maxFeed' })).toBe('maxFeed');
+    for (const type of ['text', 'bool', 'file', 'folder', 'address-list']) expect(prefillMemberOf({ type, prefill: 'machine.motion.maxFeed' })).toBeNull();
+  });
+
+  it('needs the machine service to answer get: a deps object without it does not build (CODE-11)', () => {
+    // A type-level check (`npm run check`): were `get` optional again, this directive would be unused and fail.
+    const onlyEffective = {} as Pick<MachineService, 'effective'>;
+    // @ts-expect-error `get` is required
+    const without: ScriptDeps['machines'] = onlyEffective;
+    expect(without).toBeDefined();
+  });
+
+  it('a value the caller passes explicitly wins over the machine', async () => {
+    const h = await ready({ entries: withParams(PECK()) });
+    h.machine = MILL_1({ motion: MOTION });
+    h.runs = [result()];
+    await h.service.run(SCRIPT, { skipForm: true, params: { peckRetract: 4 } });
+    expect((h.requests[0].context as ScriptContextV2).params).toEqual({ peckRetract: 4 });
+  });
+
+  it('skipForm and runLast use the machine too, and not the remembered value', async () => {
+    const h = await ready({ entries: withParams(PECK()) });
+    h.ui.update((state) => ({ ...state, lastParams: { [formKey(SCRIPT)]: { peckRetract: 9 } } }));
+    h.machine = MILL_1({ motion: MOTION });
+    h.runs = [result(), result()];
+    await h.service.run(SCRIPT, { skipForm: true });
+    expect((h.requests[0].context as ScriptContextV2).params).toEqual({ peckRetract: 0.5 });
+    lastScriptId.set(SCRIPT);
+    await h.service.runLast();
+    expect((h.requests[1].context as ScriptContextV2).params).toEqual({ peckRetract: 0.5 });
+  });
+
+  it('does not touch a parameter without prefill: remembered values still apply', async () => {
+    const h = await ready({ entries: withParams(PERCENT[0], PECK()) });
+    h.ui.update((state) => ({ ...state, lastParams: { [formKey(SCRIPT)]: { percent: 90, peckRetract: 9 } } }));
+    h.machine = MILL_1({ motion: MOTION });
+    h.formAnswers = [undefined];
+    await h.service.run(SCRIPT);
+    expect(h.forms[0].values).toEqual({ percent: 90, peckRetract: 0.5 });
   });
 });
 

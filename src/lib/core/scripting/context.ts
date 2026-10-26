@@ -178,5 +178,11 @@ export function buildContext(i: BuildContextInput): ScriptContextV2 {
   };
   // M12: additive, `contract` stays 2 (F50); absent for a document without channels.
   if (channels !== undefined) context.channels = channels;
+  // P4b (P4.8, plan §6.4 rule 4): the machine's motion data and limits, additive. The caller
+  // passes only a **valid** block (`motionBlock`/`limitsBlock`), so a machine without one, or
+  // with a broken one, gives the script no member and `machine_motion(ctx)` answers `None`.
+  // Copied, like `params` and `codes`: the script's file cannot change what the app holds.
+  if (i.motion !== undefined) context.machine.motion = structuredClone(i.motion);
+  if (i.limits !== undefined) context.machine.limits = structuredClone(i.limits);
   return context;
 }

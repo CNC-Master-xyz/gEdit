@@ -542,12 +542,14 @@ describe('what the lathe profile inherits and what it states', () => {
     expect(lathe.profile.machineParams?.numberInput?.default).toBe('calculator');
     expect(mill.machineParams?.numberInput?.default).toBe('is-b');
     // The lathe states its presets itself (an array is replaced as a whole, AD-16): the
-    // same three, because the mill's "As written" label is about the mill.
+    // same four (T083: IS-A, IS-B, IS-C), because the mill's "As written" label is about the mill.
     expect(lathe.profile.machineParams?.numberInput?.presets?.map((p) => p.id)).toEqual([
+      'is-a',
       'is-b',
       'is-c',
       'calculator',
     ]);
+    expect(mill.machineParams?.numberInput?.presets?.map((p) => p.id)).toEqual(['is-a', 'is-b', 'is-c', 'calculator']);
   });
 
   // Review of the UI polish pass: the mill's "As written" label says no cycle parameter has
@@ -559,9 +561,35 @@ describe('what the lathe profile inherits and what it states', () => {
     expect(calculator?.label).not.toMatch(/mill/i);
     expect(calculator?.label).toContain('G76 Q');
     expect(calculator?.label).toContain('Q6000 is 6 mm');
-    // The two increment presets say the same as the mill's.
+    // The three increment presets read lengths, angles and dwells as the mill's do. Manual-check
+    // fix D4-1: a point-less feed per revolution, and a thread lead, count in 0.0001 mm/rev
+    // (0.000001 in/rev) on the lathe, where the mill counts 0.01 mm/rev (the lathe's 0.01 is the
+    // Series 15 format, a choice of its own point-less feeds option).
     const mill = compiled(MILL).profile.machineParams?.numberInput?.presets ?? [];
-    expect(presets.slice(0, 2)).toEqual(mill.slice(0, 2));
+    for (const [i, preset] of presets.slice(0, 3).entries()) {
+      const { classes: latheClasses, ...latheRest } = preset.value;
+      const { classes: millClasses, ...millRest } = mill[i].value;
+      expect(preset.id).toBe(mill[i].id);
+      expect(latheRest, preset.id).toEqual(millRest);
+      expect(latheClasses?.feedPerMin, preset.id).toEqual(millClasses?.feedPerMin);
+      expect(latheClasses?.feedPerRev, preset.id).toEqual({ mode: 'increment', increment: '0.0001', incrementInch: '0.000001' });
+      expect(preset.label, preset.id).toContain('0.0001 mm/rev (F2500 is 0.25 mm/rev)');
+    }
+  });
+
+  it('D4-2: states its own point-less feeds option, not the mill one', () => {
+    const feeds = lathe.profile.machineParams?.numberInput?.pointlessFeeds;
+    expect(feeds?.default).toBe('standard');
+    expect(feeds?.verify).toBe(true);
+    expect(feeds?.choices.map((c) => [c.value, c.classes ?? null])).toEqual([
+      ['standard', null],
+      ['per-minute', { feedPerMin: { increment: '0.001', incrementInch: '0.00001' } }],
+      ['series-15', { feedPerRev: { increment: '0.01', incrementInch: '0.0001' } }],
+      [
+        'both',
+        { feedPerMin: { increment: '0.001', incrementInch: '0.00001' }, feedPerRev: { increment: '0.01', incrementInch: '0.0001' } },
+      ],
+    ]);
   });
 
   it('offers exactly the machine parameters of §8.8', () => {
@@ -569,7 +597,8 @@ describe('what the lathe profile inherits and what it states', () => {
     expect(lathe.profile.machineParams?.modalGroups).toEqual(['feedmode', 'spindlemode', 'plane']);
     expect(compiled(MILL).profile.machineParams?.modalGroups).toEqual(['feedmode', 'distance', 'plane']);
     expect(compiled(MILL).profile.machineParams?.diameter).toBeUndefined();
-    expect(compiled(MILL).profile.machineParams?.variants).toBeUndefined();
+    // v1.2.0 manual-check fix round (D3-4c): the mill's one variant, what a T on the M6 line is.
+    expect(compiled(MILL).profile.machineParams?.variants?.map((v) => v.id)).toEqual(['toolOnChangeLine']);
     // Klartext declares no machine parameters at all, so it has no machine item (§8.8).
     expect(compiled(KLARTEXT).profile.machineParams).toBeUndefined();
     // M12 (P12, the owner's decision of 2026-10-07, §8.9): channel presets are offered,
@@ -587,7 +616,7 @@ describe('what the lathe profile inherits and what it states', () => {
       ...(compiled(MILL).profile.machineParams?.numberInput?.presets ?? []),
       ...(lathe.profile.machineParams?.numberInput?.presets ?? []),
     ];
-    expect(presets.length).toBe(6);
+    expect(presets.length).toBe(8);
     for (const preset of presets) {
       expect(typeof preset.label, preset.id).toBe('string');
       expect(preset.label.length, preset.id).toBeGreaterThan(0);
@@ -601,19 +630,20 @@ describe('what the lathe profile inherits and what it states', () => {
 
   it('rewrites the block references a renumber can follow, and only those', () => {
     const rules = lathe.profile.numbering.references ?? [];
-    expect(rules.map((r) => [r.addresses.join(''), r.rewrite ?? true])).toEqual([
-      // `M99 P` may name a block in the **caller**, which renumbering this file cannot
-      // see, so it is reported and never rewritten (F42).
-      ['P', false],
-      // `M98 Q…` without a `P` calls a block of this program: followed and rewritten.
-      ['Q', true],
+    expect(rules.map((r) => [r.addresses.join(''), r.rewrite ?? true, r.program ?? 'own'])).toEqual([
+      // `M99 P` names a block in the **caller** (F42). P4d (plan §6.6 rule 10): rewritten
+      // when exactly one program of the file calls this one, reported otherwise.
+      ['P', true, 'caller'],
+      // `M98 Q…` without a `P` (or a program name) calls a block of this program: followed
+      // and rewritten.
+      ['Q', true, 'own'],
       // G8 M6: with a `P` it starts another program at *that* program's block, so the
-      // lathe now carries the same reporting rule the mill got in I6. Nothing is
-      // rewritten by it — the user guide promises such a line is listed with its reason,
-      // and before this the lathe listed nothing at all.
-      ['Q', false],
-      ['PQ', true],
-      ['GOTO', true],
+      // lathe carries the same reporting rule the mill got in I6. Nothing is rewritten by
+      // it (the owner, P4d: its Q depends on a parameter) — the user guide promises such a
+      // line is listed with its reason.
+      ['Q', false, 'called'],
+      ['PQ', true, 'own'],
+      ['GOTO', true, 'own'],
     ]);
   });
 });

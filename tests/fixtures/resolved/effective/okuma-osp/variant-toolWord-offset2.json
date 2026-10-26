@@ -16,6 +16,7 @@
       },
       "units": "mm",
       "variants": {
+        "counterSpindleY": "turns",
         "toolWord": "offset2"
       }
     },
@@ -28,6 +29,7 @@
       "numberInput": "profile",
       "units": "profile",
       "variants": {
+        "counterSpindleY": "profile",
         "toolWord": "machine"
       }
     }
@@ -216,8 +218,8 @@
         "presets": [
           {
             "id": "okuma-2turret",
-            "label": "Two turrets in one program: G13 (or G013) starts turret A, G14 (or G014) turret B (as often as needed); P codes order the two sides (smaller number first); M100 waits by count",
-            "source": "syntax-okuma.md §11.7a; OSP-P200L programming manual, programming for simultaneous 4-axis cuts (turret selection, P codes, M100)",
+            "label": "Two turrets in one program: G13 (or G013) starts turret A, G14 (or G014) turret B (as often as needed); P codes order the two sides (smaller number first); a spindle command (S, M00, M01, M03-M05, M41-M44, G96) stands at a P code both sides have; a P with a minus sign (P-10) is a wait both sides need, not part of the order (to be confirmed); M100 waits by count and does not wait for a P code",
+            "source": "syntax-okuma.md §11.7a; OSP-P200L programming manual, programming for simultaneous 4-axis cuts (turret selection, P codes, spindle commands at P codes, M100); OSP-P200 alarm list, alarm 1216 (a negative P code is left out of the order, but turrets A and B must have the same one)",
             "value": {
               "layout": "single-file",
               "list": [
@@ -251,7 +253,20 @@
                   "partners": {
                     "kind": "all"
                   },
-                  "semantics": "ordered"
+                  "semantics": "ordered",
+                  "sharesWaitsWith": "m100",
+                  "withCodes": "S0-S99999999, M0-M1, M3-M5, M41-M44, G96"
+                },
+                {
+                  "id": "p-negative",
+                  "label": "P with a minus sign (P-10): a wait both turrets need, with the same number; not part of the order (from the alarm list, to be confirmed on the machine)",
+                  "match": {
+                    "kind": "regex",
+                    "pattern": "(?<![A-Za-z_])(?<mark>P-\\d{1,4})(?![\\d.])"
+                  },
+                  "partners": {
+                    "kind": "all"
+                  }
                 },
                 {
                   "id": "m100",
@@ -346,12 +361,12 @@
         {
           "choices": [
             {
-              "label": "Two-digit offsets (up to 99): T0101 (default, verify)",
+              "label": "Two-digit offsets (up to 99): T0101, T101 (default, verify)",
               "overlay": {
                 "toolCall": {
-                  "ignore": "(?<![A-Z])(?:G0*(?:7[1-8]|18\\d)(?![\\d.])|T(?:\\d{2})?00\\d{2}(?!\\d))",
-                  "tool": "(?<![A-Z])T(?:\\d{2}(?=\\d{4}(?!\\d)))?(?<tool>\\d{2})(?=\\d{2}(?!\\d))",
-                  "trigger": "(?<![A-Z])T\\d{4}(?:\\d{2})?(?!\\d)"
+                  "ignore": "(?<![A-Z])(?:G0*(?:7[1-8]|18\\d)(?![\\d.])|T(?:(?:\\d{2})?00\\d{2}|0\\d{2})(?!\\d))",
+                  "tool": "(?<![A-Z])T(?:\\d{2}(?=\\d{4}(?!\\d)))?(?<tool>\\d{2}(?=\\d{2}(?!\\d))|\\d(?=\\d{2}(?!\\d)))",
+                  "trigger": "(?<![A-Z])T(?:\\d{3,4}|\\d{6})(?!\\d)"
                 }
               },
               "value": "offset2"
@@ -371,6 +386,21 @@
           "default": "offset2",
           "id": "toolWord",
           "label": "Tool word: offset digits"
+        },
+        {
+          "choices": [
+            {
+              "label": "Y turns with Z: the Z mirror for the counter spindle changes the sign of Y too (default, verify)",
+              "value": "turns"
+            },
+            {
+              "label": "Y stays: the Z mirror for the counter spindle leaves Y as written",
+              "value": "stays"
+            }
+          ],
+          "default": "turns",
+          "id": "counterSpindleY",
+          "label": "Counter spindle"
         }
       ]
     },
@@ -535,10 +565,10 @@
       "wordSeparatorRequired": false
     },
     "toolCall": {
-      "ignore": "(?<![A-Z])(?:G0*(?:7[1-8]|18\\d)(?![\\d.])|T(?:\\d{2})?00\\d{2}(?!\\d))",
-      "tool": "(?<![A-Z])T(?:\\d{2}(?=\\d{4}(?!\\d)))?(?<tool>\\d{2})(?=\\d{2}(?!\\d))",
+      "ignore": "(?<![A-Z])(?:G0*(?:7[1-8]|18\\d)(?![\\d.])|T(?:(?:\\d{2})?00\\d{2}|0\\d{2})(?!\\d))",
+      "tool": "(?<![A-Z])T(?:\\d{2}(?=\\d{4}(?!\\d)))?(?<tool>\\d{2}(?=\\d{2}(?!\\d))|\\d(?=\\d{2}(?!\\d)))",
       "toolFrom": "same-line",
-      "trigger": "(?<![A-Z])T\\d{4}(?:\\d{2})?(?!\\d)"
+      "trigger": "(?<![A-Z])T(?:\\d{3,4}|\\d{6})(?!\\d)"
     },
     "toolList": {
       "commentFilter": "^[-*=_\\s]*$",

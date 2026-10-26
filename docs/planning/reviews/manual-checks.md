@@ -104,7 +104,64 @@ Plan: [Phase 4 section 10](../phase-4-implementation.md#10-manual-checks-for-the
 7. **Aligned compare.** Compare two re-posted programs in the aligned view; copy a change, a line and a word both ways, then undo. Expect: each copy lands where marked and each undo takes it back. [ ]
 8. **Wait codes on a real program.** Run Check Wait Codes on a program that ran correctly. Expect: no finding. [ ]
 
-## 9. The release's own checks
+## 9. Typing help and printing (P4c)
+
+Plan: [Phase 4 section 10](../phase-4-implementation.md#10-manual-checks-for-the-owner), P4c; use [Editing comfort](../../user/editing.md). Work on copies. Do the typing check once; do the print checks on each of the three systems (macOS, Windows, Linux), each with a short program and with one of several pages.
+
+1. **Typing help.** Switch on Auto Space and Automatic Block Number (Edit tab, *Typing*). Type a few blocks such as `G1X10.Y5.` and press Enter at the end of a block. Expect: a space in front of each new word, a new line that starts with the next block number, and one undo step takes back a typed letter with its space or a line break with its number. [ ]
+2. **Print to paper.** Press `Cmd/Ctrl+P`, keep the defaults, choose a real printer. Expect: the print dialog of the system opens (no second window of gEdit on the page); the pages are portrait, nothing is cut at the right or bottom edge on A4 or on Letter, every page has the header with the name, the date and *Page 2 of 5*, and the line numbers are the program's line numbers. [ ]
+3. **Print to PDF.** Print the same program to PDF from the print dialog. Expect: the same pages as on paper, in colour, the colours readable on white. [ ]
+4. **Black only and a selection.** Print again with *Black only*, and with *The selected lines* after selecting some lines. Expect: no colour on the pages; only the selected lines, with their own line numbers. [ ]
+5. **The chord in a form.** Open the print form, click in a text field and press `Cmd/Ctrl+P`. Expect: nothing prints from the form. [ ]
+6. **Export as HTML.** Run Export as HTML, open the file in a browser and print it from there. Expect: the same pages, in colour, with no script. Say on which systems Print itself did not work. [ ]
+7. **Too large.** Print a program of more than 20,000 lines. Expect: the refusal names the limit and says to print a selection. [ ]
+
+## 10. Drilling cycles and time (P4b)
+
+Plan: [Phase 4 section 10](../phase-4-implementation.md#10-manual-checks-for-the-owner), P4b. Work on copies. The printing checks of P4c are not here.
+
+1. **Expand Drilling Cycles on a real machine program.** Expand the cycles of a real milling program (a copy), then run both the original and the expanded copy in the machine's own simulation, or as a dry run above the part. Expect: the tool makes the same holes, to the same depths, with the same pecks, dwells and return levels; the expanded program is longer but moves identically. Try one program per control you have (Fanuc, Klartext, Sinumerik). [ ]
+2. **A refusal.** Run it on a program with a tapping cycle, or a `G98`/`G99` cycle with the return level not written. Expect: nothing changes, and the findings name each line and say why in plain words. [ ]
+3. **Time estimate against a real cycle time.** Fill in the machine's Motion and limits, run Statistics and Time on a real program, and compare the total with the time the machine reports for a run at 100 % override. Expect: the estimate is **lower** than the machine's time and the message says it is a lower bound; the gap is explained by the listed blocks and by acceleration. If it is higher, write down the program and both times. [ ]
+4. **Not set.** Run Statistics and Time on a machine whose Motion and limits are empty. Expect: lengths are given, times say *not set*, and the findings name the missing values. [ ]
+5. **The limits checks.** Set a top spindle speed and a travel, then run Program checks on a program that goes above and outside them. Expect: a spindle speed limit warning, a travel error for a position in machine coordinates, one travel warning per axis when the positions in work coordinates span more than the travel (and none when they span less, however far from zero), none for a program inside the limits. On a lathe, check that the X travel you entered as a diameter is the one compared. [ ]
+6. **Units of the peck values.** On a machine whose Motion data is in inches, expand a millimetre program with a `G83`. Expect: **Units of the peck values** is prefilled with the machine's units, the values are converted by 25.4 in the expansion, and the written moves match the pecks your control makes. [ ]
+7. **`G86` and the spindle.** Expand a `G86` under `M3`, then under `M4`, then with no spindle code before it. Expect: the first is written out; the other two are refused (the manual does not say which way the spindle restarts, and with no direction in force there is none to restart in). The code is the check, not `M4` alone: any spindle code but `M3` refuses. Check on the machine which way it restarts after `G86` under `M4` ([machine facts](machine-facts.md)). [ ]
+8. **`K0` with a position.** Run a Fanuc `G81 X… Y… K0` block on the control. Expect: gEdit refuses to expand it; note whether the control moves to the position or does nothing. [ ]
+9. **`CYCL CALL POS` with an `F`.** Run `CYCL CALL POS X… Y… Z… F300` followed by a move without an `F`. Expect: the `F300` counts for the move to the position only; the next move runs at the feed in force before the call. [ ]
+10. **`CYCLE83` with `_DAM` 0.** Expand a `CYCLE83` with `VARI=1` and `_DAM=0`, then with `_DAM` not written. Expect: every peck after the first as deep as the first would be (no reduction); compare the strokes on the machine. Kept as it is until you say otherwise. [ ]
+
+## 11. Renumber and the references between programs (P4d)
+
+Plan: [Phase 4 section 10](../phase-4-implementation.md#10-manual-checks-for-the-owner), P4d; use [Transformations](../../user/transformations.md#renumber-blocks). Work on copies; for the cross-file checks open two copies of a main program and a subprogram file in two tabs.
+
+1. **Number every Nth block.** Renumber a copy of a program with **Number every Nth block** 5, on a program that has a `GOTO`. Expect: only every fifth block has a number, and the block the `GOTO` names keeps one and is rewritten with it. [ ]
+2. **Fit the increment to the maximum.** Renumber with **Fit the increment to the maximum**: once with a maximum that leaves room, once with a maximum too small for the blocks, once with the **Maximum** empty. Expect: the first uses the largest whole increment that fits; the second writes nothing and the status bar says why; the third uses the dialect's maximum (99999 on Fanuc). [ ]
+3. **A start text that is not there.** Set **Start at the line containing** to a text no line has. Expect: nothing is renumbered and the status bar says no line contains it. [ ]
+4. **Two programs, `M98 P1000 Q30`.** Keep a main program with `M98 P1000 Q30` open next to the file that holds `O1000`; renumber `O1000`. Expect: the `Q30` is listed in Results with the *never rewrites* wording and is not marked to update. Check on the control that `M98 P1000 Q30` starts the subprogram at block 30, and say whether you want `Q` rewritten after all. [ ]
+5. **`M99 P30` and Update References.** With a subprogram file and a main program open, renumber the main program, then run **Update References in Other Documents**. Expect: it asks once, writes the `M99 P`, and Undo in the subprogram file takes back that file only. [ ]
+6. **Edit after the list.** Renumber, then type in the renumbered document and run **Update References in Other Documents**. Expect: nothing is written and the status bar says to undo your changes or the renumber. Undo your typing and run it again: it writes. [ ]
+7. **A locked document.** Lock a listed document (Read-only) and run Update. Expect: nothing is written anywhere and the status bar says which document is locked. [ ]
+8. **A second renumber.** Renumber document A, then renumber document B before updating. Expect: the status bar and a row in Results say that the references of A were not updated and are no longer listed. [ ]
+9. **A local call.** In a program with `M98 Q30` and an `M99 P` inside the part from `N30` to the next `M99`, renumber. Expect: the `Q30` and the `P` are rewritten. Say whether your control runs `M98 Q30` as a call of its own blocks. [ ]
+10. **An interrupt.** In a subprogram started by `M96 P2000`, renumber a program that holds an `M99 P`. Expect: the row says an interrupt starts the program and the `P` is left as written. [ ]
+11. **A number twice.** Renumber a selection so that a new number is one that a line outside it already has. Expect: a warning that the number is on more than one block, with a row on each. [ ]
+
+## 12. Review round X: tool direction, copies, templates
+
+Plan: [Phase 4 section 10](../phase-4-implementation.md#10-manual-checks-for-the-owner), review round X. Work on copies.
+
+1. **Tool direction under `G43.5`.** On a 5-axis program with `G43.5` (or `G41.6`, `G42.6`) and `I J K`, run Address Arithmetic with Multiply on `X` and `Y`. Expect: the `I J K` of the blocks under the mode stay as written, with a note; after `G49` or `G40` the same words in an arc scale. [ ]
+2. **Rotate and Mirror under `G43.5`.** Run Rotate and Mirror on the same copy. Expect: both refuse, naming the `I J K` words; Translate works. [ ]
+3. **Check Program under `G43.5`.** Run Program checks on it with an increment machine. Expect: no *Machine reading* rows for the `I J K` of the tool direction. [ ]
+4. **A template from selection with `M99 P`.** Select lines with an `M99 P30` and a block `N30`, make a template. Expect: the `P30` stays as written and the draft says so. [ ]
+5. **Contour lists.** Select a Klartext contour with `CYCL DEF 14.1 KONTURLABEL1/2` and its `LBL` blocks, make a template. Expect: the labels in the list stay as written, with the note. [ ]
+6. **Copy between programs in other modes.** In the aligned view copy a line from a program that is in `G91` into one that has written no `G90` or `G91`. Expect: a warning after the copy that the mode is not known in the other program. Then copy between `G54.1 P1` and `G54.1 P2`: a warning that the work offsets differ. [ ]
+7. **The channel view and a screen reader.** Open the channel view of a program with a wait that has no partner, with a screen reader on. Expect: it says the problem as the view opens, and says that all waits are lined up when you fix it. [ ]
+8. **An Okuma six-digit `T`.** On an Okuma machine set to *Three-digit offsets*, open a program with `T010101`. Expect: it is not a tool change in the tool list, and Program checks warns about the word. Say whether that matches what your control does. [ ]
+9. **Sinumerik milling cycles on a lathe.** With a Sinumerik turning program, run **Edit Cycle** on an empty line. Expect: `POCKET3`, `SLOT1` and the other milling cycles are offered; the turning cycles too. [ ]
+
+## 13. The release's own checks
 
 1. **Release checklist.** The boxes of the [release checklist](../../releases/checklist.md) that apply to v1.2.0 are ticked, or what is not ticked is written into the notes as a known limit. [ ]
-2. **The phase checks.** Sections 7 and 8 above (P4a and P4e) are done. [ ]
+2. **The phase checks.** Sections 7 to 12 above (P4a, P4e, P4c, P4b, P4d and review round X) are done. [ ]

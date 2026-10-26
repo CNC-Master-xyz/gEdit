@@ -89,7 +89,15 @@ interface Decided extends Seen {
   exists: boolean;
 }
 
-export function createExternalChangeService(deps: ExternalChangeDeps): ExternalChangeService {
+/** What the service is holding per document, for the test of the leak (T218). */
+export interface ExternalChangeInternals {
+  /** How many documents have an entry in any of the three maps. */
+  trackedCount(): number;
+}
+
+export function createExternalChangeService(
+  deps: ExternalChangeDeps,
+): ExternalChangeService & ExternalChangeInternals {
   const now = (): number => (deps.now ? deps.now() : Date.now());
   /**
    * The stamp a "Keep mine" would apply, per document: the file as the poll last read it.
@@ -286,7 +294,23 @@ export function createExternalChangeService(deps: ExternalChangeDeps): ExternalC
     deps.status.show(t('external.changedStatus', { name: doc.title }));
   }
 
+  /**
+   * Lets go of the documents that are no longer open (T218). `pending`, `seen` and
+   * `kept` are filled when a banner goes up or "Keep mine" is answered and emptied only
+   * when that document is reported on again, so a tab closed with its banner still up
+   * stayed in all three for the rest of the session — a stamp per closed file, for ever.
+   * Document ids are never reused, so nothing else can ever clear them.
+   */
+  function prune(): void {
+    if (pending.size === 0 && seen.size === 0 && kept.size === 0) return;
+    const open = new Set(deps.docs.all().map((doc) => doc.id));
+    for (const id of [...pending.keys(), ...seen.keys(), ...kept.keys()]) {
+      if (!open.has(id)) forget(id);
+    }
+  }
+
   async function sweep(): Promise<void> {
+    prune();
     // A document with no stamp is untitled, or a restored snapshot whose sidecar carried
     // none; there is nothing to compare it against. `fileOps.write` asks before it
     // overwrites such a document's file, because "nothing to compare" is not "unchanged".
@@ -312,6 +336,10 @@ export function createExternalChangeService(deps: ExternalChangeDeps): ExternalC
   }
 
   return {
+    trackedCount(): number {
+      return new Set([...pending.keys(), ...seen.keys(), ...kept.keys()]).size;
+    },
+
     start(): Disposable {
       const timer = setInterval(() => {
         if (deps.hasFocus()) void checkNow();

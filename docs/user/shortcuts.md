@@ -30,6 +30,7 @@ On a Mac laptop the F-keys may need the `fn` key, depending on your keyboard set
 | `Cmd/Ctrl+Alt+S` | Save All |
 | `Cmd/Ctrl+W` | Close the tab |
 | `Cmd/Ctrl+Shift+W` | Close the window |
+| `Cmd/Ctrl+P` | Print… — opens the print form (what to print, colours, line numbers, font size) |
 
 **Reload** (read the file again from disk) is on the File tab and in the palette; it has no key.
 
@@ -39,6 +40,11 @@ encoding, line ending) have no shortcut. All of them are in the palette; Open Re
 Clear Recent Files are also in the File tab's Recent list, and the pickers are in the
 status bar. Lock Against Editing has no key on purpose: an accidental one would look like
 a broken keyboard.
+
+`Cmd/Ctrl+P` prints the program: **Print** is on the File tab (group *Print*) and in the palette.
+It opens a form first, see [Print and Export as HTML](editing.md#print-and-export-as-html).
+In a form, a dialog or a text field the key does nothing, so gEdit's own window is never printed.
+**Export as HTML**, **Insert File** and **Append File** have no key.
 
 ## Tabs and panels
 
@@ -74,7 +80,7 @@ under the cursor; see [Understanding a block](inspector.md).
 
 `Ctrl+G` is the Control key even on a Mac: `Cmd+G` is "find next" there, and `Ctrl+G` is
 the editor component's own key for going to a line, which gEdit takes over so that it
-finds a block number too. Clear Bookmarks has no shortcut.
+finds a block number too. Clear Bookmarks, **Name Bookmark**, **Bookmark All Matches**, **Bookmark Panel**, **Select Block Range** and **Delete Block Range** have no shortcut; see [Editing comfort](editing.md).
 
 **Two editor defaults were taken over:** `F2` and `Cmd/Ctrl+F2` are bookmark keys here,
 not *Rename Symbol* and *Change All Occurrences*. Selecting every occurrence of a word is
@@ -176,6 +182,9 @@ None of these has a key; they are on the ribbon or in the palette (`F1`).
 
 - **Upper-Case Typing** (Edit tab, *Typing*) switches [upper case while you type](README.md#typing-forced-upper-case-and-no-accidental-joins)
   off or on for the session.
+- **Auto Space** and **Automatic Block Number** (Edit tab, *Typing*) switch the two typing helps of
+  [Editing comfort](editing.md) on or off for the session. The automatic number acts on a plain `Enter`
+  at the end of a numbered block.
 - `Backspace` in column 1 and `Delete` at the end of a line refuse to join two blocks of text
   (the switch above does not change that); select the line break to delete it.
 - **Manage Profiles…**, **New Profile From…**, **Open**, **Import** and **Export Profile

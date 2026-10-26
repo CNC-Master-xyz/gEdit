@@ -219,8 +219,10 @@ export function recentList(): Promise<RecentEntry[]> {
 
 /**
  * Moves `path` to the front and truncates the list to `max` entries, answering with the
- * new list. Rejects unless the fs scope already allows `path` (AD-9), so only a file the
- * user picked, dropped or reopened can get in.
+ * new list. Rejects unless the fs scope already allows `path` (AD-9) **and** `path` is an
+ * absolute path to an existing regular file other than gEdit's own state file (T135), so
+ * only a file the user picked, dropped or reopened can get in: a folder the user picked
+ * makes everything under it pass the scope, which is not a reason to remember it.
  */
 export function recentTouch(path: string, max: number): Promise<RecentEntry[]> {
   return invoke<RecentEntry[]>('recent_touch', { path, max });
@@ -531,7 +533,10 @@ export interface ScriptMeta {
   /** stdout is `{ text, message, findings }` rather than plain text. */
   envelope: boolean;
   documents: ScriptDocumentsMode;
-  /** Rendered by `modals.form()` exactly like a transform's options. */
+  /**
+   * Rendered by `modals.form()` exactly like a transform's options; a parameter may carry the
+   * `prefill` of plan §6.4 rule 5 (`FieldSpec.prefill`, checked by `meta.rs`).
+   */
   params: FieldSpec[];
   warnings: string[];
 }

@@ -8,6 +8,7 @@
 
 import { writable } from 'svelte/store';
 import { createChannelPanes, type ChannelPanesDeps } from '$lib/monaco/channelPanes';
+import { editKeepsChannels } from '$lib/core/channels/touch';
 import { createEditorService } from '$lib/monaco/editorService';
 import { realModel } from '$lib/monaco/realModel';
 import { createChannelService, type EffectiveView } from '$lib/stores/channels';
@@ -31,6 +32,12 @@ export interface PaneEditor extends FakeEditor {
   getScrollTop(): number;
   /** The decorations the view put on the editor, the last `set`. */
   marks(): { range: { startLineNumber: number }; options: Record<string, unknown> }[];
+}
+
+/** A hover provider as the view registers it. */
+export interface HoverRegistration {
+  language: string;
+  provider: { provideHover(model: unknown, position: { lineNumber: number; column: number }): { range: unknown; contents: { value: string; isTrusted?: boolean; supportHtml?: boolean }[] } | null | undefined };
 }
 
 export interface FakeNode {
@@ -78,8 +85,17 @@ function augment(ed: FakeEditor): PaneEditor {
 }
 
 /** The fake Monaco of the groups, with real text models and the augmented editors. */
-export function paneMonaco(): { api: Monaco; state: FakeMonacoState } {
+export function paneMonaco(): { api: Monaco; state: FakeMonacoState; hovers: HoverRegistration[] } {
   const { api, state } = groupMonaco();
+  // The hover providers the view registers (`monaco.languages.registerHoverProvider`), the live ones in registration order.
+  const hovers: HoverRegistration[] = [];
+  (api as unknown as { languages: unknown }).languages = {
+    registerHoverProvider(language: string, provider: HoverRegistration['provider']) {
+      const entry = { language, provider };
+      hovers.push(entry);
+      return { dispose: () => void hovers.splice(hovers.indexOf(entry), 1) };
+    },
+  };
   const editor = (api as unknown as { editor: Record<string, unknown> }).editor;
   const create = editor.create as (element: unknown, options: Record<string, unknown>) => FakeEditor;
   editor.create = (element: unknown, options: Record<string, unknown>) => augment(create(element, options));
@@ -93,7 +109,7 @@ export function paneMonaco(): { api: Monaco; state: FakeMonacoState } {
     };
     return model;
   };
-  return { api, state };
+  return { api, state, hovers };
 }
 
 // -- a machine with channels ------------------------------------------------------------------
@@ -162,6 +178,10 @@ export interface PaneWorld {
   /** The live fake editor of group `id`, mounted if it was not. */
   mount(id: GroupId): Promise<PaneEditor>;
   editorOf(id: GroupId): PaneEditor;
+  /** The hover providers registered now (the view's wait hovers). */
+  hovers: HoverRegistration[];
+  /** What the wait hovers say for line `line` of the model shown in group `group` (every provider asked, in order); empty when none has anything to say. */
+  hover(group: GroupId, line: number): string[];
   /** The real model of a document. */
   model(id: DocId): ITextModel;
   /** The text of a document, LF-joined. */
@@ -179,7 +199,7 @@ export interface PaneWorld {
 /** The world: documents, the editor service, a real channel service under `params` and the channel view. */
 export async function paneWorld(params: ChannelParams | null, o: { cp?: string; viewDeps?: Partial<ChannelPanesDeps>; now?: () => number } = {}): Promise<PaneWorld> {
   const docs = createDocumentStore({ caseInsensitivePaths: false });
-  const { api, state } = paneMonaco();
+  const { api, state, hovers } = paneMonaco();
   let registered: PaneHistory | undefined;
   const editor = createEditorService({ docs, loadMonaco: async () => api, paneHistory: () => registered });
   const timers: (() => void)[] = [];
@@ -232,6 +252,8 @@ export async function paneWorld(params: ChannelParams | null, o: { cp?: string; 
     createNode: () => fakeNode(),
     // The microtask of the app, made explicit: a test calls `panes.flush()` where the harness would wait.
     defer: (fn) => void deferred.push(fn),
+    // As the app wires it: typing in an ordinary line does not ask the channel service again.
+    editKeepsChannels: (_id, oldText, newText) => current !== null && editKeepsChannels(oldText, newText, cp, current),
     ...o.viewDeps,
   });
 
@@ -246,6 +268,16 @@ export async function paneWorld(params: ChannelParams | null, o: { cp?: string; 
     said,
     timers,
     history: () => registered,
+    hovers,
+    hover(group, line) {
+      const model = world.editorOf(group).getModel() as unknown as ITextModel;
+      const out: string[] = [];
+      for (const { provider } of [...hovers]) {
+        const answer = provider.provideHover(model, { lineNumber: line, column: 1 });
+        for (const content of answer?.contents ?? []) out.push(content.value);
+      }
+      return out;
+    },
     addDoc(text, opts = {}) {
       const id = docs.add({ ...META, path: opts.path ?? null, untitledIndex: opts.path ? null : META.untitledIndex }, { activate: opts.activate ?? true });
       editor.createModel(id, text, 'fanuc-lathe', 'lf');

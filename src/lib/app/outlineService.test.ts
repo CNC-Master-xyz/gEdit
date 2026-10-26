@@ -11,6 +11,7 @@ import { cpOf, profileOf } from '../../../tests/unit/helpers/profiles';
 import { COMPILED, FANUC, KLARTEXT, META, big, harness, type Harness } from '../../../tests/unit/helpers/outlineHarness';
 import { CHAIN_MS, computeJumpLines, groupByChannel, nextTurn, reuseRows, SYNC_ROWS_MAX } from './outlineService';
 import { compileProfile } from '$lib/core/profiles/compile';
+import { OutlineIndex } from '$lib/core/profiles/outline';
 import type { ChannelParams, ChannelSet } from '$lib/core/channels/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import type { DocId } from '$lib/app/types';
@@ -106,8 +107,11 @@ describe('the first build', () => {
     it('rebuilds after a machine switch in slices as well, not inside the switch', () => {
       const machineRevision = writable(0);
       let key = 'a';
-      const cp = COMPILED.get(FANUC) as CompiledProfile;
-      const h = harness({ idleQueue: true, machineRevision, effective: () => ({ cp, key }) });
+      // The machine's profile reads the program differently (T136: one that reads it the same keeps the index).
+      const profile = structuredClone(profileOf(FANUC));
+      profile.toolList = { ...profile.toolList, dropLeadingZeros: !(profile.toolList?.dropLeadingZeros === true) } as typeof profile.toolList;
+      const views: Record<string, CompiledProfile> = { a: COMPILED.get(FANUC) as CompiledProfile, b: compileProfile(profile) };
+      const h = harness({ idleQueue: true, machineRevision, effective: () => ({ cp: views[key], key }) });
       h.clock.tick = 0;
       h.clock.perLine = 1;
       const id = h.add(LONG);
@@ -335,6 +339,212 @@ describe('the first build', () => {
     h.createModel(second);
     h.flush();
     expect(h.outline.toolLines(second)).toEqual([3, 6]);
+  });
+});
+
+// T136: the last stage of the first build (the marks into the tree), what is published while
+// it runs, and the machine switch that leaves the map as it is.
+describe('the last stage of the first build (T136)', () => {
+  // Tool changes on lines 3, 7, 13, 17, 23, 27, 33 and 37: eight marks.
+  const LONG = Array.from({ length: 40 }, (_, i) => (i % 10 === 2 || i % 10 === 6 ? `T${i} M6` : `G1 X${i}.`)).join('\n');
+
+  /** Runs the slices one at a time and says how many it took until `done` holds. */
+  function slicesUntil(h: Harness, done: () => boolean): number {
+    let slices = 0;
+    while (!done()) {
+      if (h.nextSlice() === null) throw new Error('the build stopped');
+      slices++;
+      if (slices > 10_000) throw new Error('the build does not end');
+    }
+    return slices;
+  }
+
+  it('puts the marks into the tree in runs, one run a slice once the lines are read', () => {
+    // The default clock moves 10 ms on every reading, so every slice is one run.
+    const h = harness({ idleQueue: true, aggregateRun: { lines: 1000, marks: 2 } });
+    const id = h.add(LONG);
+    const items = h.outline.items(id);
+    // 40 lines in runs of 4, and the first run of marks (two of eight) in the slice that read the last line.
+    const readSlices = 10;
+    const slices = slicesUntil(h, () => get(items).length > 0);
+    // Three more slices of two marks: the build is ready after 13, where it was after 10.
+    expect(slices).toBe(readSlices + 3);
+    expect(get(items).map((item) => item.line)).toEqual([3, 7, 13, 17, 23, 27, 33, 37]);
+  });
+
+  it('is ready in the slice that read the last line when the marks fit in one run', () => {
+    const h = harness({ idleQueue: true });
+    const id = h.add(LONG);
+    const items = h.outline.items(id);
+    expect(slicesUntil(h, () => get(items).length > 0)).toBe(10);
+  });
+
+  it('publishes nothing while the build runs, and the whole map when it is done', async () => {
+    const timers: { fn: () => void; ms: number; dead: boolean }[] = [];
+    const fire = (ms: number): void => {
+      const due = timers.filter((t) => !t.dead && t.ms === ms);
+      for (const timer of due) timers.splice(timers.indexOf(timer), 1);
+      for (const timer of due) timer.fn();
+    };
+    const h = harness({
+      schedule: (fn, ms) => {
+        const timer = { fn, ms, dead: false };
+        timers.push(timer);
+        return () => {
+          timer.dead = true;
+        };
+      },
+    });
+    const id = h.add(LONG);
+    const items = h.outline.items(id);
+    fire(0); // the first slice: the first run of 4 lines holds a tool call (line 3)
+    expect(h.outline.toolLines(id)).toEqual([3]);
+    // The debounce that `rebuild` armed fires while the build is still reading: it must not
+    // aggregate the part that is read and publish it (a stall that grows with the prefix).
+    fire(150);
+    expect(get(items)).toEqual([]);
+    for (let i = 0; i < 100 && get(items).length === 0; i++) fire(0);
+    expect(get(items).map((item) => item.line)).toEqual([3, 7, 13, 17, 23, 27, 33, 37]);
+    await h.outline.whenReady(id);
+  });
+
+  it('keeps what was published until a rebuild is done (a reload does not blank the map or aggregate half of it)', () => {
+    const h = harness({ idleQueue: true });
+    const id = h.add(LONG);
+    h.flush();
+    const before = get(h.outline.items(id));
+    expect(before).toHaveLength(8);
+
+    h.setText(id, LONG.replace('T2 M6', '(CHANGED)'));
+    const store = h.outline.items(id);
+    expect(get(store)).toBe(before);
+    expect(h.flush()).toBeGreaterThan(0);
+    expect(get(store)).not.toBe(before);
+    expect(get(store).map((item) => item.line)).toEqual([3, 7, 13, 17, 23, 27, 33, 37]);
+    expect(get(store)[0].kind).toBe('comment');
+  });
+
+  /** The service stopped in the middle of the last stage: every line read, two of the eight marks in the tree. */
+  function midStage() {
+    const lines = LONG.split('\n');
+    const h = harness({ idleQueue: true, aggregateRun: { lines: 1000, marks: 2 } });
+    const id = h.add(LONG);
+    const items = h.outline.items(id);
+    slicesUntil(h, () => h.reads.length >= 10);
+    expect(get(items)).toEqual([]);
+    const fresh = (): OutlineIndex => {
+      const index = new OutlineIndex(COMPILED.get(FANUC) as CompiledProfile);
+      index.reset(lines);
+      return index;
+    };
+    return { h, id, items, lines, fresh };
+  }
+
+  it('goes on with the marks after an edit below the walk', () => {
+    const { h, id, items, lines, fresh } = midStage();
+    lines[35] = 'T50 M6';
+    h.edit(id, 36, 'T50 M6');
+    // The walk is on its way still: the slices that are left are queued, and the tree is made by them.
+    expect(h.idleTasks.some((task) => !task.cancelled)).toBe(true);
+    expect(get(items)).toEqual([]);
+    // Seven marks are left (the edit made the ninth), in runs of two.
+    expect(slicesUntil(h, () => get(items).length > 0)).toBe(4);
+    expect(get(items)).toEqual(fresh().items());
+    expect(h.outline.toolLines(id)).toEqual(fresh().toolLines());
+  });
+
+  it('ends the first build at once after an edit above the walk, and publishes by the debounce like any edit', async () => {
+    const { h, id, items, lines, fresh } = midStage();
+    let ready = false;
+    void h.outline.whenReady(id).then(() => {
+      ready = true;
+    });
+    lines[4] = 'T51 M6';
+    h.edit(id, 5, 'T51 M6');
+    await Promise.resolve();
+    expect(ready).toBe(true);
+    // The map is the debounce's to publish; the index is current at once.
+    expect(get(items)).toEqual([]);
+    expect(h.outline.toolLines(id)).toEqual(fresh().toolLines());
+    h.flush();
+    expect(get(items)).toEqual(fresh().items());
+  });
+
+  // A keystroke every slice above the walk used to send it back to the first line each time,
+  // and the build never ended while the typing went on (the typing test at 800,000 lines).
+  it('is ready while a keystroke arrives between every two slices above the walk', async () => {
+    const { h, id, lines } = midStage();
+    let ready = false;
+    void h.outline.whenReady(id).then(() => {
+      ready = true;
+    });
+    for (let key = 0; key < 20 && !ready; key++) {
+      lines[1] = `G1 X${key}.`;
+      h.edit(id, 2, `G1 X${key}.`);
+      h.nextSlice();
+      await Promise.resolve();
+    }
+    expect(ready).toBe(true);
+  });
+});
+
+describe('a machine switch (T136)', () => {
+  function switching(views: Record<string, CompiledProfile>) {
+    const machineRevision = writable(0);
+    let key = 'a';
+    const h = harness({ idleQueue: true, machineRevision, effective: () => ({ cp: views[key], key }) });
+    return {
+      h,
+      switchTo(to: string) {
+        key = to;
+        machineRevision.update((n) => n + 1);
+      },
+    };
+  }
+
+  const base = COMPILED.get(FANUC) as CompiledProfile;
+
+  it('keeps the index when the machine\'s profile reads the program the same way (another object, other power-on state)', () => {
+    const profile = structuredClone(profileOf(FANUC));
+    profile.modal = { ...profile.modal, initial: { ...profile.modal?.initial }, units: 'inch', diameter: 'on' };
+    profile.name = 'Fanuc, some machine';
+    const { h, switchTo } = switching({ a: base, b: compileProfile(profile) });
+    const id = h.add(PROGRAM);
+    h.flush();
+    const published = get(h.outline.items(id));
+    expect(published).toHaveLength(4);
+
+    switchTo('b');
+    // Nothing is queued: no first build, no publish.
+    expect(h.pending()).toBe(0);
+    expect(h.reads).toHaveLength(2); // the two runs of the first build, and none since
+    expect(get(h.outline.items(id))).toBe(published);
+    expect(h.outline.toolLines(id)).toEqual([3, 6]);
+  });
+
+  it('keeps the index when the key changes and the profile object does not', () => {
+    const { h, switchTo } = switching({ a: base, b: base });
+    const id = h.add(PROGRAM);
+    h.flush();
+    switchTo('b');
+    expect(h.pending()).toBe(0);
+  });
+
+  it('keeps following later switches: the key it last saw is the one it compares with', () => {
+    const profile = structuredClone(profileOf(FANUC));
+    profile.outline = profile.outline.filter((rule) => rule.kind !== 'comment');
+    const { h, switchTo } = switching({ a: base, b: compileProfile(structuredClone(profileOf(FANUC))), c: compileProfile(profile) });
+    const id = h.add(PROGRAM);
+    h.flush();
+    switchTo('b');
+    expect(h.pending()).toBe(0);
+    switchTo('c');
+    expect(h.pending()).toBeGreaterThan(0);
+    h.flush();
+    expect(get(h.outline.items(id)).some((item) => item.kind === 'comment')).toBe(false);
+    switchTo('b');
+    h.flush();
+    expect(get(h.outline.items(id)).some((item) => item.kind === 'comment')).toBe(true);
   });
 });
 

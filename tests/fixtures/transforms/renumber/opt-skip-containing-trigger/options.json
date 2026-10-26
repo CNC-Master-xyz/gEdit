@@ -1,0 +1,40 @@
+{
+  "note": "P4d §6.6 rules 4, 6 and 7: numbering starts at the line after the first one that contains (BEGIN); the header above keeps its text and is not listed line by line (one row says where numbering starts), while the program markers are listed as always, because they come first in the order. The two M00 lines contain OPERATOR and keep their text.",
+  "profile": "fanuc-gcode",
+  "options": {
+    "skipContaining": "OPERATOR",
+    "startTrigger": "(BEGIN)",
+    "startAfterTrigger": true
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 2,
+        "severity": "info"
+      },
+      {
+        "line": 5,
+        "severity": "info"
+      },
+      {
+        "line": 8,
+        "severity": "info"
+      },
+      {
+        "line": 12,
+        "severity": "info"
+      },
+      {
+        "line": 15,
+        "severity": "info"
+      }
+    ],
+    "warnings": [],
+    "preflight": null
+  }
+}

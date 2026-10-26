@@ -28,6 +28,10 @@ const GOLDEN: Record<string, string[]> = {
     'fanuc-2path-nop',
     'fanuc-3path-digits-nop12',
     'fanuc-2head-m100',
+    // Manual check D2-7 (2026-10-25): builders' presets from their own manuals.
+    'fanuc-nakamura-2unit',
+    'fanuc-nakamura-3unit-digits',
+    'fanuc-star-2head',
   ],
   'okuma-osp': ['okuma-2turret'],
   sinumerik: SIEMENS,

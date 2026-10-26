@@ -305,7 +305,12 @@ The G groups, their members, which of them are modal and which is the control's 
 | `G74` / `G75` | Reference-point approach / approach a fixed machine point (`G75 X0 Z0 FP=n`): the axis value is not a position | 2 | Common in milling posts as a retract; not allowed while radius compensation or a transformation is active. In the database (`FP=` itself is not). |
 | `TRANS` / `ATRANS` | Programmable translation (absolute / additive) | 3 (non-modal, own block; the frame it sets stays) | `TRANS` alone resets the programmable frame [P §4.3.4, p.1227] |
 | `ROT` / `AROT` | Programmable rotation around axes, or `RPL=` in plane | 3 | Used for 3+2 when the post does not use `CYCLE800` |
+| `ROTS` / `AROTS` / `CROTS` | Rotation by solid angles (replacing, additive, from the stored frame); the axis words are angles | 3 | Frames, *review pending* (manual-check fix round, D6-1). A bare `ROT` or `TRANS` ends `ROTS` and `CROTS`; `AROTS` adds to the frame |
+| `TOFRAME` / `TOROT` (`X`, `Y`, `Z` forms), `PAROT` | Turn the coordinate system along the tool (`TOFRAME`, `TOROT`) or with the workpiece (`PAROT`) | 3 | Frames, *review pending*; `TOROTOF` ends the first group (its own modal group `toolFrame`), `PAROTOF` the second. A shift, turn or mirror below one is refused as inside a frame |
 | `SCALE` / `ASCALE`, `MIRROR` / `AMIRROR` | Scaling / mirroring | 3 | Rare in CAM output |
+
+- **`SD42440` and increments (review round, NC-1/SK-1).** With the setting at 1 an incremental move also travels the change of the zero point. A block that changes the work offset and moves absolutely on an axis has taken the change along on that axis; a block that changes the offset and moves incrementally itself (`G55 G91 G1 X5 Y5`) travels it too, so turn and mirror refuse it (`shift-increment`). A `TRANS` written as data is no move.
+- **Counter spindle (D5-7).** The machine setting `counterSpindleY` (`turns` default, `stays`) says whether the Z mirror for the counter spindle changes the sign of `Y`, an incremental `Y` and `J`; the same setting is on the Fanuc lathe and Okuma profiles.
 
 ### 4.4 Orientation and 5-axis
 

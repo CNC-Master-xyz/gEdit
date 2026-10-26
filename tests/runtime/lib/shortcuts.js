@@ -19,7 +19,7 @@
  * `bookmark.*` ones; M5 `script.runPicker` (F9) and `script.runLast` (Mod+F9).
  * Phase 2 (§7.13): M10 (WP10.1) added `nav.selectToolSegment` (Mod+F7); M11 (WP11.1) `search.findAll` (Mod+Shift+F); M12 (WP12.5) `channels.nextSyncPoint` (Alt+F7), `channels.prevSyncPoint` (Shift+Alt+F7), `channels.gotoPartner` (Mod+Alt+P).
  * Phase 3 (§6.7): P3.2b added `view.toggleInspector` (Mod+Alt+A).
- * Phase 4 (§6.11): P4.21 added `view.focusNextPane` (F6) and `view.focusPreviousPane` (Shift+F6).
+ * Phase 4 (§6.11): P4.21 added `view.focusNextPane` (F6) and `view.focusPreviousPane` (Shift+F6); P4.15 (P4c) `file.print` (Mod+P).
  *
  * @type {ReadonlyArray<readonly [string, string]>}
  */
@@ -29,6 +29,7 @@ export const SHORTCUTS = [
   ['file.save', 'Mod+S'],
   ['file.saveAs', 'Mod+Shift+S'],
   ['file.saveAll', 'Mod+Alt+S'],
+  ['file.print', 'Mod+P'],
   ['file.close', 'Mod+W'],
   ['file.closeWindow', 'Mod+Shift+W'],
   ['view.nextTab', 'Ctrl+Tab'],

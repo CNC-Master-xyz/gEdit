@@ -61,6 +61,8 @@
   const docTitle = $derived($list.find((doc) => doc.id === content?.docId)?.title ?? '');
   /** A channel's name as the channel view knows it, else its id. */
   const channelName = $derived($view.panes.find((pane) => pane.groupId === group.id)?.name ?? channelId);
+  /** The close button's name: a channel pane names its channel (v1.2.0 T030); another group is "Close this pane". */
+  const closeLabel = $derived(channelId === '' ? t('splitView.closeGroup') : t('channelPanes.closePane', { channel: channelName }));
   const title = $derived.by(() => {
     if (channelId === '') return docTitle;
     // A pane of a program shows the channel; one file per channel shows the file as well.
@@ -96,8 +98,8 @@
         class="close"
         data-testid="editor-group-close"
         data-group={group.id}
-        aria-label={t('splitView.closeGroup')}
-        title={t('splitView.closeGroup')}
+        aria-label={closeLabel}
+        title={closeLabel}
         onpointerdown={(event) => event.stopPropagation()}
         onclick={() => editor.closeGroup(group.id)}
       >

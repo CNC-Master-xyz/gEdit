@@ -73,7 +73,8 @@ export const BUNDLED_M10 = [
  * and the lathe ones (a check that does not apply to the document's profile does not run).
  */
 export const CHECKS_GENERAL = ['spindleOff', 'toolChangeSpindle', 'toolChangeInCycle', 'stops', 'programFrame', 'machineReading', 'lowerCase', 'unclosedComments', 'characters']
-export const CHECKS_LATHE = ['cssClamp', 'offsetCancelCut', 'profileTargets', 'callInProfile', 'threadUnderCss']
+// Manual-check fixes D5-5 and D5-4 added passRepeat and gcodeSystemC.
+export const CHECKS_LATHE = ['cssClamp', 'offsetCancelCut', 'profileTargets', 'callInProfile', 'threadUnderCss', 'passRepeat', 'gcodeSystemC']
 
 /** The `operation` choices of address arithmetic, in the order its form lists them. */
 export const OPERATIONS = ['add', 'subtract', 'multiply', 'divide']

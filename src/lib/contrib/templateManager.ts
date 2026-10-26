@@ -32,6 +32,7 @@ import { templateEnv, templates } from '$lib/app/templateService';
 import {
   baseTemplatesFrom,
   createTemplateManager,
+  managerModalOptions,
   variantsFrom,
   type TemplateManager as TemplateManagerModel,
   type TemplateManagerDeps,
@@ -193,7 +194,7 @@ function target(): { docId: string; dialect: string; machineType: 'mill' | 'lath
 
 /** The panel is wide, and a press outside it or an Esc with unsaved edits asks first (`ModalHost`). */
 function managerOptions(model: TemplateManagerModel): ModalOptions {
-  return { wide: true, mayClose: () => model.leave() };
+  return managerModalOptions(model);
 }
 
 /** Opens the manager on the model: reads the files, then the dialog. */

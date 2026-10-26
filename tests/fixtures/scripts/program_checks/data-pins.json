@@ -84,9 +84,9 @@
           "cycle",
           "surfaceSpeed",
           "feedNotPerMinute",
-          "frame:frame",
           "frame:polar",
-          "frame:cylindrical"
+          "frame:cylindrical",
+          "code:G68"
         ]
       },
       "G43.5": {
@@ -97,9 +97,9 @@
           "cycle",
           "surfaceSpeed",
           "feedNotPerMinute",
-          "frame:frame",
           "frame:polar",
-          "frame:cylindrical"
+          "frame:cylindrical",
+          "code:G68"
         ]
       },
       "G49": {
@@ -118,6 +118,11 @@
           "!frame:frame"
         ]
       },
+      "G53.6": {
+        "conflicts": [
+          "!frame:frame"
+        ]
+      },
       "G65": {
         "alone": true
       },
@@ -128,7 +133,6 @@
       },
       "G68.2": {
         "conflicts": [
-          "tcp",
           "radiusComp",
           "lengthComp",
           "cycle",
@@ -142,7 +146,6 @@
       },
       "G68.3": {
         "conflicts": [
-          "tcp",
           "radiusComp",
           "lengthComp",
           "cycle",
@@ -156,12 +159,11 @@
       },
       "G68.4": {
         "conflicts": [
-          "tcp",
           "radiusComp",
           "lengthComp",
           "cycle",
           "surfaceSpeed",
-          "frame:frame",
+          "code:G68",
           "frame:mirror",
           "frame:scaling",
           "frame:polar",
@@ -722,6 +724,11 @@
         "sets": {
           "toolSpindle": "on"
         }
+      },
+      "M100": {
+        "conflicts": [
+          "radiusComp"
+        ]
       },
       "M110": {
         "alone": true

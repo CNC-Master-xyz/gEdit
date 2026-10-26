@@ -255,6 +255,14 @@
           <section class="draft" data-testid="template-draft">
             <h2>{t('templateManager.draft.title')}</h2>
             <p class="hint">{t('templateManager.draft.hint')}</p>
+            {#if (draft.draft.notes ?? []).length > 0}
+              <!-- T158: what the draft leaves as written, and why (TemplateDraft.notes). -->
+              <ul class="draft-notes" data-testid="template-draft-notes">
+                {#each draft.draft.notes ?? [] as note, i (i)}
+                  <li data-testid="template-draft-note" data-key={note.key}>{t(note.key, note.params)}</li>
+                {/each}
+              </ul>
+            {/if}
             <pre class="code" data-testid="template-draft-body">{#each draft.draft.body.split('\n') as line, n (n)}{#each pieces(line, n, draft.draft.candidates) as piece, k (k)}{#if piece.candidate}<button
                     type="button"
                     class="cand"
@@ -610,6 +618,13 @@
   .hint {
     margin: 0;
     color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .draft-notes {
+    margin: 6px 0 0;
+    padding: 0 0 0 18px;
+    color: var(--text-main);
     font-size: 12px;
   }
 

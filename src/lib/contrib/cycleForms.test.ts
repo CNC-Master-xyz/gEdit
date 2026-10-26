@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { blockRange } from '$lib/core/codes/inspect';
 import { loadCodeDb } from '$lib/core/codes/load';
 import { resolveCodeDbFiles } from '$lib/core/codes/resolve';
-import type { FieldSpec } from '$lib/core/forms/types';
+import type { FieldSpec, FormLiveAnswer } from '$lib/core/forms/types';
 import { applyMachine, effectiveMachine } from '$lib/core/machines/effective';
 import type { EffectiveProfile } from '$lib/core/machines/types';
 import { ModalIndex } from '$lib/core/nc/modal';
@@ -235,11 +235,21 @@ describe('Edit Cycle on a cycle block', () => {
     expect(r.statuses.pop()).toEqual({ text: t('cycleForm.refused.elsewhere', { line: 39 }), error: true });
   });
 
-  it('refuses a cycle that is written in two blocks, in plain words', async () => {
-    const r = rig({ lines: read('fanuc-lathe/l01-turning-a.nc'), line: 15, profile: 'fanuc-lathe' });
+  it('T119: on a cycle written in two blocks it edits the block at the cursor, and its title says which', async () => {
+    const r = rig({ lines: read('fanuc-lathe/l01-turning-a.nc'), line: 16, profile: 'fanuc-lathe' });
+    r.answer.value = (call) => ({ ...call.values, U: '0.5' });
+    expect(await r.editor.editCycle()).toBe('edited');
+    expect(r.forms[0].title).toMatch(/^G71: .+, block 2 of 2$/);
+    expect(r.forms[0].fields.map((f) => f.id)).toEqual(['P', 'Q', 'U', 'W', 'F', 'S', 'T']);
+    expect(r.lines[14]).toBe('G71 U2. R0.5');
+    expect(r.lines[15]).toBe('G71 P100 Q200 U0.5 W0.1 F0.25');
+  });
+
+  it('T119: refuses a block of a two-block cycle that does not say which block it is, in plain words', async () => {
+    const r = rig({ lines: ['%', 'O2000', 'N10 G0 X50.', 'N20 G71', 'N30 G0 X100.'], line: 4, profile: 'fanuc-lathe' });
     expect(await r.editor.editCycle()).toBe('refused');
     expect(r.forms).toEqual([]);
-    expect(r.statuses.pop()).toEqual({ text: t('cycleForm.refused.twoBlocks'), error: true });
+    expect(r.statuses.pop()).toEqual({ text: t('cycleForm.refused.whichBlock'), error: true });
   });
 
   it('refuses a locked program before it asks anything', async () => {
@@ -375,6 +385,22 @@ describe('P3b fix NC: what the form says', () => {
     const q = r.forms[0].fields.find((f) => f.id === 'Q');
     expect(q?.help).toBe(t('cycleForm.withoutPoint', { literal: '4000', value: '4 mm' }));
     expect(r.forms[0].fields.find((f) => f.id === 'Z')?.help).toBeUndefined();
+  });
+
+  it('T146: the help beside a field follows the value as it is typed, and goes when it no longer applies', async () => {
+    const lines = ['%', 'O1000', 'N10 G90 G0 X0. Y0.', 'N20 G98 G83 X1. Y1. Z-5. R2. Q4000 F100.', 'N30 G80'];
+    const r = rig({ lines, line: 4, numberInput: 'is-b' });
+    await r.editor.editCycle();
+    const live = r.forms[0].live as (v: Record<string, unknown>) => FormLiveAnswer;
+    const values = r.forms[0].values ?? {};
+    expect(live({ ...values, Q: '5000' }).help).toEqual({ Q: t('cycleForm.withoutPoint', { literal: '5000', value: '5 mm' }) });
+    // A refused value: no new reading, the one of the form stays as it was opened.
+    expect(live({ ...values, Q: 'x' }).help).toBeUndefined();
+    // A program without a machine reads every word as written: no help at all.
+    const plain = rig({ lines, line: 4 });
+    plain.answer.value = undefined;
+    await plain.editor.editCycle();
+    expect((plain.forms[0].live as (v: Record<string, unknown>) => FormLiveAnswer)({ ...(plain.forms[0].values ?? {}), Z: '-6.' }).help).toBeUndefined();
   });
 
   it('CODE-16: a program locked while the form is open is refused, and nothing is written', async () => {

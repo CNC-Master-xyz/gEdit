@@ -8,12 +8,21 @@
 import { render } from 'svelte/server';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
-import { createCompareService, compare, compareController, type CompareController, type CompareDeps } from './compare';
+import {
+  createCompareService,
+  compare,
+  compareController,
+  modalStateAfterLine,
+  modalStatesAroundEdit,
+  type CompareController,
+  type CompareDeps,
+} from './compare';
 import CompareView from '$lib/components/editor/CompareView.svelte';
 import compareContribution from '$lib/contrib/compare';
 import { createDocumentStore, docs as appDocs } from '$lib/stores/documents';
 import { createLayoutStore } from '$lib/stores/layout';
 import { profiles as appProfiles } from '$lib/stores/profiles';
+import { codes as appCodes } from '$lib/stores/codes';
 import { hasKey, t } from '$lib/i18n';
 import { copyRowPlan } from '$lib/core/compare/aligned';
 import { realModel, type RealModel } from '$lib/monaco/realModel';
@@ -126,7 +135,11 @@ interface Harness {
 }
 
 /** `original` is document b, `modified` is document a, as `compare.open(a, { kind: 'document', docId: b })` makes them. */
-function harness(original: string, modified: string, o: { fileOriginal?: boolean } = {}): Harness {
+function harness(
+  original: string,
+  modified: string,
+  o: { fileOriginal?: boolean; codes?: boolean; modalStateAfter?: CompareDeps['modalStateAfter'] } = {},
+): Harness {
   const docs = createDocumentStore({ caseInsensitivePaths: false });
   const layout = createLayoutStore({ regionOf: () => 'overlay' });
   const messages: string[] = [];
@@ -174,10 +187,12 @@ function harness(original: string, modified: string, o: { fileOriginal?: boolean
       return {
         profile: appProfiles.profile(profileId),
         cp: appProfiles.compiled(profileId),
-        codes: undefined as never,
+        codes: o.codes === true ? appCodes.forProfile(profileId) : (undefined as never),
         machine: { id: null, name: null, choice: 'none', key: `${profileId}:none`, params: {}, source: {} } as never,
       };
     },
+    ...(o.codes === true ? { codesFor: (profileId: string) => appCodes.forProfile(profileId) } : {}),
+    ...(o.modalStateAfter ? { modalStateAfter: o.modalStateAfter } : {}),
     pickFile: () => Promise.resolve(null),
     diff: () => state.view as unknown as AlignedHandle | null,
     focusEditorWhenBack: () => {},
@@ -607,6 +622,212 @@ describe('merging a run of words', () => {
       expect(await alone.service.copyWord('toModified')).toBe(false);
       expect(alone.messages).toEqual([`!${t('compare.wordNoPair')}`]);
     });
+  });
+});
+
+describe('a copy where the two programs are in different modes (review NC-6)', () => {
+  async function aligned(original: string, modified: string, cursor: AlignedCursor, o: Parameters<typeof harness>[2] = {}) {
+    const h = harness(original, modified, { codes: true, ...o });
+    await h.open();
+    h.service.setAligned(true);
+    h.mount(cursor);
+    return h;
+  }
+  const warning = (original: string, modified: string) => `!${t('compare.modesDiffer', { original, modified })}`;
+
+  // Line 3 is incremental on the left and absolute on the right; line 4 differs in F.
+  const INC = ['O1000', 'N10 G90 G54 G17', 'N20 G91', 'N30 G1 X10. F1200', 'N40 M30'].join('\n');
+  const ABS = ['O1000', 'N10 G90 G54 G17', 'N20 G90', 'N30 G1 X10. F1000', 'N40 M30'].join('\n');
+
+  it('copies a change anyway, and then warns: G91 in the original, G90 in the current document', async () => {
+    const h = await aligned(INC, ABS, { side: 'modified', line: 4, column: 1 });
+    expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+    expect(h.models.modified.getValue()).toBe(ABS.replace('F1000', 'F1200'));
+    expect(h.messages).toEqual([warning('G91', 'G90')]);
+    // The other way names the same modes on the same sides.
+    h.messages.length = 0;
+    expect(undone(h.models.modified)).toBe(ABS);
+    h.view!.cursorPos = { side: 'original', line: 4, column: 1 };
+    expect(await h.service.copyChange('toOriginal', { lineOnly: true })).toBe(true);
+    expect(h.models.original.getValue()).toBe(INC.replace('F1200', 'F1000'));
+    expect(h.messages).toEqual([warning('G91', 'G90')]);
+  });
+
+  it('copies a word anyway, and then warns, naming every mode that differs in order', async () => {
+    const o = ['O1000', 'G20 G91 G18 G55', 'G1 X10. F100', 'M30'].join('\n');
+    const m = ['O1000', 'G21 G90 G17 G54', 'G1 X10. F200', 'M30'].join('\n');
+    // F100 starts at column 9 of line 3.
+    const h = await aligned(o, m, { side: 'original', line: 3, column: 10 });
+    expect(await h.service.copyWord('toModified')).toBe(true);
+    expect(h.models.modified.getValue()).toBe(m.replace('F200', 'F100'));
+    expect(h.messages).toEqual([warning('G91, inch, G18, G55', 'G90, mm, G17, G54')]);
+  });
+
+  it('says nothing when the modes are the same at that place, or where the copy only removes lines', async () => {
+    const same = await aligned(ORIGINAL, MODIFIED, { side: 'modified', line: 4, column: 1 });
+    expect(await same.service.copyChange('toModified')).toBe(true);
+    expect(same.messages).toEqual([]);
+    // The original lacks the line in front of M30: copying that gap removes the document's line.
+    const removal = await aligned(
+      ['G91', 'G1 X1.', 'M30'].join('\n'),
+      ['G90', 'G1 X1.', 'G1 X2.', 'M30'].join('\n'),
+      { side: 'modified', line: 3, column: 1 },
+    );
+    expect(await removal.service.copyChange('toModified')).toBe(true);
+    expect(removal.models.modified.getValue()).toBe(['G90', 'G1 X1.', 'M30'].join('\n'));
+    expect(removal.messages).toEqual([]);
+  });
+
+  it('reads a file that is not open as a document with its own profile, walking its text', async () => {
+    const h = await aligned(INC, ABS, { side: 'modified', line: 4, column: 1 }, { fileOriginal: true });
+    expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+    expect(h.messages).toEqual([warning('G91', 'G90')]);
+  });
+
+  it('takes the state of an open document from the modal index when it has the line', async () => {
+    const asked: [DocId, number][] = [];
+    // The index says the document is incremental above line 4, whatever its text says.
+    const indexed = modalStateAfterLine(['N10 G90 G54 G17', 'N20 G91'], appProfiles.compiled('fanuc-gcode'), appCodes.forProfile('fanuc-gcode'), 2);
+    const h = await aligned(ABS, ABS.replace('F1000', 'F900'), { side: 'modified', line: 4, column: 1 }, {
+      modalStateAfter: (docId, line) => {
+        asked.push([docId, line]);
+        return docId === h.a ? indexed : null;
+      },
+    });
+    expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+    expect(asked).toEqual([
+      [h.b, 3],
+      [h.a, 3],
+    ]);
+    expect(h.messages).toEqual([warning('G90', 'G91')]);
+  });
+
+  it('never stands in the way of a copy: no database, no warning', async () => {
+    const h = await aligned(INC, ABS, { side: 'modified', line: 4, column: 1 }, { codes: false });
+    expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+    expect(h.models.modified.getValue()).toBe(ABS.replace('F1000', 'F1200'));
+    expect(h.messages).toEqual([]);
+  });
+});
+
+describe('a copy that changes the modes of the lines below it (the owner, 2026-10-20)', () => {
+  async function aligned(original: string, modified: string, cursor: AlignedCursor, o: Parameters<typeof harness>[2] = {}) {
+    const h = harness(original, modified, { codes: true, ...o });
+    await h.open();
+    h.service.setAligned(true);
+    h.mount(cursor);
+    return h;
+  }
+  const front = (original: string, modified: string) => `!${t('compare.modesDiffer', { original, modified })}`;
+  const end = (before: string, after: string) => `!${t('compare.modesChangeBelow', { before, after })}`;
+  const join = (lines: string[]) => lines.join('\n');
+
+  // Lines 3 and 4 differ: the original's block ends in G91, the document's in G90.
+  const ENDS_INC = join(['O1000', 'G90 G54 G17', 'G1 X1. F100', 'G91', 'G1 X2.', 'M30']);
+  const ENDS_ABS = join(['O1000', 'G90 G54 G17', 'G1 X1. F200', 'G90', 'G1 X2.', 'M30']);
+
+  it('warns at the end only: the copied block ends in G91 where the lines below ran in G90', async () => {
+    const h = await aligned(ENDS_INC, ENDS_ABS, { side: 'modified', line: 3, column: 1 });
+    expect(await h.service.copyChange('toModified')).toBe(true);
+    expect(h.models.modified.getValue()).toBe(ENDS_INC);
+    expect(h.messages).toEqual([end('G90', 'G91')]);
+    // The other way round: the original's lines below now run in G90 instead of G91.
+    h.messages.length = 0;
+    expect(undone(h.models.modified)).toBe(ENDS_ABS);
+    h.view!.cursorPos = { side: 'original', line: 3, column: 1 };
+    expect(await h.service.copyChange('toOriginal')).toBe(true);
+    expect(h.models.original.getValue()).toBe(ENDS_ABS);
+    expect(h.messages).toEqual([end('G91', 'G90')]);
+  });
+
+  it('warns in front only when the copied text leaves the modes below as they were', async () => {
+    const o = join(['O1000', 'G91', 'G1 X1. F100', 'G1 X2.', 'M30']);
+    const m = join(['O1000', 'G90', 'G1 X1. F200', 'G1 X2.', 'M30']);
+    const h = await aligned(o, m, { side: 'modified', line: 3, column: 1 });
+    expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+    expect(h.models.modified.getValue()).toBe(m.replace('F200', 'F100'));
+    expect(h.messages).toEqual([front('G91', 'G90')]);
+  });
+
+  it('names front and end in one message when both differ', async () => {
+    const o = join(['O1000', 'G91', 'G0 Z5.', 'G1 X1. F100', 'G20', 'G1 X2.', 'M30']);
+    const m = join(['O1000', 'G90', 'G0 Z5.', 'G1 X1. F200', 'G21', 'G1 X2.', 'M30']);
+    const h = await aligned(o, m, { side: 'modified', line: 4, column: 1 });
+    expect(await h.service.copyChange('toModified')).toBe(true);
+    expect(h.models.modified.getValue()).toBe(m.replace('F200', 'F100').replace('G21', 'G20'));
+    expect(h.messages).toEqual([
+      `!${t('compare.modesDifferAndChange', { original: 'G91', modified: 'G90', before: 'mm', after: 'inch' })}`,
+    ]);
+  });
+
+  it('warns when a copy only removes lines and the removed line held the mode', async () => {
+    const o = join(['G90', 'G1 X1.', 'G1 X2.', 'M30']);
+    const m = join(['G90', 'G1 X1.', 'G91', 'G1 X2.', 'M30']);
+    const block = await aligned(o, m, { side: 'modified', line: 3, column: 1 });
+    expect(await block.service.copyChange('toModified')).toBe(true);
+    expect(block.models.modified.getValue()).toBe(o);
+    expect(block.messages).toEqual([end('G91', 'G90')]);
+    // The one-row copy removes the same line and says the same.
+    const row = await aligned(o, m, { side: 'modified', line: 3, column: 1 });
+    expect(await row.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+    expect(row.models.modified.getValue()).toBe(o);
+    expect(row.messages).toEqual([end('G91', 'G90')]);
+  });
+
+  it('warns when a copied or removed word changes the modes of the lines below', async () => {
+    const plain = join(['G90', 'G1 X1.', 'G1 X2.', 'M30']);
+    const withG91 = join(['G90', 'G1 X1. G91', 'G1 X2.', 'M30']);
+    // The original's G91 (columns 8–10 of line 2) goes into the document's line.
+    const added = await aligned(withG91, plain, { side: 'original', line: 2, column: 9 });
+    expect(await added.service.copyWord('toModified')).toBe(true);
+    expect(added.models.modified.getValue()).toBe(withG91);
+    expect(added.messages).toEqual([end('G90', 'G91')]);
+    // The original has no G91: copying that removes the document's word.
+    const removed = await aligned(plain, withG91, { side: 'modified', line: 2, column: 9 });
+    expect(await removed.service.copyWord('toModified')).toBe(true);
+    expect(removed.models.modified.getValue()).toBe(plain);
+    expect(removed.messages).toEqual([end('G91', 'G90')]);
+  });
+
+  it('says nothing when the copy changes no mode, or when no line follows it', async () => {
+    const same = await aligned(
+      join(['G90', 'G1 X1. F100', 'G1 X2.', 'M30']),
+      join(['G90', 'G1 X1. F200', 'G1 X2.', 'M30']),
+      { side: 'modified', line: 2, column: 1 },
+    );
+    expect(await same.service.copyChange('toModified')).toBe(true);
+    expect(same.messages).toEqual([]);
+    // A G91 copied at the very end of the program changes nothing below it (a blank line is nothing).
+    const last = await aligned(join(['G90', 'G1 X1.', 'G91', '']), join(['G90', 'G1 X1.', 'G90', '']), {
+      side: 'modified',
+      line: 3,
+      column: 1,
+    });
+    expect(await last.service.copyChange('toModified')).toBe(true);
+    expect(last.models.modified.getValue()).toBe(join(['G90', 'G1 X1.', 'G91', '']));
+    expect(last.messages).toEqual([]);
+  });
+
+  it('never stands in the way of a copy: no database, no warning at the end either', async () => {
+    const h = await aligned(ENDS_INC, ENDS_ABS, { side: 'modified', line: 3, column: 1 }, { codes: false });
+    expect(await h.service.copyChange('toModified')).toBe(true);
+    expect(h.models.modified.getValue()).toBe(ENDS_INC);
+    expect(h.messages).toEqual([]);
+  });
+
+  it('reads the line below before and after the edit from one walk to the place', () => {
+    const cp = appProfiles.compiled('fanuc-gcode');
+    const db = appCodes.forProfile('fanuc-gcode');
+    const lines = ['G90 G54', 'G1 X1.', 'G91', 'G1 X2.'];
+    // Line 3 (G91) replaced by G90: G91 before, G90 after.
+    const replaced = modalStatesAroundEdit(lines, cp, db, 3, 1, ['G90']);
+    expect([replaced.before.distance, replaced.after.distance]).toEqual(['incremental', 'absolute']);
+    // G55 inserted in front of line 2: the offset below changes, the distance does not.
+    const inserted = modalStatesAroundEdit(lines, cp, db, 2, 0, ['G55']);
+    expect([inserted.before.groups.offset?.code, inserted.after.groups.offset?.code]).toEqual(['G54', 'G55']);
+    expect(inserted.after.distance).toBe('absolute');
+    // The state before is the one the plain walk reads after the replaced lines.
+    expect(replaced.before).toEqual(modalStateAfterLine(lines, cp, db, 3));
   });
 });
 

@@ -107,7 +107,8 @@ judge, by its **effective** value (plan §7.15, AD-31): `gedit_nc.resolve_value`
 the word is worth on the document's machine, the operation is applied to that value in the
 program's units, and `gedit_nc.write_back` puts the result back into the word's own form —
 a point stays a point, a point-less increment or unit word stays a whole number of them,
-rounded half away from zero and reported when it had to be rounded. Multiply and divide are
+rounded half away from zero and reported when it had to be rounded, also when it rounds back
+to the value as written (manual check D4-5). Multiply and divide are
 unit-free, so they work on the literal itself where the result keeps its form.
 
 On a **turning** profile with `addresses.diameter` the X operand is a diameter or a radius
@@ -157,7 +158,10 @@ in `G98`, returns to it.
 parameter of the cycle in its block with no position (`position: 'none'`) and that may be a
 length (no `unit` of `dwell`, `count` or `angle`) is a value of the cycle and is left and
 listed (`data`): the relief `R` of `G74` and `G75`, the allowance and the taper `R` of `G76`.
-A count stays the user's choice (`K` of `G83`).
+A count stays the user's choice (`K` of `G83`). A word on an axis address that a code of its
+block, or the motion code in force, declares as no position is never moved as that axis
+(manual check, review round): the phase shift `C` of the Okuma `G31`-`G33` is left and listed
+(`data`) while the C words around it move.
 
 **Arc geometry** (NC-3). An absolute arc centre (`I=AC(50)`) and the intermediate point of
 `CIP` (`CodeParam.axis`, absolute under `G90`) are positions of their axis and move with
@@ -264,6 +268,8 @@ VALUE_FUNCTIONS = {"AC": "absolute", "IC": "incremental"}
 
 #: The parameter units of a cycle value that is no length (`CodeParam.unit`).
 NOT_A_LENGTH = ("dwell", "count", "angle")
+#: D4-3 (manual check): the number classes of a position, the words a distance mode governs.
+POSITION_CLASSES = ("length", "angle")
 
 #: At most this many findings; the rest are counted in the message. The app takes 1000.
 MAX_FINDINGS = 500
@@ -706,6 +712,19 @@ def param_axis(codes: Sequence[Dict[str, Any]], address: str) -> Optional[str]:
     return None
 
 
+def point_owner(codes: Sequence[Dict[str, Any]], address: str) -> Optional[str]:
+    """Manual check D5-1: the code of a parameter of ``codes`` that is a coordinate of an
+    axis (`CodeParam.axis`) and belongs to no arc (`sets.path`), such as the change points
+    `XA=`/`ZA=` of an Okuma LAP `G84`; ``None`` for an arc's point (`CIP I1=`) or any other
+    word."""
+    for entry in codes:
+        param = param_named(entry, address)
+        axis = param.get("axis") if param is not None else None
+        if isinstance(axis, str) and axis != "":
+            return None if sets_of(entry).get("path") == "arc" else code_of(entry)
+    return None
+
+
 def reviewed(entry: Optional[Dict[str, Any]]) -> bool:
     """Whether anybody reviewed the entry's parameters for R8: at least one carries a role."""
     return any(gedit_nc.position_of(param) is not None for param in params_of(entry))
@@ -818,6 +837,9 @@ class Block:
         self.word_findings: List[Tuple[int, str, str]] = []
         #: (line, message) of every value that had to be rounded.
         self.notes: List[Tuple[int, str]] = []
+        #: D4-5 (manual check): how many of the notes are about a word whose result rounded
+        #: back to the value it is written with, so it stays as written.
+        self.rounded_back = 0
         self.changed = 0
         self.cycle_changed = 0
         #: Arc centres changed only because of the `arcCentres` option.
@@ -862,6 +884,7 @@ class Block:
         self.edits = []
         self.word_findings = []
         self.notes = []
+        self.rounded_back = 0
         self.changed = 0
         self.cycle_changed = 0
         self.arc_changed = 0
@@ -1011,7 +1034,8 @@ class Findings:
 
 
 #: A value the run would change, or why it leaves it: ``('edit', line, start, end, text,
-#: rounded, written, is_cycle)``, ``('skip', line, reason, message, written)`` or ``('same',)``.
+#: rounded, written, is_cycle)``, ``('skip', line, reason, message, written)``, ``('same',)``
+#: or, for a result that rounded back to the word as written (D4-5), ``('same', line, written)``.
 Outcome = Tuple[Any, ...]
 
 
@@ -1472,6 +1496,7 @@ class Run:
         """A block this run would change, a frame it opens, or a cycle whose positions it moves."""
         setup = self.setup
         words = setup.words
+        pointed = [e for e in block.codes() if any(isinstance(p.get("axis"), str) for p in params_of(e))]
         for token, line in block.words:
             if (token.address or "").upper() in words:
                 if (token.value_text or "") != "":
@@ -1481,6 +1506,11 @@ class Run:
                     return True
             # B1 fix NC (NC-03): an FK point on a chosen axis is reported (`judge`).
             elif FK_POINT_AXES.get((token.address or "").upper()) in setup.chosen and (token.value_text or "") != "":
+                return True
+            # Manual check D5-1: a parameter that is a coordinate of a chosen axis
+            # (`CodeParam.axis`: the CIP point `I1=`, the change points `XA=`/`ZA=` of an
+            # Okuma LAP `G84`) is moved with it, also in a block without the axis word.
+            elif pointed and (token.value_text or "") != "" and param_axis(pointed, (token.address or "").upper()) in setup.chosen:
                 return True
         if setup.scaled_axes and self.writes_length(block):
             # A length a multiply or divide does not scale (`judge_lengths`): `RND R2`, `CHF 3`.
@@ -1567,6 +1597,7 @@ class Run:
         if refusal is not None:
             block.refusal = refusal
             return
+        self.mark_code_values(block, cycle_data)
         self.judge_process_values(block, state)
         if (cycle_words or cycle_args) and interp.tcp is None:
             # NC-4: a cycle's tool-axis positions (the R plane, Q203, RFP) are Z coordinates
@@ -1588,8 +1619,13 @@ class Run:
 
         data = next((code_of(e) for e in codes if gedit_nc.axis_words_of(e) == "data"), None)
         in_force = [group.entry] if group is not None and group.kind == "modal" and isinstance(group.entry, dict) else []
+        # T120 / FB-2: under a mode that makes I, J and K its own words (Fanuc `G43.5`,
+        # `G41.6`, `G42.6`) they are the tool direction, a count, and no arc centre to scale.
+        in_force += gedit_nc.arc_centre_modes(state.get("groups"), interp.entry, setup.profile, codes)
         outcomes: List[Outcome] = []
         geometry: List[Outcome] = []
+        #: The codes (no arc) whose own positions on a chosen axis this block writes.
+        points: set = set()
         for token, line in block.words:
             address = (token.address or "").upper()
             if (token.value_text or "") == "":
@@ -1610,6 +1646,14 @@ class Run:
             # position of its axis, moved with the end point or the arc is not left whole.
             geo = self.geometry_of(token, address, codes)
             if geo is not None and geo[1] in setup.chosen:
+                owner = point_owner(codes, address)
+                if geo[0] == "expression" and owner is not None:
+                    block.refusal = (
+                        "cycle-expression",
+                        "%s is a position of %s on %s that cannot be computed, so the block cannot be moved or scaled in one piece"
+                        % (quote(token.text), owner, geo[1]),
+                    )
+                    return
                 if geo[0] == "expression":
                     block.refusal = (
                         "arc-geometry",
@@ -1617,6 +1661,8 @@ class Run:
                         % quote(token.text),
                     )
                     return
+                if owner is not None:
+                    points.add(owner)
                 outcome = self.word_outcome(token, line, address, state, codes, in_force, None, False, geo)
                 outcomes.append(outcome)
                 geometry.append(outcome)
@@ -1647,6 +1693,16 @@ class Run:
             )
             if bad is not None:
                 why = bad[3].split(": ", 1)[-1]
+                if points:
+                    # Manual check D5-1: the positions of a code that is no arc (the LAP
+                    # change points) are moved with the block's other words or not at all.
+                    reason = "cycle-expression" if bad[2] in ("expression", "unreadable") else "cycle-unresolved"
+                    block.refusal = (
+                        reason,
+                        "%s cannot be changed (%s), so the block and the positions of %s cannot be changed together"
+                        % (bad[4], why, and_list(sorted(points))),
+                    )
+                    return
                 block.refusal = (
                     "arc-geometry",
                     "%s cannot be changed (%s), so the arc's end point, centre and intermediate point cannot be changed together"
@@ -1694,6 +1750,18 @@ class Run:
             elif kind == "skip":
                 _, line, reason, message, _ = outcome
                 block.word_findings.append((line.number, reason, message))
+            elif kind == "same" and len(outcome) > 1:
+                # D4-5 (manual check): the change was asked for and rounded away; say so, or
+                # the run reads as if the word had not been chosen.
+                _, line, written = outcome
+                block.notes.append(
+                    (
+                        line.number,
+                        "%s: the change is smaller than this word's form can hold; rounded half away from zero, it stays %s"
+                        % (written, written),
+                    )
+                )
+                block.rounded_back += 1
 
     def block_refusal(self, block: Block, state: Dict[str, Any], codes: List[Dict[str, Any]]) -> Optional[Tuple[str, str]]:
         """The first of the block reasons that are not about a cycle, or ``None``."""
@@ -1834,6 +1902,23 @@ class Run:
                 % (written, line, name, where, and_list(hit)),
             )
         return None
+
+    def mark_code_values(self, block: Block, cycle_data: Dict[int, str]) -> None:
+        """Manual-check integration (review batch L, NC-6): a word on an axis address that a
+        code of the block, or the motion code in force, declares as no position (`position:
+        'none'`) is a value of that code, never a position of the axis: the phase shift `C` of
+        the Okuma fixed thread cycles `G31`-`G33`. It is left and listed (`data`), as NC-16
+        does for the values of a cycle; the axis words around it move as asked."""
+        setup = self.setup
+        axes = setup.axes | frozenset(setup.twins)
+        entries = block.codes() + self.motion_lengths(block)
+        for token, _ in block.words:
+            address = (token.address or "").upper()
+            if id(token) in cycle_data or address not in setup.words or address not in axes or (token.value_text or "") == "":
+                continue
+            owner = next((e for e in entries if gedit_nc.position_of(param_named(e, address)) == "none"), None)
+            if owner is not None:
+                cycle_data[id(token)] = code_of(owner)
 
     def judge_lengths(self, block: Block, state: Dict[str, Any], cycle_data: Dict[int, str]) -> Optional[Tuple[str, str]]:
         """NCF-A follow-up: a length written in this block for a code that is neither a cycle nor
@@ -2461,16 +2546,18 @@ class Run:
             return ("skip", line, "incremental", "%s: written as an incremental distance, so a shift does not apply to it" % written, written)
         absolute = function == "absolute" or mode == "absolute"
         distance = state.get("distance")
-        if additive and not twin and not absolute:
+        cls = self.number_class(address, codes, in_force)
+        if cls is None and geometry is not None:
+            cls = self.number_class(geometry[1], codes, in_force)
+        # D4-3 (manual check): G90/G91 decide where the axes go, not what a feed, a dwell, a
+        # speed or a count is. Only a position word waits for an absolute distance mode.
+        if additive and not twin and not absolute and self.is_position(address, cls, geometry):
             if distance == "incremental":
                 return ("skip", line, "incremental", "%s: the distance mode is incremental here, so a shift does not apply to it" % written, written)
             if distance != "absolute":
                 return ("skip", line, "incremental", "%s: the distance mode is not known here (no code set it before this block)" % written, written)
         if literal is None:
             return ("skip", line, "expression", "%s: a variable or an expression, which this script does not compute" % written, written)
-        cls = self.number_class(address, codes, in_force)
-        if cls is None and geometry is not None:
-            cls = self.number_class(geometry[1], codes, in_force)
         if geometry is None and cls in ("count", "increment") and address in setup.via_arcs:
             owner = next((code_of(e) for e in codes + in_force if param_named(e, address) is not None), "its code")
             return ("skip", line, "count", "%s: a parameter of %s, not an arc centre" % (written, owner), written)
@@ -2497,6 +2584,27 @@ class Run:
             else:
                 factor = Decimal("0.5") if operand_is_diameter else Decimal(1)
         return self.change(literal, cls, line, span, written, factor, self.units(state), is_cycle)
+
+    def is_position(self, address: str, cls: Optional[str], geometry: Optional[Tuple[str, str]]) -> bool:
+        """D4-3 (manual check): whether a word is a position, which the distance mode governs.
+
+        A length or an angle is one (the axes, their incremental twins, the arc centres, `R`
+        and the cycle positions); so is a coordinate of an arc (``geometry``). A word with no
+        number class counts as one when its address is a position address of the profile, so
+        that no position loses the check because its class could not be told. A feed, a
+        dwell, a count and a number of increments are not, and neither is a word without a
+        class whose address is no position (`S`, a feed while the feed unit is unknown)."""
+        if cls in POSITION_CLASSES or geometry is not None:
+            return True
+        if cls is not None:
+            return False
+        setup = self.setup
+        return (
+            address in setup.axes
+            or address in setup.twins
+            or address in setup.arc_addresses
+            or address == "R"  # a length on every profile (`_nc_machine` rule 6)
+        )
 
     def number_class(self, address: str, codes: List[Dict[str, Any]], in_force: List[Dict[str, Any]]) -> Optional[str]:
         """`gedit_nc.number_class_of`, remembered: a program asks the same few questions."""
@@ -2650,7 +2758,8 @@ class Run:
     def edit_or_same(self, line: Line, span: Tuple[int, int], text: str, rounded: bool, written: str, is_cycle: bool) -> Outcome:
         start, end = span
         if line.text[start:end] == text:
-            return ("same",)
+            # D4-5 (manual check): a result rounded back to the value as written is noted.
+            return ("same", line, written) if rounded else ("same",)
         return ("edit", line, start, end, text, rounded, written, is_cycle)
 
     # -- the end ------------------------------------------------------------------
@@ -2804,10 +2913,15 @@ def summary(run: Run, findings: Findings) -> str:
     changed_words = sum(b.changed for b in blocks if b.refusal is None)
     changed_blocks = sum(1 for b in blocks if b.refusal is None and b.changed)
     cycle_words = sum(b.cycle_changed for b in blocks if b.refusal is None)
-    rounded = sum(len(b.notes) for b in blocks if b.refusal is None)
+    rounded_back = sum(b.rounded_back for b in blocks if b.refusal is None)
+    rounded = sum(len(b.notes) for b in blocks if b.refusal is None) - rounded_back
+    back_text = "%s rounded back to the value %s written with" % (
+        count_text(rounded_back, "word") if changed_words == 0 else "{:,} more".format(rounded_back),
+        "it is" if rounded_back == 1 else "they are",
+    )
 
     if changed_words == 0:
-        first = "Changed nothing."
+        first = "Changed nothing: %s." % back_text if rounded_back else "Changed nothing."
     else:
         shown = [
             "%s (as a %s)" % (a, params.x_operand) if params.additive and run.setup.lathe and a in run.setup.diameter_words else a
@@ -2828,6 +2942,8 @@ def summary(run: Run, findings: Findings) -> str:
             extras.append("%s of them %s" % ("{:,}".format(cycle_words), "a cycle position" if cycle_words == 1 else "cycle positions"))
         if rounded:
             extras.append("%s rounded to the form %s written in" % ("{:,}".format(rounded), "it is" if rounded == 1 else "they are"))
+        if rounded_back:
+            extras.append(back_text)
         first += (", " + ", ".join(extras) if extras else "") + "."
 
     block_counts: Dict[str, int] = {}

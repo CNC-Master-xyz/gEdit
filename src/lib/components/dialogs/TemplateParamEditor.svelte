@@ -68,6 +68,28 @@
     set('digits', text === '' ? undefined : Number(text));
   }
 
+  /** T155: the most characters of a text, kept as typed until it is a whole number. */
+  function lengthText(): string {
+    return typed.maxLength ?? (param.maxLength === undefined ? '' : String(param.maxLength));
+  }
+
+  function lengthBad(): boolean {
+    const text = typed.maxLength;
+    return text !== undefined && text.trim() !== '' && !/^\d+$/.test(text.trim());
+  }
+
+  function typeLength(text: string): void {
+    typed.maxLength = text;
+    if (text.trim() === '') set('maxLength', undefined);
+    else if (/^\d+$/.test(text.trim())) set('maxLength', Number(text.trim()));
+  }
+
+  const CHARSET_CHOICES = [
+    ['no-spaces', 'templateManager.charset.noSpaces'],
+    ['letters-digits', 'templateManager.charset.lettersDigits'],
+    ['name', 'templateManager.charset.name'],
+  ] as const;
+
   const decimalChoices = [0, 1, 2, 3, 4, 5, 6];
   const digitChoices = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 </script>
@@ -156,6 +178,31 @@
           <option value="">{t('templateManager.digits.unset')}</option>
           {#each digitChoices as n (n)}
             <option value={String(n)}>{n}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
+
+    {#if shown.has('unit')}
+      <label>
+        <span>{t('templateManager.field.unit')}</span>
+        <input type="text" data-testid="template-param-field" data-field="unit" value={param.unit ?? ''} disabled={locked} maxlength={TEMPLATE_LIMITS.unit} spellcheck="false" oninput={(e) => set('unit', e.currentTarget.value)} />
+      </label>
+    {/if}
+    {#if shown.has('maxLength')}
+      <label>
+        <span>{t('templateManager.field.maxLength')}</span>
+        <input type="text" inputmode="numeric" data-testid="template-param-field" data-field="maxLength" data-bad={lengthBad()} value={lengthText()} disabled={locked} oninput={(e) => typeLength(e.currentTarget.value)} />
+        {#if lengthBad()}<em class="bad">{t('templateManager.param.notANumber')}</em>{/if}
+      </label>
+    {/if}
+    {#if shown.has('charset')}
+      <label>
+        <span>{t('templateManager.field.charset')}</span>
+        <select data-testid="template-param-field" data-field="charset" value={param.charset ?? ''} disabled={locked} onchange={(e) => set('charset', e.currentTarget.value === '' ? undefined : e.currentTarget.value)}>
+          <option value="">{t('templateManager.charset.any')}</option>
+          {#each CHARSET_CHOICES as [value, label] (value)}
+            <option {value}>{t(label)}</option>
           {/each}
         </select>
       </label>

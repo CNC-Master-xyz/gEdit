@@ -1,1 +1,7 @@
-{ "keepSectionHeadings": false }
+{
+  "note": "Klartext with keepSectionHeadings off: the * - heading lines go too.",
+  "profile": "heidenhain-klartext",
+  "options": {
+    "keepSectionHeadings": false
+  }
+}

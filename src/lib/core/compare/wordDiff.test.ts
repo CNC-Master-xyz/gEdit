@@ -181,6 +181,72 @@ describe('the words each dialect reads', () => {
     });
   });
 
+  it('marks the changed parts inside a long word too: a call, an expression, a comment (review NC-8)', () => {
+    /** The whole marked words and the parts marked inside them, as text. */
+    const withParts = (a: string, b: string, o: { ignoreCase?: boolean; key?: ProfileKey } = {}) => {
+      const marks = wordDiff(tokens(a, o.key), tokens(b, o.key), o);
+      const text = (line: string, spans: WordSpan[] | undefined) => (spans ?? []).map((sp) => line.slice(sp.start, sp.end));
+      return {
+        original: text(a, marks.original),
+        modified: text(b, marks.modified),
+        parts: { original: text(a, marks.parts?.original), modified: text(b, marks.parts?.modified) },
+      };
+    };
+    // A changed argument of a cycle call: the call stays marked whole, the argument is marked inside it.
+    expect(
+      withParts('CYCLE800(1,"TABLE",0,57,0,0,0,-30,0,0,0,0,0,-1,100,1)', 'CYCLE800(1,"TABLE",0,57,0,0,0,-45,0,0,0,0,0,-1,100,1)', { key: 'sinumerik' }),
+    ).toEqual({
+      original: ['CYCLE800(1,"TABLE",0,57,0,0,0,-30,0,0,0,0,0,-1,100,1)'],
+      modified: ['CYCLE800(1,"TABLE",0,57,0,0,0,-45,0,0,0,0,0,-1,100,1)'],
+      parts: { original: ['30'], modified: ['45'] },
+    });
+    expect(withParts('CYCLE81(10,0,2,-12)', 'CYCLE81(10,0,2,-15)', { key: 'sinumerik' }).parts).toEqual({ original: ['12'], modified: ['15'] });
+    // A sign that comes or goes is part of the change, joined to the number next to it.
+    expect(withParts('CYCLE81(10,0,2,12)', 'CYCLE81(10,0,2,-15)', { key: 'sinumerik' }).parts).toEqual({ original: ['12'], modified: ['-15'] });
+    // A string argument is one part, its case kept.
+    expect(withParts('CYCLE800(1,"TABLE",0)', 'CYCLE800(1,"HEAD",0)', { key: 'sinumerik' }).parts).toEqual({ original: ['"TABLE"'], modified: ['"HEAD"'] });
+    expect(withParts('G1 X=AC(5) Y=IC(-3) F300', 'G1 X=AC(7) Y=IC(-3) F300', { key: 'sinumerik' }).parts).toEqual({ original: ['5'], modified: ['7'] });
+    // An expression in brackets; a part that grows is marked whole on both sides.
+    const expression = withParts('G1 X[#1+#2] F100', 'G1 X[#1+#3] F100', { key: 'fanuc' });
+    expect(expression.original).toEqual(['X[#1+#2]']);
+    expect(expression.parts).toEqual({ original: ['#2'], modified: ['#3'] });
+    expect(withParts('G1 X[#1+#2] F100', 'G1 X[#1+#22] F100', { key: 'fanuc' }).parts).toEqual({ original: ['#2'], modified: ['#22'] });
+    expect(withParts('G1 X[#12+#2] F100', 'G1 X[#2+#2] F100', { key: 'fanuc' }).parts).toEqual({ original: ['#12'], modified: ['#2'] });
+    // An argument added at the end: the comma and the number are new, nothing on the other side is marked.
+    expect(withParts('CYCLE81(10,0,2)', 'CYCLE81(10,0,2,-15)', { key: 'sinumerik' }).parts).toEqual({ original: [], modified: [',-15'] });
+    // A comment.
+    expect(withParts('N10 G1 X10.5 F200 (FACE MILL D50)', 'N10 G1 X10.5 F200 (FACE MILL D63)', { key: 'okuma' }).parts).toEqual({
+      original: ['D50'],
+      modified: ['D63'],
+    });
+    expect(withParts('L X+10 Y+20 FMAX ;A B', 'L X+10 Y+20 FMAX ;A C', { key: 'klartext' }).parts).toEqual({ original: ['B'], modified: ['C'] });
+  });
+
+  it('marks no parts in a plain word, in two different calls, or where several words changed together (review NC-8)', () => {
+    const parts = (a: string, b: string, key?: ProfileKey) => wordDiff(tokens(a, key), tokens(b, key)).parts;
+    // A plain address word is marked whole, as before.
+    expect(parts('N10 G1 X10. F1200', 'N10 G1 X10. F1000')).toBeUndefined();
+    expect(parts('G1 X10.5', 'G1 X10.25')).toBeUndefined();
+    // Another cycle: the head differs, so the whole call is the change.
+    expect(parts('CYCLE81(10,0,2,-12)', 'CYCLE82(10,0,2,-12)', 'sinumerik')).toBeUndefined();
+    // Two calls that changed next to each other face no single word.
+    expect(parts('CYCLE81(1,2,3) CYCLE82(1,2,3)', 'CYCLE81(1,2,4) CYCLE82(1,2,5) X1', 'sinumerik')).toBeUndefined();
+    // Equal lines and a moved word have no marks at all, so no parts either.
+    expect(parts('CYCLE81(10,0,2,-12)', 'CYCLE81(10,0,2,-12)', 'sinumerik')).toBeUndefined();
+  });
+
+  it('gives the parts as offsets of the line, inside their word (review NC-8)', () => {
+    const marks = wordDiff(tokens('N5 CYCLE81(10,0,2,-12)', 'sinumerik'), tokens('N5   CYCLE81(10,0,2,-15)', 'sinumerik'));
+    expect(marks.original).toEqual([{ start: 3, end: 22 }]);
+    expect(marks.parts).toEqual({ original: [{ start: 19, end: 21 }], modified: [{ start: 21, end: 23 }] });
+  });
+
+  it('folds the case of the parts outside strings with ignoreCase (review NC-8)', () => {
+    const marks = wordDiff(tokens('CYCLE800(1,"Table",0,a)', 'sinumerik'), tokens('cycle800(1,"TABLE",0,A)', 'sinumerik'), { ignoreCase: true });
+    const line = 'CYCLE800(1,"Table",0,a)';
+    expect((marks.parts?.original ?? []).map((sp) => line.slice(sp.start, sp.end))).toEqual(['"Table"']);
+  });
+
   it('Okuma: a $ line, a $ at the end of a block, a sequence name and a comment', () => {
     expect(marked('$PART.MIN%', '$PART.MAX%', { key: 'okuma' })).toEqual({ original: ['$PART.MIN%'], modified: ['$PART.MAX%'] });
     expect(marked('$ G90 G0 X10', '$ G91 G0 X10', { key: 'okuma' })).toEqual({ original: ['G90'], modified: ['G91'] });

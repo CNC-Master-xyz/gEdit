@@ -226,6 +226,14 @@ describe('the P4e scenarios (H4e) and the suites around them', () => {
     expect(scenarios.get('p4-channels')?.options.files).toEqual({ 'repo-path.txt': '{repo}' });
   });
 
+  it('registers p4-comfort and its restart pair, and suites/p4c.txt lists exactly those three (the pair shares one HOME)', async () => {
+    await import('../runtime/scenarios/p4-comfort.js');
+    expect(namesIn('p4c.txt')).toEqual(['p4-comfort', 'p4-comfort-names-1', 'p4-comfort-names-2']);
+    for (const name of namesIn('p4c.txt')) expect(scenarios.get(name), name).toBeDefined();
+    expect(scenarios.get('p4-comfort-names-2')?.options.vars?.HOME).toBe('{run}/../p4-comfort-names-1/state-home');
+    expect(scenarios.get('p4-comfort-names-1')?.options.vars?.HOME).toBe('{run}/state-home');
+  });
+
   it('runs every suite file on the hosted runner: the glob of harness.yml names them all', () => {
     const workflow = readFileSync(join(root, '.github', 'workflows', 'harness.yml'), 'utf8');
     const glob = /suites\/\{(.+)\}\.txt/.exec(workflow)?.[1] ?? '';
@@ -259,12 +267,12 @@ describe('the P4e scenarios (H4e) and the suites around them', () => {
     });
 
     it('runs the whole list, unchanged, when the field is empty (a push to main never has it)', () => {
-      expect(step).toContain('tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"');
+      expect(step).toContain('tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e}.txt 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"');
       for (const empty of ['', '   ']) {
         const { code, stdout } = run(empty);
         expect(code).toBe(0);
         expect(stdout.trim()).toBe(
-          `SUITE ${['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12', 'rp', 'm13', 'p3a', 'p3b', 'b1', 'p4a', 'p4e'].map((n) => `tests/runtime/suites/${n}.txt`).join(' ')}`,
+          `SUITE ${['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12', 'rp', 'm13', 'p3a', 'p3b', 'b1', 'p4a', 'p4b', 'p4c', 'p4d', 'p4e'].map((n) => `tests/runtime/suites/${n}.txt`).join(' ')}`,
         );
       }
     });

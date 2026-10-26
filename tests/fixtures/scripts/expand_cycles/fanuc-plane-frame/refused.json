@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be written out as plain moves: 1 cycle outside the XY plane, 1 cycle in a tilted or turned frame. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N50 G98 G81 X10. Y10. Z-5. R2. F150.: the cycle runs in a tilted or turned frame (G68 (line 6)).",
+      "reason": "frame"
+    },
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "N80 G98 G81 X10. Z-5. Y20. R2. F150.: the cycle runs outside the XY plane (ZX).",
+      "reason": "plane"
+    }
+  ]
+}

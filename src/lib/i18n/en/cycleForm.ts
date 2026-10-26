@@ -22,6 +22,8 @@ export default {
   notProgram: 'Cycles are edited in NC programs, not in this kind of file.',
   /** The title of the form; {code} and {label} come from the code database. */
   title: '{code}: {label}',
+  /** T119: the title of the form of one block of a two-block cycle; {part} is 1 or 2. */
+  titlePart: '{code}: {label}, block {part} of 2',
   /** The OK button when the form edits the cycle at the cursor / inserts a new one. */
   okEdit: 'Apply',
   okInsert: 'Insert',
@@ -40,6 +42,8 @@ export default {
   /** P3.8: why the cycle at the cursor has no form (`CYCLE_FORM_REFUSALS`). */
   refused: {
     twoBlocks: 'This cycle is written in two blocks. Edit it in the text, or insert it from a template.',
+    /** T119: a block of a two-block cycle whose words do not say whether it is the first or the second. */
+    whichBlock: 'This block does not show whether it is the first or the second block of the cycle. Edit it in the text.',
     verify: 'This cycle is not confirmed in the code database yet, so it has no form.',
     noParams: 'The code database lists no parameters for this cycle.',
     tooLong: 'The block is too long to edit in a form.',
@@ -55,6 +59,8 @@ export default {
   // P3b fix NC: what the form says besides the fields.
   /** NC-08: the help of a field whose word is written without a point; {value} with its unit (`4 mm`). */
   withoutPoint: 'Written without a point: {literal} = {value} on this machine. Type the value as it is written.',
+  /** T146: the help of a field whose value this machine reads as something else than written; {value} with its unit. */
+  reading: '{literal} = {value} on this machine.',
   /** NC-05: the note when the new cycle is inserted with its cancel. */
   cancelAdded: 'The cycle stays on until {cancel}. Put further hole positions between the two blocks.',
   /** SK-03: the note when a Sinumerik drilling cycle is inserted as a call. */

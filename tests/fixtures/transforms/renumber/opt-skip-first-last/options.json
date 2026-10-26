@@ -1,0 +1,29 @@
+{
+  "note": "P4d §6.6 rule 5: the first three and the last line of the program keep their text (one row for each region); the final newline is no line. The main block :8 keeps its prefix and the GOTOB follows it.",
+  "profile": "sinumerik",
+  "options": {
+    "skipFirst": 3,
+    "skipLast": 1
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 11,
+        "severity": "info"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.referencesRewritten"
+    ],
+    "preflight": null
+  }
+}

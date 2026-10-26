@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Fanuc: spaced blocks are packed; the spaces inside a comment stay.",
+  "profile": "fanuc-gcode",
+  "options": {}
+}

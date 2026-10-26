@@ -13,6 +13,7 @@ import { t } from '$lib/i18n';
 import { CLOSED_VIEW, WAIT_RULER_COLORS, paneSourceOfModel } from './channelPanes';
 import { docIdOf } from './editorService';
 import { computeJumpLines } from '$lib/app/outlineService';
+import { mayDecideJumps } from '$lib/core/channels/jumpCache';
 import { WAIT_RULE, fileParams, paneWorld, sectionParams, type PaneEditor, type PaneWorld } from '../../../tests/unit/helpers/channelPanes';
 import { cpOf, profileOf } from '../../../tests/unit/helpers/profiles';
 import type { ChannelParams, SyncRule } from '$lib/core/channels/types';
@@ -50,6 +51,9 @@ async function files(texts: string[][]): Promise<{ w: PaneWorld; ids: string[] }
 }
 
 const zonesOf = (ed: PaneEditor): [number, number][] => [...ed.zones.values()].map((z): [number, number] => [z.afterLineNumber, z.heightInLines]).sort((a, b) => a[0] - b[0]);
+/** Every hover the wait hovers give for the lines of the model in group `group`, in line order. */
+const allHovers = (w: PaneWorld, group: string): string[] =>
+  Array.from({ length: (w.editorOf(group).getModel() as unknown as { getLineCount(): number }).getLineCount() }, (_, i) => w.hover(group, i + 1)).flat();
 const marksOf = (ed: PaneEditor): { line: number; cls: unknown }[] => ed.marks().map((m) => ({ line: m.range.startLineNumber, cls: m.options.linesDecorationsClassName }));
 
 describe('the channel view stub of the P4e prelude is gone', () => {
@@ -466,7 +470,7 @@ describe('the channel view (P4.22b)', () => {
       w.type(paneModel(w, 'g2'), 5, 6, '\nG1 Z2');
       w.panes.flush();
       expect(zonesOf(w.editorOf('g1'))).toEqual([[6, 1]]);
-      expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 0 });
+      expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 0, unknown: 0 });
     });
 
     it('replaces only the zones that differ: a zone that stays keeps its place, and an edit that changes nothing asks Monaco for nothing', async () => {
@@ -519,8 +523,11 @@ describe('the channel view (P4.22b)', () => {
       expect(marksOf(w.editorOf('g2'))).toEqual([{ line: 7, cls: 'gedit-wait-matched' }]);
       const matched = w.editorOf('g1').marks()[0].options;
       expect(matched).toMatchObject({ isWholeLine: true, overviewRuler: { color: WAIT_RULER_COLORS.matched } });
-      expect(matched.hoverMessage).toMatchObject({ value: 'Waits with Turret B, line 11' });
-      expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 0 });
+      // The hover is not a decoration (it would be made for every wait): it is asked for, for the line the pointer is on.
+      expect(matched.hoverMessage).toBeUndefined();
+      expect(w.hover('g1', 6)).toEqual(['Waits with Turret B, line 11']);
+      expect(w.hover('g1', 5)).toEqual([]);
+      expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 0, unknown: 0 });
 
       // Channel 2 loses its wait: the one in channel 1 has no partner.
       w.model(id).pushEditOperations(null, [{ range: { startLineNumber: 11, startColumn: 1, endLineNumber: 12, endColumn: 1 }, text: '' }], () => null);
@@ -529,8 +536,68 @@ describe('the channel view (P4.22b)', () => {
       expect(marksOf(w.editorOf('g2'))).toEqual([]);
       const unmatched = w.editorOf('g1').marks()[0].options;
       expect(unmatched).toMatchObject({ overviewRuler: { color: WAIT_RULER_COLORS.unmatched } });
-      expect(unmatched.hoverMessage).toMatchObject({ value: 'Turret B has no matching wait for "M901P12"' });
-      expect(get(w.panes.state).marks).toEqual({ matched: 0, unmatched: 1, none: 0 });
+      expect(unmatched.hoverMessage).toBeUndefined();
+      expect(w.hover('g1', 6)).toEqual(['Turret B has no matching wait for "M901P12"']);
+      expect(get(w.panes.state).marks).toEqual({ matched: 0, unmatched: 1, none: 0, unknown: 0 });
+    });
+
+    // v1.2.0 channel-enter: the sentence of a hover was built for every wait of the program on every alignment; it is made for the line asked about.
+    it('gives no decoration a hover and answers the hover of the line the pointer is on, for a program with many waits', async () => {
+      const lines = ['%', 'O0100'];
+      for (let block = 0; block < 60; block++) lines.push('CH1', 'G1 X1.', 'M901P12', 'CH2', 'G1 X2.', 'M901P12');
+      const { w } = await sections(lines);
+      const marks = w.editorOf('g1').marks();
+      expect(marks).toHaveLength(60);
+      for (const ed of [w.editorOf('g1'), w.editorOf('g2')]) {
+        for (const m of ed.marks()) expect(m.options.hoverMessage).toBeUndefined();
+      }
+      // Each block is six lines of the program: its CH1 wait is the block's third line, its CH2 wait the sixth.
+      const line = marks[29].range.startLineNumber;
+      expect(w.hover('g1', line)).toEqual([`Waits with Turret B, line ${2 + 29 * 6 + 6}`]);
+      expect(w.hover('g1', line - 1)).toEqual([]);
+      expect(w.hover('g2', marks[29].range.startLineNumber)).toEqual([`Waits with Turret A, line ${2 + 29 * 6 + 3}`]);
+    });
+
+    it('registers its hover provider while the view is open, for every language, and takes it away when the view closes', async () => {
+      const { w } = await sections();
+      expect(w.hovers.map((h) => h.language)).toEqual(['*']);
+      // A model the view does not show gets nothing from it.
+      const foreign = w.model(w.docs.getActiveId() as string);
+      expect(w.hovers[0].provider.provideHover(foreign, { lineNumber: 1, column: 1 })).toBeNull();
+      const answer = w.hovers[0].provider.provideHover(paneModel(w, 'g1'), { lineNumber: 6, column: 1 }) as { range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }; contents: { value: string; isTrusted?: boolean; supportHtml?: boolean }[] };
+      expect(answer.contents).toEqual([{ value: 'Waits with Turret B, line 11', isTrusted: false, supportHtml: false }]);
+      expect(answer.range).toMatchObject({ startLineNumber: 6, startColumn: 1, endLineNumber: 6 });
+      w.panes.close();
+      expect(w.hovers).toEqual([]);
+    });
+
+    // WX-CODE-8: one provider per language at opening lost the hover of a file whose language changed while the view was open.
+    it('keeps the hover of a channel file whose model changes language while the view is open', async () => {
+      const { w } = await files([
+        ['%', 'O0100', 'G0 X10', 'M901P12', 'G1 X20'],
+        ['%', 'O0200', 'G0 X5', 'M901P12', 'G1 X6'],
+      ]);
+      // Monaco asks a provider whose selector is the language of the model, or '*'.
+      const providersFor = (language: string) => w.hovers.filter((h) => h.language === '*' || h.language === language);
+      expect(providersFor('fanuc-lathe').length).toBeGreaterThan(0);
+      // The model of the second file goes into a language that was not there at opening (a profile change).
+      const changed = 'sinumerik-840d';
+      const hovers = providersFor(changed);
+      expect(hovers.length).toBeGreaterThan(0);
+      const model = paneModel(w, 'g2');
+      const answers = hovers.map((h) => h.provider.provideHover(model, { lineNumber: 4, column: 1 }));
+      expect(answers.some((a) => a !== null)).toBe(true);
+    });
+
+    it('moves the hover with the wait when a line break is typed above it', async () => {
+      const { w } = await sections();
+      const g1 = paneModel(w, 'g1');
+      w.type(g1, 5, g1.getLineMaxColumn(5), '\nG1 Z-1.');
+      w.panes.flush();
+      expect(marksOf(w.editorOf('g1'))).toEqual([{ line: 7, cls: 'gedit-wait-matched' }]);
+      // The wait of the other channel is on the program's line 12 now (the new line is above it too).
+      expect(w.hover('g1', 7)).toEqual(['Waits with Turret B, line 12']);
+      expect(w.hover('g1', 6)).toEqual([]);
     });
 
     it('holds the colours of the marks at 3:1 against the editor background in both themes, and the ruler’s on both', () => {
@@ -674,7 +741,7 @@ describe('the channel view (P4.22b)', () => {
     it('lines up M901P12 in channels 1 and 2 and not in channel 3, and M910P123 in all three', async () => {
       const { w } = await files([CH1, CH2, CH3]);
       // Waits: channel 1 M901 at 4, M910 at 6; channel 2 M901 at 6, M910 at 8; channel 3 M910 at 4.
-      expect(get(w.panes.state).marks).toEqual({ matched: 5, unmatched: 0, none: 0 });
+      expect(get(w.panes.state).marks).toEqual({ matched: 5, unmatched: 0, none: 0, unknown: 0 });
       expect(marksOf(w.editorOf('g1'))).toEqual([{ line: 4, cls: 'gedit-wait-matched' }, { line: 6, cls: 'gedit-wait-matched' }]);
       expect(marksOf(w.editorOf('g2'))).toEqual([{ line: 6, cls: 'gedit-wait-matched' }, { line: 8, cls: 'gedit-wait-matched' }]);
       // Channel 3 has only the M910: no mark for M901, which does not name it.
@@ -686,14 +753,14 @@ describe('the channel view (P4.22b)', () => {
       const rows = (name: string): number => w.editorOf(name).getModel()!.getLineCount() + zonesOf(w.editorOf(name)).reduce((n, z) => n + z[1], 0);
       expect([rows('g1'), rows('g2'), rows('g3')]).toEqual([10, 10, 10]);
       // The hover of a wait of three channels names the other two.
-      expect(w.editorOf('g3').marks()[0].options.hoverMessage).toMatchObject({ value: 'Waits with Turret A, line 6; Turret B, line 8' });
+      expect(w.hover('g3', w.editorOf('g3').marks()[0].range.startLineNumber)).toEqual(['Waits with Turret A, line 6; Turret B, line 8']);
     });
 
     it('marks M910P123 unmatched in channels 1 and 2 when the shown channel 3 has none', async () => {
       const { w } = await files([CH1, CH2, CH3.filter((l) => l !== 'M910P123')]);
-      expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 2, none: 0 });
+      expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 2, none: 0, unknown: 0 });
       expect(marksOf(w.editorOf('g1')).map((m) => m.cls)).toEqual(['gedit-wait-matched', 'gedit-wait-unmatched']);
-      expect(w.editorOf('g1').marks()[1].options.hoverMessage).toMatchObject({ value: 'Turret C has no matching wait for "M910P123"' });
+      expect(w.hover('g1', w.editorOf('g1').marks()[1].range.startLineNumber)).toEqual(['Turret C has no matching wait for "M910P123"']);
       expect(marksOf(w.editorOf('g3'))).toEqual([]);
     });
 
@@ -1320,10 +1387,9 @@ describe('waits inside a loop and waits naming a channel the machine does not ha
     const w = await withJumps(sectionParams(2), async (world) => {
       expect(await world.panes.open(world.addDoc(LOOPED.join('\n')))).toEqual({ ok: true });
     });
-    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 2 });
+    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 2, unknown: 0 });
     expect(marksOf(w.editorOf('g2')).filter((m) => m.cls === 'gedit-wait-unmatched')).toEqual([]);
-    const hovers = w.editorOf('g2').marks().map((m) => (m.options.hoverMessage as { value: string }).value);
-    expect(hovers.filter((h) => h === t('channelPanes.mark.loop'))).toHaveLength(2);
+    expect(allHovers(w, 'g2').filter((h) => h === t('channelPanes.mark.loop'))).toHaveLength(2);
   });
 
   it('does not judge the count of a wait inside a loop, with one file per channel', async () => {
@@ -1332,7 +1398,7 @@ describe('waits inside a loop and waits naming a channel the machine does not ha
       world.addDoc(LOOPED.slice(9).join('\n'), { path: '/nc/PART_CH2.nc', activate: false });
       expect(await world.panes.open(a)).toEqual({ ok: true });
     });
-    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 2 });
+    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 2, unknown: 0 });
   });
 
   it('still marks a count difference outside any loop', async () => {
@@ -1340,15 +1406,13 @@ describe('waits inside a loop and waits naming a channel the machine does not ha
     const w = await withJumps(sectionParams(2), async (world) => {
       expect(await world.panes.open(world.addDoc(lines.join('\n')))).toEqual({ ok: true });
     });
-    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 2, none: 0 });
+    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 2, none: 0, unknown: 0 });
   });
 
   it('marks a wait that names a channel the machine does not have, and the hover names it', async () => {
     const { w } = await sections(['%', 'O1', 'CH1', 'M901P14', 'M30', 'CH2', 'G0 X1', 'CH3', 'G0 X2'], 3);
     expect(marksOf(w.editorOf('g1'))).toEqual([{ line: 4, cls: 'gedit-wait-unmatched' }]);
-    expect(w.editorOf('g1').marks()[0].options.hoverMessage).toMatchObject({
-      value: 'This wait names channel 4, which this machine does not have. The control would wait here for ever.',
-    });
+    expect(w.hover('g1', 4)).toEqual(['This wait names channel 4, which this machine does not have. The control would wait here for ever.']);
   });
 });
 
@@ -1363,7 +1427,7 @@ describe('the hover of a wait says the alignment’s own reason', () => {
     await w.mountAll();
     w.panes.flush();
     expect(marksOf(w.editorOf('g1'))).toEqual([{ line: 2, cls: 'gedit-wait-unmatched' }]);
-    expect(w.editorOf('g1').marks()[0].options.hoverMessage).toMatchObject({ value: 'Turret C has no matching wait for "N20 WAITM(1,1,2,3)"' });
+    expect(w.hover('g1', 2)).toEqual(['Turret C has no matching wait for "N20 WAITM(1,1,2,3)"']);
   });
 
   it('says that a SETM answers a WAITM', async () => {
@@ -1375,8 +1439,9 @@ describe('the hover of a wait says the alignment’s own reason', () => {
     await w.mountAll();
     w.panes.flush();
     expect(get(w.panes.state).marks.unmatched).toBe(0);
-    const hover = w.editorOf('g1').marks().map((m) => (m.options.hoverMessage as { value: string }).value);
-    expect(hover).toEqual(['A SETM in Turret B answers this wait, so it needs no matching wait there.']);
+    // A wait in neither state has no decoration, only a hover.
+    expect(w.editorOf('g1').marks()).toEqual([]);
+    expect(allHovers(w, 'g1')).toEqual(['A SETM in Turret B answers this wait, so it needs no matching wait there.']);
   });
 
   it('tells a P-less Fanuc wait from one with P: the other channel lacks it (not “another order”)', async () => {
@@ -1389,15 +1454,15 @@ describe('the hover of a wait says the alignment’s own reason', () => {
       world.panes.flush();
       return { w: world };
     })();
-    expect(w.editorOf('g1').marks()[0].options.hoverMessage).toMatchObject({ value: 'Turret B has no matching wait for "M901"' });
-    expect(w.editorOf('g2').marks()[0].options.hoverMessage).toMatchObject({ value: 'Turret A has no matching wait for "M901P12"' });
+    expect(w.hover('g1', w.editorOf('g1').marks()[0].range.startLineNumber)).toEqual(['Turret B has no matching wait for "M901"']);
+    expect(w.hover('g2', w.editorOf('g2').marks()[0].range.startLineNumber)).toEqual(['Turret A has no matching wait for "M901P12"']);
   });
 
   it('says a crossing wait comes in another order', async () => {
     const { w } = await sections(['%', 'O1', 'CH1', 'M901P12', 'M902P12', 'M903P12', 'M909P12', 'CH2', 'M909P12', 'M901P12', 'M902P12', 'M903P12'], 2);
     const unmatched = (g: string) => w.editorOf(g).marks().filter((m) => m.options.linesDecorationsClassName === 'gedit-wait-unmatched');
     expect(unmatched('g1').map((m) => m.range.startLineNumber)).toEqual([7]);
-    expect(unmatched('g1')[0].options.hoverMessage).toMatchObject({ value: t('channelPanes.mark.crossing') });
+    expect(w.hover('g1', unmatched('g1')[0].range.startLineNumber)).toEqual([t('channelPanes.mark.crossing')]);
   });
 
   it('has a short plain text for every reason', () => {
@@ -1418,5 +1483,255 @@ describe('the hover of a wait says the alignment’s own reason', () => {
       expect(text.length, key).toBeLessThan(120);
     }
     expect(t('channelPanes.mark.missing', { channels: 'Turret B, Turret C', count: 2, text: 'M901P123' })).toBe('Turret B, Turret C have no matching wait for "M901P123"');
+  });
+});
+
+// -- v1.2.0, batch BL-channel-view -------------------------------------------------------------
+
+describe('the channel bar counts (T036, T037)', () => {
+  /** Two sections that end at `M30`; the tail after the last one is what is outside. */
+  const endedParams = (): ChannelParams => ({ ...sectionParams(2), sectionEnd: '(?<![A-Z0-9])M30(?!\\d)' });
+  async function ended(lines: string[]): Promise<{ w: PaneWorld; id: string }> {
+    const w = await paneWorld(endedParams());
+    const id = w.addDoc(lines.join('\n'));
+    expect(await w.panes.open(id)).toEqual({ ok: true });
+    await w.mountAll();
+    w.panes.flush();
+    return { w, id };
+  }
+  const BODY = ['%', 'O0100', 'CH1', 'A1', 'M30', '(TAIL)', 'CH2', 'B1', 'M30'];
+
+  it('does not count the empty line after the final line break as a line in no channel (T036)', async () => {
+    // `(TAIL)` is the one line that no channel holds; the empty last line is only the end of the text.
+    const { w } = await ended([...BODY, '']);
+    expect(get(w.panes.state).outsideLines).toBe(1);
+    const same = await ended(BODY);
+    expect(get(same.w.panes.state).outsideLines).toBe(1);
+  });
+
+  it('counts a line of text after the last section, and says 0 when only the empty last line is left (T036)', async () => {
+    const tail = await ended([...BODY, '(END)', '']);
+    expect(get(tail.w.panes.state).outsideLines).toBe(2);
+    const none = await ended(['%', 'O0100', 'CH1', 'A1', 'M30', 'CH2', 'B1', 'M30', '']);
+    expect(get(none.w.panes.state).outsideLines).toBe(0);
+  });
+
+  it('keeps the count while the program is edited (the end of the text stays out) (T036)', async () => {
+    const { w, id } = await ended(BODY);
+    expect(get(w.panes.state).outsideLines).toBe(1);
+    // A final line break typed at the end of the program.
+    const last = w.model(id).getLineCount();
+    w.type(w.model(id), last, w.model(id).getLineMaxColumn(last), '\n');
+    w.panes.flush();
+    expect(get(w.panes.state).outsideLines).toBe(1);
+    // A line of text after it is a line in no channel.
+    w.type(w.model(id), last + 1, 1, '(MORE)');
+    w.panes.flush();
+    expect(get(w.panes.state).outsideLines).toBe(2);
+  });
+
+  it('counts a wait that names a channel the machine does not have apart from the waits without a partner (T037)', async () => {
+    // Channel 1 waits at `M901P14` (channel 4 does not exist) and `M902P12`, which channel 2 does not answer.
+    const { w } = await sections(['%', 'O1', 'CH1', 'M901P14', 'M902P12', 'M30', 'CH2', 'G0 X1', 'M30'], 3);
+    expect(get(w.panes.state).marks).toEqual({ matched: 0, unmatched: 1, none: 0, unknown: 1 });
+  });
+
+  it('counts none of them as a wait without a partner when all the waits name a channel the machine lacks (T037)', async () => {
+    const { w } = await sections(['%', 'O1', 'CH1', 'M901P14', 'M30', 'CH2', 'G0 X1', 'CH3', 'G0 X2'], 3);
+    expect(get(w.panes.state).marks).toEqual({ matched: 0, unmatched: 0, none: 0, unknown: 1 });
+  });
+});
+
+describe('the two kinds of mark are told apart without colour (T029)', () => {
+  it('draws an unmatched mark as dashes and a matched one solid, and an unmatched wait takes the whole ruler lane', async () => {
+    const css = readFileSync(join(__dirname, 'channelPanes.css'), 'utf8');
+    // The rule of its own, not the grouped one that sets the width of both.
+    const rule = (name: string): string => new RegExp(`(?<!,)\\n\\.monaco-editor \\.gedit-wait-${name}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
+    expect(rule('unmatched')).toMatch(/repeating-linear-gradient/);
+    expect(rule('matched')).not.toMatch(/gradient/);
+    expect(rule('matched')).toMatch(/background-color/);
+
+    const { w, id } = await sections();
+    const lane = (g: string): unknown => (w.editorOf(g).marks()[0].options.overviewRuler as { position: number }).position;
+    const matchedLane = lane('g1');
+    // Channel 2 loses its wait.
+    w.model(id).pushEditOperations(null, [{ range: { startLineNumber: 11, startColumn: 1, endLineNumber: 12, endColumn: 1 }, text: '' }], () => null);
+    w.panes.flush();
+    expect(lane('g1')).not.toBe(matchedLane);
+    expect(lane('g1')).toBe(7);
+  });
+});
+
+describe('a refused pane edit leaves no Redo that does nothing once the view is closed (T032)', () => {
+  type Doc = ITextModel & { getAlternativeVersionId(): number };
+
+  /** A program with a typed step and a refused edit after it, the view closed. */
+  async function refused(): Promise<{ w: PaneWorld; id: string; doc: Doc; original: string; withZ: string }> {
+    const { w, id } = await sections(GAPPED);
+    const original = w.text(id);
+    const pane = paneModel(w, 'g1');
+    w.type(pane, 4, 3, 'Z');
+    pane.pushStackElement();
+    const withZ = w.text(id);
+    edit(pane, 6, 1, 6, 1, 'N'); // refused
+    w.panes.flush();
+    expect(w.text(id)).toBe(withZ);
+    w.panes.close();
+    return { w, id, doc: w.model(id) as Doc, original, withZ };
+  }
+
+  // Redoing the empty step changes no text (no content event) but moves the model to another version: the dirty mark follows it.
+  it('skips the empty step: a Redo after closing leaves the model at the version it was', async () => {
+    const { w, id, doc, withZ } = await refused();
+    const version = doc.getAlternativeVersionId();
+    void doc.redo();
+    expect(doc.getAlternativeVersionId()).toBe(version);
+    expect(w.text(id)).toBe(withZ);
+  });
+
+  it('still redoes what an Undo took back, and skips the empty step behind it', async () => {
+    const { w, id, doc, original, withZ } = await refused();
+    void doc.undo();
+    expect(w.text(id)).toBe(original);
+    void doc.redo();
+    expect(w.text(id)).toBe(withZ);
+    const version = doc.getAlternativeVersionId();
+    void doc.redo();
+    expect(doc.getAlternativeVersionId()).toBe(version);
+  });
+
+  it('stops skipping once the program is edited: the Redo of that edit works', async () => {
+    const { w, id, doc, withZ } = await refused();
+    w.type(doc, 1, 1, '!');
+    const edited = w.text(id);
+    expect(edited).toBe(`!${withZ}`);
+    void doc.undo();
+    expect(w.text(id)).toBe(withZ);
+    void doc.redo();
+    expect(w.text(id)).toBe(edited);
+  });
+
+  it('leaves the model’s own Redo in place when no edit was refused', async () => {
+    const { w, id } = await sections(GAPPED);
+    const doc = w.model(id) as unknown as Record<string, unknown>;
+    const own = Object.prototype.hasOwnProperty.call(doc, 'redo');
+    w.panes.close();
+    expect(Object.prototype.hasOwnProperty.call(doc, 'redo')).toBe(own);
+  });
+});
+
+describe('the jump lines are read again only when an edit can change them (T033)', () => {
+  const LOOPED = ['%', 'O0100', 'CH1', '#1=0', 'N10 M901P12', '#1=#1+1', 'IF[#1LT3]GOTO10', 'M30', 'CH2', 'M901P12', 'G0 X1', 'M901P12', 'G0 X2', 'M901P12', 'M30'];
+
+  async function looped(): Promise<{ w: PaneWorld; id: string; reads: () => number }> {
+    let reads = 0;
+    const w = await paneWorld(sectionParams(2), {
+      viewDeps: {
+        jumpLines: (_id, channelOf, lines) => (reads++, computeJumpLines([...lines], cpOf('fanuc-lathe'), channelOf)),
+        jumpMayDecide: (_id, line) => mayDecideJumps(line, cpOf('fanuc-lathe')),
+      },
+    });
+    const id = w.addDoc(LOOPED.join('\n'));
+    expect(await w.panes.open(id)).toEqual({ ok: true });
+    await w.mountAll();
+    w.panes.flush();
+    return { w, id, reads: () => reads };
+  }
+
+  it('reads the program once, however many lines are typed or added in lines that cannot matter', async () => {
+    const { w, id, reads } = await looped();
+    expect(reads()).toBe(1);
+    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 2, unknown: 0 });
+    // Enter after `G0 X1` of channel 2 (line 11), and a character in the line it made: the waits below move down by one.
+    const doc = w.model(id);
+    w.type(doc, 11, doc.getLineMaxColumn(11), '\nG0 X7');
+    w.panes.flush();
+    w.type(doc, 12, doc.getLineMaxColumn(12), '5');
+    w.panes.flush();
+    expect(doc.getLineContent(12)).toBe('G0 X75');
+    expect(reads()).toBe(1);
+    // The loop in channel 1 is still seen: no red mark, the count of channel 2 is not judged.
+    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 2, unknown: 0 });
+  });
+
+  it('reads it again when a jump is written, and sees the loop go', async () => {
+    const { w, id, reads } = await looped();
+    const doc = w.model(id);
+    // The jump back to line `N10` is typed over.
+    w.type(doc, 7, 1, 'G0 X9', doc.getLineMaxColumn(7));
+    w.panes.flush();
+    expect(reads()).toBe(2);
+    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 2, none: 0, unknown: 0 });
+  });
+});
+
+describe('a character in an ordinary line does not ask the channel service for the resolution (T026)', () => {
+  const asked = (w: PaneWorld): { count: number } => {
+    const calls = { count: 0 };
+    const fresh = w.channels.fresh.bind(w.channels);
+    w.channels.fresh = (id) => {
+      calls.count++;
+      return fresh(id);
+    };
+    return calls;
+  };
+
+  it('leaves the panes, the document, the marks and the bar as a keystroke made them, without reading the resolution', async () => {
+    const { w, id } = await sections();
+    const calls = asked(w);
+    const pane = paneModel(w, 'g1');
+    // `G0 X10` (pane line 5, document line 5): typed at the end, twice.
+    w.type(pane, 5, pane.getLineMaxColumn(5), '1');
+    w.panes.flush();
+    w.type(pane, 5, pane.getLineMaxColumn(5), '2');
+    w.panes.flush();
+    expect(calls.count).toBe(0);
+    expect(w.model(id).getLineContent(5)).toBe('G0 X1012');
+    expect(paneModel(w, 'g1').getLineContent(5)).toBe('G0 X1012');
+    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 0, none: 0, unknown: 0 });
+    expect(marksOf(w.editorOf('g1'))).toEqual([{ line: 6, cls: 'gedit-wait-matched' }]);
+    // The same in the other channel.
+    const other = paneModel(w, 'g2');
+    w.type(other, 5, 1, 'X');
+    w.panes.flush();
+    expect(calls.count).toBe(0);
+    expect(w.model(id).getLineContent(9)).toBe('XG0 X5');
+  });
+
+  it('asks again when the character is in a wait, a section start, or writes either', async () => {
+    const { w } = await sections();
+    const calls = asked(w);
+    const pane = paneModel(w, 'g1');
+    w.type(pane, 6, pane.getLineMaxColumn(6), '3'); // `M901P12` -> `M901P123`: a wait
+    w.panes.flush();
+    expect(calls.count).toBe(1);
+    w.type(pane, 5, 1, 'M902P12 ', 7); // an ordinary line becomes a wait
+    w.panes.flush();
+    expect(calls.count).toBe(2);
+  });
+
+  it('judges a wait written after quiet keystrokes as the program is: the earlier keystrokes are part of the resolution then', async () => {
+    const { w, id } = await sections();
+    const pane = paneModel(w, 'g1');
+    w.type(pane, 5, pane.getLineMaxColumn(5), '1'); // quiet
+    w.panes.flush();
+    w.type(pane, 7, 1, 'M902P12\n'); // a wait without a partner, above `G1 X20`
+    w.panes.flush();
+    expect(w.model(id).getLineContent(5)).toBe('G0 X101');
+    expect(get(w.panes.state).marks).toEqual({ matched: 2, unmatched: 1, none: 0, unknown: 0 });
+    expect(marksOf(w.editorOf('g1')).map((m) => m.cls)).toEqual(['gedit-wait-matched', 'gedit-wait-unmatched']);
+  });
+
+  it('still asks for every keystroke when the view is not given the way to tell', async () => {
+    const w = await paneWorld(sectionParams(2), { viewDeps: { editKeepsChannels: undefined } });
+    const id = w.addDoc(PROGRAM.join('\n'));
+    expect(await w.panes.open(id)).toEqual({ ok: true });
+    await w.mountAll();
+    w.panes.flush();
+    const calls = asked(w);
+    const pane = paneModel(w, 'g1');
+    w.type(pane, 5, pane.getLineMaxColumn(5), '1');
+    w.panes.flush();
+    expect(calls.count).toBe(1);
   });
 });

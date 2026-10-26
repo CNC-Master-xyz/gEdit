@@ -13,3 +13,35 @@
 export function mayRetry(suiteRetries, options) {
   return suiteRetries && options?.retry !== false
 }
+
+/**
+ * Whether a run that came back BLOCKED may be run once more (T197). The harness cannot do
+ * anything about a locked screen, so that block is final; a block with the screen unlocked is a
+ * hiccup of the machine (the main thread did not answer an input in time, which a shared CI runner
+ * does now and then: `m0-trusted` twice in a few runs) and is retried once like a failure. A block
+ * a scenario inherits from a predecessor that writes its HOME (`where: 'suite'`) is not its own to
+ * clear.
+ * @param {{ status: string, screenLocked?: boolean, blocked?: { where?: string }[] }} result one scenario's result
+ * @returns {boolean}
+ */
+export function isTransientBlock(result) {
+  return result.status === 'blocked' && result.screenLocked !== true && !(result.blocked ?? []).some((b) => b.where === 'suite')
+}
+
+/**
+ * Turns the result of a numbered scenario (`…-2`) that failed into a blocked one when the scenario
+ * that writes its HOME (`…-1`) was blocked: what `…-2` reports is that block, not the app. It
+ * is decided **before** the result is printed (T194): the first line said FAIL and a second one
+ * said it was not, which reads like two verdicts.
+ * @template {{ status: string, blocked: { reason: string, where?: string }[] }} R
+ * @param {R} result changed in place
+ * @param {string | undefined} blocker the predecessor that was blocked, if any
+ * @returns {R}
+ */
+export function inheritBlock(result, blocker) {
+  if (result.status === 'fail' && blocker) {
+    result.status = 'blocked'
+    result.blocked.push({ reason: `${blocker}, which writes its HOME, was blocked`, where: 'suite' })
+  }
+  return result
+}

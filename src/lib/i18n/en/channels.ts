@@ -48,6 +48,8 @@ export default {
     markerConflict: 'Line {line} names {channel}, line {other} names {otherChannel}, so the channel of this program is not set.',
     siblingUnknown: 'Could not check whether the file for {channel} exists.',
     longLines: '{count} lines longer than {max} characters were not read for channels and wait codes.',
+    /** T171: a pattern of the channel rules ran past its time budget in the background reader and was stopped. */
+    patternStopped: 'The pattern “{pattern}” took longer than {seconds} seconds on this program and was stopped, so channels are off for it. Make the pattern simpler: avoid a repeat inside a repeat, such as (a+)+.',
   },
 
   /** The program map. */
@@ -70,17 +72,22 @@ export default {
     broken: 'Channel rules are broken',
     tooltipSingle: 'One program holds all the channels.',
     tooltipMulti: 'One file for each channel.',
-    foundSections: 'in this program, {count} sections',
+    foundSections_one: 'in this program, {count} section',
+    foundSections_other: 'in this program, {count} sections',
     foundFileName: 'found by its file name',
     foundMarker: 'found by the marker in the program',
     foundAssigned: 'set by you',
     stateOpen: 'open',
     stateNotOpen: 'exists, not open',
     stateNotFound: 'not found',
+    /** One program with sections: a declared channel that has no section here (T127). Information, not a fault. */
+    stateNotUsed: 'not used in this program',
     stateUnknown: 'could not be checked',
     unassignedTooltip: 'This program is not tied to a channel yet. Click to choose one.',
     /** The resolution ran out of its time (`channels.problems.tooSlow`): said, never silent (M12 fix F4). */
     tooSlow: 'Channels: too slow to read',
+    /** T171: a pattern of the channel rules ran past its time budget and was stopped (`channels.problems.patternStopped`). */
+    patternStopped: 'Channels: pattern stopped',
   },
 
   pick: {
@@ -149,6 +156,19 @@ export default {
       'The order of {previous} (line {previousLine}) and {mark} in {channel} is not checked: a jump target or a backward jump lies between them.',
     notIncreasing: '{mark} comes after {previous} (line {previousLine}) in {channel}; the numbers must increase.',
     unmatched: '{mark} in {channel} names no other channel, so nothing can answer it.',
+    /** Manual check D2-2: the P word leaves out the mark's own channel. */
+    ownChannelNotNamed:
+      '{mark} in {channel} waits for {names} but does not name {channel} itself; the channel list (the P word) has to name every channel that waits, this one too.',
+    /** Manual check D2-4 (c): an Okuma spindle command at a P code the other turret does not have. */
+    missingWithCode:
+      '{code} in {channel} (line {line}) stands at {mark}, but {other} has no {mark}; this code has to stand at a sync code that both sides have, with the same number.',
+    /** Manual check D2-4 (a), a warning: an Okuma M100 against a P code. */
+    meetsOtherRule:
+      'Warning: {mark} in {channel} (line {line}) meets {otherMark} in {other} (line {otherLine}); these two do not wait for each other, so both sides go on.',
+    /** Manual check D2-5, a warning: a Fanuc wait with other words in its block. */
+    sharesBlock: 'Warning: {mark} in {channel} shares its block with other words; write a wait code in a block of its own.',
+    /** Manual check D2-5, a warning: a Siemens WAITM mark number outside 0 to 99. */
+    markOutOfRange: 'Warning: {mark} in {channel} is not a mark number from {min} to {max}.',
     truncated: 'The check took too long and was stopped; the findings below are incomplete.',
   },
 
@@ -184,6 +204,8 @@ export default {
     channel: 'Channel',
     mark: 'Wait code',
     problem: 'Problem',
+    /** Information, not a fault: a channel without a section in one program with sections (T127). */
+    note: 'Note',
     marks: '{count} wait codes found.',
     machineNone: 'This document has no machine with channel settings.',
   },

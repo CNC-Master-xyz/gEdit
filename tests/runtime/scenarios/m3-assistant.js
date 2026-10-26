@@ -213,6 +213,8 @@ scenario('m3-assistant', { timeout: 300 }, async (h) => {
   h.check('the Assistance page offers the hover switch and the completion mode', !!hoverBox && !!field(h, 'assist.completion'), h.qa('form-field').map((e) => e.dataset.field))
   // P3a: the page gained one switch, Motion Colors, on by default.
   h.check('P3a: and the Motion Colors switch, which is on', !!control(h, 'assist.motionColors') && control(h, 'assist.motionColors')?.checked === true, h.qa('form-field').map((e) => e.dataset.field))
+  // T214: and the switch for Enter taking a suggestion, which is off: Enter ends the block.
+  h.check('T214: and the Enter-accepts-a-suggestion switch, which is off', !!control(h, 'assist.acceptOnEnter') && control(h, 'assist.acceptOnEnter')?.checked === false && ctx.settings.get('assist.acceptOnEnter') === false, h.qa('form-field').map((e) => e.dataset.field))
   if (hoverBox) {
     hoverBox.checked = false
     hoverBox.dispatchEvent(new Event('change', { bubbles: true }))

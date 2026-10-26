@@ -9,6 +9,7 @@
 
 export * from './types';
 export {
+  charsetFits,
   loadTemplates,
   placeholdersOf,
   templateCommandId,
@@ -19,12 +20,13 @@ export {
   offeredToMachine,
   PROGRAM_START_TEMPLATE_ID,
   SYS_PLACEHOLDERS,
+  TEMPLATE_CHARSETS,
   TEMPLATE_COMMAND_PREFIX,
   TEMPLATE_ID,
   TEMPLATE_LIMITS,
   TEMPLATE_PARAM_ID,
 } from './load';
-export { renderTemplate, templateFields, validateTemplateValues } from './engine';
+export { formulaTexts, renderTemplate, templateFields, validateTemplateValues } from './engine';
 export {
   checkFormula,
   evaluateFormulas,
@@ -36,7 +38,7 @@ export {
   FORMULA_READABLE,
   type ParsedFormula,
 } from './formula';
-export { applyCycleForm, cycleEntries, cycleFormAt, cycleFormFor, CYCLE_FORM_REFUSALS, CYCLE_FORM_WHOLE } from './cycleForm';
+export { applyCycleForm, cycleEntries, cycleFormAt, cycleFormFor, cycleFormReadings, CYCLE_FORM_REFUSALS, CYCLE_FORM_WHOLE } from './cycleForm';
 export { draftToTemplate, templateFromSelection } from './fromSelection';
 
 /**

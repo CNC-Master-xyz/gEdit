@@ -144,6 +144,7 @@
       "code": "G4",
       "group": "nonmodal",
       "axisWords": "data",
+      "review": "pending",
       "label": "Dwell",
       "description": "Holds the tool where it is before the next block runs. It applies to this block only.",
       "params": [
@@ -159,7 +160,8 @@
           "min": 0,
           "unit": "dwell"
         }
-      ]
+      ],
+      "dwell": { "increments": "P", "seconds": "X" }
     },
     {
       "code": "G5",
@@ -682,7 +684,8 @@
       "group": "lengthComp",
       "modal": true,
       "sets": { "tcp": "on", "lengthComp": "on" },
-      "conflicts": ["cycle", "surfaceSpeed", "feedNotPerMinute", "frame:frame", "frame:polar", "frame:cylindrical"],
+      "conflicts": ["cycle", "surfaceSpeed", "feedNotPerMinute", "frame:polar", "frame:cylindrical", "code:G68"],
+      "review": "pending",
       "label": "Tool centre point control, by rotary positions",
       "description": "Keeps the tool tip on the programmed path while the rotary axes move; the block writes the end positions of the rotary axes and the length offset register H. The move of this block itself only applies the length offset, and the control starts after it. G49 ends it.",
       "params": [
@@ -694,7 +697,8 @@
       "group": "lengthComp",
       "modal": true,
       "sets": { "tcp": "on", "lengthComp": "on" },
-      "conflicts": ["cycle", "surfaceSpeed", "feedNotPerMinute", "frame:frame", "frame:polar", "frame:cylindrical"],
+      "conflicts": ["cycle", "surfaceSpeed", "feedNotPerMinute", "frame:polar", "frame:cylindrical", "code:G68"],
+      "review": "pending",
       "label": "Tool centre point control, by tool direction",
       "description": "Keeps the tool tip on the programmed path while the tool tilts; the block writes the direction of the tool axis as I, J and K instead of rotary positions, and the length offset register H. The move of this block itself only applies the length offset, and the control starts after it. G49 ends it.",
       "params": [
@@ -800,6 +804,22 @@
       "alone": true,
       "label": "Turn the tool axis to the tilted plane",
       "description": "Write it alone in the block after G68.2 or G68.4: the rotary axes move so that the tool stands at right angles to the tilted plane."
+    },
+    {
+      "code": "G53.6",
+      "group": "nonmodal",
+      "positionsRotary": true,
+      "review": "pending",
+      "conflicts": ["!frame:frame"],
+      "label": "Turn the tool axis to the tilted plane, tool tip kept",
+      "description": "Written after G68.2 or G68.4: the rotary axes move so that the tool stands at right angles to the tilted plane, while the tool tip stays where it is on the workpiece. H names the tool offset, R the distance from the tool tip to the centre of rotation; X, Y and Z, if written, are where the tool tip ends up.",
+      "params": [
+        { "address": "H", "label": "Tool offset number", "min": 0 },
+        { "address": "R", "label": "Distance from the tool tip to the centre of rotation" },
+        { "address": "X", "label": "End point of the tool tip, X" },
+        { "address": "Y", "label": "End point of the tool tip, Y" },
+        { "address": "Z", "label": "End point of the tool tip, Z" }
+      ]
     },
     {
       "code": "G54",
@@ -952,9 +972,10 @@
       "group": "frame",
       "axisWords": "data",
       "frame": "open",
-      "conflicts": ["tcp", "radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "conflicts": ["radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "review": "pending",
       "label": "Tilted working plane",
-      "description": "Defines a coordinate system tilted against the workpiece and makes it the one the program is written in. X, Y and Z give its origin; I, J and K give the three Euler angles, or with P another way to define the plane (P1 roll-pitch-yaw angles with Q as the order of the turns, P2 three points, P3 two vectors, P4 projection angles). G69 ends it. G53.1 in the next block turns the rotary axes to the new tool direction.",
+      "description": "Defines a coordinate system tilted against the workpiece and makes it the one the program is written in. X, Y and Z give its origin; I, J and K give the three Euler angles, or with P another way to define the plane (P1 roll-pitch-yaw angles with Q as the order of the turns, P2 three points, P3 two vectors, P4 projection angles). G69 ends it. G53.1 or G53.6 in the next block turns the rotary axes to the new tool direction. Whether a tool length offset may stay on while it is given depends on the machine; many want it cancelled first. It may be given while tool centre point control is on.",
       "params": [
         { "address": "P", "label": "How the plane is defined: none Euler angles, 1 to 4 another form", "min": 1, "max": 4 },
         { "address": "Q", "label": "Order of the turns (P1) or the number of the point or vector (P2, P3)" },
@@ -969,7 +990,8 @@
       "group": "frame",
       "axisWords": "data",
       "frame": "open",
-      "conflicts": ["tcp", "radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "conflicts": ["radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "review": "pending",
       "label": "Tilted working plane from the tool direction",
       "description": "Makes the coordinate system whose Z axis is the present direction of the tool the one the program is written in. X, Y and Z give its origin in absolute values (the present position when left out); R turns it about its Z axis. G69 ends it.",
       "params": [
@@ -981,9 +1003,10 @@
       "group": "frame",
       "axisWords": "data",
       "frame": "open",
-      "conflicts": ["tcp", "radiusComp", "lengthComp", "cycle", "surfaceSpeed", "frame:frame", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "conflicts": ["radiusComp", "lengthComp", "cycle", "surfaceSpeed", "code:G68", "frame:mirror", "frame:scaling", "frame:polar", "frame:cylindrical"],
+      "review": "pending",
       "label": "Tilted working plane, added to the one in force",
-      "description": "Tilts again, relative to the tilted plane that is in force. It is written like G68.2 (P chooses the form), and its origin is given in the coordinates of that plane. Tool length and radius compensation must be off. G69 ends it.",
+      "description": "Tilts again, relative to the tilted plane that is in force. It is written like G68.2 (P chooses the form), and its origin is given in the coordinates of that plane. Radius compensation must be off; whether a tool length offset may stay on depends on the machine. G69 ends it.",
       "params": [
         { "address": "P", "label": "How the plane is defined: none Euler angles, 1 to 4 another form", "min": 1, "max": 4 },
         { "address": "Q", "label": "Order of the turns (P1) or the number of the point or vector (P2, P3)" },
@@ -1013,27 +1036,32 @@
       "modal": true,
       "sets": { "cycle": "start" },
       "conflicts": ["tcp"],
+      "review": "pending",
       "label": "Peck drilling cycle with chip break",
       "description": "Drills in steps of Q and pulls back only a short way between the steps to break the chip. On lathes in G-code system A, G73 repeats a profile for a pre-shaped blank instead.",
       "params": [
         {
           "address": "X",
-          "label": "Hole position X"
+          "label": "Hole position X",
+          "expandRole": "position"
         },
         {
           "address": "Y",
-          "label": "Hole position Y"
+          "label": "Hole position Y",
+          "expandRole": "position"
         },
         {
           "address": "Z",
           "label": "Hole bottom",
-          "required": true
+          "required": true,
+          "expandRole": "depth"
         },
         {
           "address": "R",
           "label": "R point: where the feed starts (G99 returns here)",
           "required": true,
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "expandRole": "r-plane"
         },
         {
           "address": "Q",
@@ -1041,23 +1069,36 @@
           "required": true,
           "min": 0,
           "unit": "length",
-          "position": "none"
+          "position": "none",
+          "expandRole": "peck"
         },
         {
           "address": "F",
           "label": "Drilling feed",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed"
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
           "unit": "count",
-          "position": "none"
+          "position": "none",
+          "expandRole": "repeat"
         }
-      ]
+      ],
+      "expand": {
+        "kind": "peck",
+        "steps": [
+          { "step": "rapid", "to": "r-plane" },
+          { "step": "pecks", "mode": "chip-break", "retract": { "form": "peckRetract" } },
+          { "step": "rapid", "to": "return" }
+        ],
+        "returnBy": "code",
+        "leaves": { "motion": "before", "feed": "cycle" }
+      }
     },
     {
       "code": "G74",
@@ -1185,43 +1226,60 @@
       "modal": true,
       "sets": { "cycle": "start" },
       "conflicts": ["tcp"],
+      "review": "pending",
       "label": "Drilling cycle",
       "description": "Feeds down to Z and pulls out at rapid. Every following block that carries a position drills another hole, until G80.",
       "params": [
         {
           "address": "X",
-          "label": "Hole position X"
+          "label": "Hole position X",
+          "expandRole": "position"
         },
         {
           "address": "Y",
-          "label": "Hole position Y"
+          "label": "Hole position Y",
+          "expandRole": "position"
         },
         {
           "address": "Z",
           "label": "Hole bottom",
-          "required": true
+          "required": true,
+          "expandRole": "depth"
         },
         {
           "address": "R",
           "label": "R point: where the feed starts (G99 returns here)",
           "required": true,
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "expandRole": "r-plane"
         },
         {
           "address": "F",
           "label": "Drilling feed",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed"
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
           "unit": "count",
-          "position": "none"
+          "position": "none",
+          "expandRole": "repeat"
         }
-      ]
+      ],
+      "expand": {
+        "kind": "drill",
+        "steps": [
+          { "step": "rapid", "to": "r-plane" },
+          { "step": "feed", "to": "depth" },
+          { "step": "rapid", "to": "return" }
+        ],
+        "returnBy": "code",
+        "leaves": { "motion": "before", "feed": "cycle" }
+      }
     },
     {
       "code": "G82",
@@ -1229,50 +1287,69 @@
       "modal": true,
       "sets": { "cycle": "start" },
       "conflicts": ["tcp"],
+      "review": "pending",
       "label": "Drilling cycle with dwell",
       "description": "Like G81, but waits at the hole bottom for the time given by P before pulling out. The dwell cleans up the bottom of a flat hole.",
       "params": [
         {
           "address": "X",
-          "label": "Hole position X"
+          "label": "Hole position X",
+          "expandRole": "position"
         },
         {
           "address": "Y",
-          "label": "Hole position Y"
+          "label": "Hole position Y",
+          "expandRole": "position"
         },
         {
           "address": "Z",
           "label": "Hole bottom",
-          "required": true
+          "required": true,
+          "expandRole": "depth"
         },
         {
           "address": "R",
           "label": "R point: where the feed starts (G99 returns here)",
           "required": true,
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "expandRole": "r-plane"
         },
         {
           "address": "P",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
           "unit": "count",
-          "position": "none"
+          "position": "none",
+          "expandRole": "dwell"
         },
         {
           "address": "F",
           "label": "Drilling feed",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed"
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
           "unit": "count",
-          "position": "none"
+          "position": "none",
+          "expandRole": "repeat"
         }
-      ]
+      ],
+      "expand": {
+        "kind": "drill",
+        "steps": [
+          { "step": "rapid", "to": "r-plane" },
+          { "step": "feed", "to": "depth" },
+          { "step": "dwell", "at": "bottom" },
+          { "step": "rapid", "to": "return" }
+        ],
+        "returnBy": "code",
+        "leaves": { "motion": "before", "feed": "cycle" }
+      }
     },
     {
       "code": "G83",
@@ -1280,27 +1357,32 @@
       "modal": true,
       "sets": { "cycle": "start" },
       "conflicts": ["tcp"],
+      "review": "pending",
       "label": "Peck drilling cycle",
       "description": "Drills in steps of Q and pulls all the way back to the R point after each step, so the chips clear. Active until G80.",
       "params": [
         {
           "address": "X",
-          "label": "Hole position X"
+          "label": "Hole position X",
+          "expandRole": "position"
         },
         {
           "address": "Y",
-          "label": "Hole position Y"
+          "label": "Hole position Y",
+          "expandRole": "position"
         },
         {
           "address": "Z",
           "label": "Hole bottom",
-          "required": true
+          "required": true,
+          "expandRole": "depth"
         },
         {
           "address": "R",
           "label": "R point: where the feed starts (G99 returns here)",
           "required": true,
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "expandRole": "r-plane"
         },
         {
           "address": "Q",
@@ -1308,23 +1390,36 @@
           "required": true,
           "min": 0,
           "unit": "length",
-          "position": "none"
+          "position": "none",
+          "expandRole": "peck"
         },
         {
           "address": "F",
           "label": "Drilling feed",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed"
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
           "unit": "count",
-          "position": "none"
+          "position": "none",
+          "expandRole": "repeat"
         }
-      ]
+      ],
+      "expand": {
+        "kind": "peck",
+        "steps": [
+          { "step": "rapid", "to": "r-plane" },
+          { "step": "pecks", "mode": "full-retract", "back": "r-plane", "reentry": { "form": "peckClearance" } },
+          { "step": "rapid", "to": "return" }
+        ],
+        "returnBy": "code",
+        "leaves": { "motion": "before", "feed": "cycle" }
+      }
     },
     {
       "code": "G84",
@@ -1432,43 +1527,61 @@
       "modal": true,
       "sets": { "cycle": "start" },
       "conflicts": ["tcp"],
+      "review": "pending",
       "label": "Boring cycle",
       "description": "Feeds down to Z and feeds back out again, which leaves a cleaner wall than a rapid retract.",
       "params": [
         {
           "address": "X",
-          "label": "Hole position X"
+          "label": "Hole position X",
+          "expandRole": "position"
         },
         {
           "address": "Y",
-          "label": "Hole position Y"
+          "label": "Hole position Y",
+          "expandRole": "position"
         },
         {
           "address": "Z",
           "label": "Hole bottom",
-          "required": true
+          "required": true,
+          "expandRole": "depth"
         },
         {
           "address": "R",
           "label": "R point: where the feed starts (G99 returns here)",
           "required": true,
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "expandRole": "r-plane"
         },
         {
           "address": "F",
           "label": "Boring feed",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed"
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
           "unit": "count",
-          "position": "none"
+          "position": "none",
+          "expandRole": "repeat"
         }
-      ]
+      ],
+      "expand": {
+        "kind": "bore",
+        "steps": [
+          { "step": "rapid", "to": "r-plane" },
+          { "step": "feed", "to": "depth" },
+          { "step": "feed", "to": "r-plane" },
+          { "step": "rapid", "to": "return" }
+        ],
+        "returnBy": "code",
+        "leaves": { "motion": "before", "feed": "cycle" }
+      }
     },
     {
       "code": "G86",
@@ -1476,43 +1589,62 @@
       "modal": true,
       "sets": { "cycle": "start" },
       "conflicts": ["tcp"],
+      "review": "pending",
       "label": "Boring cycle with spindle stop",
       "description": "Feeds down to Z, stops the spindle and pulls out at rapid.",
       "params": [
         {
           "address": "X",
-          "label": "Hole position X"
+          "label": "Hole position X",
+          "expandRole": "position"
         },
         {
           "address": "Y",
-          "label": "Hole position Y"
+          "label": "Hole position Y",
+          "expandRole": "position"
         },
         {
           "address": "Z",
           "label": "Hole bottom",
-          "required": true
+          "required": true,
+          "expandRole": "depth"
         },
         {
           "address": "R",
           "label": "R point: where the feed starts (G99 returns here)",
           "required": true,
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "expandRole": "r-plane"
         },
         {
           "address": "F",
           "label": "Boring feed",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed"
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
           "unit": "count",
-          "position": "none"
+          "position": "none",
+          "expandRole": "repeat"
         }
-      ]
+      ],
+      "expand": {
+        "kind": "bore",
+        "steps": [
+          { "step": "rapid", "to": "r-plane" },
+          { "step": "feed", "to": "depth" },
+          { "step": "spindle-stop" },
+          { "step": "rapid", "to": "return" },
+          { "step": "spindle-restore" }
+        ],
+        "returnBy": "code",
+        "leaves": { "motion": "before", "feed": "cycle" }
+      }
     },
     {
       "code": "G87",
@@ -1629,50 +1761,70 @@
       "modal": true,
       "sets": { "cycle": "start" },
       "conflicts": ["tcp"],
+      "review": "pending",
       "label": "Boring cycle with dwell",
       "description": "Feeds down to Z, waits for the time given by P and feeds back out.",
       "params": [
         {
           "address": "X",
-          "label": "Hole position X"
+          "label": "Hole position X",
+          "expandRole": "position"
         },
         {
           "address": "Y",
-          "label": "Hole position Y"
+          "label": "Hole position Y",
+          "expandRole": "position"
         },
         {
           "address": "Z",
           "label": "Hole bottom",
-          "required": true
+          "required": true,
+          "expandRole": "depth"
         },
         {
           "address": "R",
           "label": "R point: where the feed starts (G99 returns here)",
           "required": true,
-          "position": "tool-axis"
+          "position": "tool-axis",
+          "expandRole": "r-plane"
         },
         {
           "address": "P",
           "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)",
           "min": 0,
           "unit": "count",
-          "position": "none"
+          "position": "none",
+          "expandRole": "dwell"
         },
         {
           "address": "F",
           "label": "Boring feed",
           "required": true,
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "expandRole": "feed"
         },
         {
           "address": "K",
           "label": "Repeat count",
           "min": 0,
           "unit": "count",
-          "position": "none"
+          "position": "none",
+          "expandRole": "repeat"
         }
-      ]
+      ],
+      "expand": {
+        "kind": "bore",
+        "steps": [
+          { "step": "rapid", "to": "r-plane" },
+          { "step": "feed", "to": "depth" },
+          { "step": "dwell", "at": "bottom" },
+          { "step": "feed", "to": "r-plane" },
+          { "step": "rapid", "to": "return" }
+        ],
+        "returnBy": "code",
+        "leaves": { "motion": "before", "feed": "cycle" }
+      }
     },
     {
       "code": "G90",
@@ -1764,6 +1916,8 @@
       "code": "G98",
       "group": "cyclereturn",
       "modal": true,
+      "sets": { "cycleReturn": "initial" },
+      "review": "pending",
       "label": "Cycle return to the initial level",
       "description": "After each hole the cycle pulls back to the level the tool was at when the cycle started, which clears clamps between holes. On lathes in G-code system A, G98 means feed per minute instead."
     },
@@ -1771,6 +1925,8 @@
       "code": "G99",
       "group": "cyclereturn",
       "modal": true,
+      "sets": { "cycleReturn": "r-plane" },
+      "review": "pending",
       "label": "Cycle return to the retract plane",
       "description": "After each hole the cycle pulls back only to the R plane, which is quicker. On lathes in G-code system A, G99 means feed per revolution instead."
     },

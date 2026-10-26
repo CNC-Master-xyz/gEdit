@@ -154,7 +154,9 @@ P4a fix batch B1 (the P4a reviews; plan §7 #311-#323)
     ``systemVariables`` or ``systemVariableNumbers``) is a ``coordinate-shift``; a move around
     a pole set before the scope refuses every operation (``pole-unknown``).
 11. **The lathe Z mirror turns Y round too** (owner decision Q-B): ``Y' = −Y``, about the
-    turning axis, and an incremental Y and ``J`` change sign (:data:`LATHE_MIRROR_AXES`).
+    turning axis, and an incremental Y and ``J`` change sign (:data:`LATHE_MIRROR_AXES`); on a
+    machine whose "Counter spindle" setting says Y stays (D5-7, ``LatheZMirror.y_turns``) they
+    are left as written.
 12. **What a long program asks again and again is worked out once for the kind of word** (B6, CODE-1; no
     output changes): the value of a written ``1`` and whether the profile's presets write a result
     alike (``_Data.unit_of``, ``_Data.writes_alike``), whether a word with a point is read as
@@ -270,14 +272,38 @@ class LatheZMirror(NamedTuple):
     and the counter spindle share (both spindles' coordinate systems have X = 0, Y = 0 on that
     axis), while their Z zeros lie apart, which is what ``z0`` places. With X kept and Z and Y
     turned round, the counter spindle's system is the main spindle's turned half a turn about
-    X."""
+    X.
+
+    Review round (D5-7): the machine setting "Counter spindle" (variant ``counterSpindleY``)
+    keeps Q-B as its default; its other choice, ``stays``, is a machine whose Y does not turn
+    with Z (``y_turns`` false): Y, an incremental Y and ``J`` are left as written."""
 
     z0: Decimal = Decimal(0)
+    y_turns: bool = True
 
 
 #: The axes the lathe Z mirror changes the sign of (Q4-2, and Y by Q-B): an absolute Z about
 #: ``z0``, an absolute Y about 0, every increment and centre component along them.
 LATHE_MIRROR_AXES = ("Z", "Y")
+
+
+def lathe_mirror_axes(op: "LatheZMirror") -> Tuple[str, ...]:
+    """The axes ``op`` changes: :data:`LATHE_MIRROR_AXES`, or Z alone on a machine whose Y stays
+    (D5-7)."""
+    return LATHE_MIRROR_AXES if op.y_turns else ("Z",)
+
+
+#: D5-7: the machine setting that says whether Y turns with Z under the counter-spindle mirror,
+#: and the choice that keeps Y (any other value, or none, is the default Q-B).
+COUNTER_SPINDLE_VARIANT = "counterSpindleY"
+COUNTER_SPINDLE_Y_STAYS = "stays"
+
+
+def counter_spindle_y_turns(context: Dict[str, Any]) -> bool:
+    """Whether the document's machine turns Y with Z under the lathe Z mirror (D5-7): true
+    unless its ``counterSpindleY`` choice is ``stays``."""
+    variants = _dict(_dict(gedit_nc.machine_params(context).get("params")).get("variants"))
+    return variants.get(COUNTER_SPINDLE_VARIANT) != COUNTER_SPINDLE_Y_STAYS
 
 Op = Union[Translate, Rotate, Mirror, LatheZMirror]
 #: The operations by the name a script and a finding use.
@@ -403,6 +429,14 @@ REASONS = {
         ("translate",),
         "a rotary axis stands turned here and tool centre point control is off, so a shift "
         "of the program is not a shift of these machine axes",
+    ),
+    # v1.2.0 manual-check fix round (D6-7): Sinumerik setting data SD42440.
+    "shift-increment": (
+        TURNING,
+        "an incremental move along an axis the program has not written absolutely since the "
+        "zero point was shifted or the work offset changed (TRANS, ATRANS, G54 to G57, G500); "
+        "with the control's setting SD42440 at 1 such a move also travels the change of the "
+        "shift, which a turn or a mirror cannot carry over. Write the axis absolutely first",
     ),
     "selection-inside": (
         ALL_OPS,
@@ -547,6 +581,20 @@ INFO = {
         ("rotate", "mirror"),
         "the workpiece blank is left as written: it only sets the blank the control's graphics "
         "show. Check it there",
+    ),
+    # Review round (D6-4): Fanuc tool centre point control in the table coordinate system.
+    "tcp-table": (
+        ("translate",),
+        "tool centre point control is on here, and the shift assumes the table coordinate "
+        "system (parameter 19696 bit 5 = 0), in which the coordinates turn with the table. "
+        "Check your machine",
+    ),
+    # Review round (NC-9): the drilling R on a lathe set to the Series 15 format.
+    "cycle-r-left": (
+        ("translate",),
+        "R left as written: this machine is set to the Series 15 format, where R can be an "
+        "absolute position (parameter 5102 bit 6). If your machine reads R as absolute, shift "
+        "it too",
     ),
 }
 
@@ -830,7 +878,7 @@ def transform(role: str, value: Union[Decimal, Dict[str, Decimal]], op: Op) -> T
     if isinstance(op, LatheZMirror):
         if "Z" in value:
             out["Z"] = _TWO * Decimal(op.z0) - value["Z"] if absolute else -value["Z"]
-        if "Y" in value:
+        if "Y" in value and op.y_turns:
             out["Y"] = -value["Y"]  # Q-B: about the turning axis, Y = 0 (absolute and incremental alike)
         return out, True
 
@@ -883,7 +931,7 @@ def affects(role: WordRole, op: Op) -> bool:
     if isinstance(op, LatheZMirror):
         if kind in SWAPPED_ROLES:
             return True
-        return kind in VECTOR_ROLES and axis in LATHE_MIRROR_AXES
+        return kind in VECTOR_ROLES and axis in lathe_mirror_axes(op)
     if isinstance(op, (Rotate, Mirror)):
         if kind in VECTOR_ROLES:
             return kind != "tool-axis" and axis in ("X", "Y")
@@ -1001,7 +1049,13 @@ class _Data:
                     groups.add("motion or cycle")
                 if positions or self.axis_of(param["address"]) is not None:
                     groups.add("axis words")
-                owners[param["address"].upper()] = (groups, first if first is not None else entry)
+                owners[param["address"].upper()] = (groups, entry if first is None or (first.get("group") == "nonmodal" and group != "nonmodal") else first)
+        #: v1.2.0 manual-check integration: a one-shot code that names the offset number of a
+        #: modal group (Fanuc `G53.6` `H`, the lathe's `D`) does not take the address away from
+        #: that group: `H1` without `G43` stays the length offset number.
+        for address, (groups, entry) in list(owners.items()):
+            if "nonmodal" in groups and len(groups) == 2 and None not in groups and entry is not None and entry.get("group") != "nonmodal":
+                owners[address] = ({entry.get("group")}, entry)
         self.group_params = {address: entry for address, (groups, entry) in owners.items() if len(groups) == 1 and None not in groups and entry is not None}
         #: v1.2 NC fix round (FZ-7): a word written with `=` that is a code of its own and
         #: describes its own value by a parameter of the same address (Sinumerik `RND=2`,
@@ -1023,6 +1077,10 @@ class _Data:
         #: `systemVariableNumbers` on).
         patterns = getattr(cp, "patterns", None) if cp is not None else None
         self.system_variables = _dict(patterns).get("system_variables") if isinstance(patterns, dict) else None
+        #: The leading mark of a line that continues the block above it (Okuma `$`,
+        #: ``syntax.continuationStart``): the tokenizer leaves it as an unknown token, but it is
+        #: no word of the block (manual-check fix round, with D5-1).
+        self.continuation_start = _dict(patterns).get("continuation_start") if isinstance(patterns, dict) else None
         syntax = _dict(profile.get("syntax"))
         first = syntax.get("systemVariableNumbers")
         self.system_from = first if isinstance(first, int) and not isinstance(first, bool) and first > 0 else None
@@ -1033,7 +1091,24 @@ class _Data:
         self.need_lines = array("l")
         self.need_masks = array("b")
         self.blank_noted = False
+        #: v1.2.0 manual-check fix round (D6-7): an incremental move after a change of the zero
+        #: point also travels that change (Sinumerik setting data SD42440 at 1; the profile's
+        #: ``syntax.incrementTravelsShift``). ``shift_pending`` holds the axes not written
+        #: absolutely since the last shift or work offset code (:func:`observe`).
+        self.increment_travels_shift = syntax.get("incrementTravelsShift") is True
+        self.shift_pending: FrozenSet[str] = frozenset()
+        #: Review round (D6-4): the profile's tool centre point control can work in the table's
+        #: or in the workpiece's coordinate system (a machine parameter), and a shift is read in
+        #: the table's (``syntax.tcpTableCoordinates``); a Translate under it says so, once.
+        self.tcp_table = syntax.get("tcpTableCoordinates") is True
+        self.tcp_noted = False
+        #: Review round (NC-9): the point-less-feeds choices that stand for a tape format in
+        #: which a drilling cycle's R can be an absolute position (``syntax.cycleRAbsoluteWith``).
+        named = syntax.get("cycleRAbsoluteWith")
+        self.cycle_r_with = [v for v in named if isinstance(v, str)] if isinstance(named, list) else []
         decl = _dict(profile.get("machineParams"))
+        feeds = _dict(_dict(decl.get("numberInput")).get("pointlessFeeds")).get("choices")
+        self.feed_choices = [c for c in feeds if isinstance(c, dict)] if isinstance(feeds, list) else []
         presets = _dict(decl.get("numberInput")).get("presets")
         #: The presets a result written with no machine chosen has to agree with (D57).
         self.presets = (
@@ -1154,6 +1229,50 @@ class _Data:
         return word if word in self.axes else None
 
 
+def observe(step: Any, tracker: Any) -> None:
+    """v1.2.0 manual-check fix round (D6-7, SD42440): what a line leaves for the blocks after it.
+    The scripts call it for every line after the tracker read it (the lines above a selection
+    included) and after :func:`refusals_of` judged it. A code that shifts the zero point or
+    changes the work offset (``CodeEntry.shift``, a code of the ``offset`` group) makes every
+    linear axis pending but those the same block moves to absolutely; an absolute word of a
+    move writes its axis again. Only a profile whose
+    control travels the change of a shift with the next increment reads it
+    (``syntax.incrementTravelsShift``)."""
+    data = _data(tracker)
+    if not data.increment_travels_shift:
+        return
+    if _shifts_zero(step):
+        # Review round (NC-1): a block that changes the zero point and moves to an absolute
+        # position in the same breath (`G54 G0 X0 Y0 Z100`) has travelled the change along
+        # those axes already; only the others stay pending. A shift written as data
+        # (`TRANS X10`) is no move, so it writes no axis.
+        data.shift_pending = _linear_axes(data) - _absolute_axes(step)
+        return
+    if data.shift_pending:
+        written = _absolute_axes(step)
+        if written:
+            data.shift_pending = data.shift_pending - written
+
+
+def _shifts_zero(step: Any) -> bool:
+    """Whether ``step`` carries a code that shifts the zero point or changes the work offset
+    (``CodeEntry.shift``, a code of the ``offset`` group): D6-7's start of a pending shift."""
+    entries = [_dict(e[0]) for e in (getattr(step, "entries", None) or ()) if isinstance(e, tuple) and e]
+    return any(e.get("shift") is True or e.get("group") == "offset" for e in entries)
+
+
+def _linear_axes(data: "_Data") -> FrozenSet[str]:
+    """The axes a change of the zero point shifts: every axis but the rotary ones and the twins."""
+    return frozenset(a for a in data.axes if a not in data.rotary and a not in data.twins)
+
+
+def _absolute_axes(step: Any) -> FrozenSet[str]:
+    """The axes a move ``step`` writes absolutely (none for a step that is no move)."""
+    if getattr(step, "kind", None) != "move":
+        return frozenset()
+    return frozenset(r.axis for r in (getattr(step, "reads", None) or ()) if r.incremental is False and r.value is not None)
+
+
 def _data(tracker: Any) -> _Data:
     found = getattr(tracker, "_nc_geom_data", None)
     if isinstance(found, _Data) and found.profile is getattr(tracker, "profile", None):
@@ -1251,6 +1370,9 @@ class _Block:
         self.judged = [e for e in self.cycles if _sets(e).get("cycle") in ("start", "define")]
         self.defined = interp.entry(interp.defined_cycle) if interp.defined_cycle else None
         in_force = [e for e in (in_force_motion, active_entry) if e is not None and e not in self.entries]
+        # T120 / FB-2: a mode in force that makes I, J and K its own words (Fanuc `G43.5`, the
+        # tool direction) lends the block those words only.
+        in_force += gedit_nc.arc_centre_modes(groups, interp.entry, data.profile, self.entries)
         self.in_force = in_force
         self.data_entries = [e for e in self.entries if gedit_nc.axis_words_of(e) == "data"]
         self.words_are_data = any(e.get("wordsAreData") is True for e in self.entries)
@@ -1507,6 +1629,15 @@ def _classify(block: _Block, token: Any) -> Tuple[str, Optional[str], Optional[D
         return "untouched", None, None  # the speed of a numbered spindle (`S1=`, `S2=`)
     found = block.param(address)
     if found is not None:
+        coordinate = found[1].get("axis")
+        if isinstance(coordinate, str) and coordinate != "" and data.axis_of(coordinate.upper()) is not None:
+            # Manual-check fix D5-1: a parameter that is a coordinate of an axis outside an arc
+            # (Okuma LAP `G84` `XA=`, `ZA=`, `XB=`, `ZB=`, absolute change points). It moves with
+            # its axis where the distance mode is known absolute; in incremental mode or with
+            # the mode not known, whether it is absolute is not certain: refused.
+            if block.incremental(token, address) is False:
+                return "cycle-position", data.axis_of(coordinate.upper()), found[0]
+            return "cycle-position", None, found[0]
         return _kept_role(block.number_class(address)), None, found[0]
     if address in data.angular:
         return "untouched", None, None
@@ -1589,6 +1720,20 @@ def _q_role(block: _Block, tokens: Sequence[Any], i: int) -> Tuple[Optional[Word
     return _param_role(block, synthetic, owners[0], found[1] if found is not None else None), end
 
 
+def _continuation_mark(data: _Data, tokens: Sequence[Any], i: int) -> bool:
+    """The token at ``i`` is the leading mark of a line that continues the block above it (the
+    profile's ``syntax.continuationStart``, Okuma ``$``): the first token of the line that is not
+    blank, matched in full by that pattern."""
+    pattern = data.continuation_start
+    if pattern is None or not hasattr(pattern, "match"):
+        return False
+    if any(t.kind != "whitespace" for t in tokens[:i]):
+        return False
+    text = tokens[i].text
+    found = pattern.match(text)
+    return found is not None and found.end() >= len(text.rstrip())
+
+
 def roles_of(step: "_nc_path.Step", tracker: "_nc_path.PathTracker") -> List[WordRole]:
     """Every word and every code of ``step``, in written order, with its role (contract item 1,
     2). Codes that set an arc direction or a compensation side are ``code-arc`` / ``code-comp``;
@@ -1624,7 +1769,8 @@ def roles_of(step: "_nc_path.Step", tracker: "_nc_path.PathTracker") -> List[Wor
                 out.append(role)
             continue
         if kind == "unknown" and token.text.strip() != "":
-            out.append(WordRole(token, "unknown", None, None, None))
+            if not _continuation_mark(block.data, tokens, i):
+                out.append(WordRole(token, "unknown", None, None, None))
         elif kind == "word" and id(token) not in block.consumed:
             if not token.address:
                 out.append(WordRole(token, "unknown", None, None, None))
@@ -1650,6 +1796,10 @@ def _reading(token: Any, interp: Any, data: _Data, role: Optional[WordRole] = No
         found = _nc_path.centre_reading(interp, role.axis, _dict(interp.state.get("diameter")).get("mode"))
         return found if found is not None else "unknown"
     address = (token.address or "").upper()
+    if role is not None and role.role == "cycle-position" and role.axis in data.diameter and address not in data.diameter:
+        # Manual-check fix D5-1: a coordinate parameter of a diameter axis (Okuma `G84` `XA=`)
+        # is read as that axis is.
+        address = role.axis
     if address not in data.diameter:
         return "radius"
     reading = interp.diameter_reading(address)
@@ -1998,7 +2148,7 @@ def _machine_change(block: _Block, roles: Sequence[WordRole], tracker: Any, op: 
     if isinstance(op, Translate):
         return any(axis in op.shift and Decimal(op.shift[axis]) != _ZERO for axis in absolute)
     if isinstance(op, LatheZMirror):
-        if "Y" in absolute and absolute["Y"] != _ZERO or "Y" in incremental and incremental["Y"] != _ZERO:
+        if op.y_turns and ("Y" in absolute and absolute["Y"] != _ZERO or "Y" in incremental and incremental["Y"] != _ZERO):
             return True  # Q-B: Y changes sign about 0
         return ("Z" in absolute and absolute["Z"] != Decimal(op.z0)) or ("Z" in incremental and incremental["Z"] != _ZERO)
     if isinstance(op, Rotate) and _quarter(op.degrees) == 0 and Decimal(op.degrees) % 360 == 0:
@@ -2332,6 +2482,31 @@ def _flow_reasons(step: Any, block: _Block, roles: Sequence[WordRole], tracker: 
                     break
 
 
+def _tool_direction_turned(block: _Block, role: WordRole, op: Op) -> bool:
+    """FB-2: whether ``role`` is a component of the tool direction (an arc-centre word that a
+    code of the block, or a mode in force, declares as its own: Fanuc `G43.5 … I J K`) that a
+    turn or a mirror would change: a component along an axis the operation moves, written as
+    anything but 0."""
+    address = (role.token.address or "").upper()
+    # A word read as an arc centre has a centre role; the tool direction is a count kept as
+    # written, owned by a code that is neither the move nor a cycle (an Okuma `G2` declares
+    # its `I` and `K` too, as arc centres).
+    if role.role != "untouched" or role.number_class != "count" or role.entry is None or address not in block.data.centre_words:
+        return False
+    if _dict(role.entry).get("group") in ("cycle", "motion"):
+        return False
+    if not gedit_nc.redefines_arc_centre(role.entry, block.data.profile):
+        return False
+    axis = _nc_path.CENTRE_AXIS.get(address)
+    moved = lathe_mirror_axes(op) if isinstance(op, LatheZMirror) else ("X", "Y")
+    if axis not in moved:
+        return False
+    literal, _ = _nc_path.literal_of(role.token)
+    if literal is None:
+        return True
+    return ((literal.int_part or "") + (literal.frac_part or "")).strip("0") != ""
+
+
 def refusals_of(
     step: "_nc_path.Step",
     roles: Sequence[WordRole],
@@ -2480,6 +2655,14 @@ def refusals_of(
             if name in TURNING or gedit_nc.is_assignment(role.token):
                 add("word-unknown", role.token.text.strip())
     if name in TURNING:
+        # FB-2 (T120): under a mode that makes I, J and K its own words (Fanuc `G43.5`, `G41.6`,
+        # `G42.6`), in its own block and in the blocks it governs, they are the tool direction.
+        # A turn or a mirror would have to turn it with the path, which gEdit does not do, so
+        # such a word is one it cannot place, as it was before T120 read it. A component the
+        # operation leaves alone, or one written as 0, needs nothing.
+        for role in roles:
+            if _tool_direction_turned(block, role, op):
+                add("word-unknown", role.token.text.strip())
         # AD-31's rotary rule, for a turn or a mirror about the tool axis (plan §7 #300): a
         # rotary word is fine while it leaves its axis at 0 (`A0 C0`, `G0 B0.`); an axis that
         # ends anywhere else, or that stands turned (or not known) while the block moves the
@@ -2495,6 +2678,16 @@ def refusals_of(
                 for value in (before.get(rotary), after.get(rotary)):
                     if value is not None and Decimal(value) != _ZERO:
                         add("rotary-word", "%s%s" % (rotary, _trim(Decimal(value))))
+    # Review round (SK-1): :func:`observe` reads a block after it was judged, so a block that
+    # itself changes the zero point (`G55 G91 G1 X5 Y5`) counts every axis as pending for its
+    # own increments: they travel the change of the offset too.
+    shift_pending = _linear_axes(data) if data.increment_travels_shift and _shifts_zero(step) else data.shift_pending
+    if name in TURNING and shift_pending:
+        # D6-7 (SD42440): an increment along an axis the transform changes, while one of
+        # those axes has not been written absolutely since the last shift.
+        pending = [a for a in _changed_axes(op, data) if a in shift_pending]
+        if pending and any(r.role == "point-inc" for r in affected):
+            add("shift-increment", ", ".join(pending))
     if isinstance(op, Translate) and block.interp.tcp is None and affected:
         after = _dict(getattr(step, "after", None))
         for role in affected:
@@ -2599,7 +2792,49 @@ def notes_of(
             if moving and role.role == "unknown" and not gedit_nc.is_assignment(role.token):
                 out.append(Refusal(line, "word-left", block.written, role.token.text.strip()))
                 break
+        data = block.data
+        affected = [r for r in roles if affects(r, op)]
+        if data.tcp_table and not data.tcp_noted and block.interp.tcp is not None and affected:
+            # D6-4: said once per run, at the first block the shift moves under TCP.
+            data.tcp_noted = True
+            out.append(Refusal(line, "tcp-table", block.written, ""))
+        if data.cycle_r_with and affected:
+            left = _cycle_r_left(block, context)
+            if left is not None:
+                out.append(Refusal(line, "cycle-r-left", block.written, left))
     return out
+
+
+def _cycle_r_left(block: "_Block", context: Dict[str, Any]) -> Optional[str]:
+    """NC-9: the ``R`` word a drilling cycle of ``block`` writes and the shift leaves (``position:
+    'none'``), on a machine whose point-less-feeds choice is one the profile names in
+    ``syntax.cycleRAbsoluteWith`` (the Series 15 format, where parameter 5102 bit 6 can make R
+    an absolute position); ``None`` otherwise."""
+    data = block.data
+    kept = [
+        p for e in block.cycles for p in _params(e)
+        if str(p.get("address") or "").upper() == "R" and p.get("position") == "none"
+    ]
+    if not kept:
+        return None
+    word = next((t for t in block.tokens if t.kind == "word" and (t.address or "").upper() == "R" and (t.value_text or "").strip()), None)
+    if word is None:
+        return None
+    number_input = _dict(_dict(data.machine_of(context).get("params")).get("numberInput"))
+    classes = _dict(number_input.get("classes"))
+    for choice in data.feed_choices:
+        if choice.get("value") not in data.cycle_r_with:
+            continue
+        steps = _dict(choice.get("classes"))
+        if not steps:
+            continue
+        if all(
+            (_dict(classes.get(cls)).get("mode") or number_input.get("mode")) == "increment"
+            and _dict(classes.get(cls)).get("increment") == _dict(step).get("increment")
+            for cls, step in steps.items()
+        ):
+            return word.text.strip()
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -2664,6 +2899,8 @@ __all__ = [
     "FK_WORDS",
     "INCREMENTAL_ROLES",
     "INFO",
+    "COUNTER_SPINDLE_VARIANT",
+    "COUNTER_SPINDLE_Y_STAYS",
     "LATHE_MIRROR_AXES",
     "LatheZMirror",
     "MAX_DECIMALS",
@@ -2685,9 +2922,12 @@ __all__ = [
     "affects",
     "check_arcs",
     "check_chord",
+    "counter_spindle_y_turns",
     "finding_of",
     "is_exact",
+    "lathe_mirror_axes",
     "notes_of",
+    "observe",
     "op_name",
     "partner_text",
     "read_word",

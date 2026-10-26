@@ -280,6 +280,20 @@ describe('the editor', () => {
 describe('New Template from Selection', () => {
   const db = loadCodeDb(resolveCodeDbFiles(BUILTIN_CODE_DB_JSON)['fanuc']);
 
+  it('T158: shows what the draft leaves as written, each note with its key; none without notes', async () => {
+    const m = await model();
+    const lathe = loadCodeDb(resolveCodeDbFiles(BUILTIN_CODE_DB_JSON)['fanuc-lathe']);
+    const draft = templateFromSelection(['N10 G70 P100 Q200'], cpOf('fanuc-lathe'), lathe);
+    expect(draft.notes).toHaveLength(1);
+    m.startDraft(draft, {});
+    const markup = html(m);
+    expect(tags(markup, 'template-draft-note').map((tag) => attr(tag, 'data-key'))).toEqual(['templates.fromSelection.referencedKept']);
+    expect(markup).toContain('P100 Q200 point at blocks outside the selection; they stay as written.');
+    const plain = await model();
+    plain.startDraft(templateFromSelection(['N10 G0 X1.'], cpOf('fanuc-gcode'), db), {});
+    expect(html(plain)).not.toContain('template-draft-note');
+  });
+
   it('shows the text of the selection with its numbers as buttons to tick, the ticked ones marked', async () => {
     const m = await model();
     const draft = templateFromSelection(['N10 G83 X20. Z-5. R3. Q4. F240.', 'N20 G80'], cpOf('fanuc-gcode'), db);
@@ -332,11 +346,11 @@ describe('the parameter form', () => {
   const fields = (markup: string): string[] => tags(markup, 'template-param-field').map((tag) => attr(tag, 'data-field') as string);
 
   it('shows the members the loader allows for each kind, and no others', () => {
-    expect(fields(show({ type: 'number' }))).toEqual(['label', 'id', 'type', 'help', 'prefix', 'suffix', 'min', 'max', 'default', 'decimals', 'required', 'plusSign', 'remember']);
-    expect(fields(show({ type: 'integer' }))).toEqual(['label', 'id', 'type', 'help', 'prefix', 'suffix', 'min', 'max', 'default', 'digits', 'required', 'plusSign', 'remember']);
-    expect(fields(show({ type: 'text' }))).toEqual(['label', 'id', 'type', 'help', 'prefix', 'suffix', 'default', 'required', 'uppercase', 'comment', 'remember']);
+    expect(fields(show({ type: 'number' }))).toEqual(['label', 'id', 'type', 'help', 'prefix', 'suffix', 'min', 'max', 'default', 'decimals', 'unit', 'required', 'plusSign', 'remember']);
+    expect(fields(show({ type: 'integer' }))).toEqual(['label', 'id', 'type', 'help', 'prefix', 'suffix', 'min', 'max', 'default', 'digits', 'unit', 'required', 'plusSign', 'remember']);
+    expect(fields(show({ type: 'text' }))).toEqual(['label', 'id', 'type', 'help', 'prefix', 'suffix', 'default', 'maxLength', 'charset', 'required', 'uppercase', 'comment', 'remember']);
     expect(fields(show({ type: 'choice', choices: [{ label: 'One', value: '1' }] }))).toEqual(['label', 'id', 'type', 'help', 'prefix', 'suffix', 'default', 'required', 'remember']);
-    expect(fields(show({ type: 'formula', formula: 'a*2' }))).toEqual(['label', 'id', 'type', 'help', 'prefix', 'suffix', 'decimals', 'digits', 'formula', 'plusSign', 'hidden']);
+    expect(fields(show({ type: 'formula', formula: 'a*2' }))).toEqual(['label', 'id', 'type', 'help', 'prefix', 'suffix', 'decimals', 'digits', 'unit', 'formula', 'plusSign', 'hidden']);
   });
 
   it('lists the choices, locked when the template is a built-in one', () => {

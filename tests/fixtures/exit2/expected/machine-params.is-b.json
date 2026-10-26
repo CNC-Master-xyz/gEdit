@@ -29,7 +29,9 @@
       "variants": {
         "gcodeSystem": "B",
         "incrementalAddresses": "uw",
-        "toolWord": "byLength"
+        "toolWord": "byLength",
+        "toolChange": "turret",
+        "counterSpindleY": "turns"
       },
       "modalInitial": {
         "feedmode": "G95"
@@ -74,6 +76,11 @@
         "source": "machine"
       },
       {
+        "key": "variant counterSpindleY",
+        "value": "turns",
+        "source": "machine"
+      },
+      {
         "key": "variant gcodeSystem",
         "value": "B",
         "source": "machine"
@@ -81,6 +88,11 @@
       {
         "key": "variant incrementalAddresses",
         "value": "uw",
+        "source": "machine"
+      },
+      {
+        "key": "variant toolChange",
+        "value": "turret",
         "source": "machine"
       },
       {

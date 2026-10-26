@@ -259,18 +259,37 @@ export const openDocIds = (h) => h.qa('doc-tab').map((e) => e.dataset.docId)
  * Selects whole lines in the active editor. `EditorService` has no `setSelection`, and a
  * run over a selection is what proves the scope is taken from the editor and the report
  * lines are document lines.
+ *
+ * The lines are read from **the active document's own model**, and the selection is set once the
+ * editor instance shows that model (T187). Straight after `newDoc` the instance can still hold the
+ * previous document for a turn, and asking *its* model for the length of line 4 when that document
+ * has three lines is Monaco's "Illegal value for lineNumber" — the one failure in 13 runs of
+ * `m4-transforms`. A selection outside the document is a scenario mistake and says so by name.
  * @param {Harness} h
  * @param {number} startLine 1-based
  * @param {number} endLine inclusive
  */
 export async function selectLines(h, startLine, endLine) {
-  const instance = /** @type {any} */ (context(h).editor.editorInstance())
-  if (!instance) throw new Error('selectLines: no editor instance')
+  const ctx = context(h)
+  const id = ctx.docs.getActiveId()
+  const model = /** @type {any} */ (id === null ? undefined : ctx.editor.model(id))
+  if (!model) throw new Error('selectLines: the active document has no model')
+  const lineCount = model.getLineCount()
+  if (startLine < 1 || endLine < startLine || endLine > lineCount) {
+    throw new Error(`selectLines: lines ${startLine} to ${endLine} of a document with ${lineCount} lines`)
+  }
+  const instance = /** @type {any} */ (
+    await h.waitFor(() => {
+      const shown = /** @type {any} */ (ctx.editor.editorInstance())
+      return shown && shown.getModel() === model ? shown : null
+    }, { timeout: 8000 })
+  )
+  if (!instance) throw new Error('selectLines: the editor does not show the active document')
   instance.setSelection({
     startLineNumber: startLine,
     startColumn: 1,
     endLineNumber: endLine,
-    endColumn: 1 + (instance.getModel()?.getLineLength(endLine) ?? 0),
+    endColumn: 1 + model.getLineLength(endLine),
   })
   await h.idle()
 }

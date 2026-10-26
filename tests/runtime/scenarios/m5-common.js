@@ -30,17 +30,19 @@ export { context, ready, ribbonTab, setField, setInput }
 
 /**
  * The scripts `src-tauri/resources/scripts` ships, sorted: the three of Phase 1, since
- * M10 address arithmetic, extents and the program checks, and since P4a mirror, rotate and
- * translate.
+ * M10 address arithmetic, extents and the program checks, since P4a mirror, rotate and
+ * translate, and since P4b expand_cycles and time_estimate.
  */
 export const BUNDLED = [
   'bundled:address_arithmetic.py',
+  'bundled:expand_cycles.py',
   'bundled:extents.py',
   'bundled:mirror.py',
   'bundled:program_checks.py',
   'bundled:rotate.py',
   'bundled:scale_feed.py',
   'bundled:scale_speed.py',
+  'bundled:time_estimate.py',
   'bundled:tool_list.py',
   'bundled:translate.py',
 ]

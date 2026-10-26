@@ -1,0 +1,9 @@
+{
+  "profile": "sinumerik",
+  "machineName": "Lathe 1",
+  "limits": {
+    "units": "mm",
+    "spindle": { "main": 4000, "S2": 6000 },
+    "travel": { "X": { "min": -10, "max": 600 }, "Z": { "min": -500, "max": 10 } }
+  }
+}

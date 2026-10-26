@@ -6,6 +6,8 @@ import { writable } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cpOf } from '../../../tests/unit/helpers/profiles';
 import type { ChannelParams, SyncHit } from '$lib/core/channels/types';
+import { createInlineRunner, type GuardRunner } from '$lib/core/regexGuard/runner';
+import type { GuardJob } from '$lib/core/regexGuard/job';
 import type { MachineConfig } from '$lib/core/machines/types';
 import type { ChannelBlock } from '$lib/core/machines/validate';
 import type { SiblingInfo } from '$lib/platform/commands';
@@ -27,7 +29,7 @@ vi.mock('$lib/stores/machines', () => ({ machines: {} }));
 vi.mock('$lib/stores/fileMemory', () => ({ fileMemory: {} }));
 vi.mock('$lib/stores/documents', () => ({ docs: {} }));
 
-const { createChannelService } = await import('./channels');
+const { createChannelService, sameMarkId } = await import('./channels');
 type Service = ReturnType<typeof createChannelService>;
 
 const cp = cpOf('fanuc-lathe');
@@ -78,9 +80,13 @@ interface World {
   readCalls: [DocId, number, number][];
   /** While set, `siblingInfo` waits for it (a call that is still out). */
   siblingHold: Promise<void> | null;
+  /** T172: the macro-call codes the effective view answers (absent: none). */
+  calls?: readonly string[];
+  /** The `ms` of every `schedule` call, in order. */
+  delays: number[];
 }
 
-function world(): World {
+function world(guard?: () => Promise<GuardRunner | null>): World {
   const docs: DocMeta[] = [];
   const listStore = writable<DocMeta[]>(docs);
   const lines = new Map<DocId, string[]>();
@@ -103,6 +109,7 @@ function world(): World {
     clock: { t: 0, step: 0 },
     readCalls: [] as [DocId, number, number][],
     siblingHold: null,
+    delays: [] as number[],
   } as unknown as World;
   let next = 1;
   w.open = (title, text, path = null, machine = 'm1') => {
@@ -138,7 +145,7 @@ function world(): World {
     effective: (id) => {
       const mid = w.docMachine.get(id);
       if (mid === undefined) return null;
-      return { cp, key: `k-${mid}`, machineId: mid, machineName: mid === null ? null : `Machine ${mid}` };
+      return { cp, key: `k-${mid}`, machineId: mid, machineName: mid === null ? null : `Machine ${mid}`, calls: w.calls };
     },
     machine: (id) => w.machinesById.get(id),
     block: (m) => w.blocks.get(m.id) ?? { state: 'absent' },
@@ -160,7 +167,9 @@ function world(): World {
       if (w.siblingAnswer === 'reject') throw new Error('out of scope');
       return w.siblingAnswer;
     },
-    schedule: (fn) => {
+    guard,
+    schedule: (fn, ms) => {
+      w.delays.push(ms);
       timers.push(fn);
       return () => {
         const at = timers.indexOf(fn);
@@ -188,6 +197,18 @@ let w: World;
 beforeEach(() => {
   w = world();
   seen.length = 0;
+});
+
+// Manual check fix round, integration (D2-1): the Okuma negative P is one mark however many
+// zeros it is written with, and never the same mark as the P without its minus.
+describe('sameMarkId', () => {
+  it('reads P-010 as P-10, M0101 as M101, and keeps P-10 apart from P10', () => {
+    expect(sameMarkId('P-010', 'P-10')).toBe(true);
+    expect(sameMarkId('M0101', 'M101')).toBe(true);
+    expect(sameMarkId('p-10', 'P-10')).toBe(true);
+    expect(sameMarkId('P-10', 'P10')).toBe(false);
+    expect(sameMarkId('P-10', 'P-11')).toBe(false);
+  });
 });
 
 describe('the resolution order', () => {
@@ -635,5 +656,266 @@ describe('waitCodeRule (M12.5, §7.16 #178)', () => {
     w.blocks.set('m1', valid({ ...builder, syncMarks: [{ ...builder.syncMarks[1], label: '  ' }] }));
     const id = w.open('PART_1.ISO', ['M198']);
     expect(w.svc.waitCodeRule(id, 'M', 195)).toEqual({ ruleId: 'wait', label: null, machineName: 'Machine m1', semantics: 'rendezvous' });
+  });
+});
+
+// T172 (review NC-05): the store hands the effective database's macro-call codes to every reading.
+describe('a wait code after a macro call (T172)', () => {
+  const CALL_PROGRAM = ['%', 'O1', 'G13', 'G65 P9010 M901', 'M902', 'G14', 'M902', 'G0 X2'];
+  beforeEach(() => {
+    w.machinesById.set('m1', machine('m1'));
+    w.blocks.set('m1', valid(single));
+    w.calls = ['G65'];
+  });
+
+  it('is not a wait in the resolution', () => {
+    const id = w.open('a.nc', CALL_PROGRAM);
+    expect(w.svc.forDoc(id).marks.map((m) => [m.mark, m.line, m.channel])).toEqual([
+      ['M902', 5, '1'],
+      ['M902', 7, '2'],
+    ]);
+  });
+
+  it('is not a wait after an edit read from the edited lines only', () => {
+    const change = (w as unknown as { change(id: DocId, span?: { startLine: number; endLineOld: number; endLineNew: number }): void }).change;
+    const id = w.open('a.nc', CALL_PROGRAM);
+    w.svc.forDoc(id);
+    w.readCalls.length = 0;
+    w.lines.set(id, ['%', 'O1', 'G13', 'G65 P9010 M901', 'M902', 'G65 P9011 M903', 'G14', 'M902', 'G0 X2']);
+    change(id, { startLine: 5, endLineOld: 5, endLineNew: 6 });
+    w.runTimers();
+    expect(w.readCalls).toEqual([[id, 5, 6]]);
+    expect(w.svc.forDoc(id).marks.map((m) => m.mark)).toEqual(['M902', 'M902']);
+  });
+
+  it('is not handed to Check Wait Codes, for the program nor for a sibling', () => {
+    const id = w.open('a.nc', CALL_PROGRAM);
+    w.svc.check(id);
+    expect(seen[0].perChannel['1'].map((m) => m.mark)).toEqual(['M902']);
+    w.blocks.set('m1', valid(multi));
+    const one = w.open('p_CH1.nc', ['M901 P12'], '/j/p_CH1.nc');
+    w.open('p_CH2.nc', ['G65 P9010 M901', 'M901 P12'], '/j/p_CH2.nc');
+    seen.length = 0;
+    w.svc.check(one);
+    expect(seen[0].perChannel['2'].map((m) => m.line)).toEqual([2]);
+  });
+});
+
+
+// T171: the user's patterns are read in the background reader first.
+describe('the background reader in front of the resolution (T171)', () => {
+  const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 4; i++) await tick();
+  };
+  const change = (world: World) => (world as unknown as { change(id: DocId, span?: { startLine: number; endLineOld: number; endLineNew: number }): void }).change;
+
+  /** A reader that records its jobs; `answer` decides, `gate` holds the answer until released. */
+  function reader() {
+    const jobs: { job: GuardJob; budgetMs: number }[] = [];
+    const r = {
+      jobs,
+      answer: 'done' as 'done' | 'timeout',
+      gate: null as Promise<void> | null,
+      runner: {
+        run: async (job: GuardJob, budgetMs: number) => {
+          jobs.push({ job, budgetMs });
+          if (r.gate !== null) await r.gate;
+          if (r.answer === 'timeout') return { status: 'timeout' as const, budgetMs, probe: 'sectionStart' };
+          return createInlineRunner().run(job, budgetMs);
+        },
+        dispose: () => undefined,
+      } as GuardRunner,
+    };
+    return r;
+  }
+
+  function guarded(r: ReturnType<typeof reader>, params: ChannelParams = single) {
+    w = world(() => Promise.resolve(r.runner));
+    w.machinesById.set('m1', machine('m1'));
+    w.blocks.set('m1', valid(params));
+    return w;
+  }
+
+  it('opening a program answers none at once, schedules the reading, and resolves it after the reader', async () => {
+    const r = reader();
+    guarded(r);
+    const id = w.open('a.nc', PROGRAM);
+    let bumps = 0;
+    w.svc.revision.subscribe(() => bumps++);
+    expect(w.svc.forDoc(id).layout).toBe('none');
+    expect(w.timers).toHaveLength(1);
+    expect(w.delays).toEqual([0]);
+    expect(r.jobs).toEqual([]);
+    expect(w.readCalls).toEqual([]); // nothing read on this thread yet
+    w.runTimers();
+    await flush();
+    // The reader got the whole program, masked, with the 2 s budget, before the plain reading.
+    expect(r.jobs).toHaveLength(1);
+    expect(r.jobs[0].budgetMs).toBe(2000);
+    expect(r.jobs[0].job.lines).toHaveLength(PROGRAM.length);
+    expect(r.jobs[0].job.probes.map((p) => p.id)).toEqual(['sectionStart']);
+    const set = w.svc.forDoc(id);
+    expect(set.layout).toBe('single-file');
+    expect(set.marks.map((m) => [m.line, m.mark, m.channel])).toEqual([[4, 'M901', '1'], [7, 'M901', '2']]);
+    expect(bumps).toBe(2); // the subscribe call, then the resolution
+  });
+
+  it('reads the program once for the reader and the plain reading', async () => {
+    const r = reader();
+    guarded(r);
+    const id = w.open('a.nc', PROGRAM);
+    w.svc.forDoc(id);
+    w.runTimers();
+    await flush();
+    expect(w.readCalls).toEqual([[id, 1, PROGRAM.length]]);
+  });
+
+  it('a pattern that runs out of time leaves no channels, names the pattern, reads nothing in place and does not retry', async () => {
+    const r = reader();
+    r.answer = 'timeout';
+    guarded(r);
+    const id = w.open('a.nc', PROGRAM);
+    w.svc.forDoc(id);
+    w.runTimers();
+    await flush();
+    const set = w.svc.forDoc(id);
+    expect(set.layout).toBe('none');
+    expect(set.members).toEqual([]);
+    expect(set.marks).toEqual([]);
+    expect(set.problems.map((p) => [p.path, p.message.key])).toEqual([['sectionStart', 'channels.problems.patternStopped']]);
+    expect(w.timers).toHaveLength(0); // no retry
+    expect(w.svc.check(id).findings).toEqual([]);
+  });
+
+  it('an edit reads only the edited lines in the reader, with the short budget, and patches the resolution', async () => {
+    const r = reader();
+    guarded(r);
+    const id = w.open('a.nc', PROGRAM);
+    w.svc.forDoc(id);
+    w.runTimers();
+    await flush();
+    r.jobs.length = 0;
+    w.readCalls.length = 0;
+    w.lines.set(id, ['%', 'O1', 'G13', 'M901', 'G0 X1', 'M902', 'G14', 'M901', 'G0 X2']);
+    change(w)(id, { startLine: 5, endLineOld: 5, endLineNew: 6 });
+    w.runTimers();
+    await flush();
+    expect(r.jobs).toHaveLength(1);
+    expect(r.jobs[0].budgetMs).toBe(500);
+    expect(r.jobs[0].job.lines).toEqual(['G0 X1', 'M902']); // the edited lines, not the program
+    expect(w.readCalls).toEqual([[id, 5, 6], [id, 5, 6]]); // the reader's, then the patch's: never the program
+    expect(w.svc.forDoc(id).marks.map((m) => [m.mark, m.line, m.channel])).toEqual([['M901', 4, '1'], ['M902', 6, '1'], ['M901', 8, '2']]);
+  });
+
+  it('an edit that needs the whole program (a section start) goes to the reader whole, with the long budget', async () => {
+    const r = reader();
+    guarded(r);
+    const id = w.open('a.nc', PROGRAM);
+    w.svc.forDoc(id);
+    w.runTimers();
+    await flush();
+    r.jobs.length = 0;
+    w.lines.set(id, ['%', 'O1', 'G13', 'M901', 'G0 X1', 'G14', 'M901', 'G0 X2']);
+    change(w)(id); // a flush: the whole text
+    w.runTimers();
+    await flush();
+    expect(r.jobs.map((j) => [j.budgetMs, j.job.lines.length])).toEqual([[2000, 8]]);
+  });
+
+  it('a change made while the reader is busy drops that answer, and the next reading is the answer', async () => {
+    const r = reader();
+    guarded(r);
+    const id = w.open('a.nc', PROGRAM);
+    w.svc.forDoc(id);
+    let release = (): void => undefined;
+    r.gate = new Promise<void>((resolve) => (release = resolve));
+    w.runTimers();
+    await flush();
+    expect(r.jobs).toHaveLength(1); // the cold reading is out
+    w.lines.set(id, [...PROGRAM, 'G13', 'M902']);
+    change(w)(id);
+    release();
+    await flush();
+    expect(w.svc.forDoc(id).layout).toBe('none'); // the stale answer was not installed
+    r.gate = null;
+    w.runTimers();
+    await flush();
+    expect(w.svc.forDoc(id).marks).toHaveLength(3);
+  });
+
+  it('`fresh` answers from the last set and reads nothing in place while the first reading is out', async () => {
+    const r = reader();
+    guarded(r);
+    const id = w.open('a.nc', PROGRAM);
+    const before = w.svc.forDoc(id);
+    expect(before.layout).toBe('none');
+    change(w)(id);
+    w.readCalls.length = 0;
+    expect(w.svc.fresh(id)).toBe(before);
+    expect(w.readCalls).toEqual([]);
+    expect(r.jobs).toEqual([]);
+  });
+
+  it('`fresh` reads a pending change in place once the reader has let the program through (the channel view judges its own edit by it)', async () => {
+    const r = reader();
+    guarded(r);
+    const id = w.open('a.nc', PROGRAM);
+    w.svc.forDoc(id);
+    w.runTimers();
+    await flush();
+    const before = w.svc.forDoc(id);
+    expect(before.marks).toHaveLength(2);
+    // A wait is added; the debounce has not run yet.
+    w.lines.set(id, [...PROGRAM, 'G13', 'M902']);
+    change(w)(id, { startLine: PROGRAM.length + 1, endLineOld: PROGRAM.length, endLineNew: PROGRAM.length + 2 });
+    expect(w.svc.forDoc(id)).toBe(before); // the readers of the service still have the last set...
+    const now = w.svc.fresh(id);
+    expect(now).not.toBe(before); // ...but a caller that asks for the current sections gets them
+    expect(now.marks.map((m) => m.mark)).toEqual([...before.marks.map((m) => m.mark), 'M902']);
+    expect(w.svc.forDoc(id)).toBe(now);
+  });
+
+  it('after a stopped pattern an edit waits longer before the reader tries again', async () => {
+    const r = reader();
+    r.answer = 'timeout';
+    guarded(r);
+    const id = w.open('a.nc', PROGRAM);
+    w.svc.forDoc(id);
+    w.runTimers();
+    await flush();
+    w.delays.length = 0;
+    change(w)(id);
+    expect(w.delays).toEqual([3000]);
+    // The pattern is fixed (the machine is edited): the new key reads again.
+    r.answer = 'done';
+    w.timers.length = 0;
+    w.blocks.set('m1', valid({ ...single, sectionStart: '(?<![A-Z0-9.])(?<channel>G1[34])(?![\\d.])' }));
+    w.revision.update((n) => n + 1);
+    expect(w.svc.forDoc(id).layout).toBe('none');
+    w.runTimers();
+    await flush();
+    expect(w.svc.forDoc(id).layout).toBe('single-file');
+  });
+
+  it('a machine whose rules hold no pattern of the user\'s is read at once and never asks the reader', () => {
+    const r = reader();
+    guarded(r, { ...single, sectionStart: 'G13' }); // a plain literal cannot run away
+    const id = w.open('a.nc', PROGRAM);
+    expect(w.svc.forDoc(id).layout).toBe('single-file');
+    expect(w.timers).toHaveLength(0);
+    expect(r.jobs).toEqual([]);
+  });
+
+  it('reads in place, as before, when no reader can be had', async () => {
+    guarded(reader());
+    w = world(() => Promise.resolve(null));
+    w.machinesById.set('m1', machine('m1'));
+    w.blocks.set('m1', valid(single));
+    const id = w.open('a.nc', PROGRAM);
+    w.svc.forDoc(id);
+    w.runTimers();
+    await flush();
+    expect(w.svc.forDoc(id).layout).toBe('single-file');
   });
 });

@@ -1545,6 +1545,106 @@ mod tests {
         path
     }
 
+    // --- shutting a file or a folder, on both families of file system (T185) ---
+    //
+    // The data-safety tests below need something the user's folder will refuse: a file
+    // that cannot be read, a folder that takes no new file, a folder that cannot be looked
+    // into. Unix does that with mode bits. Windows has none; its file systems refuse by
+    // ACL, so the twin puts a *deny* entry for Everyone on the path (`icacls`, which every
+    // Windows has) and removes it again. A deny entry beats every allow entry, an
+    // administrator included, so the refusal is real on the CI runner, whose user is one.
+    // Both families report whether the path really is shut afterwards: a process that
+    // ignores the bits (root on Unix) gets `false` and the test skips its assertions; on
+    // Windows a deny that did not take is a failure of the twin itself, not a skip.
+
+    /// What `icacls` calls "Everyone", by SID so that a localized Windows works too.
+    #[cfg(windows)]
+    const EVERYONE: &str = "*S-1-1-0";
+
+    #[cfg(windows)]
+    fn icacls(path: &Path, args: &[&str]) {
+        let out = std::process::Command::new("icacls")
+            .arg(path)
+            .args(args)
+            .output()
+            .expect("icacls could not be started");
+        assert!(
+            out.status.success(),
+            "icacls {args:?} on {} failed: {}{}",
+            path.display(),
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The folder takes no new file or folder; what is in it can still be read and
+    /// written. `true` when that is what the folder now does.
+    #[cfg(unix)]
+    fn shut_folder(folder: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(folder, fs::Permissions::from_mode(0o555)).unwrap();
+        fs::write(folder.join("probe"), b"").is_err()
+    }
+
+    /// WD is "create a file here" and AD "create a folder here" on a folder.
+    #[cfg(windows)]
+    fn shut_folder(folder: &Path) -> bool {
+        icacls(folder, &["/deny", &format!("{EVERYONE}:(WD,AD)")]);
+        let shut = fs::write(folder.join("probe"), b"").is_err();
+        assert!(shut, "the deny entry did not shut {}", folder.display());
+        shut
+    }
+
+    #[cfg(unix)]
+    fn open_folder(folder: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(folder, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn open_folder(folder: &Path) {
+        icacls(folder, &["/remove:d", EVERYONE]);
+    }
+
+    /// The file or folder cannot be read (a folder cannot be listed). `true` when that
+    /// is what it now does.
+    #[cfg(unix)]
+    fn shut_for_reading(path: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o000)).unwrap();
+        if path.is_dir() {
+            fs::read_dir(path).is_err()
+        } else {
+            fs::read(path).is_err()
+        }
+    }
+
+    /// RD is "read data" on a file and "list folder" on a folder. Read control is left
+    /// alone, so the entry can be removed again.
+    #[cfg(windows)]
+    fn shut_for_reading(path: &Path) -> bool {
+        icacls(path, &["/deny", &format!("{EVERYONE}:(RD)")]);
+        let shut = if path.is_dir() {
+            fs::read_dir(path).is_err()
+        } else {
+            fs::read(path).is_err()
+        };
+        assert!(shut, "the deny entry did not shut {}", path.display());
+        shut
+    }
+
+    #[cfg(unix)]
+    fn open_for_reading(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if path.is_dir() { 0o755 } else { 0o644 };
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn open_for_reading(path: &Path) {
+        icacls(path, &["/remove:d", EVERYONE]);
+    }
+
     fn at(millis: u64) -> SystemTime {
         UNIX_EPOCH + Duration::from_millis(millis)
     }
@@ -2151,11 +2251,8 @@ mod tests {
     /// still allows — and so has already emptied the previous backup by the time it
     /// finds out whether it can fill it again. On a full disk, which is the case
     /// this is really about, that leaves no usable copy of the program at all.
-    #[cfg(unix)]
     #[test]
     fn a_failed_sibling_backup_keeps_the_previous_one() {
-        use std::os::unix::fs::PermissionsExt;
-
         let (root, dirs) = scratch("sibling-fails");
         let source = program(&root, "welle.nc", "good\n");
         let target = backup(&dirs, sibling(), &source, at(1_000))
@@ -2165,9 +2262,8 @@ mod tests {
 
         fs::write(&source, "newer\n").unwrap();
         let folder = root.join("nc");
-        fs::set_permissions(&folder, fs::Permissions::from_mode(0o555)).unwrap();
         // root ignores the mode bits, so only assert when the folder really is shut.
-        if fs::write(folder.join("probe"), b"").is_err() {
+        if shut_folder(&folder) {
             let err = backup(&dirs, sibling(), &source, at(2_000)).expect_err("wrote anyway");
             assert!(err.contains("welle.nc.bak"), "{err}");
             assert_eq!(
@@ -2176,7 +2272,7 @@ mod tests {
                 "a failed backup destroyed the one that was there"
             );
         }
-        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        open_folder(&folder);
         // No half-written temp file was left in the user's folder either.
         let leftovers: Vec<String> = fs::read_dir(&folder)
             .unwrap()
@@ -2195,11 +2291,8 @@ mod tests {
     ///
     /// The copy fails here because the program itself cannot be read: a permission
     /// that changed under the user, which is also a save that is about to fail.
-    #[cfg(unix)]
     #[test]
     fn a_backup_that_cannot_be_made_prunes_nothing() {
-        use std::os::unix::fs::PermissionsExt;
-
         let (root, dirs) = scratch("history-fails");
         let source = program(&root, "welle.nc", "v1\n");
         backup(&dirs, history(1), &source, at(1_000)).unwrap();
@@ -2211,9 +2304,8 @@ mod tests {
             .join(folder_key(source.parent().unwrap()))
             .join("welle.nc");
         fs::write(&source, "v2\n").unwrap();
-        fs::set_permissions(&source, fs::Permissions::from_mode(0o000)).unwrap();
         // root reads whatever it likes, so only assert when the file really is shut.
-        if fs::read(&source).is_err() {
+        if shut_for_reading(&source) {
             let err = backup(&dirs, history(1), &source, at(2_000)).expect_err("copied anyway");
             assert!(err.contains("welle.nc"), "{err}");
             // `history_of` lists the whole folder, so this also says that no temp
@@ -2225,7 +2317,7 @@ mod tests {
             );
             assert_eq!(fs::read_to_string(dir.join(&kept[0])).unwrap(), "v1\n");
         }
-        fs::set_permissions(&source, fs::Permissions::from_mode(0o644)).unwrap();
+        open_for_reading(&source);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -2939,20 +3031,43 @@ mod tests {
     }
 
     /// A permission error is "cannot tell", which is "there" (a locked folder).
-    #[cfg(unix)]
+    ///
+    /// The invariant is the same on every file system: a file is taken for gone only
+    /// when looking for it says "not found", never when looking is refused. What the
+    /// refusal looks like is the file system's business. Unix answers a lookup inside a
+    /// folder it may not enter with "permission denied", and there the test insists on
+    /// "not gone". NTFS lets a user without the right to list a folder still ask for a
+    /// name in it (the traverse right is a different one), so it may answer "not found";
+    /// then the folder is there and the file is gone, and that is what the code says. The
+    /// Windows run prints what it saw, so the answer is on record.
     #[test]
     fn a_permission_error_is_not_gone() {
-        use std::os::unix::fs::PermissionsExt;
         let (root, _dirs) = scratch("locked");
         let locked = root.join("nc").join("locked");
         fs::create_dir_all(&locked).unwrap();
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
-        let can_look = fs::symlink_metadata(locked.join("a.nc")).is_ok_and(|_| true)
-            || fs::read_dir(&locked).is_ok();
+        let shut = shut_for_reading(&locked);
+        let looked = fs::symlink_metadata(locked.join("a.nc"));
+        let can_look = looked.is_ok() || fs::read_dir(&locked).is_ok();
         let answer = gone_with(&locked.join("a.nc"), |_| true);
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
-        // Running as root sees through the lock; then there is nothing to test.
-        if !can_look {
+        open_for_reading(&locked);
+        let refused = looked
+            .as_ref()
+            .err()
+            .is_some_and(|err| err.kind() != io::ErrorKind::NotFound);
+        if cfg!(windows) {
+            eprintln!(
+                "a lookup inside a folder shut for listing: {looked:?}; gone_with says {answer}"
+            );
+        }
+        // Gone exactly when the lookup says "not found", whatever the platform does.
+        assert_eq!(
+            answer,
+            matches!(&looked, Err(err) if err.kind() == io::ErrorKind::NotFound),
+            "{looked:?}"
+        );
+        // Running as root sees through the lock; then there is nothing more to test.
+        if shut && !can_look && cfg!(unix) {
+            assert!(refused, "{looked:?}");
             assert!(!answer, "a locked folder read as a deleted file");
         }
         let _ = fs::remove_dir_all(&root);

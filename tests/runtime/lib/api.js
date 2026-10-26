@@ -49,6 +49,19 @@ import { keyEvent, typeEvents } from './keys.js'
  */
 
 /** @typedef {{ len: number, mtimeMs: number, mode: number, isFile: boolean, isDir: boolean }} Stat */
+/** @typedef {{ name: string, isFile: boolean, isDir: boolean, isSymlink: boolean, len: number }} DirEntry */
+/**
+ * The main window as the window server has it. Sizes are in physical pixels, like the
+ * `.window-state.json` the window-state plugin writes; `scale` turns them into logical ones.
+ * @typedef {object} WindowGeometry
+ * @property {number} width inner (content) width
+ * @property {number} height inner (content) height
+ * @property {number} x outer position, left
+ * @property {number} y outer position, top
+ * @property {number} scale physical pixels per logical pixel
+ * @property {boolean} maximized
+ * @property {boolean} fullscreen
+ */
 /** @typedef {{ texts: string[], buttons: string[], count: number }} AlertInfo */
 /** @typedef {Record<string, string | number | boolean>} Attrs */
 
@@ -134,6 +147,18 @@ export function createHarness(cfg, rec, send, drain = async () => {}) {
   /** @type {ExitExpectation | null} */
   let exitExpected = null
   const robust = cfg.robust !== false
+
+  /**
+   * Hands everything queued so far to Rust, but only while an exit is expected. The queue
+   * dies with the process: a call that can end the app (a quit, a close, Cmd+Q, Cmd+Shift+W)
+   * would otherwise race its own `expect-exit` record, and the run is then judged "the
+   * scenario never finished" although every check passed. With no exit expected the call
+   * costs nothing extra.
+   */
+  const flushIfExiting = () => (exitExpected ? drain() : Promise.resolve())
+
+  /** One private Monaco service per id, found once (see `h.monaco`). @type {Map<string, any>} */
+  const monacoServices = new Map()
 
   /**
    * Waits for a condition. The first sample is taken straight away, so a condition that
@@ -280,6 +305,25 @@ export function createHarness(cfg, rec, send, drain = async () => {}) {
     idle,
     /** Resolves once the browser has rendered a frame. @returns {Promise<boolean>} */
     frame: nextFrame,
+
+    /**
+     * A wait measured in turns of the app instead of milliseconds: `n` round trips to the
+     * main thread, each followed by a rendered frame. For the check that something did
+     * **not** happen (a second alert did not stack, a window did not close): a fixed sleep is
+     * too short on a loaded runner and too long everywhere else, while a number of turns
+     * stretches with the load. Use `idle()` when no backend call is in flight and `waitFor`
+     * when there is something to wait for; `turns` is for the state that stays as it is.
+     * @param {number} [n]
+     * @returns {Promise<void>}
+     */
+    async turns(n = 8) {
+      for (let i = 0; i < n; i++) {
+        // The window-state hop is the one that is known to be answered while an alert is up. A hop that
+        // times out (a main thread busy for 3 s) is a turn that took long, not a failure of the wait.
+        await invoke('h_window_state').catch(() => null)
+        await nextFrame()
+      }
+    },
     q,
     qa,
 
@@ -311,7 +355,11 @@ export function createHarness(cfg, rec, send, drain = async () => {}) {
      * @param {KeySpec[]} keys
      * @returns {Promise<string[]>}
      */
-    nativeKeys: (keys) => invoke('h_native_input', { events: keys.map(keyEvent) }),
+    async nativeKeys(keys) {
+      // Cmd+Q and Cmd+Shift+W end the app: see `flushIfExiting`.
+      await flushIfExiting()
+      return invoke('h_native_input', { events: keys.map(keyEvent) })
+    },
 
     /**
      * Types US-layout text with real key presses (`\n` = Enter). The editor must have focus.
@@ -386,7 +434,11 @@ export function createHarness(cfg, rec, send, drain = async () => {}) {
        * @param {{ timeout?: number }} [opts]
        * @returns {Promise<{ texts: string[], buttons: string[], clicked: string }>}
        */
-      click: (label, { timeout = 10000 } = {}) => invoke('h_alert_click', { label, timeoutMs: timeout }),
+      async click(label, { timeout = 10000 } = {}) {
+        // An answer can end the app (Discard All on a quit): see `flushIfExiting`.
+        await flushIfExiting()
+        return invoke('h_alert_click', { label, timeoutMs: timeout })
+      },
     },
 
     disk: {
@@ -422,8 +474,86 @@ export function createHarness(cfg, rec, send, drain = async () => {}) {
           return null
         }
       },
-      /** @param {string} from @param {string} to */
+      /**
+       * Copies a file, or a folder with everything in it, creating the folders above `to`.
+       * @param {string} from
+       * @param {string} to
+       * @returns {Promise<number>} bytes copied
+       */
       copy: (from, to) => invoke('h_copy', { src: from, dst: to }),
+      /**
+       * Deletes a file, a link or a folder under the run folder or the app's HOME (never
+       * either of them itself, never a path outside). A missing path is not an error.
+       * @param {string} p
+       * @param {{ recursive?: boolean }} [opts] `recursive`: a folder with its content (default: only an empty one)
+       * @returns {Promise<boolean>} whether something was removed
+       */
+      remove: (p, { recursive = false } = {}) => invoke('h_remove', { path: p, recursive }),
+      /**
+       * What a folder holds, sorted by name. Links are reported as links, not followed.
+       * @param {string} p
+       * @returns {Promise<DirEntry[]>}
+       */
+      list: (p) => invoke('h_list', { path: p }),
+      /**
+       * A symbolic link at `link` that points to `target` (made outside the app, the way a
+       * user or a CAM post would). The folders above `link` are created.
+       * @param {string} target
+       * @param {string} link
+       */
+      symlink: (target, link) => invoke('h_symlink', { target, link }),
+    },
+
+    /**
+     * The system clipboard's text. A run starts with an empty clipboard and puts the owner's
+     * text back when it ends (the harness does both, so a scenario never reads what was
+     * copied before it and never leaves its own text behind); only text is kept, anything
+     * else on the clipboard is lost for the run.
+     */
+    clipboard: {
+      /** @returns {Promise<string>} */
+      read: () => invoke('h_clipboard_read'),
+      /** @param {string} text */
+      write: (text) => invoke('h_clipboard_write', { text }),
+      /** Empties it. */
+      clear: () => invoke('h_clipboard_write', { text: null }),
+    },
+
+    /**
+     * Monaco's own services, for what the test hook does not say (the number of models the
+     * editor holds). They live in the editor's instantiation tree, an internal of the pinned
+     * Monaco (0.55): **this is the only place a scenario touches it**, and a scenario checks
+     * `service(...)` is not null so a move of the internals fails there and not silently.
+     * A service is found once and kept, because a comparison removes the editor it is found
+     * through. A hook that offers `modelCount()` (`window.__gedit`) is preferred.
+     */
+    monaco: {
+      /**
+       * @param {string} id the id the service was registered under, e.g. `modelService`
+       * @param {string} method a method the service must have, e.g. `getModels`
+       * @returns {any} the service, or null
+       */
+      service(id, method) {
+        const known = monacoServices.get(id)
+        if (known && typeof known[method] === 'function') return known
+        let inst = /** @type {any} */ (/** @type {any} */ (window.__gedit?.ctx)?.editor?.editorInstance?.())?._instantiationService
+        while (inst) {
+          for (const [key, service] of inst._services?._entries ?? []) {
+            if (String(key) === id && typeof service?.[method] === 'function') {
+              monacoServices.set(id, service)
+              return service
+            }
+          }
+          inst = inst._parent
+        }
+        return null
+      },
+      /** How many text models Monaco holds right now; -1 when that cannot be read. @returns {number} */
+      modelCount() {
+        const hooked = /** @type {any} */ (window.__gedit)?.modelCount
+        if (typeof hooked === 'function') return hooked()
+        return h.monaco.service('modelService', 'getModels')?.getModels().length ?? -1
+      },
     },
 
     /**
@@ -489,17 +619,54 @@ export function createHarness(cfg, rec, send, drain = async () => {}) {
 
     window: {
       /** `window.close()` from Rust, like the app's own Cmd+Q item. @param {number} [delayMs] */
-      close: (delayMs = 0) => invoke('h_close_from_rust', { delayMs }),
+      async close(delayMs = 0) {
+        await flushIfExiting()
+        return invoke('h_close_from_rust', { delayMs })
+      },
       /** The red close button (`performClose:`). */
-      performClose: () => invoke('h_quit', { mode: 'performclose' }),
+      async performClose() {
+        await flushIfExiting()
+        return invoke('h_quit', { mode: 'performclose' })
+      },
       /** Cmd+Q through the main menu's key equivalent. */
-      quitKey: () => invoke('h_quit', { mode: 'keyequiv' }),
+      async quitKey() {
+        await flushIfExiting()
+        return invoke('h_quit', { mode: 'keyequiv' })
+      },
       /** `[NSApp terminate:]`, the path of Dock > Quit and logout. */
-      terminate: () => invoke('h_quit', { mode: 'terminate' }),
+      async terminate() {
+        await flushIfExiting()
+        return invoke('h_quit', { mode: 'terminate' })
+      },
       /**
        * @returns {Promise<{ exists: boolean, active?: boolean, key?: boolean, visible?: boolean, sheet?: boolean, alerts?: number }>}
        */
       state: () => invoke('h_window_state'),
+
+      /**
+       * The size and place of the window in physical pixels, the unit of `.window-state.json`.
+       * @returns {Promise<WindowGeometry>}
+       */
+      geometry: () => invoke('h_window_geometry'),
+
+      /**
+       * Resizes (and, with `x` and `y`, moves) the window, like a user dragging its edge;
+       * the size is in logical pixels. Resolves once the window reports it, or with what it
+       * reports after `timeout` ms.
+       * @param {number} width
+       * @param {number} height
+       * @param {{ x?: number, y?: number, timeout?: number }} [opts]
+       * @returns {Promise<WindowGeometry>}
+       */
+      async setSize(width, height, { x, y, timeout = 3000 } = {}) {
+        const first = await invoke('h_window_set_size', { width, height, x, y })
+        const wanted = (/** @type {WindowGeometry} */ g) => Math.abs(g.width - Math.round(width * g.scale)) <= 1 && Math.abs(g.height - Math.round(height * g.scale)) <= 1
+        const landed = await waitFor(async () => {
+          const g = await invoke('h_window_geometry')
+          return wanted(g) ? g : null
+        }, { timeout, interval: 50 })
+        return landed ?? first
+      },
 
       /**
        * Who owns the keyboard, and whether native input would reach the app
@@ -522,11 +689,19 @@ export function createHarness(cfg, rec, send, drain = async () => {}) {
      * Declares that the app is about to exit. Call it before triggering the exit; the
      * runner then counts the exit as a pass (with the expected code, or the expected
      * `signal`) and checks `files`.
+     *
+     * The record is handed to Rust before this resolves, and every call that can end the
+     * app (`h.window.close/performClose/quitKey/terminate`, `h.nativeKeys`) hands over
+     * what is queued first while an exit is expected, so a scenario neither has to wait
+     * for it nor to sleep a while "to let the queue empty". Awaiting it is allowed and
+     * costs one round trip.
      * @param {ExitExpectation} [expectation]
+     * @returns {Promise<void>}
      */
     expectExit(expectation = {}) {
       exitExpected = { within: 10000, files: [], ...(expectation.signal ? {} : { code: 0 }), ...expectation }
       send({ kind: 'expect-exit', ...exitExpected })
+      return drain()
     },
 
     /**

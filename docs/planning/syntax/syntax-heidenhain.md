@@ -219,7 +219,7 @@ Working plane: the tool axis in `TOOL CALL` sets it (Z → XY, Y → ZX, X → Y
 | `FMAX` | Rapid | **block-wise only**. The previous numeric F applies again afterwards |
 | `FAUTO` | Feed from the last `TOOL CALL` | block (verify) |
 | `FU<n>` / `FZ<n>` | Feed per revolution / per tooth; allowed in `TOOL CALL` (from software -05) and in positioning blocks. `FU` may not be combined with `M136` in an INCH program | yes (verify) |
-| `M136` / `M137` | From here on `F` is in mm per spindle revolution / back to per minute; takes effect at block start | yes (in the database since the source review) |
+| `M136` / `M137` | From here on `F` is in mm per spindle revolution / back to per minute; takes effect at block start. At power-on the control moves at `F` per minute, so `M137` is in force until the first `M136` (TNC 640 user manual, `M136`) | yes (in the database since the source review; the profile's power-on feed mode is `M137`, `modal.initial.feedmode`, since P4b) |
 | `FQ<n>` | Feed from Q parameter (CAM posts often define Q feeds at the program start) | yes |
 
 ### 4.5 M functions typical in CAM output
@@ -243,7 +243,7 @@ Working plane: the tool axis in `TOOL CALL` sets it (Z → XY, Y → ZX, X → Y
 | M126 / M127 | Shortest-path rotary positioning on/off | | modal |
 | M128 [F…] / M129 | Keep tool tip position when tilt axes move (TCPM) on/off; F = feed for compensating moves | M128 start, M129 end | modal. Must be reset before `TOOL CALL`, M91 and M92 |
 | M140 MB n\|MB MAX [F…] | Retract along tool axis by distance / to travel limit | start | block only |
-| M136 / M137 | Feed per spindle revolution on / off (§4.4) | start | modal |
+| M136 / M137 | Feed per spindle revolution on / off (§4.4); `M137` (per minute) is in force at power-on | start | modal |
 | M101 / M102, M107 / M108, M120 `LA n`, M138, M144 / M145, M148 / M149 | Less common; highlight only | | |
 
 M functions that take effect at block start run before those at block end. Otherwise they run in the programmed order.

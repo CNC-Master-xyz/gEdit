@@ -30,11 +30,11 @@ import { files } from '$lib/app/fileOps';
 import { modals } from '$lib/app/modals';
 import { computeJumpLines } from '$lib/app/outlineService';
 import { channelRefs, channelsAt } from '$lib/core/channels/resolve';
-import { resolveDocument, shownMark } from '$lib/core/channels/marks';
+import { macroCallCodes, resolveDocument, shownMark } from '$lib/core/channels/marks';
 import { planMerge, splitRecord, type SplitRecord } from '$lib/core/channels/merge';
 import { answersWait, markIdOf, pairsByList, waitKey } from '$lib/core/channels/panes';
 import { status } from '$lib/app/status';
-import { CHANNEL_CAPS, type ChannelParams, type ChannelRef, type ChannelSet, type SyncFinding, type SyncHit, type SyncRule } from '$lib/core/channels/types';
+import { CHANNEL_CAPS, type ChannelParams, type ChannelProblem, type ChannelRef, type ChannelSet, type SyncFinding, type SyncHit, type SyncRule } from '$lib/core/channels/types';
 import { applyLines } from '$lib/monaco/applyLines';
 import { editor } from '$lib/monaco/editorService';
 import { channels } from '$lib/stores/channels';
@@ -81,15 +81,23 @@ export type PartnerAnswer =
  * channel that is not open cannot answer (`marksOf` null); it is named when no open channel does.
  *
  * - By the pairing key (`waitKey`, the owner's rule of 2026-10-17, §7 #388): the same code
- *   **and the same `P` set** (the channel's own included), the n-th occurrence in this channel
- *   with the n-th in the other. So an `M901 P12` is answered by the `M901 P12` of the other
- *   channel and never by an `M901 P123`, and a program that waits on `M901 P12` three times has
- *   three distinct partners. With `rules`, a `samePartners` rule's `P`-less wait meets only a
- *   `P`-less one (P4e review NC-3).
+ *   **and the same `P` set**, the n-th occurrence in this channel with the n-th in the other.
+ *   So an `M901 P12` is answered by the `M901 P12` of the other channel and never by an
+ *   `M901 P123`, and a program that waits on `M901 P12` three times has three distinct
+ *   partners. With `rules`, a `samePartners` rule's `P`-less wait meets only a `P`-less one
+ *   (P4e review NC-3), and its set is compared as written (manual check D2-2): the own channel
+ *   is not added, so an `M901 P2` written in path 1 names no path 1 and meets nothing, as
+ *   Check Wait Codes reports it (`own-channel-not-named`). A rule without `samePartners` still
+ *   keys by the channels taking part, its own included. The code is compared by value, a
+ *   negative Okuma `P-010` as `P-10` (D2-1).
  * - A rule that `pairsByList` (the Siemens `WAITM`, P4e review NC-4; needs `rules`): the n-th
  *   wait of its id in this channel that names the other channel meets the n-th wait of that id
  *   there that names this one, as Check Wait Codes pairs them; when there is none, a mark there
- *   that answers it (`SETM` of the id) is the partner.
+ *   that answers it (`SETM` of the id, `answersWait`) is the partner: the n-th such mark, or the
+ *   last when there are fewer (T174).
+ * - From a mark that answers (`SETM`, T174) the way back: the n-th wait of its id in the next
+ *   channel that names this one (the last when there are fewer). Every `P`-word wait keeps the
+ *   same-`P` key above.
  */
 export function findPartner(o: {
   order: readonly ChannelRef[];
@@ -107,6 +115,11 @@ export function findPartner(o: {
   const id = markIdOf(o.mark);
   const k = o.ownMarks.filter((h) => h.channel === o.mark.channel && h.line <= o.mark.line && waitKey(h, rule) === key).length - 1;
   const at = o.order.findIndex((c) => c.id === o.self);
+  /** The n-th of `list`, or its last when it is shorter (an answering mark is an answer to the id, not to one occurrence). */
+  const nth = (list: readonly SyncHit[], n: number): SyncHit | undefined => list[Math.min(Math.max(n, 0), list.length - 1)];
+  const answers = answersWait(o.mark, rule);
+  // T174: the how-many-th answering mark of its id this one is in its channel.
+  const own = answers ? o.ownMarks.filter((h) => h.channel === o.mark.channel && h.line <= o.mark.line && markIdOf(h) === id && answersWait(h, ruleOf(h.ruleId))).length - 1 : -1;
   let notOpen: ChannelRef | null = null;
   for (let step = 1; step < o.order.length; step++) {
     const channel = o.order[(at + step) % o.order.length];
@@ -116,13 +129,19 @@ export function findPartner(o: {
       notOpen ??= channel;
       continue;
     }
+    if (answers) {
+      // From a SETM to the waits of its id there that wait for this channel.
+      const hit = nth(info.marks.filter((h) => h.blocking && markIdOf(h) === id && h.partners.includes(o.self)), own);
+      if (hit) return { kind: 'found', channel, docId: info.docId, hit };
+      continue;
+    }
     if (byList) {
       // Channel by channel: the n-th of this id naming that channel meets the n-th there naming this one.
       const sameWait = (h: SyncHit): boolean => h.blocking && h.ruleId === o.mark.ruleId && markIdOf(h) === id;
       const n = o.ownMarks.filter((h) => h.channel === o.mark.channel && h.line <= o.mark.line && sameWait(h) && h.partners.includes(channel.id)).length - 1;
       const hit = info.marks.filter((h) => sameWait(h) && h.partners.includes(o.self))[Math.max(n, 0)];
       if (hit) return { kind: 'found', channel, docId: info.docId, hit };
-      const answer = info.marks.find((h) => markIdOf(h) === id && answersWait(h, ruleOf(h.ruleId)));
+      const answer = nth(info.marks.filter((h) => markIdOf(h) === id && answersWait(h, ruleOf(h.ruleId))), n);
       if (answer) return { kind: 'found', channel, docId: info.docId, hit: answer };
       continue;
     }
@@ -474,6 +493,19 @@ async function checkSync(): Promise<void> {
 
 // --- the tester --------------------------------------------------------------------
 
+/**
+ * One problem of the resolution as a row of Test Channel Rules. On one program with sections a
+ * declared channel without a section is information, as the status item says it (T127, the
+ * owner 2026-10-19): a one-turret program on a two-turret machine does not use the other turret.
+ * Exported for the tests.
+ */
+export function testerProblemRow(set: { layout: ChannelSet['layout'] }, p: ChannelProblem): { what: string; text: string } {
+  if (set.layout === 'single-file' && p.message.key === 'channels.problems.channelNotFound') {
+    return { what: t('channels.test.note'), text: `${String(p.message.params?.channel ?? '')}: ${t('channels.status.stateNotUsed')}` };
+  }
+  return { what: t('channels.test.problem'), text: t(p.message.key, p.message.params) };
+}
+
 function testOnDocument(): void {
   const id = docs.getActiveId();
   if (id === null) return;
@@ -497,7 +529,7 @@ function testOnDocument(): void {
     const channel = names.get(hit.channel) ?? '';
     rows.push({ what: t('channels.test.mark'), text: `${markName(id, hit)}${channel ? ` (${channel})` : ''}`, line: hit.line, docId: id });
   }
-  for (const p of set.problems) rows.push({ what: t('channels.test.problem'), text: t(p.message.key, p.message.params), line: null, docId: id });
+  for (const p of set.problems) rows.push({ ...testerProblemRow(set, p), line: null, docId: id });
   results.show({
     title: set.layout === 'none' ? t('channels.test.titleNone', { document: title }) : t('channels.test.title', { document: title }),
     message: t('channels.test.marks', { count: set.marks.length }),
@@ -616,7 +648,8 @@ function resolveLines(id: DocId, lines: readonly string[]): ChannelSet {
   const params: ChannelParams | null = channels.params(id);
   if (params === null || params.layout !== 'single-file') return empty;
   const now = () => Date.now();
-  const read = resolveDocument('', lines, machines.effective(id).cp, params, { deadline: now() + CHANNEL_CAPS.resolveMs, now });
+  const view = machines.effective(id);
+  const read = resolveDocument('', lines, view.cp, params, { deadline: now() + CHANNEL_CAPS.resolveMs, now, calls: macroCallCodes(view.codes) });
   if (read.layout !== 'single-file') return { ...empty, problems: read.problems, truncated: read.abandoned };
   const found = new Set(read.sections.map((section) => section.channel.id));
   return {

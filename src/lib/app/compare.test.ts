@@ -11,6 +11,20 @@
 
 import { render } from 'svelte/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The lines the checks at a copy read from a side (WX-CODE-1): every line of a side that carries
+// the marker is counted when the tokenizer takes it, whoever asks.
+const read = vi.hoisted(() => ({ marked: 0 }));
+vi.mock('$lib/core/nc/tokenizer', async (original) => {
+  const real = await original<typeof import('$lib/core/nc/tokenizer')>();
+  return {
+    ...real,
+    tokenizeLine: (...args: Parameters<typeof real.tokenizeLine>) => {
+      if (args[0].includes('(src)')) read.marked++;
+      return real.tokenizeLine(...args);
+    },
+  };
+});
 import {
   autoTarget,
   availableSources,
@@ -39,8 +53,12 @@ import { createDocumentStore, docs as appDocs } from '$lib/stores/documents';
 import { createLayoutStore } from '$lib/stores/layout';
 import { hasKey, t } from '$lib/i18n';
 import { profiles as appProfiles } from '$lib/stores/profiles';
+import { codes as appCodes } from '$lib/stores/codes';
 import { COMPARE_FALLBACK, COMPARE_OPTION_KEYS, type CompareMemo } from '$lib/core/compare/types';
 import { compareDefaults } from '$lib/core/compare';
+import { ModalIndex, type ModalSnapshot } from '$lib/core/nc/modal';
+import type { CodeDb } from '$lib/core/codes/types';
+import type { CompiledProfile } from '$lib/core/profiles/types';
 import type { DiffCursor, DiffHandle, DiffLineChange, DiffSide } from '$lib/monaco/diff';
 import type { LineOperation } from '$lib/monaco/applyLines';
 import type { EffectiveMachine, EffectiveProfile } from '$lib/core/machines/types';
@@ -119,6 +137,17 @@ interface Harness {
   diff: FakeDiff | null;
   /** How often a session ended and asked for the keyboard to go back to the editor. */
   focused: number;
+  /** Review NC-6: the documents carry their real code database (default: none, nothing is read). */
+  withCodes: boolean;
+  /** M11 CODE-18: what `watchDiff` was given, to call when the fake diff's cursor moves. */
+  watcher: (() => void) | null;
+  /** The modal service's snapshots (compare3): what `modalSnapshotAt` was asked, and what it answers (default: none). */
+  snapshots: {
+    calls: { docId: DocId; line: number; version: number | undefined }[];
+    answer: ((docId: DocId, line: number, expect: { cp: CompiledProfile; db: CodeDb }) => ModalSnapshot | null) | null;
+  };
+  /** `editor.versionId` per document. */
+  versions: Map<DocId, number>;
 }
 
 /**
@@ -240,6 +269,10 @@ function harness(): Harness {
     untitled: [],
     diff: null,
     focused: 0,
+    withCodes: false,
+    watcher: null,
+    snapshots: { calls: [], answer: null },
+    versions: new Map(),
     service: undefined as unknown as CompareController,
   };
 
@@ -273,12 +306,23 @@ function harness(): Harness {
       return {
         profile: appProfiles.profile(profileId),
         cp: appProfiles.compiled(profileId),
-        codes: undefined as never,
+        codes: state.withCodes ? appCodes.forProfile(profileId) : (undefined as never),
         machine: state.machines.get(id) ?? machine(null, `${profileId}:none`),
       };
     },
+    versionOf: (id) => state.versions.get(id) ?? 1,
+    modalSnapshotAt: (docId, line, expect) => {
+      state.snapshots.calls.push({ docId, line, version: expect.version });
+      return state.snapshots.answer?.(docId, line, expect) ?? null;
+    },
     pickFile: () => Promise.resolve(state.picks.shift() ?? null),
     diff: () => state.diff,
+    watchDiff: (listener) => {
+      state.watcher = listener;
+      return () => {
+        state.watcher = null;
+      };
+    },
     memory: {
       read: () => state.memory.value,
       write: (memo) => {
@@ -835,6 +879,87 @@ describe('the change at the cursor', () => {
     expect(changeAtCursor(all, { side: 'modified', line: 4 })).toBeNull();
     expect(changeAtCursor([], { side: 'modified', line: 1 })).toBeNull();
   });
+
+  describe('by binary search (WX-CODE-2)', () => {
+    /** What `changeAtCursor` was before: a scan of the whole list. */
+    function scan(changes: readonly DiffLineChange[], cursor: DiffCursor): DiffLineChange | null {
+      const hold = (start: number, end: number, line: number): 'inside' | 'next' | null =>
+        end === 0 || end < start ? (line === start || line === start + 1 ? 'next' : null) : line >= start && line <= end ? 'inside' : null;
+      let adjacent: DiffLineChange | null = null;
+      for (const c of changes) {
+        const held =
+          cursor.side === 'original'
+            ? hold(c.originalStartLineNumber, c.originalEndLineNumber, cursor.line)
+            : hold(c.modifiedStartLineNumber, c.modifiedEndLineNumber, cursor.line);
+        if (held === 'inside') return c;
+        if (held === 'next' && adjacent === null) adjacent = c;
+      }
+      return adjacent;
+    }
+
+    /** Blocks as Monaco hands them out: in order, at least one equal line between two, an insertion or a deletion one side empty. */
+    function blocks(seed: number, count: number): DiffLineChange[] {
+      let a = seed >>> 0;
+      const rnd = (n: number): number => {
+        a = (Math.imul(a, 1664525) + 1013904223) >>> 0;
+        return a % n;
+      };
+      const out: DiffLineChange[] = [];
+      let o = 1;
+      let m = 1;
+      for (let i = 0; i < count; i++) {
+        const gap = 1 + rnd(3);
+        o += gap;
+        m += gap;
+        const kind = rnd(3);
+        const so = 1 + rnd(3);
+        const sm = 1 + rnd(3);
+        if (kind === 0) {
+          out.push({ originalStartLineNumber: o, originalEndLineNumber: o + so - 1, modifiedStartLineNumber: m, modifiedEndLineNumber: m + sm - 1 });
+          o += so;
+          m += sm;
+        } else if (kind === 1) {
+          out.push({ originalStartLineNumber: o - 1, originalEndLineNumber: 0, modifiedStartLineNumber: m, modifiedEndLineNumber: m + sm - 1 });
+          m += sm;
+        } else {
+          out.push({ originalStartLineNumber: o, originalEndLineNumber: o + so - 1, modifiedStartLineNumber: m - 1, modifiedEndLineNumber: 0 });
+          o += so;
+        }
+      }
+      return out;
+    }
+
+    it('gives what the scan gave, for every line of both panes, on random blocks', () => {
+      let asked = 0;
+      for (let seed = 1; seed <= 30; seed++) {
+        const changes = blocks(seed, 1 + (seed % 12) * 3);
+        const last = Math.max(changes[changes.length - 1].originalEndLineNumber, changes[changes.length - 1].modifiedEndLineNumber, 1) + 6;
+        for (const side of ['original', 'modified'] as const) {
+          for (let line = 0; line <= last + 4; line++) {
+            expect(changeAtCursor(changes, { side, line }), `seed ${seed} ${side} ${line}`).toBe(scan(changes, { side, line }));
+            asked++;
+          }
+        }
+      }
+      expect(asked).toBeGreaterThan(1000);
+    });
+
+    it('reads a handful of the 100,000 blocks for a cursor, not all of them', () => {
+      const changes = blocks(7, 100_000);
+      let reads = 0;
+      const seen = new Proxy(changes, {
+        get(target, key, receiver) {
+          if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      for (const line of [1, 5, 50_000, 123_457, 399_999, 600_000]) {
+        reads = 0;
+        expect(changeAtCursor(seen, { side: 'modified', line })).toBe(scan(changes, { side: 'modified', line }));
+        expect(reads).toBeLessThan(80);
+      }
+    });
+  });
 });
 
 describe('the merge edit', () => {
@@ -1270,6 +1395,249 @@ describe('copyChange', () => {
     h.service.close();
     expect(await h.service.copyChange('toModified')).toBe(false);
     expect(diff.models.modified.log).toEqual([]);
+  });
+
+  it('marks both copy buttons as not offered while the cursor is in no change (M11 CODE-18)', () => {
+    expect(h.watcher).not.toBeNull();
+    // In the change (modified line 3): offered.
+    h.watcher!();
+    expect(get(h.service.copyBlock)).toEqual({ toModified: null, toOriginal: null });
+    // On a line that is the same on both sides: not offered.
+    diff.cursorAt = { side: 'modified', line: 1 };
+    h.watcher!();
+    expect(get(h.service.copyBlock)).toEqual({ toModified: 'noChange', toOriginal: 'noChange' });
+    // Next to an empty side of a change counts as in it, as for the copy itself.
+    diff.cursorAt = { side: 'original', line: 2 };
+    h.watcher!();
+    expect(get(h.service.copyBlock)).toEqual({ toModified: null, toOriginal: null });
+    // While the diff is being worked out again, the last answer stands (no flicker while typing).
+    diff.cursorAt = { side: 'modified', line: 1 };
+    diff.current = false;
+    h.watcher!();
+    expect(get(h.service.copyBlock)).toEqual({ toModified: null, toOriginal: null });
+    diff.current = true;
+    h.watcher!();
+    expect(get(h.service.copyBlock).toModified).toBe('noChange');
+    // A refusal of its own still wins: review mode says review.
+    h.service.setMode('review');
+    expect(get(h.service.copyBlock)).toEqual({ toModified: 'review', toOriginal: 'review' });
+  });
+
+  it('starts a new comparison with the buttons offered, whatever the last one said (M11 CODE-18)', async () => {
+    diff.cursorAt = { side: 'modified', line: 1 };
+    h.watcher!();
+    expect(get(h.service.copyBlock).toModified).toBe('noChange');
+    h.service.close();
+    await h.service.open(a, { kind: 'document', docId: b });
+    expect(get(h.service.copyBlock)).toEqual({ toModified: null, toOriginal: null });
+  });
+
+  it('copies in the raw view where the modes differ, and then warns (review NC-6)', async () => {
+    h.withCodes = true;
+    const original = 'G91\nG1 X1. F100\nM30';
+    const modified = 'G90\nG1 X1. F200\nM30';
+    h.texts.set(b, original);
+    h.texts.set(a, modified);
+    diff.models.original = new FakeModel(original);
+    diff.models.modified = new FakeModel(modified);
+    diff.changes = [{ originalStartLineNumber: 1, originalEndLineNumber: 2, modifiedStartLineNumber: 1, modifiedEndLineNumber: 2 }];
+    diff.cursorAt = { side: 'modified', line: 2 };
+    h.messages.length = 0;
+    expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+    expect(diff.models.modified.text).toBe('G90\nG1 X1. F100\nM30');
+    expect(h.messages).toEqual([`!${t('compare.modesDiffer', { original: 'G91', modified: 'G90' })}`]);
+    // The whole change carries the G91 with it: read in front of line 1, both sides know nothing
+    // yet, but M30 below now runs in G91 where it ran in G90 (the owner, 2026-10-20).
+    h.messages.length = 0;
+    diff.models.modified = new FakeModel(modified);
+    expect(await h.service.copyChange('toModified')).toBe(true);
+    expect(diff.models.modified.text).toBe(original);
+    expect(h.messages).toEqual([`!${t('compare.modesChangeBelow', { before: 'G90', after: 'G91' })}`]);
+  });
+
+  describe('the checks at a long program (compare3)', () => {
+    // A target of 300 lines: G90 on line 1, a long run of moves, G91 on line 299, M30 below.
+    const pad = Array.from({ length: 297 }, (_, i) => `G1 X${i}. F100`);
+    const target = ['G90', ...pad, 'G91', 'M30'].join('\n');
+    const source = ['G91', ...pad, 'G91', 'M30'].join('\n');
+
+    /** A snapshot answer that is the real index of `text` with a snapshot every 50 lines, as the service would hand it out. */
+    function indexOf(text: string): (docId: DocId, line: number, expect: { cp: CompiledProfile; db: CodeDb }) => ModalSnapshot {
+      const lines = text.split('\n');
+      return (_docId, line, expect) => {
+        const index = new ModalIndex(expect.cp, expect.db, { every: 50 });
+        index.reset(lines.length, (n) => lines[n - 1] ?? '');
+        index.buildSome(1e9);
+        return index.snapshotAtOrBefore(line);
+      };
+    }
+
+    async function copyAt(line: number): Promise<string[]> {
+      h.withCodes = true;
+      h.texts.set(b, source);
+      h.texts.set(a, target);
+      diff.models.original = new FakeModel(source);
+      diff.models.modified = new FakeModel(target);
+      diff.changes = [{ originalStartLineNumber: 299, originalEndLineNumber: 299, modifiedStartLineNumber: 299, modifiedEndLineNumber: 299 }];
+      diff.cursorAt = { side: 'modified', line };
+      h.messages.length = 0;
+      expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+      return [...h.messages];
+    }
+
+    it('asks the modal service for the snapshot in front of the place, for the text it read, and says the same with or without one', async () => {
+      h.versions.set(a, 7);
+      h.versions.set(b, 9);
+      const without = await copyAt(299);
+      // The front check asks for both sides (source line 299 of the original, place 299 of the target) and the end check for the target.
+      expect(h.snapshots.calls).toEqual([
+        { docId: b, line: 298, version: 9 },
+        { docId: a, line: 298, version: 7 },
+        { docId: a, line: 298, version: 7 },
+      ]);
+      h.snapshots.calls.length = 0;
+      diff.models.modified = new FakeModel(target);
+      h.snapshots.answer = indexOf(target);
+      // The original is another text: its snapshot comes from its own lines.
+      const answer = h.snapshots.answer;
+      h.snapshots.answer = (docId, line, expect) => (docId === b ? indexOf(source)(docId, line, expect) : answer(docId, line, expect));
+      const withSnapshots = await copyAt(299);
+      expect(withSnapshots).toEqual(without);
+      expect(withSnapshots).toEqual([`!${t('compare.modesDiffer', { original: 'G91', modified: 'G90' })}`]);
+      expect(h.snapshots.calls.length).toBe(3);
+    });
+
+    it('reads a 50,000-line saved version once for two copies, not once for each (WX-CODE-1)', async () => {
+      h.withCodes = true;
+      const lines = Array.from({ length: 50_000 }, (_, i) => (i === 99 ? 'G91 (src)' : `G1 X${i % 90}. F100 (src)`));
+      h.disk.set('/nc/A.nc', decoded(lines.join('\n')));
+      const small = 'G90\nG1 X1. F100\nM30';
+      h.texts.set(a, small);
+      h.service.close();
+      expect(await h.service.open(a, { kind: 'saved' })).toBe(true);
+      read.marked = 0;
+      const warned: string[][] = [];
+      for (const line of [25_000, 49_500]) {
+        diff.models.original = new FakeModel(lines.join('\n'));
+        diff.models.modified = new FakeModel(small);
+        diff.changes = [{ originalStartLineNumber: line, originalEndLineNumber: line, modifiedStartLineNumber: 2, modifiedEndLineNumber: 2 }];
+        diff.cursorAt = { side: 'modified', line: 2 };
+        h.messages.length = 0;
+        expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+        warned.push([...h.messages]);
+      }
+      // The saved version is G91 from its line 100 on, the target G90: both copies say so.
+      const warning = `!${t('compare.modesDiffer', { original: 'G91', modified: 'G90' })}`;
+      expect(warned).toEqual([[warning], [warning]]);
+      // Walked once down to the furthest place; a walk for each copy reads 25,000 + 49,499 lines.
+      expect(read.marked).toBeLessThanOrEqual(50_000 + 1_000);
+      expect(read.marked).toBeGreaterThan(49_000);
+    });
+
+    describe('modes only one program knows (the owner, 2026-10-22)', () => {
+      // A Fanuc mill knows only mm at power-on: absolute/incremental, the plane and the work
+      // offset are unknown until the program says them.
+      async function copy(original: string, modified: string, change: DiffLineChange, cursorLine: number): Promise<string[]> {
+        h.withCodes = true;
+        h.texts.set(b, original);
+        h.texts.set(a, modified);
+        diff.models.original = new FakeModel(original);
+        diff.models.modified = new FakeModel(modified);
+        diff.changes = [change];
+        diff.cursorAt = { side: 'modified', line: cursorLine };
+        h.messages.length = 0;
+        expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+        return [...h.messages];
+      }
+
+      it('warns in front of the copy: G91 here, not known at the top of the other program', async () => {
+        const messages = await copy('G90 G54 G17\nG91\nG1 X1. F100\nM30', 'G1 X1. F200\nG90\nM30', {
+          originalStartLineNumber: 3,
+          originalEndLineNumber: 3,
+          modifiedStartLineNumber: 1,
+          modifiedEndLineNumber: 1,
+        }, 1);
+        expect(messages).toEqual([
+          `!${t('compare.modesDiffer', {
+            original: 'G91, G17, G54',
+            modified: 'absolute/incremental mode not known, plane not known, work offset not known',
+          })}`,
+        ]);
+      });
+
+      it('warns at the end of the copy: the lines below ran in a mode not known, and now run in G91', async () => {
+        const messages = await copy('G91\nM30', 'G1 X1.\nM30', {
+          originalStartLineNumber: 1,
+          originalEndLineNumber: 1,
+          modifiedStartLineNumber: 1,
+          modifiedEndLineNumber: 1,
+        }, 1);
+        expect(messages).toEqual([
+          `!${t('compare.modesChangeBelow', { before: 'an unknown absolute/incremental mode', after: 'G91' })}`,
+        ]);
+      });
+
+      it('warns when a removed line took the only G90 with it', async () => {
+        const messages = await copy('G1 X1.\nM30', 'G90\nG1 X1.\nM30', {
+          originalStartLineNumber: 0,
+          originalEndLineNumber: 0,
+          modifiedStartLineNumber: 1,
+          modifiedEndLineNumber: 1,
+        }, 1);
+        expect(messages).toEqual([
+          `!${t('compare.modesChangeBelow', { before: 'G90', after: 'an unknown absolute/incremental mode' })}`,
+        ]);
+      });
+
+      it('says nothing where neither program knows the modes', async () => {
+        expect(
+          await copy('G1 X1. F100\nM30', 'G1 X1. F200\nM30', {
+            originalStartLineNumber: 1,
+            originalEndLineNumber: 1,
+            modifiedStartLineNumber: 1,
+            modifiedEndLineNumber: 1,
+          }, 1),
+        ).toEqual([]);
+      });
+    });
+
+    it('warns when two sides select different extended work offsets, G54.1 P1 and G54.1 P2 (WX-NC-7)', async () => {
+      h.withCodes = true;
+      const original = 'G54.1 P1\nG1 X1. F100\nM30';
+      const modified = 'G54.1 P2\nG1 X1. F200\nM30';
+      h.texts.set(b, original);
+      h.texts.set(a, modified);
+      diff.models.original = new FakeModel(original);
+      diff.models.modified = new FakeModel(modified);
+      diff.changes = [{ originalStartLineNumber: 2, originalEndLineNumber: 2, modifiedStartLineNumber: 2, modifiedEndLineNumber: 2 }];
+      diff.cursorAt = { side: 'modified', line: 2 };
+      h.messages.length = 0;
+      expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+      expect(h.messages).toEqual([`!${t('compare.modesDiffer', { original: 'G54.1 P1', modified: 'G54.1 P2' })}`]);
+      // The same offset on both sides says nothing.
+      h.messages.length = 0;
+      h.texts.set(a, original.replace('F100', 'F200'));
+      diff.models.modified = new FakeModel(original.replace('F100', 'F200'));
+      expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+      expect(h.messages).toEqual([]);
+    });
+
+    it('does not ask for the saved version, which is no open document', async () => {
+      h.withCodes = true;
+      h.disk.set('/nc/A.nc', decoded(source));
+      h.texts.set(a, target);
+      h.service.close();
+      expect(await h.service.open(a, { kind: 'saved' })).toBe(true);
+      diff.models.original = new FakeModel(source);
+      diff.models.modified = new FakeModel(target);
+      diff.changes = [{ originalStartLineNumber: 1, originalEndLineNumber: 1, modifiedStartLineNumber: 1, modifiedEndLineNumber: 1 }];
+      diff.cursorAt = { side: 'modified', line: 1 };
+      h.snapshots.calls.length = 0;
+      h.messages.length = 0;
+      expect(await h.service.copyChange('toModified', { lineOnly: true })).toBe(true);
+      expect(h.snapshots.calls.length).toBeGreaterThan(0);
+      expect(h.snapshots.calls.every((call) => call.docId === a)).toBe(true);
+    });
   });
 });
 

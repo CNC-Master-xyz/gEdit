@@ -4,7 +4,7 @@ Core editing, file handling and navigation. NC-specific text transformations are
 
 Tag format: `Priority · Size · Delivery` (see [README](README.md#conventions-used-in-these-documents)).
 
-> **Status.** Design note from 2026-09-21. What shipped is described in the [user guide](../user/README.md); where this note and the guide differ, the guide is right. The [roadmap](roadmap.md) gives the status of every item (its rows link to the sections below), and a *Status* line under a heading below says where this note was brought up to date. In short: Phases 1 and 2 shipped everything tagged P1 and P2 except the items the roadmap lists as deferred (bookmark names and panel, block range, insert and append file, OS file associations, next and previous NC event) or cut (a global viewer mode, an in-app user guide); the P3 items are Phase 4: split view is built (P4e, see [Split view](#split-view)); printing, find files in folders, auto-space and automatic block number are not built.
+> **Status.** Design note from 2026-09-21. What shipped is described in the [user guide](../user/README.md); where this note and the guide differ, the guide is right. The [roadmap](roadmap.md) gives the status of every item (its rows link to the sections below), and a *Status* line under a heading below says where this note was brought up to date. In short: Phases 1 and 2 shipped everything tagged P1 and P2 except the items the roadmap lists as deferred (OS file associations, next and previous NC event) or cut (a global viewer mode, an in-app user guide); the P3 items are Phase 4: split view is built (P4e, see [Split view](#split-view)); bookmark names and panel, block range, insert and append file, printing, auto-space and the automatic block number are built (P4c, see the sections below and [Editing comfort](../user/editing.md)); find files in folders is not built.
 
 ## What Monaco gives us
 
@@ -101,7 +101,7 @@ New files use the encoding and line ending from the profile, with ASCII and CRLF
 ### Insert file and append file
 `P2 · S · Core`
 
-**Status:** not built (deferred to Phase 4).
+**Status:** built in P4c (P4.14b), described in the user guide: [Insert File and Append File](../user/editing.md#insert-file-and-append-file). Insert goes before the cursor's line in column 1 with no selection, else after it; after a program end it goes ahead and warns; Klartext renumbers the inserted blocks and the blocks below in the same edit (at most 5,000), every other dialect keeps the numbers. A block is never split from its continuation.
 
 Insert the content of another file at the cursor, or at the end of the document. Line endings are normalized to the document's, and the insert is one undo step. When appending after a program-end marker (`M30`, `%`, `END PGM`), warn because the appended code would never run. For Heidenhain, offer to renumber afterwards.
 
@@ -136,7 +136,7 @@ A file that is data rather than a program (more than 10 % NUL bytes between the 
 ### Printing
 `P3 · M · Core`
 
-**Status:** not built (Phase 4).
+**Status:** built in P4c (P4.15): **Print** (`Cmd/Ctrl+P`) and **Export as HTML**, see [Print and Export as HTML](../user/editing.md#print-and-export-as-html). Portrait pages cut for the smaller of A4 and Letter; the font size is a field of the form, not of the print dialog; at most 20,000 lines to print and 100,000 to export. Export as HTML is the fallback until the owner's check of the print dialog on each platform is done.
 
 Print the document or the selection. Render a print-only HTML view with syntax colors (or monochrome), optional line numbers, and a header with file name, date and page number. Use the webview's print dialog, which also saves PDF on most platforms. Margins and font size are set in the print dialog. Multi-column layouts and raw line-printer output are not planned.
 
@@ -186,7 +186,7 @@ The existing panel lists tool calls and comments. Changes:
 ### Bookmarks
 `P1 · M · Core` (toggle, next/previous) · `P2 · S · Core` (names, list panel, bookmark all matches, persistence)
 
-**Status:** toggle, next and previous shipped in Phase 1; persistence per file in M7; names, the bookmark panel and *bookmark all matches* are deferred to Phase 4.
+**Status:** toggle, next and previous shipped in Phase 1; persistence per file in M7; names, the bookmark panel and *Bookmark All Matches* built in P4c (P4.13), see [Bookmarks](../user/editing.md#bookmarks). A document keeps at most 200 bookmarks; a deleted line's bookmark and name move to the next line.
 
 - Toggle a bookmark on the current line (shortcut). An optional variant asks for a name.
 - Bookmarks are Monaco decorations with a gutter icon, so they move with edits.
@@ -246,7 +246,7 @@ The editor uses ECMAScript regular expressions (Monaco), and scripts use Python 
 ### Select or delete a block range
 `P2 · S · Core`
 
-**Status:** not built (deferred to Phase 4).
+**Status:** built in P4c (P4.14a): [Select and Delete Block Range](../user/editing.md#select-and-delete-block-range). A block number that is in the program twice is refused with its lines named (no guess); a block that continues over several lines is taken whole.
 
 A dialog with from/to values, given as line numbers or block numbers, and an action (select or delete). The range is inclusive. If a block number does not exist, report it instead of guessing. The selection can then be copied, deleted, or passed to a script.
 
@@ -278,14 +278,14 @@ Backspace at the start of a line, and Delete at the end of a line, do not merge 
 ### Auto-space while typing
 `P3 · M · Core`
 
-**Status:** not built (Phase 4).
+**Status:** built in P4c (P4.12): [Auto Space](../user/editing.md#auto-space). Off by default; the profile member `editing.autoSpace` and the session switch **Auto Space** turn it on.
 
 When a letter that starts a new address word is typed directly after a number, a space is inserted first (`G1X` becomes `G1 X`). It is not active inside comments, strings, variable expressions or multi-letter keywords.
 
 ### Automatic block number on Enter
 `P3 · M · Core`
 
-**Status:** not built (Phase 4).
+**Status:** built in P4c (P4.12): [Automatic Block Number](../user/editing.md#automatic-block-number). Off by default; the profile member `editing.autoNumber` and the session switch turn it on. A line that continues a block is never numbered; Klartext renumbers the blocks below in the same edit, up to 5,000 lines.
 
 A new line gets the previous block number plus the profile's increment. A line inserted between two numbered lines gets a number between them. If there is no gap left, the line stays unnumbered and the status bar suggests renumbering. For Heidenhain, the following lines are renumbered automatically, because the numbering must stay consecutive.
 

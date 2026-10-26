@@ -52,6 +52,12 @@ export interface Settings {
   'assist.hover': boolean;
   'assist.completion': 'auto' | 'manual' | 'off';
   /**
+   * T214: whether Enter takes the highlighted suggestion while the suggestion list is open.
+   * Off: Enter always ends the block (an NC block ends with Enter, and the list is open for
+   * most of it); Tab takes the suggestion either way.
+   */
+  'assist.acceptOnEnter': boolean;
+  /**
    * Phase 3 (P3a prelude; P3.7): a coloured mark beside every line that moves, by how it
    * moves (rapid, straight, arc, thread, cycle), read from the modal state.
    */
@@ -130,6 +136,7 @@ export const DEFAULTS: Settings = freeze({
   'editor.rulers': freeze<number[]>([]),
   'assist.hover': true,
   'assist.completion': 'auto',
+  'assist.acceptOnEnter': false,
   'assist.motionColors': true,
   'files.recentLength': 15,
   'files.externalChange': 'reload',
@@ -233,6 +240,7 @@ export const SETTING_FIELDS: SettingFieldMeta[] = [
     type: 'choice',
     choices: choice('assist.completion', ['auto', 'manual', 'off']),
   }),
+  meta('assist.acceptOnEnter', 'assistance', { type: 'bool' }),
   meta('assist.motionColors', 'assistance', { type: 'bool' }),
 
   // Files

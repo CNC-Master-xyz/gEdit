@@ -222,7 +222,7 @@
       {
         "line": 27,
         "severity": "warning",
-        "message": "1 word, first Z2000 (line 27): the value depends on how the machine reads a number (calculator: 2000 mm; is-b: 2 mm; is-c: 0.2 mm). Not resolved; choose a machine for this document to read them.",
+        "message": "1 word, first Z2000 (line 27): the value depends on how the machine reads a number (calculator: 2000 mm; is-a: 20 mm; is-b: 2 mm; is-c: 0.2 mm). Not resolved; choose a machine for this document to read them.",
         "reason": "machine-dependent"
       },
       {

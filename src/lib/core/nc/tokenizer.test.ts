@@ -381,9 +381,9 @@ describe('the dialect with separated words', () => {
   });
 
   it('reads a word it cannot split as one unknown token, not as letter soup', () => {
-    expect(tokens('26 SEL TABLE TNC:\\SUB1.TAB').at(-1)).toMatchObject({ kind: 'unknown', text: 'TNC:\\SUB1.TAB' });
     expect(tokens('5 L H01_3TOOLS')[2]).toMatchObject({ kind: 'unknown', text: 'H01_3TOOLS' });
-    // M12.5: behind `CALL PGM` and `BEGIN PGM` the same text is a `text` token (`syntax.freeText`).
+    // M12.5: behind `CALL PGM`, `SEL PGM`/`SEL TABLE`/… (P4c NC-7) and `BEGIN PGM` the text is a `text` token (`syntax.freeText`).
+    expect(tokens('26 SEL TABLE TNC:\\SUB1.TAB').at(-1)).toMatchObject({ kind: 'text', text: 'TNC:\\SUB1.TAB' });
     expect(tokens('26 CALL PGM TNC:\\SUB1.H').at(-1)).toMatchObject({ kind: 'text', text: 'TNC:\\SUB1.H' });
     expect(tokens('0 BEGIN PGM H01_3TOOLS MM')[2]).toMatchObject({ kind: 'text', text: 'H01_3TOOLS' });
   });

@@ -1,0 +1,29 @@
+{
+  "message": "Nothing was changed: 4 blocks cannot be written out as plain moves: 4 cycles missing a value. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "error",
+      "message": "N40 CYCLE81(10,0,-2,-5): a value the cycle needs is not written and has no default (a set-up clearance below 0).",
+      "reason": "value-missing"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N60 CYCLE81(-1,0,2,,5): a value the cycle needs is not written and has no default (a return level that is not above the surface).",
+      "reason": "value-missing"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "N80 CYCLE81(10,5,2,,0): a value the cycle needs is not written and has no default (a depth of 0 and no other depth).",
+      "reason": "value-missing"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "N100 CYCLE86(10,0,1,-12,,1,,-1,0,0,45): a value the cycle needs is not written and has no default (the spindle direction SDIR).",
+      "reason": "value-missing"
+    }
+  ]
+}

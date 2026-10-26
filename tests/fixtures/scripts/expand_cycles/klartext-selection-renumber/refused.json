@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be written out as plain moves: 1 block the renumbering would reach below the selection. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 16,
+      "severity": "error",
+      "message": "6 L X+10 Y+10 R0 FMAX M99: the program numbers every block, and the blocks below the selection would have to be renumbered.",
+      "reason": "renumber-outside"
+    }
+  ]
+}

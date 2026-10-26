@@ -4,7 +4,8 @@
 // `OutlineIndex` caches the classification of each line and splices that cache on a
 // content change, so a one-line edit in a 300k-line program costs one line of work plus a
 // linear aggregation, not a full re-parse. There is no worker: the first build runs after
-// the first render, in 20k-line chunks (`OutlineService`, `app/outlineService.ts`).
+// the first render, in short slices (`OutlineService`, `app/outlineService.ts`): the lines are
+// read in runs (`applyChange`), and the tree is made in runs too (`aggregateSome`, T136).
 //
 // Two passes, and the split between them is the whole design:
 //
@@ -25,7 +26,9 @@
 //     the names in its match as the real line writes them.
 //   - A tool change outranks the `outline` rules: it is the spine of the map.
 //   - `toolCall.toolFrom: 'same-line-or-last'` takes the tool from the same line or from
-//     the last `T` word before it; a bare `T` word is not a tool change.
+//     the last `T` word before it; a bare `T` word is not a tool change. `'last-before'`
+//     (D3-4c) takes it from the last `T` word before the line only: a `T` on the tool line
+//     is the next tool.
 //   - The result is a two-level tree: an item inside a tool segment becomes a child of
 //     it. The plan names comments and sections; a `stop` or a `label` between two tool
 //     calls is inside that segment just as much, and leaving those at the top level
@@ -102,8 +105,10 @@ interface LineMark {
 
 /** The per-profile settings the two passes read, derived once. */
 interface OutlineSpec {
-  /** `toolCall.toolFrom === 'same-line-or-last'`. */
+  /** `toolCall.toolFrom` is `'same-line-or-last'` or `'last-before'`: every line's `T` word is read. */
   toolFromLast: boolean;
+  /** `toolCall.toolFrom === 'last-before'` (D3-4c): the tool line loads the `T` written before it. */
+  toolFromBefore: boolean;
   description: 'auto' | 'above' | 'below' | 'trailing';
   /** A description that matches is decoration (`------`), not a description. */
   commentFilter: RegExp | null;
@@ -133,7 +138,8 @@ function buildSpec(cp: CompiledProfile): OutlineSpec {
     .filter((marker) => typeof marker?.start === 'string' && marker.start !== '')
     .map((marker) => ({ start: marker.start, end: typeof marker.end === 'string' && marker.end !== '' ? marker.end : null }));
   return {
-    toolFromLast: cp.profile.toolCall?.toolFrom === 'same-line-or-last',
+    toolFromLast: cp.profile.toolCall?.toolFrom === 'same-line-or-last' || cp.profile.toolCall?.toolFrom === 'last-before',
+    toolFromBefore: cp.profile.toolCall?.toolFrom === 'last-before',
     description: toolList?.description ?? 'auto',
     commentFilter: cp.re.commentFilter ?? null,
     dropLeadingZeros: toolList?.dropLeadingZeros === true,
@@ -302,7 +308,9 @@ function classify(line: string, cp: CompiledProfile, spec: OutlineSpec): LineMar
   // the first tab switch away from that program miss its 100 ms (`m1-perf-open`).
   const triggered = cp.re.toolTrigger.test(masked);
   const ignoredTrigger = triggered && (cp.re.toolIgnore?.test(masked) ?? false);
-  const isTool = triggered && !ignoredTrigger;
+  // D3-4c `last-before`: the ignore rule only marks the line's `T` as an unload (`M6 T0`
+  // loads the tool selected before it and preselects the unload).
+  const isTool = triggered && (!ignoredTrigger || spec.toolFromBefore);
   let tool: string | null = null;
   let axis = false;
   if (isTool || spec.toolFromLast) {
@@ -446,6 +454,8 @@ export class OutlineIndex {
   /** The last aggregation, dropped by every change. */
   private tree: OutlineItem[] | null = null;
   private tools: number[] | null = null;
+  /** An aggregation that `aggregateSome` has started and not finished (T136), or null. */
+  private agg: Aggregation | null = null;
 
   constructor(cp: CompiledProfile) {
     this.cp = cp;
@@ -457,7 +467,7 @@ export class OutlineIndex {
     const marks: (LineMark | null)[] = new Array<LineMark | null>(lines.length);
     for (let i = 0; i < lines.length; i++) marks[i] = classify(lines[i], this.cp, this.spec);
     this.marks = marks;
-    this.invalidate();
+    this.invalidate(0);
   }
 
   /**
@@ -474,7 +484,7 @@ export class OutlineIndex {
 
     if (removed === newLines.length) {
       for (let i = 0; i < newLines.length; i++) this.marks[start + i] = classify(newLines[i], this.cp, this.spec);
-      this.invalidate();
+      this.invalidate(start);
       return;
     }
 
@@ -491,7 +501,7 @@ export class OutlineIndex {
       for (const mark of fresh) this.marks.push(mark);
       for (const mark of tail) this.marks.push(mark);
     }
-    this.invalidate();
+    this.invalidate(start);
   }
 
   /** The two-level tree, in line order. */
@@ -526,9 +536,18 @@ export class OutlineIndex {
     return best;
   }
 
-  private invalidate(): void {
+  /**
+   * Drops the finished aggregation, and the unfinished one too unless the change cannot have
+   * reached it: `start` is the first changed mark (0-based). The walk has read the marks
+   * before `agg.at`, and a tool call among them looked up to `LOOK_BELOW` marks further down
+   * for its description, so a change from `agg.at + LOOK_BELOW` on is below everything the
+   * walk has seen and it carries on (T136: typing during the last stage of the first build
+   * does not send it back to the first line).
+   */
+  private invalidate(start: number): void {
     this.tree = null;
     this.tools = null;
+    if (this.agg !== null && start < this.agg.at + LOOK_BELOW) this.agg = null;
   }
 
   /**
@@ -579,24 +598,54 @@ export class OutlineIndex {
   }
 
   /**
-   * Walks the marks once and builds the tree. Everything that needs more than one line
-   * happens here, so `classify` can stay a pure per-line function.
+   * Walks the marks and builds the tree. Everything that needs more than one line happens
+   * here, so `classify` can stay a pure per-line function. One walk: `aggregateSome` stops
+   * after a few marks and carries on later (T136), and this is the same walk without the
+   * stops, so a tree built in steps is the tree built at once.
    */
   private aggregate(): void {
-    const items: OutlineItem[] = [];
-    const tools: number[] = [];
-    /** The open tool segment, so a comment below it becomes its child. */
-    let segment: OutlineItem | null = null;
-    /** The open program, so its `endLine` can be closed by the next one. */
-    let program: OutlineItem | null = null;
-    /** The open section, closed by the next section, tool or program. */
-    let section: OutlineItem | null = null;
-    /** The last `T` word seen, for `toolFrom: 'same-line-or-last'`. */
-    let lastTool: string | null = null;
-    /** That `T` word unloads the spindle (`T0`, `LineMark.unload`). */
-    let lastUnload = false;
-    /** Tool number → text of the header tool list, filled as the walk passes it. */
-    const fromList = new Map<string, string>();
+    const walk = this.agg ?? newAggregation();
+    this.agg = walk;
+    this.walk(walk, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+  }
+
+  /**
+   * Advances the aggregation by at most `maxLines` lines or `maxMarks` marks that say
+   * something, whichever comes first, and answers true when the tree is there. The first
+   * build of a large program calls this in slices (`outlineService.ts`) instead of
+   * aggregating its 300,000 lines in the slice that read the last one: with 30,000 rows that
+   * was a stall of 100 to 200 ms on its own. A change that reaches what the walk has already
+   * read starts it again (`invalidate`); one below it does not.
+   */
+  aggregateSome(maxLines: number, maxMarks: number): boolean {
+    if (this.tree !== null) return true;
+    const walk = this.agg ?? newAggregation();
+    this.agg = walk;
+    this.walk(walk, maxLines, maxMarks);
+    return this.tree !== null;
+  }
+
+  /** True while an aggregation has been started and not finished. */
+  get aggregating(): boolean {
+    return this.agg !== null;
+  }
+
+  /**
+   * The aggregation's loop, from `walk.at`. It stops at the end of the marks (and then
+   * closes the open segments and publishes the tree), after `maxLines` lines, or in front
+   * of the mark that would be the `maxMarks + 1`-th that says something.
+   */
+  private walk(walk: Aggregation, maxLines: number, maxMarks: number): void {
+    const marks = this.marks;
+    const spec = this.spec;
+    const items = walk.items;
+    const tools = walk.tools;
+    const fromList = walk.fromList;
+    let segment = walk.segment;
+    let program = walk.program;
+    let section = walk.section;
+    let lastTool = walk.lastTool;
+    let lastUnload = walk.lastUnload;
 
     const closeSection = (before: number): void => {
       if (section !== null) section.endLine = before - 1;
@@ -608,14 +657,20 @@ export class OutlineIndex {
       segment = null;
     };
 
-    for (let i = 0; i < this.marks.length; i++) {
-      const mark = this.marks[i];
+    const end = Math.min(marks.length, walk.at + maxLines);
+    let said = 0;
+    let i = walk.at;
+    for (; i < end; i++) {
+      const mark = marks[i];
       if (mark === null) continue;
+      if (said >= maxMarks) break;
+      said++;
       const line = i + 1;
 
       // The tool in the spindle before this line, for `isSpeedOnlyCall` — a Klartext
       // `TOOL CALL` that repeats it without an axis is a speed change, not a new call.
       const previousTool = lastTool;
+      const previousUnload = lastUnload;
       if (mark.tool !== null) {
         lastTool = mark.tool;
         lastUnload = mark.unload;
@@ -631,11 +686,13 @@ export class OutlineIndex {
 
       // `T0` preselected, then `M6` alone: the tool change loads the pending `T0`, so it
       // unloads the spindle and is no tool change, as `M6 T0` on one line is not.
-      const unloads = mark.tool === null && this.spec.toolFromLast && lastUnload;
-      if (mark.isTool && !unloads && !isSpeedOnlyCall(mark, previousTool, this.spec)) {
+      // D3-4c `last-before`: the change loads the `T` written before its line, whatever the
+      // line writes itself (that one is the next tool).
+      const unloads = spec.toolFromBefore ? previousTool !== null && previousUnload : mark.tool === null && spec.toolFromLast && lastUnload;
+      if (mark.isTool && !unloads && !isSpeedOnlyCall(mark, previousTool, spec)) {
         closeSegment(line);
-        const tool = mark.tool ?? (this.spec.toolFromLast ? lastTool : null);
-        const label = tool === null ? '' : toolLabel(tool, this.spec);
+        const tool = spec.toolFromBefore ? previousTool : (mark.tool ?? (spec.toolFromLast ? lastTool : null));
+        const label = tool === null ? '' : toolLabel(tool, spec);
         const description = this.describeTool(line, tool, fromList);
         const text = [label, description].filter((part) => part !== null && part !== '').join(LABEL_SEPARATOR);
         const item: OutlineItem = { kind: 'tool', line, text: text !== '' ? text : mark.text };
@@ -670,11 +727,71 @@ export class OutlineIndex {
       else items.push(item);
     }
 
-    const last = this.marks.length;
+    walk.at = i;
+    walk.segment = segment;
+    walk.program = program;
+    walk.section = section;
+    walk.lastTool = lastTool;
+    walk.lastUnload = lastUnload;
+    if (i < marks.length) return;
+
+    const last = marks.length;
     closeSegment(last + 1);
     if (program !== null) program.endLine = last;
 
     this.tree = items;
     this.tools = tools;
+    this.agg = null;
   }
+}
+
+/** Where an aggregation stands between two steps (`OutlineIndex.aggregateSome`). */
+interface Aggregation {
+  /** The first mark (0-based) it has not read. */
+  at: number;
+  items: OutlineItem[];
+  tools: number[];
+  /** The open tool segment, so a comment below it becomes its child. */
+  segment: OutlineItem | null;
+  /** The open program, so its `endLine` can be closed by the next one. */
+  program: OutlineItem | null;
+  /** The open section, closed by the next section, tool or program. */
+  section: OutlineItem | null;
+  /** The last `T` word seen, for `toolFrom: 'same-line-or-last'` and `'last-before'`. */
+  lastTool: string | null;
+  /** That `T` word unloads the spindle (`T0`, `LineMark.unload`). */
+  lastUnload: boolean;
+  /** Tool number → text of the header tool list, filled as the walk passes it. */
+  fromList: Map<string, string>;
+}
+
+function newAggregation(): Aggregation {
+  return { at: 0, items: [], tools: [], segment: null, program: null, section: null, lastTool: null, lastUnload: false, fromList: new Map() };
+}
+
+/**
+ * The parts of a compiled profile the index is built from: the comment, program and tool
+ * rules, the tool list settings and the syntax the line mask and the tokenizer read. Two
+ * profiles with the same reading give the same index for the same text, whatever else
+ * differs (a machine's power-on state, the code database, the name).
+ */
+const READINGS = new WeakMap<CompiledProfile, string>();
+
+function readingOf(cp: CompiledProfile): string {
+  let found = READINGS.get(cp);
+  if (found === undefined) {
+    const p = cp.profile;
+    found = JSON.stringify([cp.flags, cp.keywords, p.syntax, p.toolCall, p.toolList, p.outline]);
+    READINGS.set(cp, found);
+  }
+  return found;
+}
+
+/**
+ * True when an index built with `a` is the index `b` would build (T136): a machine switch that
+ * only changes what the modal state starts from, or a reload that made an equal profile,
+ * leaves the program map as it is and needs no new first build.
+ */
+export function sameOutlineReading(a: CompiledProfile, b: CompiledProfile): boolean {
+  return a === b || readingOf(a) === readingOf(b);
 }

@@ -4,17 +4,24 @@
   A `banner` panel, so `AppShell` renders it above the editor while the channel view is open and
   not at all otherwise. It says how the view was made (one program with channel sections, or one
   file per channel), which channels are not shown, how many lines are in no channel (sections only)
-  and how many of the waits are lined up; its button closes the view.
+  and how many of the waits are lined up, have no partner, or name a channel the machine does not
+  have; its button closes the view.
+
+  The bar itself is not a live region: its numbers change with nearly every edit. A hidden live
+  region (`channel-view-announce`, polite) carries the few changes worth hearing (v1.2.0 T031,
+  `channelBarAnnouncement.ts`).
 
   Test id `channel-view-bar` with `data-layout` (`single-file` | `multi-file`), `data-not-shown`
-  (the channel ids, comma-separated), `data-outside`, `data-matched` and `data-unmatched`; the
-  close button has `data-action="close"`.
+  (the channel ids, comma-separated), `data-outside`, `data-matched`, `data-unmatched` (waits with no
+  partner) and `data-unknown` (waits naming a channel the machine does not have); the close button has
+  `data-action="close"`.
 -->
 <script lang="ts">
   import X from 'lucide-svelte/icons/x';
   import { channelPanes } from '$lib/monaco/channelPanes';
   import { channels } from '$lib/stores/channels';
   import { t } from '$lib/i18n';
+  import { announcement } from './channelBarAnnouncement';
 
   const view = channelPanes.state;
 
@@ -25,8 +32,29 @@
   }
 
   const notShown = $derived($view.notShown.map((id) => nameOf($view.docId, id)));
-  const total = $derived($view.marks.matched + $view.marks.unmatched);
+  const total = $derived($view.marks.matched + $view.marks.unmatched + $view.marks.unknown);
+
+  // The live region's words change only when a count that matters changes. `hadProblem` is the memory
+  // of the last answer; it is a plain variable, not state, and it is written only in the effect below
+  // (never inside a `$derived`, which may run when it is read and as often as it likes). The region
+  // itself sits outside `{#if $view.open}` and is empty while the view is closed, so the first words
+  // at opening are an insertion into a region the screen reader already knows (WX-CODE-3).
+  let hadProblem = false;
+  const facts = () => ({ ...$view.marks, notShown: $view.notShown.map((id) => nameOf($view.docId, id)) });
+  let said = $state($view.open ? announcement(facts(), false).text : '');
+  $effect.pre(() => {
+    if (!$view.open) {
+      hadProblem = false;
+      said = '';
+      return;
+    }
+    const answer = announcement(facts(), hadProblem);
+    hadProblem = answer.problem;
+    said = answer.text;
+  });
 </script>
+
+<span class="sr-only" role="status" aria-live="polite" data-testid="channel-view-announce">{$view.open ? said : ''}</span>
 
 {#if $view.open}
   <div
@@ -37,13 +65,14 @@
     data-outside={$view.outsideLines}
     data-matched={$view.marks.matched}
     data-unmatched={$view.marks.unmatched}
-    role="status"
+    data-unknown={$view.marks.unknown}
+    role="group"
     aria-label={t('channelPanes.bar.label')}
   >
     <span class="part layout">{$view.layout === 'multi-file' ? t('channelPanes.bar.layoutFiles') : t('channelPanes.bar.layoutSections')}</span>
     {#if total > 0}
-      <span class="part" class:warn={$view.marks.unmatched > 0} data-part="marks">
-        {t('channelPanes.bar.marks', { matched: $view.marks.matched, total })}{#if $view.marks.unmatched > 0}, {t('channelPanes.bar.unmatched', { count: $view.marks.unmatched })}{/if}
+      <span class="part" class:warn={$view.marks.unmatched + $view.marks.unknown > 0} data-part="marks">
+        {t('channelPanes.bar.marks', { matched: $view.marks.matched, total })}{#if $view.marks.unmatched > 0}, {t('channelPanes.bar.unmatched', { count: $view.marks.unmatched })}{/if}{#if $view.marks.unknown > 0}, {t('channelPanes.bar.unknown', { count: $view.marks.unknown })}{/if}
       </span>
     {/if}
     {#if notShown.length > 0}
@@ -86,6 +115,14 @@
   }
   .layout {
     color: var(--text-muted);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .warn {
     color: var(--warning);

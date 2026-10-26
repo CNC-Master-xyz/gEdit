@@ -11,11 +11,12 @@
 // to .perf/ (gitignored) by default.
 //
 // M8 (P8): the source of the two turning dialects is written out below rather than read
-// from `tests/fixtures/nc/`, because the prelude registers the profiles before the
-// content work packages write their fixtures. Both seeds carry the `WRITTEN FOR GEDIT`
-// marker of every other program here. When WP8.3 and WP8.5 have their fixtures in, the
-// `program` member of a dialect can be swapped for a `source` path like the two older
-// dialects use, and nothing else changes.
+// from `tests/fixtures/nc/`: a fixture program carries goldens (detection, outline, modal),
+// and a seed that only exists to be repeated should not need them. Both seeds carry the
+// `WRITTEN FOR GEDIT` marker of every other program here. They cannot drift from what they
+// imitate unnoticed (T208): `tests/unit/genLarge.test.ts` has the shipped profiles detect
+// what they generate and holds the harness's port of this module
+// (`tests/runtime/scenarios/m8-common.js`, `turningProgram`) to the same bytes.
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';

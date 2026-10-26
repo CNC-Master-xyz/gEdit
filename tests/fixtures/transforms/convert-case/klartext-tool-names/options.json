@@ -1,1 +1,7 @@
-{ "case": "upper" }
+{
+  "note": "Klartext, to upper case: the program name and the quoted tool name keep their case.",
+  "profile": "heidenhain-klartext",
+  "options": {
+    "case": "upper"
+  }
+}

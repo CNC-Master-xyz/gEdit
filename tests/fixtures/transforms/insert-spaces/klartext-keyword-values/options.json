@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Klartext: a keyword value such as REP5 is not split into REP 5, because the dialect already separates its words (G8 M4).",
+  "profile": "heidenhain-klartext",
+  "options": {}
+}

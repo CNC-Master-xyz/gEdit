@@ -1,0 +1,39 @@
+{
+  "title": "Program checks",
+  "columns": [
+    {
+      "key": "line",
+      "label": "Line"
+    },
+    {
+      "key": "check",
+      "label": "Check"
+    },
+    {
+      "key": "severity",
+      "label": "Severity"
+    },
+    {
+      "key": "message",
+      "label": "Finding"
+    }
+  ],
+  "rows": [
+    {
+      "line": 5,
+      "check": "Spindle speed limit",
+      "checkId": "speedLimit",
+      "severity": "warning",
+      "message": "S12000 is above the top speed of this machine, 10000 rpm"
+    },
+    {
+      "line": 7,
+      "check": "Travel",
+      "checkId": "travelLimit",
+      "severity": "error",
+      "message": "Z-700 is outside the travel of this machine, Z -500 to 0 mm (in machine coordinates, M91)"
+    }
+  ],
+  "message": "2 findings in 2 checks. Machine 'Mill 2'.",
+  "findings": []
+}

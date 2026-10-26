@@ -1,5 +1,5 @@
 {
-  "note": "G8 M6. A block may write its words in any order, so `P2000 M98 Q50` is the same subprogram call as `M98 P2000 Q50`: it starts program 2000 at THAT program's N50, which this file cannot renumber. The guard only looked to the right of M98, so the P in front of it was not seen and the Q was rewritten with the caller's own new number. It is reported and kept now, while the plain local call on the next line is still followed.",
+  "note": "G8 M6. A block may write its words in any order, so `P2000 M98 Q50` is the same subprogram call as `M98 P2000 Q50`: it starts program 2000 at THAT program's N50 (program: called, plan 6.6 rule 8), which this file does not hold and which stays report-only (the owner, 2026-10-19). The guard only looked to the right of M98, so the P in front of it was not seen and the Q was rewritten with the caller's own new number. It is reported and kept now, while the plain local call on the next line (no P and no program name) is still followed.",
   "profile": "fanuc-lathe",
   "options": {},
   "expect": {

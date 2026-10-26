@@ -196,7 +196,7 @@ under a Z shift has nothing to change and is not listed.
 | `cycle-position` | the cycle's entry has a parameter with role `'other'` (`CYCL CALL POS`, `CYCL CALL PAT`, `CYCLE800`) | `position_of` |
 | `cycle-mode` | a `'mode'` parameter written with a value other than empty or `0` (`_AMODE`, `_DMODE`, `_GMODE`, `_AXN`); (NCR-1) a block that writes a cycle written as a word and an arc code (`G2 G81 …`) | `position_of`, `sets.path` |
 | `cycle-plane` | a `'tool-axis'` parameter is written (or in force) while the plane is not `XY`: the tool axis is then not certain | modal `plane` (rules of §7.4, rule 15 for Klartext) |
-| `cycle-expression` | a `'tool-axis'` parameter written as a variable or an expression (`Q203=Q10`, `RFP=R1`) while the run moves the tool axis; also (WP10.4) an axis word of a chosen address in a cycle block written as one (`X30. Y30. Z#101` under `G83`) | the token |
+| `cycle-expression` | a `'tool-axis'` parameter written as a variable or an expression (`Q203=Q10`, `RFP=R1`) while the run moves the tool axis; also (WP10.4) an axis word of a chosen address in a cycle block written as one (`X30. Y30. Z#101` under `G83`); also (manual check D5-1) a coordinate of a chosen axis that belongs to a code that is no arc (`CodeParam.axis`: the change points `XA=`/`ZA=` of an Okuma LAP `G84`) written as one, or another word of its block that cannot be changed while it is | the token |
 | `cycle-unresolved` | (WP10.4) a position of a cycle block that the run would move has no resolved value (a point-less `R2` with no machine chosen): the cycle cannot be moved in one piece | `resolve_value` |
 | `cycle-empty` | (v1.2.0, NCR-9b) a shift (add or subtract) of the tool axis and a call (`CYCLE81(10,,2,-10)`) that leaves a `'tool-axis'` argument empty or out, which the control reads as 0, while its `twin` (`CodeParam.twin`: `DPR` for `DP`, `FDPR` for `FDEP`) is not written either; with the positions under its `MCALL`. A multiply or divide keeps 0 at 0 | `position_of`, `CodeParam.twin` |
 | `cycle-level-outside` | (v1.2.0, D4) a shift (add or subtract) of the tool axis on a selection, and a cycle written as a word (`G81`) that starts in it while the tool axis still stands at the level of the lines above (they wrote it, and no block of the selection before the cycle has a tool-axis word the run moves): the cycle moves to its holes at that unmoved level and, in `G98`, returns to it. `G98` and `G99` are no data, so both refuse; the blocks of the cycle with it | `sets.cycle`, `Run.level_above`, `Run.level_inside` |
@@ -209,7 +209,7 @@ under a Z shift has nothing to change and is not listed.
 | `reason` | When |
 |---|---|
 | `unreadable` | (M13 review, NC-5; **`severity: "warning"`**, the block still goes to the old position) the address of a chosen word stands alone, followed by a character no control reads: `Z–5.` with an en dash (U+2013) or a minus sign (U+2212) pasted for `-`. The finding names the character; the summary counts "words that cannot be read" |
-| `data` | a code whose axis words are data (`axisWords: 'data'` or `wordsAreData`: `G92`, `G52`, `G10`, `CYCL DEF 7`, `TRANS`) — its words are values, not positions. The pole (`pole: 'set'`) is not: its words in the plane are positions. Also (P4a review, NC-16) a reviewed `'none'` parameter of the cycle in its block that may be a length: the `R` of the Fanuc lathe's `G74`–`G76`; and (v1.2, T009) the taper `R` of a single pass (`lengthAlong` on the motion code in force) |
+| `data` | a code whose axis words are data (`axisWords: 'data'` or `wordsAreData`: `G92`, `G52`, `G10`, `CYCL DEF 7`, `TRANS`) — its words are values, not positions. The pole (`pole: 'set'`) is not: its words in the plane are positions. Also (P4a review, NC-16) a reviewed `'none'` parameter of the cycle in its block that may be a length: the `R` of the Fanuc lathe's `G74`–`G76`; and (v1.2, T009) the taper `R` of a single pass (`lengthAlong` on the motion code in force); and (manual check, review round) a word on an axis address that a code of its block or the motion code in force declares as no position (`position: 'none'`): the phase shift `C` of the Okuma `G31`-`G33` |
 | `incremental` | the distance mode is incremental (`G91`), or the address is an incremental twin (`addresses.incremental`, R6's `U`/`W` choice), or a Klartext `I` prefix (`IZ`) |
 | `expression` | a variable or an `=` expression (Okuma `X=V1+2`, Sinumerik `X=R1`); a value function around a plain number is read (M10 review): `Z=AC(3.25)` is an absolute position whatever the distance mode, `Z=IC(2)` an incremental distance (`incremental` on add and subtract, scaled on multiply and divide) |
 | `machine-dependent` | the word has no resolved value (`resolve_value` is `None`), which includes every machine-dependent word while no machine is chosen: "the reading depends on the machine; choose a machine" |
@@ -220,6 +220,16 @@ under a Z shift has nothing to change and is not listed.
 `incremental` also covers a distance mode that is **not known** (no code set it before the
 block: a Fanuc or Sinumerik program that never writes `G90`): adding to an incremental word
 adds the offset twice, so a word is moved only while the mode is known to be absolute.
+This holds for **position words only** (manual check D4-3): a length or an angle (the axes,
+their twins, the arc centres, `R`, the cycle positions, a coordinate `CodeParam.axis`
+names), and a word without a number class whose address is a position address. A feed, a
+dwell, a count or a number of increments means the same in either mode, so `F200` + 10 is
+`F210` under `G90`, under `G91` and with no `G90` written.
+
+A coordinate of an axis that belongs to a code that is no arc (`CodeParam.axis` on the
+change points `XA=`, `XB=`, `ZA=`, `ZB=` of an Okuma LAP `G84`) is moved with its axis like
+the `CIP` point, in the distance mode in force, also on a `$` line that writes no axis word
+(manual check D5-1).
 `machine-dependent` also covers a word with no number class on the profile (the Fanuc mill
 `Q` of `G83`), and a no-machine result that two presets would write differently.
 
@@ -231,11 +241,11 @@ adds the offset twice, so a word is moved only while the mode is known to be abs
 | `no-database` | `warning` | the context carries no code database: nothing is changed |
 | `unknown-code-note` | `warning` | (M10 review, NC-5) a code the database lacks, under the move letter, in a block with nothing the run would change (`G16` alone, before the database knew it): one row per code, at its first line, with the number of blocks. It may change how the blocks after it are read |
 
-### Notes (`severity: "info"`; the word **was** changed)
+### Notes (`severity: "info"`; the word **was** changed, or rounded back to itself)
 
 | `reason` | When |
 |---|---|
-| `rounded` | `write_back` rounded the result to a whole number of increments or units, half away from zero (`Z1000` + `0.0005` under IS-B → `Z1001`) |
+| `rounded` | `write_back` rounded the result to a whole number of increments or units, half away from zero (`Z1000` + `0.0005` under IS-B → `Z1001`). Also (manual check D4-5) a result that rounds **back** to the value as written: the word stays (`F200` + 0.01 under `G98` on a lathe), the note says so ("the change is smaller than this word's form can hold"), and the summary counts it as "rounded back to the value it is written with" instead of "Changed nothing" alone |
 
 ## Cycles are moved in one piece (WP10.4)
 

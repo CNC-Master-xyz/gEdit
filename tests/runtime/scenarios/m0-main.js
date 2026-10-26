@@ -220,13 +220,17 @@ scenario('m0-main', { timeout: 180 }, async (h) => {
     const durationMs = Math.round(performance.now() - t0)
     running = false
     await pinger
-    return { label, durationMs, frames, maxPingMs: Math.max(...pings), value }
+    return { label, durationMs, frames, pings: pings.length, maxPingMs: Math.max(...pings), value }
   }
   const blocked = await probe('main thread blocked for 2 s', () => h.invoke('h_block_main_sync', { ms: 2000 }))
   const script = await probe('c_sleep.py (2 s)', () => runById('extra0:c_sleep.py', ''))
+  // Counts, not a latency: a loaded runner stretches any "answered within 500 ms" and still answers and draws all the
+  // way through. A page that stays responsive answers about ten pings and draws about sixty frames a second while the
+  // script runs; a blocked main thread answers one or two in two seconds and draws none. The calibration run above
+  // says what "blocked" looks like on this machine.
   h.check(
     'a running script keeps the UI responsive',
-    script.value.ok && script.durationMs >= 1900 && script.maxPingMs < 500 && blocked.maxPingMs >= 1500,
+    script.value.ok && script.durationMs >= 1900 && script.pings >= 8 && script.frames >= 20 && blocked.pings <= 3 && blocked.maxPingMs >= 1500,
     { script, calibration: blocked },
   )
 
@@ -417,7 +421,7 @@ scenario('m0-main', { timeout: 180 }, async (h) => {
   await h.dialogs.queue('open', fanucTxt)
   await h.nativeKeys([{ key: 'o', mods: ['cmd'] }])
   await h.waitFor(async () => (await h.title()) === 'detect-fanuc.txt — gEdit')
-  await h.sleep(500)
+  await h.idle()
   h.check(
     'opening a file while another one is modified asks nothing and adds a tab',
     (await h.alert.visible()) === null &&
@@ -455,7 +459,8 @@ scenario('m0-main', { timeout: 180 }, async (h) => {
   const errorAlert = await h.alert.wait()
   h.check('a file that cannot be read is reported in a dialog', !!errorAlert && errorAlert.texts.some((t) => t.includes('does-not-exist.nc')), errorAlert)
   await h.alert.click('OK|Ok')
-  await h.sleep(300)
+  await h.waitFor(() => h.q('status-message', { error: '1' }), { timeout: 5000 })
+  await h.idle()
   h.check(
     'the failed open shows an error in the status bar and keeps the document',
     !!h.q('status-message', { error: '1' }) && (await h.title()) === '● h01-copy.h — gEdit',
@@ -472,7 +477,7 @@ scenario('m0-main', { timeout: 180 }, async (h) => {
   const closePrompt = await h.alert.wait()
   h.check('closing a modified buffer asks first', JSON.stringify(closePrompt?.buttons) === JSON.stringify(['Save', "Don't Save", 'Cancel']), closePrompt)
   await h.alert.click('Cancel')
-  await h.sleep(1500)
+  await h.idle()
   const state = await h.window.state()
   h.check('Cancel keeps the window open', state.exists && state.visible && (await h.title()) === '● h01-copy.h — gEdit', state)
 

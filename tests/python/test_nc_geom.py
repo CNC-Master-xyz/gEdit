@@ -916,8 +916,9 @@ class ReasonsCases:
     def test_every_reason_the_rules_raise_has_a_case(self) -> None:
         # The ones that are not a property of one block: the selection (the script's walk), the
         # arc check (the written program, ArcCheckTest) and the resolution (write_word,
-        # WriteBackCases).
-        elsewhere = {"selection-inside", "selection-mode", "arc-check", "resolution"}
+        # WriteBackCases). v1.2.0 manual-check fix round (D6-7): the increment after a shift
+        # needs the lines before the block, which the scripts' walk keeps (ManualCheckB5Test).
+        elsewhere = {"selection-inside", "selection-mode", "arc-check", "resolution", "shift-increment"}
         covered = {case[0] for case in self.CASES}
         self.assertEqual(set(_nc_geom.REASONS) - covered, elsewhere)
 
@@ -1837,3 +1838,382 @@ class FuzzOverRefusalTest(unittest.TestCase):
                 self.assertIn("ADISPOS=1", lines[1])
                 self.assertIn("ADIS=0.5", lines[2])
                 self.assertIn("CR=5", lines[4])
+
+
+class Fb2ToolDirectionTest(unittest.TestCase):
+    """v1.2.0 review round X, FB-2: under Fanuc `G43.5`, `G41.6` and `G42.6` I, J and K are the
+    tool direction, in the block that writes the code and in the blocks it governs. A turn or a
+    mirror of the path would have to turn it too, which gEdit does not do: those blocks are
+    refused (before FB-2 the `G43.5` block itself went through with its direction unturned).
+    A shift leaves the direction alone, as it should."""
+
+    TEXT = "\n".join([
+        "G90 G17 G21 G54 G0 X0. Y0.", "G43.5 X10. Y0. Z10. I1. J0. K1. H1", "G1 X10. Y5. I1. J0. K1. F500.",
+        "G49", "G41.6 X5. Y5. I0. J0. K1. D1", "G1 X10. I0. J1. K0.", "G40 G1 X20.",
+    ])
+
+    def test_a_turn_or_a_mirror_refuses_a_turned_tool_direction(self):
+        for script, params in (ROTATE90, MIRROR_X):
+            with self.subTest(script=script):
+                found = errors(run_geo(script, self.TEXT, "fanuc-gcode", params))
+                self.assertIn((2, "word-unknown"), found)
+                self.assertIn((3, "word-unknown"), found)
+                self.assertIn((6, "word-unknown"), found)
+                # I0. J0. points along the tool axis: a turn in the plane leaves it as it is.
+                self.assertNotIn((5, "word-unknown"), found)
+
+    def test_a_shift_leaves_the_tool_direction_alone(self):
+        result = run_geo("translate", self.TEXT, "fanuc-gcode", {"dx": 5, "dy": 0, "dz": 0})
+        self.assertEqual(errors(result), [])
+        self.assertEqual(result["text"].split("\n")[2], "G1 X15. Y5. I1. J0. K1. F500.")
+        self.assertEqual([f for f in result.get("findings", []) if f["reason"] == "word-left"], [])
+
+
+class ManualCheckB5Test(unittest.TestCase):
+    """v1.2.0 manual-check fix round, batch B5 (owner decisions D6-1, D6-5, D6-6, D6-7, D1-3 of
+    2026-10-25): what the Sinumerik and Klartext manuals say about frames, the swivel to the home
+    position, cycle 19 positioning the rotary axes itself and SD42440, through the scripts."""
+
+    SWIVEL_HOME = 'CYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)'
+
+    def test_d6_1_a_frame_along_the_tool_above_the_selection_refuses_the_shift(self):
+        # TOROT, TOFRAME, ROTS, AROTS, CROTS and PAROT turn the workpiece coordinate system;
+        # before D6-6 TOROT was a subprogram call, and nothing above the selection refused.
+        text = "G0 X10 Y10 Z5\nG1 X50 F100"
+        for code in ("TOROT", "TOROTX", "TOFRAME", "ROTS X30 Y45", "AROTS X10", "CROTS Y20", "PAROT"):
+            with self.subTest(code=code):
+                result = run_geo("translate", text, "sinumerik-mill", {"dx": 1, "dy": 2}, ["G90 G17 G71", "G0 X0 Y0 Z50", code])
+                self.assertEqual(result["text"], text)
+                self.assertEqual(errors(result), [(4, "frame"), (5, "frame")])
+        # ROT or TRANS alone clears the programmable frame, PAROTOF the alignment on the workpiece.
+        for code, end in (("TOROT", "TOROTOF"), ("ROTS X30", "TRANS"), ("PAROT", "PAROTOF")):
+            with self.subTest(code=code, end=end):
+                result = run_geo("translate", text, "sinumerik-mill", {"dx": 1, "dy": 2}, ["G90 G17 G71", "G0 X0 Y0 Z50", code, end])
+                self.assertEqual(errors(result), [])
+        # ROT alone ends it on the control too; gEdit waits for TOROTOF, the safe reading.
+        result = run_geo("translate", text, "sinumerik-mill", {"dx": 1, "dy": 2}, ["G90 G17 G71", "G0 X0 Y0 Z50", "TOROT", "ROT"])
+        self.assertEqual(errors(result), [(5, "frame"), (6, "frame")])
+
+    def test_d6_5_the_swivel_to_the_home_position_leaves_no_frame(self):
+        # The Siemens operating manual starts every program on a machine with swivelling by
+        # swivelling to the home position: a new swivel with every angle and reference point 0.
+        text = "G90 G17 G71\nT1 D1\nM6\nG54\n%s\nG0 X10 Y10 Z5\nG1 Z-1 F100\nX50\nM30"
+        for script, params in (("translate", {"dx": 1, "dy": 2}), ROTATE90, MIRROR_X):
+            with self.subTest(script=script):
+                found = errors(run_geo(script, text % self.SWIVEL_HOME, "sinumerik-mill", params))
+                self.assertEqual([r for r in found if r[1] == "frame"], [])
+        # The data set name "0" deselects the swivel whatever the angles say.
+        found = errors(run_geo("translate", text % 'CYCLE800(1,"0",0,57,0,0,0,0,30,0,0,0,0,1,0,1)', "sinumerik-mill", {"dx": 1, "dy": 2}))
+        self.assertEqual([r for r in found if r[1] == "frame"], [])
+        # An angle, a swivel on top of the active one (_ST ones digit 1) or a variable keep it.
+        for swivel in ('CYCLE800(1,"",0,57,0,0,0,0,30,0,0,0,0,1,0,1)', 'CYCLE800(1,"",1,57,0,0,0,0,0,0,0,0,0,1,0,1)', 'CYCLE800(1,"",0,57,0,0,0,0,R1,0,0,0,0,1,0,1)'):
+            with self.subTest(swivel=swivel):
+                found = errors(run_geo("translate", text % swivel, "sinumerik-mill", {"dx": 1, "dy": 2}))
+                self.assertIn((6, "frame"), found)
+
+    def test_d6_6_cycle_19_with_a_feed_turns_the_rotary_axes_itself(self):
+        # TNC 640 cycles manual (cycle 19): with a feed (and a set-up clearance) in 19.1 the
+        # machine positions the rotary axes; the reset afterwards leaves them where they went.
+        text = (
+            "BEGIN PGM P MM\nTOOL CALL 1 Z S5000\nL B+0 C+0 R0 FMAX\nCYCL DEF 19.0 WORKING PLANE\nCYCL DEF 19.1 B+45 F5000\n"
+            "CYCL DEF 19.0 WORKING PLANE\nCYCL DEF 19.1\nL X+10 Y+10 Z+5 R0 FMAX\nL Z-1 F100\nL X+50\nEND PGM P MM"
+        )
+        result = run_geo("translate", text, "heidenhain-klartext", {"dx": 1, "dy": 2})
+        self.assertEqual(result["text"], text)
+        self.assertIn((8, "rotary-turned"), errors(result))
+        # An absolute rotary word makes them known again.
+        again = text.replace("CYCL DEF 19.1\n", "CYCL DEF 19.1\nL B+0 C+0 R0 FMAX\n")
+        self.assertEqual([r for r in errors(run_geo("translate", again, "heidenhain-klartext", {"dx": 1, "dy": 2})) if r[1] == "rotary-turned"], [])
+
+    SD42440 = "G90 G17 G71\nG0 X0 Y0 Z50\n%s\nG91 G1 X5 F100\nG90 G1 X20 Y10\nG91 X5\nM30"
+
+    def test_d6_7_an_increment_after_a_shift_is_not_turned_or_mirrored(self):
+        # SD42440 at 1: the first incremental move of an axis after TRANS, ATRANS or a work offset
+        # code travels the change of the shift as well, which a turn or a mirror cannot follow.
+        for shift in ("TRANS X10", "ATRANS Y5", "G55", "TRANS"):
+            for script, params in (ROTATE90, MIRROR_X):
+                with self.subTest(shift=shift, script=script):
+                    result = run_geo(script, self.SD42440 % shift, "sinumerik-mill", params)
+                    found = errors(result)
+                    self.assertIn((4, "shift-increment"), found)
+                    message = [f["message"] for f in result["findings"] if f["reason"] == "shift-increment"][0]
+                    self.assertIn("SD42440", message)
+                    # Once X and Y are written absolutely, an increment is a plain increment.
+                    self.assertNotIn((6, "shift-increment"), found)
+        # A shift of the program moves every block alike: translate is not concerned.
+        found = errors(run_geo("translate", self.SD42440 % "G55", "sinumerik-mill", {"dx": 1, "dy": 2}))
+        self.assertNotIn((4, "shift-increment"), found)
+        # The same block in a selection below the shift is refused as the whole program is.
+        result = run_geo("rotate", "G91 G1 X5 F100\nG90 G1 X20 Y10", "sinumerik-mill", ROTATE90[1], ["G90 G17 G71", "G0 X0 Y0 Z50", "G55"])
+        self.assertIn((4, "shift-increment"), errors(result))
+        result = run_geo("rotate", "G91 G1 X5 F100\nG90 G1 X20 Y10", "sinumerik-mill", ROTATE90[1], ["G90 G17 G71", "G55", "G0 X0 Y0 Z50"])
+        self.assertNotIn((4, "shift-increment"), errors(result))
+        # A Fanuc increment after G55 moves by the increment only.
+        fanuc = "G90 G17 G21\nG0 X0. Y0. Z50.\nG55\nG91 G1 X5. F100.\nM30"
+        self.assertNotIn((4, "shift-increment"), errors(run_geo("rotate", fanuc, "fanuc-gcode", ROTATE90[1])))
+
+    def test_d1_3_cycle82_arguments_10_to_14_are_described_and_still_refused(self):
+        # The 2019 and 2020 programming manuals give CYCLE82 14 arguments; the last five
+        # (pre-drilling and drilling through) are described now, as modes: left out or 0 they
+        # are the cycle of nine arguments, any other value is refused as before.
+        context = helpers.effective_context("sinumerik-mill")
+        entry = next(e for e in context["codes"] if e.get("code") == "CYCLE82")
+        self.assertEqual([p["address"] for p in entry["params"]][9:], ["_VARI", "S_ZA", "S_FA", "S_ZD", "S_FD"])
+        base = "G90 G17 G71\nG0 X10 Y10 Z50\n%s\nM30"
+        for call in ("CYCLE82(10,0,2,-5,,1,0,0,0,10000,-2,50,0,0)", "CYCLE82(10,0,2,-5,,1,0,0,0,0,0,0,0,30)"):
+            with self.subTest(call=call):
+                result = run_geo("translate", base % call, "sinumerik-mill", {"dx": 1, "dy": 2})
+                self.assertIn((3, "cycle-not-reviewed"), errors(result))
+        for call in ("CYCLE82(10,0,2,-5,,1,0,0,0,0,0,0,0,0)", "CYCLE82(10,0,2,-5,,1,0,0,0,,,,,)"):
+            with self.subTest(call=call):
+                result = run_geo("translate", base % call, "sinumerik-mill", {"dx": 1, "dy": 2})
+                self.assertEqual(errors(result), [])
+
+    def test_d1_3_the_extents_expand_cycle82_only_with_the_five_at_0(self):
+        from tests.python import test_extents as ext
+
+        w = ext.walk("G17 G90 G0 X0 Y0 Z50\nCYCLE82(10,0,2,-5,,1,0,0,0,0,0,0,0,0)\nM30", "sinumerik-mill")
+        self.assertEqual(ext.extent(w, "Z"), ("-5", "50", 0))
+        w = ext.walk("G17 G90 G0 X0 Y0 Z50\nCYCLE82(10,0,2,-5,,1,0,0,0,10000,-2,50,0,0)\nM30", "sinumerik-mill")
+        self.assertNotEqual(ext.extent(w, "Z"), ("-5", "50", 0))
+
+
+class ManualCheckLapChangePointTest(unittest.TestCase):
+    """v1.2.0 manual-check fix round, D5-1 (with batch B3, which marks the Okuma LAP ``G84``
+    change points in ``codes/okuma.json``): a cycle parameter that is a coordinate of an axis
+    (``CodeParam.axis``: ``XA=``/``XB=`` of X, ``ZA=``/``ZB=`` of Z) moves with its axis under a
+    known absolute mode, as a diameter on a diameter axis, and is refused in incremental mode or
+    with the mode not known. The marks are set here if the database does not carry them yet."""
+
+    LAP = ["G90 G00 X100. Z5.", "G85 NAT01 D4. F0.3 U0.4 W0.2", "$ G84 ZA=-20.", "NAT01 G81", "G01 X40. Z0.", "Z-30.", "X80.", "G80", "G00 X200. Z100.", "M30"]
+
+    def run_translate(self, lines, params):
+        context = helpers.effective_context("okuma-osp", preset="okuma-1mm")
+        for entry in context["codes"]:
+            if entry.get("code") == "G84":
+                for param in entry.get("params") or []:
+                    if param["address"] in ("XA", "XB", "ZA", "ZB"):
+                        param.setdefault("axis", param["address"][0])
+        context["params"] = params
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(lines)}
+        out = helpers.run_script("translate.py", stdin="\n".join(lines), context=context)
+        if not out.ok:
+            raise AssertionError(out.stderr)
+        return out.json()
+
+    def test_a_z_shift_moves_za_with_the_contour(self):
+        report = self.run_translate(self.LAP, {"dz": -10})
+        lines = report["text"].split("\n")
+        self.assertEqual(lines[2], "$ G84 ZA=-30.")
+        self.assertEqual(lines[4], "G01 X40. Z-10.")
+        # Nothing about the line's `$`: it continues the block, it is no word gEdit left alone.
+        self.assertEqual(report.get("findings") or [], [])
+
+    def test_an_x_shift_moves_xa_as_a_diameter(self):
+        lines = [line.replace("ZA=-20.", "XA=60.") for line in self.LAP]
+        report = self.run_translate(lines, {"dx": 4})
+        self.assertEqual(report["text"].split("\n")[2], "$ G84 XA=64.")
+        self.assertEqual(report["text"].split("\n")[0], "G90 G00 X104. Z5.")
+
+    def test_incremental_mode_refuses_the_change_point(self):
+        lines = ["G91 G00 X0 Z0"] + self.LAP[1:]
+        report = self.run_translate(lines, {"dz": -10})
+        self.assertIn((3, "cycle-position"), [(f["line"], f["reason"]) for f in report.get("findings") or []])
+        self.assertEqual(report["text"].split("\n")[2], "$ G84 ZA=-20.")
+
+
+class ManualCheckB5PathTest(unittest.TestCase):
+    """v1.2.0 manual-check fix round, the `_nc_path` half of D6-5 and D6-6 (`turns_rotary`): the
+    swivel to the home position and a zero cycle 19 keep what was known about the rotary axes
+    (as T010 does for PLANE), and cycle 19 turns them only when its 19.1 writes F or ABST."""
+
+    def test_d6_5_the_swivel_to_the_home_position_keeps_the_rotary_axes(self):
+        text = 'G90 G17 G71\nG0 B0 C0\nCYCLE800(1,"",0,57,0,0,0,0,0,0,0,0,0,1,0,1)\nG0 X10 Y10 Z5\nG1 Z-1 F100\nX50\nM30'
+        for script, params in (("translate", {"dx": 1, "dy": 2}), ROTATE90, MIRROR_X):
+            with self.subTest(script=script):
+                self.assertEqual(errors(run_geo(script, text, "sinumerik-mill", params)), [])
+        # A swivel with an angle still turns them.
+        turned = text.replace("0,0,0,0,0,0,0,0,0,1,0,1", "0,0,0,0,30,0,0,0,0,1,0,1")
+        self.assertIn((8, "rotary-turned"), errors(run_geo("translate", turned.replace("X50\nM30", "X50\nCYCLE800()\nX60\nM30"), "sinumerik-mill", {"dx": 1, "dy": 2})))
+
+    def test_d6_6_cycle_19_turns_the_rotary_axes_only_with_a_feed_or_a_clearance(self):
+        head = "BEGIN PGM P MM\nTOOL CALL 1 Z S5000\nL B+0 C+0 R0 FMAX\nCYCL DEF 19.0 WORKING PLANE\n"
+        tail = "CYCL DEF 19.0 WORKING PLANE\nCYCL DEF 19.1\nL X+10 Y+10 Z+5 R0 FMAX\nL Z-1 F100\nL X+50\nEND PGM P MM"
+        for one, turned in (("CYCL DEF 19.1 B+45 F5000", True), ("CYCL DEF 19.1 B+45 ABST50", True), ("CYCL DEF 19.1 B+45", False)):
+            with self.subTest(block=one):
+                found = errors(run_geo("translate", head + one + "\n" + tail, "heidenhain-klartext", {"dx": 1, "dy": 2}))
+                self.assertEqual((8, "rotary-turned") in found, turned)
+        # All angles at 0 with a feed: no tilt, the axes keep what was known (T010).
+        text = head + "CYCL DEF 19.1 B+0 C+0 F5000\nL X+10 Y+10 Z+5 R0 FMAX\nL Z-1 F100\nL X+50\nEND PGM P MM"
+        self.assertEqual(errors(run_geo("translate", text, "heidenhain-klartext", {"dx": 1, "dy": 2})), [])
+
+
+def run_patched(script, text, context, params):
+    """One run of a geometry script on an inline program with a context made by the test."""
+    import json as _json
+
+    context = _json.loads(_json.dumps(context))
+    context["params"] = params
+    context["input"] = {"scope": "document", "startLine": 1, "endLine": len(text.split("\n"))}
+    out = helpers.run_script(script + ".py", stdin=text, context=context)
+    if not out.ok:
+        raise AssertionError(out.stderr)
+    return out.json()
+
+
+def source_profile(profile_id):
+    """A profile as the data folder ships it (before the resolved fixtures are written again)."""
+    import json as _json
+
+    return _json.loads((helpers.REPO_ROOT / "src" / "lib" / "data" / "profiles" / ("%s.json" % profile_id)).read_text(encoding="utf-8"))
+
+
+def with_syntax(context, **members):
+    """``context`` with members put into its profile's ``syntax`` (the shipped value, so the test
+    does not wait for the resolved fixtures)."""
+    import json as _json
+
+    context = _json.loads(_json.dumps(context))
+    context["profile"].setdefault("syntax", {}).update(members)
+    return context
+
+
+def with_variant(context, name, value):
+    """``context`` with a machine that makes the variant ``name`` the choice ``value``."""
+    import json as _json
+
+    context = _json.loads(_json.dumps(context))
+    machine = gedit_nc.machine_params(context)
+    variants = dict(machine["params"].get("variants") or {})
+    variants[name] = value
+    context["machine"] = {
+        "id": "review-g",
+        "name": "Review G lathe",
+        "choice": "document",
+        "params": dict(machine["params"], variants=variants),
+        "source": dict(machine["source"], variants={k: "machine" for k in variants}),
+    }
+    return context
+
+
+class ReviewRoundGTest(unittest.TestCase):
+    """v1.2.0 review round, batch G: NC-1 with SK-1 (D6-7, SD42440), D6-4 (the table coordinate
+    system under tool centre point control), D5-7 (the counter spindle's Y) and NC-9 (the
+    drilling R of a lathe set to the Series 15 format). Synthetic programs, written for gEdit."""
+
+    def test_nc_1_a_work_offset_written_with_an_absolute_move_has_been_travelled(self):
+        # `G54 G0 X0 Y0 Z100` goes to an absolute point in the new zero point: the increments
+        # after it travel nothing extra, so they are turned and mirrored.
+        text = "N10 G17 G90 G54 G0 X0 Y0 Z100\nN20 G91 G1 X5 Y5 F100\nN30 G90 X20\nN40 M30"
+        for script, params in (ROTATE90, MIRROR_X, MIRROR_Y):
+            with self.subTest(script=script, params=params):
+                result = run_geo(script, text, "sinumerik-mill", params)
+                self.assertEqual(errors(result), [])
+                self.assertNotEqual(result["text"], text)
+        rotated = run_geo("rotate", text, "sinumerik-mill", ROTATE90[1])
+        self.assertEqual(rotated["text"].split("\n")[1], "N20 G91 G1 X-5 Y5 F100")
+        # A shift written as data (`TRANS X10`) is no move: the increment after it still refuses.
+        trans = "G17 G90 G0 X0 Y0 Z100\nTRANS X10\nG91 G1 X5 F100\nM30"
+        self.assertIn((3, "shift-increment"), errors(run_geo("rotate", trans, "sinumerik-mill", ROTATE90[1])))
+        # Only the axes the offset block wrote absolutely are travelled: Y is still pending.
+        y_first = "G17 G90 G0 X0 Y0 Z100\nG55 G0 X10\nG91 G1 %s F100\nM30"
+        self.assertIn((3, "shift-increment"), errors(run_geo("mirror", y_first % "Y5", "sinumerik-mill", MIRROR_Y[1])))
+        self.assertNotIn((3, "shift-increment"), errors(run_geo("mirror", y_first % "X5", "sinumerik-mill", MIRROR_X[1])))
+        # A rotation turns X into Y, so with Y pending an increment along X refuses too.
+        self.assertIn((3, "shift-increment"), errors(run_geo("rotate", y_first % "X5", "sinumerik-mill", ROTATE90[1])))
+
+    def test_sk_1_an_offset_change_in_the_incremental_block_itself_refuses(self):
+        # `G55 G91 G1 X5 Y5`: the block that changes the offset moves incrementally, so it
+        # travels the change too (SD42440 = 1); a turn would leave that part unturned.
+        for text in (
+            "N10 G17 G90 G0 X0 Y0 Z100\nN20 G55 G91 G1 X5 Y5 F100\nN30 M30",
+            "N10 G17 G90 G54 G0 X0 Y0 Z100\nN20 G55 G91 G1 X5 F100\nN30 M30",
+        ):
+            for script, params in (ROTATE90, MIRROR_X):
+                with self.subTest(text=text, script=script):
+                    result = run_geo(script, text, "sinumerik-mill", params)
+                    self.assertIn((2, "shift-increment"), errors(result))
+                    self.assertEqual(result["text"], text)
+        # The same block with an absolute move is a plain move to the new zero point.
+        absolute = "N10 G17 G90 G0 X0 Y0 Z100\nN20 G55 G90 G1 X5 Y5 F100\nN30 G91 X5\nN40 M30"
+        self.assertEqual(errors(run_geo("rotate", absolute, "sinumerik-mill", ROTATE90[1])), [])
+
+    TCP = "G90 G54 G0 X0. Y0. Z100. B0.\nG43.4 H1\nG1 X10. Y10. B30. F500.\nX20.\nG0 B0.\nG49\nM30"
+
+    def test_d6_4_a_shift_under_tcp_says_it_assumes_the_table_coordinate_system(self):
+        self.assertIs(source_profile("fanuc-gcode")["syntax"].get("tcpTableCoordinates"), True)
+        context = with_syntax(helpers.effective_context("fanuc-gcode", preset="is-b"), tcpTableCoordinates=True)
+        result = run_patched("translate", self.TCP, context, {"dx": 5})
+        self.assertEqual(errors(result), [])
+        notes = [(f["line"], f["severity"]) for f in result["findings"] if f["reason"] == "tcp-table"]
+        self.assertEqual(notes, [(3, "info")])  # once, at the first block moved under G43.4
+        message = [f["message"] for f in result["findings"] if f["reason"] == "tcp-table"][0]
+        self.assertIn("table coordinate system (parameter 19696 bit 5 = 0)", message)
+        self.assertIn("Check your machine", message)
+        self.assertIn("assumes the table coordinate system (parameter 19696 bit 5 = 0)", result["message"])
+        self.assertIn("X15.", result["text"])
+        # Without tool centre point control, or on a profile that does not declare it: no note.
+        plain = run_patched("translate", "G90 G54 G0 X0. Y0. Z100.\nG1 X10. Y10. F500.\nM30", context, {"dx": 5})
+        self.assertEqual([f for f in plain["findings"] if f["reason"] == "tcp-table"], [])
+        self.assertNotIn("19696", plain["message"])
+        off = run_patched("translate", self.TCP, with_syntax(context, tcpTableCoordinates=False), {"dx": 5})
+        self.assertEqual([f for f in off["findings"] if f["reason"] == "tcp-table"], [])
+
+    MIRROR = "G18 G90 G0 X50. Y5. Z2.\nG1 Z-20. Y-3. F0.2\nM30"
+
+    def test_d5_7_the_counter_spindle_y_turns_by_default_and_stays_with_the_other_choice(self):
+        for profile_id in ("fanuc-lathe", "okuma-osp", "sinumerik"):
+            with self.subTest(profile=profile_id):
+                variant = next(v for v in source_profile(profile_id)["machineParams"]["variants"] if v["id"] == "counterSpindleY")
+                self.assertEqual(variant["default"], "turns")
+                self.assertEqual([c["value"] for c in variant["choices"]], ["turns", "stays"])
+                self.assertIn("verify", variant["choices"][0]["label"])
+        self.assertNotIn("counterSpindleY", [v["id"] for v in source_profile("sinumerik-mill")["machineParams"]["variants"]])
+        programs = {"fanuc-lathe": self.MIRROR, "sinumerik": "G18 G90 G0 X50 Y5 Z2\nG1 Z-20 Y-3 F0.2\nM30"}
+        flipped = {"fanuc-lathe": "G18 G90 G0 X50. Y-5. Z-2.\nG1 Z20. Y3. F0.2\nM30", "sinumerik": "G18 G90 G0 X50 Y-5 Z-2\nG1 Z20 Y3 F0.2\nM30"}
+        kept = {"fanuc-lathe": "G18 G90 G0 X50. Y5. Z-2.\nG1 Z20. Y-3. F0.2\nM30", "sinumerik": "G18 G90 G0 X50 Y5 Z-2\nG1 Z20 Y-3 F0.2\nM30"}
+        for profile_id, text in programs.items():
+            with self.subTest(profile=profile_id):
+                context = helpers.effective_context(profile_id)
+                default = run_patched("mirror", text, context, LATHE_Z[1])
+                self.assertEqual(errors(default), [])
+                self.assertEqual(default["text"], flipped[profile_id])
+                turns = run_patched("mirror", text, with_variant(context, "counterSpindleY", "turns"), LATHE_Z[1])
+                self.assertEqual(turns["text"], flipped[profile_id])
+                stays = run_patched("mirror", text, with_variant(context, "counterSpindleY", "stays"), LATHE_Z[1])
+                self.assertEqual(errors(stays), [])
+                self.assertEqual(stays["text"], kept[profile_id])
+        # The operation itself: Y, an incremental Y and J are left as written.
+        op = _nc_geom.LatheZMirror(D(5), False)
+        self.assertEqual(_nc_geom.transform("point", {"X": D(20), "Y": D("10.5"), "Z": D(2)}, op), ({"X": D(20), "Y": D("10.5"), "Z": D(8)}, True))
+        self.assertEqual(_nc_geom.transform("centre-inc", {"Z": D(-10), "Y": D(4)}, op), ({"Z": D(10), "Y": D(4)}, True))
+        self.assertEqual(_nc_geom.lathe_mirror_axes(op), ("Z",))
+        self.assertEqual(_nc_geom.lathe_mirror_axes(_nc_geom.LatheZMirror(D(5))), ("Z", "Y"))
+
+    DRILL = "G18 G97 S1000 M3\nG00 X0. Z5.\nG83 Z-20. R2. Q5000 F0.1\nG80\nM30"
+
+    def test_nc_9_the_drilling_r_on_a_series_15_lathe_carries_a_note(self):
+        self.assertEqual(source_profile("fanuc-lathe")["syntax"].get("cycleRAbsoluteWith"), ["series-15", "both"])
+        base = with_syntax(helpers.effective_context("fanuc-lathe", preset="is-b"), cycleRAbsoluteWith=["series-15", "both"])
+        for choice in ("series-15", "both"):
+            with self.subTest(choice=choice):
+                result = run_patched("translate", self.DRILL, helpers.with_pointless_feeds(base, choice), {"dz": -10})
+                self.assertEqual(errors(result), [])
+                self.assertIn("G83 Z-30. R2. Q5000 F0.1", result["text"])  # R as written
+                notes = [(f["line"], f["severity"]) for f in result["findings"] if f["reason"] == "cycle-r-left"]
+                self.assertEqual(notes, [(3, "info")])
+                message = [f["message"] for f in result["findings"] if f["reason"] == "cycle-r-left"][0]
+                self.assertIn("Series 15 format", message)
+                self.assertIn("parameter 5102 bit 6", message)
+                self.assertIn("1 drilling R point (Series 15 format)", result["message"])
+        # The standard format, calculator-type input and no machine: R is incremental, no note.
+        for context in (
+            helpers.with_pointless_feeds(base, "standard"),
+            with_syntax(helpers.effective_context("fanuc-lathe", preset="calculator"), cycleRAbsoluteWith=["series-15", "both"]),
+            with_syntax(helpers.effective_context("fanuc-lathe"), cycleRAbsoluteWith=["series-15", "both"]),
+        ):
+            result = run_patched("translate", self.DRILL, context, {"dz": -10})
+            self.assertEqual([f for f in result["findings"] if f["reason"] == "cycle-r-left"], [])
+        # A shift of nothing moves no block, and adds no note either.
+        result = run_patched("translate", self.DRILL, helpers.with_pointless_feeds(base, "series-15"), {"dx": 0, "dz": 0})
+        self.assertEqual([f for f in result["findings"] if f["reason"] == "cycle-r-left"], [])

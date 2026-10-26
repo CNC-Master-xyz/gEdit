@@ -125,6 +125,51 @@ export interface MachineParams {
    * record (X12 d).
    */
   channels?: ChannelParams;
+  /**
+   * Phase 4 (P4b prelude; plan §6.4, AD-46): the machine's rapid rates, top feed, tool-change
+   * time and the peck values the expansion and statistics forms are prefilled with. Like
+   * `channels`: additive (`MACHINES_VERSION` stays 1), **stored in `MachineConfig.params`
+   * only and never carried into `EffectiveMachine.params`**, so it is not in `effectiveKey`
+   * and changing a rate rebuilds nothing. A broken block costs the block, never the record
+   * (`motionBlock`, `core/machines/motion.ts`). The scripts get a valid block as
+   * `context.machine.motion`.
+   */
+  motion?: MachineMotion;
+  /** Phase 4 (P4b prelude; plan §6.4, AD-46): top spindle speeds and axis travel; as `motion`. */
+  limits?: MachineLimits;
+}
+
+/**
+ * Phase 4 (P4b prelude; plan §6.4, AD-46). What a machine moves at. Every member is optional
+ * and none has a default that stands for a machine (Q4-10): a missing value is "not set", and
+ * whatever needs it says so. `rapidKind` alone has a documented reading when it is missing,
+ * `'straight'` (Q4-11), and the time estimate says when it used it.
+ */
+export interface MachineMotion {
+  /** The unit of every length and rate below: mm and mm/min, or inch and in/min. Required once any of them is set. */
+  units?: 'mm' | 'inch';
+  /** Rapid rate per axis letter of the profile, per minute: a linear axis in `units`, a rotary axis (the profile's `addresses.angular`) in degrees. */
+  rapid?: Record<string, number>;
+  /** `'straight'`: all axes on one line at the rapid rate (the path length over the lowest rate of the moving axes); `'per-axis'`: each axis at its own rate, the move ending with the last axis. */
+  rapidKind?: 'straight' | 'per-axis';
+  /** The top cutting feed per minute, in `units`: a programmed feed above it is clamped. */
+  maxFeed?: number;
+  /** Seconds one tool change takes. */
+  toolChange?: number;
+  /** The retract of a high-speed peck (Fanuc `G73`), in `units`: only the prefill of the forms (Q4-9). */
+  peckRetract?: number;
+  /** The clearance a deep peck (Fanuc `G83`) comes back down to, in `units`: only the prefill of the forms (Q4-9). */
+  peckClearance?: number;
+}
+
+/** Phase 4 (P4b prelude; plan §6.4, AD-46). What a machine may not exceed. */
+export interface MachineLimits {
+  /** The unit of `travel`. Required once `travel` is set. */
+  units?: 'mm' | 'inch';
+  /** Top speed in rpm per spindle: `main` for the spindle the plain speed word drives, otherwise the speed address that names it (`S2`, `SB`). */
+  spindle?: Record<string, number>;
+  /** Travel per axis letter in machine coordinates, in `units` (a rotary axis in degrees). */
+  travel?: Record<string, { min: number; max: number }>;
 }
 
 /** Where one effective parameter came from. Shown next to every assumed value (AD-31). */

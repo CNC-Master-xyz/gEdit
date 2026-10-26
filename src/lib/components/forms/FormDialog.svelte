@@ -17,16 +17,21 @@
   A `note` (a template's "review pending") is shown above the fields; a `marker` gives the note's
   element a test id and data attributes (the cycle form's `cycle-form`). Nothing is drawn for a
   form without `live`, `note` and `marker`: the P2 form, unchanged.
+
+  v1.2.0: a field the user has not touched yet and that is still empty shows no error (T147: a
+  form that opens with empty required fields does not open full of red); OK stays disabled, and the
+  preview says to fill in the required fields. The `live` hook may answer a `note` that follows the
+  values (T159) and a help text per field (T146: how the machine reads the value typed).
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
   import Modal from '$lib/components/common/Modal.svelte';
   import FormRenderer from './FormRenderer.svelte';
-  import { validateFields } from '$lib/core/forms/validate';
+  import { isEmptyValue, validateFields } from '$lib/core/forms/validate';
   import { initialValues } from '$lib/core/forms/values';
   import { t } from '$lib/i18n';
-  import type { FieldSpec } from '$lib/core/forms/types';
-  import type { FormLiveResult, Msg } from '$lib/app/types';
+  import type { FieldSpec, FormLiveAnswer } from '$lib/core/forms/types';
+  import type { Msg } from '$lib/app/types';
 
   interface Props {
     /** Already translated. */
@@ -37,8 +42,8 @@
     /** Already translated; `common.ok` otherwise. */
     okLabel?: string;
     context?: { addresses?: string[] };
-    /** See the header: the template form's live values, preview and errors. */
-    live?: (values: Record<string, unknown>) => FormLiveResult;
+    /** See the header: the template form's live values, preview, errors, note and help. */
+    live?: (values: Record<string, unknown>) => FormLiveAnswer;
     /** Already translated. */
     note?: string;
     marker?: { testid: string; data: Record<string, string> };
@@ -52,7 +57,26 @@
   // on purpose; `untrack` says so, instead of leaving a "referenced locally" warning.
   let current = $state<Record<string, unknown>>(untrack(() => initialValues(fields, values)));
 
-  const answer = $derived<FormLiveResult | null>(live ? live(current) : null);
+  /** T147: the fields the user has typed into or chosen in. */
+  let touched = $state<Set<string>>(new Set());
+
+  const answer = $derived<FormLiveAnswer | null>(live ? live(current) : null);
+
+  /** T159: the note as the values stand (the hook's), else the one the form was opened with. */
+  const noteText = $derived(answer?.note !== undefined ? answer.note : note);
+
+  /** T146: the fields with the help the hook answers for the values as typed. */
+  const shownFields = $derived.by((): FieldSpec[] => {
+    const help = answer?.help;
+    const readOnly = answer?.readOnly;
+    if (!help && !readOnly) return fields;
+    return fields.map((field) => {
+      let shownField = field;
+      if (help && Object.prototype.hasOwnProperty.call(help, field.id)) shownField = { ...shownField, help: help[field.id] || undefined };
+      if (readOnly?.includes(field.id)) shownField = { ...shownField, readOnly: true };
+      return shownField;
+    });
+  });
 
   /** The values the fields show: the typed ones, and the computed ones in the read-only fields. */
   const shown = $derived.by((): Record<string, unknown> => {
@@ -67,14 +91,26 @@
 
   const errors = $derived<Record<string, Msg>>({ ...validateFields(fields, current), ...(answer?.fieldErrors ?? {}) });
   const blocked = $derived(Object.keys(errors).length > 0 || answer?.error !== undefined);
+  /** T147: the errors shown beside the fields: none yet for an empty field nobody has touched. */
+  const shownErrors = $derived.by((): Record<string, Msg> => {
+    const out: Record<string, Msg> = {};
+    for (const field of fields) {
+      const error = errors[field.id];
+      if (error !== undefined && (touched.has(field.id) || !isEmptyValue(field, current[field.id]))) out[field.id] = error;
+    }
+    return out;
+  });
   /** What a scenario reads from the preview: the first message key that refuses the values. */
   const refusedKey = $derived(answer?.error?.key ?? Object.values(errors)[0]?.key);
+  /** T147: only fields not filled in yet stop the text (nothing is marked). */
+  const onlyUntouched = $derived(answer?.error === undefined && Object.keys(errors).length > 0 && Object.keys(shownErrors).length === 0);
   const noteData = $derived(
     Object.fromEntries(Object.entries(marker?.data ?? {}).map(([name, value]) => [`data-${name}`, value])),
   );
 
   function set(id: string, value: unknown): void {
     current = { ...current, [id]: value };
+    if (!touched.has(id)) touched = new Set([...touched, id]);
   }
 
   function accept(): void {
@@ -90,13 +126,13 @@
   onOk={accept}
   onCancel={() => close(undefined)}
 >
-  {#if note || marker}
-    <p class="form-dialog-note" data-testid={marker?.testid ?? 'form-note'} {...noteData}>{note ?? ''}</p>
+  {#if noteText || marker}
+    <p class="form-dialog-note" data-testid={marker?.testid ?? 'form-note'} {...noteData}>{noteText ?? ''}</p>
   {/if}
   {#if fields.length === 0}
     <p class="form-dialog-empty">{t('forms.noFields')}</p>
   {:else}
-    <FormRenderer {fields} values={shown} {errors} {context} onChange={set} />
+    <FormRenderer fields={shownFields} values={shown} errors={shownErrors} {context} onChange={set} />
   {/if}
   {#if answer}
     {#if answer.error}
@@ -105,7 +141,7 @@
       </p>
     {:else if refusedKey !== undefined}
       <p class="form-dialog-preview form-dialog-preview-error" data-testid="template-preview" data-error={refusedKey}>
-        {t('forms.previewBlocked')}
+        {t(onlyUntouched ? 'forms.previewRequired' : 'forms.previewBlocked')}
       </p>
     {:else if answer.preview !== undefined}
       <pre class="form-dialog-preview" data-testid="template-preview">{answer.preview}</pre>

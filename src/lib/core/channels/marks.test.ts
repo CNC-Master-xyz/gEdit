@@ -5,7 +5,9 @@
 import { describe, expect, it } from 'vitest';
 import { fanucWait, singleFile as single } from '../../../../tests/unit/helpers/channelRules';
 import { cpOf, profileOf } from '../../../../tests/unit/helpers/profiles';
-import { decodePartnerText, findMarks, resolveDocument } from './marks';
+import fanucCodes from '$lib/data/codes/fanuc.json';
+import okumaCodes from '$lib/data/codes/okuma.json';
+import { decodePartnerText, findMarks, macroCallCodes, resolveDocument } from './marks';
 import { STOPS_AND_ENDS_RULE, type ChannelParams, type SyncRule } from './types';
 
 const lathe = cpOf('fanuc-lathe');
@@ -246,5 +248,86 @@ describe('resolveDocument', () => {
     expect(resolveDocument('a_CH1.nc', ['M901 P12'], lathe, multi, { assigned: '2' })).toMatchObject({ layout: 'multi-file', self: { id: '2' }, by: 'assigned' });
     expect(resolveDocument('a_CH1.nc', ['M901 P12'], lathe, multi, { assigned: '7' })).toMatchObject({ self: { id: '1' }, by: 'fileName' });
     expect(resolveDocument('loose.nc', ['M901 P12'], lathe, multi).layout).toBe('none');
+  });
+});
+
+// T172 (review NC-05): a wait code written after a macro call is an argument of the call.
+describe('a wait code after a macro call (T172)', () => {
+  const calls = macroCallCodes(fanucCodes);
+  const withCalls = (lines: string[], p: ChannelParams, cp = lathe, c: readonly string[] = calls) =>
+    findMarks(lines, cp, p, { channelOf: () => '1', calls: c }).marks;
+
+  it('reads the macro-call codes from the database flag, not from a list of its own', () => {
+    expect(calls).toEqual(['G65']);
+    // Okuma's G65 is a corner control, not a call: no flag, no call code. Merge seam (v12/wave): P4b flags
+    // Okuma's CALL and MODIN (programs run with the words of their block), so those two are listed; being
+    // keywords, not a letter and a number, they hide no wait word (the test below with `G65 M901`).
+    expect(macroCallCodes(okumaCodes)).toEqual(['CALL', 'MODIN']);
+    expect(macroCallCodes(okumaCodes)).not.toContain('G65');
+    expect(macroCallCodes(null)).toEqual([]);
+  });
+
+  it('does not read G65 P9010 M901 as a wait, however the call is written', () => {
+    const p = three([fanucWait('digits')]);
+    expect(run(['G65 P9010 M901'], p).map((m) => m.mark)).toEqual(['M901']); // without the calls: the old reading
+    expect(withCalls(['G65 P9010 M901', 'N10 G065 P9010 M902', 'g 65 p9010 m903', 'G65P9010M904L2'], p)).toEqual([]);
+  });
+
+  it('keeps a wait in front of the call, a wait on a line without one, and a call in a comment', () => {
+    const p = three([fanucWait('digits')]);
+    const marks = withCalls(['M901 G65 P9010 M902', 'M903 P12', '(G65 P9010) M904', 'G65.1 M905', 'G650 M906', 'G65=1 M907'], p);
+    expect(marks.map((m) => [m.mark, m.line])).toEqual([
+      ['M901', 1],
+      ['M903', 2],
+      ['M904', 3],
+      ['M905', 4],
+      ['M906', 5],
+      ['M907', 6],
+    ]);
+  });
+
+  it('holds for a prefix rule and for a pattern that reads the line from its start', () => {
+    const prefix: SyncRule = { id: 'pre', label: 'p', match: { kind: 'prefix', prefix: 'M1', idDigits: { min: 2, max: 2 } }, partners: { kind: 'all' } };
+    expect(withCalls(['G65 P9010 M130', 'M131 G65 P9010'], three([prefix])).map((m) => m.mark)).toEqual(['31']);
+    const fromStart: SyncRule = { id: 'rx', label: 'r', match: { kind: 'regex', pattern: '^.*?M(?<mark>9\\d\\d)' }, partners: { kind: 'all' } };
+    expect(withCalls(['G65 P9010 M901', 'M902 G65 P9010'], three([fromStart])).map((m) => m.mark)).toEqual(['902']);
+  });
+
+  it('gives the line to the next rule when the first rule\'s mark is an argument', () => {
+    const args: SyncRule = { id: 'late', label: 'l', match: { kind: 'codes', codes: 'M950-M959' }, partners: { kind: 'all' } };
+    const front: SyncRule = { id: 'front', label: 'f', match: { kind: 'codes', codes: 'M100' }, partners: { kind: 'all' } };
+    expect(withCalls(['M100 G65 P9010 M950'], three([args, front])).map((m) => [m.ruleId, m.mark])).toEqual([['front', 'M100']]);
+  });
+
+  it('leaves a control without a call code as it was (Okuma: G65 is no call)', () => {
+    expect(withCalls(['G65 M901'], three([fanucWait('digits')]), lathe, macroCallCodes(okumaCodes)).map((m) => m.mark)).toEqual(['M901']);
+  });
+
+  it('holds for a stop or end that waits: G65 P9010 M30 hands M30 to the macro (the owner, 2026-10-19)', () => {
+    const p = three([fanucWait('digits')], { stopsAndEndsWait: true });
+    const lines = ['G65 P9010 M30', 'M30', 'M0 G65 P9010', 'G65 P9010 M1', '(G65 P9010) M30', 'G65 P9010 M99'];
+    expect(run(lines, p).map((m) => m.line)).toEqual([1, 2, 3, 4, 5, 6]); // without the calls: the old reading
+    expect(withCalls(lines, p).map((m) => [m.ruleId, m.line])).toEqual([
+      [STOPS_AND_ENDS_RULE, 2],
+      [STOPS_AND_ENDS_RULE, 3],
+      [STOPS_AND_ENDS_RULE, 5],
+    ]);
+  });
+
+  it('reads a stop or end pattern that starts at the line start by where the code ends', () => {
+    // Okuma's end pattern reads from the line start (`NEND ... M02`); G65 stands in for a call code here.
+    const okuma = cpOf('okuma-osp');
+    const p = three([], { stopsAndEndsWait: true });
+    expect(withCalls(['NEND G65 P1 M02', 'NEND M02 G65 P1'], p, okuma).map((m) => m.line)).toEqual([2]);
+    expect(run(['NEND G65 P1 M02'], p, okuma).map((m) => m.line)).toEqual([1]);
+  });
+
+  it('is handed through resolveDocument', () => {
+    const lines = ['O1001', 'G65 P9010 M901', 'M902 P12', 'M99', 'O2001', 'M902 P12', 'M30'];
+    expect(resolveDocument('', lines, lathe, single).marks.map((m) => m.mark)).toEqual(['M901', 'M902', 'M902']);
+    expect(resolveDocument('', lines, lathe, single, { calls }).marks.map((m) => [m.mark, m.line, m.channel])).toEqual([
+      ['M902', 3, '1'],
+      ['M902', 6, '2'],
+    ]);
   });
 });

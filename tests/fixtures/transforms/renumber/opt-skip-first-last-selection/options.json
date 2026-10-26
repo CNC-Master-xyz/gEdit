@@ -1,0 +1,29 @@
+{
+  "note": "P4d §6.6 rule 5 on a selection: the first and last lines are counted in the selection (lines 3 to 10), not in the program, so N10, N20 and N80 keep their numbers and the five blocks between are numbered from 100 in steps of 5.",
+  "profile": "fanuc-lathe",
+  "scope": {
+    "startLine": 3,
+    "endLine": 10
+  },
+  "options": {
+    "start": 100,
+    "step": 5,
+    "skipFirst": 2,
+    "skipLast": 1
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.summary",
+    "skipped": [
+      {
+        "line": 3,
+        "severity": "info"
+      },
+      {
+        "line": 10,
+        "severity": "info"
+      }
+    ],
+    "warnings": [],
+    "preflight": null
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "note": "P4d §6.6 rules 6 and 7: no line contains the start text, so the run is refused and writes nothing; the reason is the summary.",
+  "profile": "sinumerik",
+  "options": {
+    "startTrigger": "START_HERE"
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.refused.noTrigger",
+    "skipped": [],
+    "warnings": [],
+    "preflight": null
+  }
+}

@@ -20,6 +20,18 @@
 //     stays marked as Monaco marks it).
 //  5. In review mode the lines are the normalized ones the view shows (AD-52), tokenized with
 //     the side's profile; in the raw view the lines as written.
+//  6. **Parts of a long word** (review NC-8). A cycle call, an expression or a comment is one
+//     word (`CYCLE800(1,"TABLE",0,57,…)`, `X[#1+#2]`, `X=AC(5)`, `(TOOL 1)`), so rule 3 marks
+//     it whole however little changed. Where one changed word faces exactly one changed word
+//     on the other side (a gap of the alignment with one marked word on each side), both are
+//     split into parts (`wordParts`: a run of letters, digits, `.`, `_`, `#`, `$`; a quoted
+//     string; any other character alone; blanks between), and when both have at least
+//     `PART_MIN` parts and start with the same part (the same cycle, address or bracket), the
+//     parts that differ are marked as well (`WordMarks.parts`), by the same longest common
+//     subsequence over the parts that reach into the stretch where the two texts differ (the
+//     characters both start and end with are cut first), neighbouring changed parts joined. The whole word stays marked: it is still
+//     the unit a word copy copies. A word whose text is not its written text (a number the
+//     review options rewrote, `X=AC(5.0)` read as `X=AC(5)`) gets no parts.
 //
 // The algorithm, in the order the code reads: take the words of each side; give each distinct
 // text a number; cut the words both lines start and end with; align what is left by the
@@ -53,6 +65,67 @@ export interface WordSpan {
 export interface WordMarks {
   original: WordSpan[];
   modified: WordSpan[];
+  /**
+   * Rule 6: inside a long marked word (a cycle call, an expression, a comment), the parts that
+   * differ, as spans of the line like the words; absent when no word has any.
+   */
+  parts?: { original: WordSpan[]; modified: WordSpan[] };
+}
+
+/** Rule 6: a word is split into parts only when both words have at least this many. */
+export const PART_MIN = 3;
+/** Rule 6: a word of more parts than this is not split (the line stays marked by whole words). */
+export const PART_MAX = 200;
+
+/** Rule 6: a character of a run part: a letter, a digit, `.`, `_`, `#` or `$`. */
+function runChar(c: number): boolean {
+  return (
+    (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 46 || c === 95 || c === 35 || c === 36
+  );
+}
+
+/** A blank between parts (a space, a tab, any other ASCII control or space character). */
+function blank(c: number): boolean {
+  return c <= 32;
+}
+
+/**
+ * The parts of `text` (rule 6) as two lists of offsets, `starts[k]`..`ends[k]`; null when it has
+ * more than `PART_MAX`. A hand-written scan, not a regular expression: it runs for every pair of
+ * long words, so it allocates no match per part.
+ */
+function scanParts(text: string): { starts: number[]; ends: number[] } | null {
+  const starts: number[] = [];
+  const ends: number[] = [];
+  const length = text.length;
+  let i = 0;
+  while (i < length) {
+    const c = text.charCodeAt(i);
+    if (blank(c)) {
+      i++;
+      continue;
+    }
+    if (starts.length >= PART_MAX) return null;
+    starts.push(i);
+    if (c === 34 || c === 39) {
+      // A quoted string up to its closing quote (or the end of the word) is one part.
+      const close = text.indexOf(text[i], i + 1);
+      i = close < 0 ? length : close + 1;
+    } else if (runChar(c)) {
+      i++;
+      while (i < length && runChar(text.charCodeAt(i))) i++;
+    } else {
+      i++;
+    }
+    ends.push(i);
+  }
+  return { starts, ends };
+}
+
+/** The parts of `text` (rule 6), as offsets into it; empty for a text of more than `PART_MAX` parts. */
+export function wordParts(text: string): WordSpan[] {
+  const found = scanParts(text);
+  return found === null ? [] : found.starts.map((start, k) => ({ start, end: found.ends[k] }));
 }
 
 /** Upper case outside `"…"` strings: how the review option `ignoreCase` folds a line. */
@@ -198,7 +271,94 @@ function analyse(original: readonly NcToken[], modified: readonly NcToken[], o: 
   return { a, b, wa, wb, rawA, rawB, changedA, changedB };
 }
 
-/** The words that differ between two lines (rules 1–4), as spans of each line. */
+/**
+ * Rule 6: the parts that differ between two words that face each other, as spans of their
+ * lines; null when the words are not split (too few parts, a different first part, a text that
+ * is not the written one, or no part that differs).
+ *
+ * Only the parts in the stretch where the two texts differ are compared: the characters both
+ * texts start and end with are cut first, and a part that reaches into what is left is in it.
+ * So a cycle call of forty arguments with one changed compares one or two parts, not eighty.
+ */
+function partMarks(a: NcToken, b: NcToken, o: { ignoreCase?: boolean }): { original: WordSpan[]; modified: WordSpan[] } | null {
+  const ta = a.text;
+  const tb = b.text;
+  if (ta.length !== a.end - a.start || tb.length !== b.end - b.start) return null;
+  // What is compared: the texts, folded like the words where `ignoreCase` says so (and where
+  // folding keeps every character in its place).
+  let fa = ta;
+  let fb = tb;
+  if (o.ignoreCase) {
+    const x = foldCase(ta);
+    const y = foldCase(tb);
+    if (x.length === ta.length && y.length === tb.length) {
+      fa = x;
+      fb = y;
+    }
+  }
+  if (fa === fb) return null;
+  const pa = scanParts(ta);
+  const pb = scanParts(tb);
+  if (pa === null || pb === null || pa.starts.length < PART_MIN || pb.starts.length < PART_MIN) return null;
+  // The same first part: the same cycle, the same address, the same bracket.
+  if (pa.starts[0] !== pb.starts[0] || pa.ends[0] !== pb.ends[0] || fa.slice(pa.starts[0], pa.ends[0]) !== fb.slice(pb.starts[0], pb.ends[0])) {
+    return null;
+  }
+  // The stretch where the texts differ: `[head, length - tail)` of each.
+  const shorter = Math.min(fa.length, fb.length);
+  let head = 0;
+  while (head < shorter && fa.charCodeAt(head) === fb.charCodeAt(head)) head++;
+  let tail = 0;
+  while (tail < shorter - head && fa.charCodeAt(fa.length - 1 - tail) === fb.charCodeAt(fb.length - 1 - tail)) tail++;
+  // A part that runs across an end of the stretch on either side (`#2` against `#22`) is in it
+  // on both sides: the stretch grows to that part's start, or to its end.
+  for (const parts of [pa, pb]) {
+    for (let k = 0; k < parts.starts.length; k++) if (parts.starts[k] < head && parts.ends[k] > head) head = parts.starts[k];
+  }
+  for (const [parts, length] of [
+    [pa, fa.length],
+    [pb, fb.length],
+  ] as const) {
+    const end = length - tail;
+    for (let k = 0; k < parts.starts.length; k++) if (parts.starts[k] < end && parts.ends[k] > end) tail = Math.min(tail, length - parts.ends[k]);
+  }
+  /** The parts of a side that reach into its stretch, as indexes. */
+  const inStretch = (parts: { starts: number[]; ends: number[] }, to: number): number[] => {
+    const out: number[] = [];
+    for (let k = 0; k < parts.starts.length; k++) if (parts.ends[k] > head && parts.starts[k] < to) out.push(k);
+    return out;
+  };
+  const ka = inStretch(pa, fa.length - tail);
+  const kb = inStretch(pb, fb.length - tail);
+  const numbers = new Map<string, number>();
+  const numberOf = (text: string): number => {
+    let n = numbers.get(text);
+    if (n === undefined) {
+      n = numbers.size;
+      numbers.set(text, n);
+    }
+    return n;
+  };
+  const na = ka.map((k) => numberOf(fa.slice(pa.starts[k], pa.ends[k])));
+  const nb = kb.map((k) => numberOf(fb.slice(pb.starts[k], pb.ends[k])));
+  const [changedA, changedB] = unaligned(na, nb);
+  // Neighbouring changed parts make one span (with the blanks between them).
+  const spans = (token: NcToken, parts: { starts: number[]; ends: number[] }, indexes: readonly number[], changed: Uint8Array): WordSpan[] => {
+    const out: WordSpan[] = [];
+    for (let i = 0; i < indexes.length; i++) {
+      if (!changed[i]) continue;
+      const k = indexes[i];
+      const last = out[out.length - 1];
+      if (last !== undefined && i > 0 && changed[i - 1] && indexes[i - 1] === k - 1) last.end = token.start + parts.ends[k];
+      else out.push({ start: token.start + parts.starts[k], end: token.start + parts.ends[k] });
+    }
+    return out;
+  };
+  const marks = { original: spans(a, pa, ka, changedA), modified: spans(b, pb, kb, changedB) };
+  return marks.original.length === 0 && marks.modified.length === 0 ? null : marks;
+}
+
+/** The words that differ between two lines (rules 1–4), as spans of each line, with the parts of rule 6. */
 export function wordDiff(
   original: readonly NcToken[],
   modified: readonly NcToken[],
@@ -207,14 +367,46 @@ export function wordDiff(
   const none: WordMarks = { original: [], modified: [] };
   const found = analyse(original, modified, o);
   if (found === null) return none;
+  const { a, b, rawA, rawB, changedA, changedB } = found;
 
   const spans = (words: readonly NcToken[], changed: Uint8Array): WordSpan[] => {
     const out: WordSpan[] = [];
     for (let k = 0; k < words.length; k++) if (changed[k]) out.push({ start: words[k].start, end: words[k].end });
     return out;
   };
-  const marks = { original: spans(found.a, found.changedA), modified: spans(found.b, found.changedB) };
-  return marks.original.length === 0 && marks.modified.length === 0 ? none : marks;
+  const marks: WordMarks = { original: spans(a, changedA), modified: spans(b, changedB) };
+  if (marks.original.length === 0 && marks.modified.length === 0) return none;
+
+  // Rule 6: each gap of the alignment with exactly one marked word on each side.
+  const parts: { original: WordSpan[]; modified: WordSpan[] } = { original: [], modified: [] };
+  for (let i = 0, j = 0; ; i++, j++) {
+    let onlyA = -1;
+    let onlyB = -1;
+    let countA = 0;
+    let countB = 0;
+    for (; i < a.length && rawA[i]; i++) {
+      if (changedA[i]) {
+        onlyA = i;
+        countA++;
+      }
+    }
+    for (; j < b.length && rawB[j]; j++) {
+      if (changedB[j]) {
+        onlyB = j;
+        countB++;
+      }
+    }
+    if (countA === 1 && countB === 1) {
+      const inner = partMarks(a[onlyA], b[onlyB], o);
+      if (inner) {
+        parts.original.push(...inner.original);
+        parts.modified.push(...inner.modified);
+      }
+    }
+    if (i >= a.length || j >= b.length) break;
+  }
+  if (parts.original.length > 0 || parts.modified.length > 0) marks.parts = parts;
+  return marks;
 }
 
 /**

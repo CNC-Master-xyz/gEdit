@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Klartext: a ; comment in front of a trailing ~ goes without the ~ (dropping it would fuse the cycle definition with the next block); the * - section headings stay.",
+  "profile": "heidenhain-klartext",
+  "options": {}
+}

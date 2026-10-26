@@ -44,6 +44,8 @@ import { status as appStatus } from '$lib/app/status';
 import { lockRefusal } from '$lib/app/readOnlyLock';
 import { contradictionRefusal, guardsScriptOutput } from '$lib/core/profiles/contradiction';
 import { initialValues } from '$lib/core/forms/values';
+import { validateFields } from '$lib/core/forms/validate';
+import { limitsBlock, motionBlock, prefillMemberOf, prefillValue } from '$lib/core/machines/motion';
 import { decideApply } from '$lib/core/scripting/apply';
 import { buildContext, MAX_PRECEDING_LINES } from '$lib/core/scripting/context';
 import { scriptLabel, scriptsForProfile } from '$lib/core/scripting/filter';
@@ -102,7 +104,7 @@ import type {
 } from '$lib/app/types';
 import type { ChannelSet } from '$lib/core/channels/types';
 import type { FieldSpec } from '$lib/core/forms/types';
-import type { EffectiveProfile } from '$lib/core/machines/types';
+import type { EffectiveProfile, MachineLimits, MachineMotion } from '$lib/core/machines/types';
 import type { ScriptContextInput } from '$lib/core/scripting/types';
 
 /** The `uiState.lastParams` key a script's form values are remembered under (§7.3). */
@@ -230,7 +232,7 @@ export interface ScriptDeps {
    * `syntax.decimalPointSignificant` already follows the machine without knowing that
    * machines exist.
    */
-  machines: Pick<MachineService, 'effective'>;
+  machines: Pick<MachineService, 'effective' | 'get'>;
   /**
    * M12 (AD-32): the document's channel set, from the service that composes it with
    * `resolveDocument` — a script gets the answer the status item and the map show, never a
@@ -321,16 +323,50 @@ export function createScriptService(deps: ScriptDeps): ScriptService {
     deps.results.show(report);
   }
 
-  /** The values a run starts from when the form is skipped, or the form is pre-filled with. */
+  /**
+   * The values a run starts from when the form is skipped, or the form is pre-filled with.
+   *
+   * A parameter with `prefill = "machine.motion.<member>"` (plan §6.4 rule 5) starts from the
+   * document's machine and never from a remembered value: a value remembered under another
+   * machine would pass as this machine's. A machine without the value leaves the field at
+   * its own default (empty). Values a caller passes in `o.params` still win, and what the
+   * form then shows is what the run gets: nothing reads the machine behind the user's back.
+   */
   function startingValues(
     fields: FieldSpec[],
     scriptId: string,
     o: { params?: Record<string, unknown>; skipForm?: boolean } | undefined,
+    motion?: MachineMotion,
   ): Record<string, unknown> {
     // `skipForm` also skips what was remembered: a headless run (the harness, a test, a
     // command that carries its own values) has to be reproducible.
     const remembered = o?.skipForm === true ? undefined : deps.uiState.getLastParams(formKey(scriptId));
-    return { ...initialValues(fields, remembered), ...(o?.params ?? {}) };
+    const values = { ...initialValues(fields, remembered), ...(o?.params ?? {}) };
+    for (const field of fields) {
+      const member = prefillMemberOf(field);
+      if (member === null || (o?.params !== undefined && Object.hasOwn(o.params, field.id))) continue;
+      const own = initialValues([field])[field.id];
+      const wanted = prefillValue(member, motion);
+      values[field.id] = wanted !== undefined && Object.keys(validateFields([field], { [field.id]: wanted })).length === 0 ? wanted : own;
+    }
+    return values;
+  }
+
+  /**
+   * The valid motion and limits blocks of the document's machine, for the context and the
+   * prefill; a broken or missing block gives nothing, and the run goes on without it.
+   */
+  function machineBlocksOf(effective: EffectiveProfile): { motion?: MachineMotion; limits?: MachineLimits } {
+    const id = effective.machine.id;
+    const record = id === null ? undefined : deps.machines.get(id);
+    if (record === undefined) return {};
+    const sets = { axes: effective.profile.addresses?.axes ?? [], angular: effective.profile.addresses?.angular ?? [] };
+    const motion = motionBlock(record, 'machine', sets);
+    const limits = limitsBlock(record, 'machine', sets);
+    return {
+      ...(motion.state === 'valid' ? { motion: motion.motion } : {}),
+      ...(limits.state === 'valid' ? { limits: limits.limits } : {}),
+    };
   }
 
   /** Publishes `status` and answers whether scripts can run at all. */
@@ -516,7 +552,8 @@ export function createScriptService(deps: ScriptDeps): ScriptService {
 
     // 2. The parameter form. A script with no parameters runs immediately.
     const fields = entry.meta?.params ?? [];
-    let params = startingValues(fields, scriptId, o);
+    const blocks = machineBlocksOf(effective);
+    let params = startingValues(fields, scriptId, o, blocks.motion);
     if (fields.length > 0 && o?.skipForm !== true) {
       const answered = await deps.modals.form({ title: label, fields, values: params });
       if (answered === undefined) return;
@@ -544,6 +581,7 @@ export function createScriptService(deps: ScriptDeps): ScriptService {
       codes: effective.codes.codes,
       machine: effective.machine,
       channels: channelSetOf(docId),
+      ...blocks,
       input: resolved.input,
       cursor: { line: cursor.line, column: cursor.column },
       params,
@@ -778,7 +816,10 @@ export function createScriptService(deps: ScriptDeps): ScriptService {
       // stale value and this handed it straight to the script (G8 M5).
       const fields = get(scriptList).find((candidate) => candidate.id === scriptId)?.meta?.params ?? [];
       const remembered = deps.uiState.getLastParams(formKey(scriptId));
-      await run(scriptId, { skipForm: true, params: initialValues(fields, remembered) });
+      const values = initialValues(fields, remembered);
+      // A prefilled parameter is the machine's, not a remembered value (`startingValues`).
+      for (const field of fields) if (prefillMemberOf(field) !== null) delete values[field.id];
+      await run(scriptId, { skipForm: true, params: values });
     },
 
     async cancel(): Promise<void> {

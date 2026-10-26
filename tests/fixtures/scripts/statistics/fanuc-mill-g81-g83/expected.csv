@@ -1,0 +1,4 @@
+Tool,Feed length (mm),Rapid length (mm),Tool changes,Feed time (s),Rapid time (s),Dwell time (s),Tool-change time (s),Total time (s),Not estimated,"Not estimated, by kind and line"
+T1,332.79,101.00,1,66.6,0.3,2.0,4.0,72.9,2,position-unknown 5-6
+T2,70.50,520.64,1,38.7,1.5,0.0,4.0,44.2,0,
+Total,403.29,621.64,2,105.3,1.8,2.0,8.0,117.1,2,position-unknown 5-6

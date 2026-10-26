@@ -13,14 +13,20 @@
 //      a parameter written at a line start right after the profile's block-number address
 //      (`N{{ns}}`, also behind a block-delete `/`), and a parameter written alone at a line
 //      start that a line of the body names in a `numbering.references` rule (Okuma
-//      `{{name}} G81` with `G85 {{name}}`). A `consecutive` profile (Klartext) has no
-//      references to block numbers and none.
+//      `{{name}} G81` with `G85 {{name}}`; a rule with `rewrite: false` or one that names another
+//      program's block does not count, v1.2.0 WX-NC-2). A `consecutive` profile (Klartext) has no
+//      references to block numbers; its labels are (v1.2.0 T160): a parameter written as the
+//      label of `LBL` at the head of a block (`{{N}}LBL {{lbl}}`) is read against the labels the
+//      program defines and calls (`documentLabels`), as a number against the block numbers.
 //   2. **What the program already uses** (`documentNumbers`): every block number (on a
 //      control that compares sequence numbers as text, Okuma, every sequence name as written,
-//      `N0100` ≠ `N100`) and every number a reference names, each with its first line. Read
+//      `N0100` ≠ `N100`) and every number a reference names, each with its first line (a word
+//      kept as written or naming another program's block, `M99 P30`, too: refuse, do not guess;
+//      WX-NC-2). Read
 //      once when the form opens and once more before the text is written.
 //   3. **The values the form starts with** (`freeBlockValues`): a default that nothing uses
-//      stays; otherwise the next free number above the program's highest one (a multiple of
+//      stays (a choice, v1.2.0 T161: else the first choice nothing uses; a formula is computed,
+//      never chosen, and only checked by rule 4, T162); otherwise the next free number above the program's highest one (a multiple of
 //      the profile's step, distinct from the template's other block numbers and from the
 //      numbers its own `{{N}}` writes, within the parameter's and the profile's maximum; when
 //      that overflows, the lowest free one), or for a name the next free one of its kind
@@ -37,12 +43,16 @@ import { blockHeadReader, commentAt, commentEndAt, lexSpec, tokenizeLine } from 
 import type { LineState, NcToken } from '$lib/core/nc/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import { comparesByText, labelsOf, referenceAddresses, referencesOn } from '$lib/core/transforms/references';
-import type { TemplateDef, TemplateEnv } from './types';
+import type { TemplateDef, TemplateEnv, TemplateParam } from './types';
 
-/** A parameter that names a block: `number` (`N{{ns}}`, compared as the number) or `name` (`{{name}}`, the whole sequence name). */
+/**
+ * A parameter that names a block: `number` (`N{{ns}}`, compared as the number), `name` (`{{name}}`,
+ * the whole sequence name), or `label` (Klartext `LBL {{lbl}}` at the head of a block, v1.2.0 T160,
+ * compared as the number).
+ */
 export interface BlockParam {
   id: string;
-  kind: 'number' | 'name';
+  kind: 'number' | 'name' | 'label';
 }
 
 /** Where a number or a name stands in the program (1-based line), and the reference word as written. */
@@ -80,15 +90,26 @@ function probeLine(line: string): string {
   return line.replace(/\{\{N\}\}/g, 'N10 ').replace(PARAM, '1');
 }
 
+/** T160: a Klartext label defined at the head of a block (`{{N}}LBL {{lbl}}`, behind a block-delete slash too). */
+const LABEL_HEAD = /^\s*(?:\{\{N\}\}|\d+)?\s*(?:\/\s*)?LBL\s+\{\{([a-z_][a-z0-9_]*)\}\}/;
+
 /** Rule 1: the parameters of `t` that name a block, in the template's parameter order. */
 export function blockNumberParams(t: TemplateDef, cp: CompiledProfile): BlockParam[] {
-  if (cp.profile.numbering?.mode === 'consecutive') return [];
+  if (cp.profile.numbering?.mode === 'consecutive') {
+    // T160: Klartext names no block by its number; its labels are what a second insertion would repeat.
+    const labels = new Set<string>();
+    for (const line of t.body.split(/\r\n?|\n/)) {
+      const m = LABEL_HEAD.exec(line);
+      if (m) labels.add(m[1]);
+    }
+    return (t.params ?? []).filter((p) => p.type !== 'formula' && labels.has(p.id)).map((p) => ({ id: p.id, kind: 'label' as const }));
+  }
   const prefix = prefixOf(cp);
   const lines = t.body.split(/\r\n?|\n/);
   const numbered = new Set<string>();
   const alone = new Set<string>();
-  const head = prefix === null ? null : new RegExp(`^\\s*(?:/\\s*)?${escapeRe(prefix)}\\{\\{([a-z_][a-z0-9_]*)\\}\\}`, 'i');
-  const bare = /^\s*(?:\/\s*)?\{\{([a-z_][a-z0-9_]*)\}\}(?=\s|$)/;
+  const head = prefix === null ? null : new RegExp(`^\\s*(?:/[0-9]?\\s*)?${escapeRe(prefix)}\\{\\{([a-z_][a-z0-9_]*)\\}\\}`, 'i');
+  const bare = /^\s*(?:\/[0-9]?\s*)?\{\{([a-z_][a-z0-9_]*)\}\}(?=\s|$)/;
   for (const line of lines) {
     const n = head?.exec(line);
     if (n && n[1] !== 'N') numbered.add(n[1]);
@@ -100,25 +121,42 @@ export function blockNumberParams(t: TemplateDef, cp: CompiledProfile): BlockPar
   if (alone.size > 0 && cp.re.references.length > 0) {
     for (const line of lines) {
       const probe = probeLine(line);
-      if (!cp.re.references.some((rule) => rule.trigger.test(probe))) continue;
+      if (!cp.re.references.some((rule, index) => ownBlock(cp, index) && rule.trigger.test(probe))) continue;
       for (const m of line.matchAll(PARAM)) if (alone.has(m[1])) referenced.add(m[1]);
     }
   }
   const byText = comparesByText(cp);
   const out: BlockParam[] = [];
   for (const p of t.params ?? []) {
-    if (p.type === 'formula' || p.type === 'choice') continue;
+    // Every kind of parameter (T161, T162): a choice writes the value chosen, a formula the value it computes.
     // `N{{id}}`: the digits after the address, compared as the dialect compares block numbers.
     if (numbered.has(p.id)) out.push({ id: p.id, kind: 'number' });
-    else if (referenced.has(p.id)) out.push({ id: p.id, kind: p.type === 'integer' && !byText ? 'number' : 'name' });
+    else if (referenced.has(p.id)) out.push({ id: p.id, kind: !byText && numeric(p) ? 'number' : 'name' });
   }
   return out;
 }
 
+/** A parameter whose values are whole numbers: an integer, a formula, a choice of numbers only. */
+function numeric(p: TemplateParam): boolean {
+  if (p.type === 'integer' || p.type === 'formula') return true;
+  return p.type === 'choice' && (p.choices ?? []).length > 0 && (p.choices ?? []).every((c) => /^\d{1,9}$/.test(c.value));
+}
+
 /** True when `t` names blocks or writes `{{N}}`: the only templates that need the program's numbers. */
 export function needsDocumentNumbers(t: TemplateDef, cp: CompiledProfile): boolean {
-  if (cp.profile.numbering?.mode === 'consecutive') return false;
+  if (cp.profile.numbering?.mode === 'consecutive') return blockNumberParams(t, cp).length > 0;
   return blockNumberParams(t, cp).length > 0 || (cp.re.references.length > 0 && t.body.includes('{{N}}'));
+}
+
+/**
+ * v1.2.0 WX-NC-2: whether `numbering.references[index]` names a block of the program it stands in and
+ * may be rewritten. A rule with `rewrite: false` (a mill `G73 Q… P…`: a peck and a dwell, or a contour)
+ * or one that names a block of another program (`M99 P`, `M98 P… Q…`) makes no block number of the
+ * template. (What a program references still counts them: `noteTokens`.) Read from the profile at the same index, as `transforms/references` does.
+ */
+function ownBlock(cp: CompiledProfile, index: number): boolean {
+  const rule = cp.profile.numbering?.references?.[index];
+  return rule?.rewrite !== false && rule?.program !== 'called' && rule?.program !== 'caller';
 }
 
 /** The key of a block-number value: the number (`'100'` for `0100`), or on a control that compares by text `N` + the digits as written. */
@@ -134,11 +172,17 @@ function numberKey(digits: string, byText: boolean): string | null {
   return String(Number(digits));
 }
 
+/** T160: the key of a Klartext label number (`LBL5` for `5` and `05`), or null. */
+function labelKey(digits: string): string | null {
+  return /^\d{1,5}$/.test(digits) ? `LBL${Number(digits)}` : null;
+}
+
 /** The key of a value of `param` as typed, or null when it is no block number or name at all. */
 export function keyOf(param: BlockParam, value: unknown, cp: CompiledProfile): string | null {
   const text = typeof value === 'number' && Number.isInteger(value) ? String(value) : typeof value === 'string' ? value.trim() : '';
   if (text === '') return null;
   if (param.kind === 'name') return text.toUpperCase();
+  if (param.kind === 'label') return labelKey(text.replace(/^\+/, ''));
   return numberKey(text.replace(/^\+/, ''), comparesByText(cp));
 }
 
@@ -166,6 +210,8 @@ function noteTokens(out: DocumentNumbers, at: number, line: string, tokens: NcTo
   }
   if (addresses.size === 0) return;
   for (const word of referencesOn(tokens, line, cp, addresses, labels)) {
+    // WX-NC-2: a word kept as written (`rewrite: false`) or naming another program's block (`M99 P30`) still
+    // counts here: the form refuses its number rather than guess that it names no block of this program.
     const key = numberKey(word.text, byText);
     if (key === null || out.referenced.has(key)) continue;
     const from = line.toUpperCase().lastIndexOf(word.address.toUpperCase(), word.start);
@@ -371,6 +417,37 @@ export function documentNumbers(lines: readonly string[], cp: CompiledProfile, w
   return out;
 }
 
+/**
+ * T160, rule 2 for Klartext: the labels the program defines (`LBL 5` at the head of a block, keyed
+ * `LBL5`, with the highest number in `max`) and the labels it calls (`CALL LBL 5`). Only lines
+ * that hold `LBL` are tokenized. Same shape as `documentNumbers`, so rules 3 and 4 read it alike.
+ */
+export function documentLabels(lines: readonly string[], cp: CompiledProfile): DocumentNumbers {
+  const out: DocumentNumbers = { blocks: new Map(), referenced: new Map(), max: null, withBlocks: true };
+  for (let i = 0; i < lines.length; i++) {
+    const line = typeof lines[i] === 'string' ? lines[i] : '';
+    if (!/LBL/i.test(line)) continue;
+    const tokens = tokenizeLine(line, cp).tokens.filter((t) => t.kind !== 'whitespace');
+    tokens.forEach((token, k) => {
+      if (token.kind !== 'keyword') return;
+      const word = typeof token.text === 'string' ? token.text.toUpperCase() : '';
+      if (word !== 'LBL' && word !== 'CALL LBL') return;
+      const value = tokens[k + 1];
+      const key = value !== undefined && value.kind === 'word' && !value.address ? labelKey(value.text) : null;
+      if (key === null || key === 'LBL0') return;
+      if (word === 'CALL LBL') {
+        if (!out.referenced.has(key)) out.referenced.set(key, { line: i + 1, word: `CALL LBL ${value.text}` });
+        return;
+      }
+      if (!tokens.slice(0, k).every((t) => t.kind === 'blockNumber' || t.kind === 'skip')) return;
+      if (!out.blocks.has(key)) out.blocks.set(key, { line: i + 1 });
+      const n = Number(value.text);
+      if (out.max === null || n > out.max) out.max = n;
+    });
+  }
+  return out;
+}
+
 /** The numbers the template's `{{N}}` writes at `env` (`count` of them), as the engine counts them out. */
 export function ownNumbers(env: TemplateEnv, count: number): number[] {
   const numbering = env.cp.profile.numbering;
@@ -404,6 +481,22 @@ export function freeBlockValues(t: TemplateDef, params: readonly BlockParam[], d
   for (const bp of params) {
     const p = (t.params ?? []).find((x) => x.id === bp.id);
     if (!p) continue;
+    // T162: a formula's value is computed from the others; it is checked (rule 4), not chosen.
+    if (p.type === 'formula') continue;
+    if (p.type === 'choice') {
+      // T161: the default when nothing uses it, else the first choice nothing uses; none: the default stays (and is refused).
+      const options = [...(p.default === undefined ? [] : [String(p.default)]), ...(p.choices ?? []).map((c) => c.value)];
+      const pick = options.find((value) => {
+        const key = keyOf(bp, value, cp);
+        return key !== null && !taken(doc, key) && !used.has(key);
+      });
+      if (pick === undefined) continue;
+      const key = keyOf(bp, pick, cp);
+      if (key !== null) used.add(key);
+      out[bp.id] = pick;
+      if (bp.kind === 'number' && /^\d+$/.test(pick)) top = Math.max(top, Number(pick));
+      continue;
+    }
     const def = p.default === undefined ? '' : String(p.default);
     const defKey = keyOf(bp, def, cp);
     if (defKey !== null && !taken(doc, defKey) && !used.has(defKey)) {
@@ -424,6 +517,19 @@ export function freeBlockValues(t: TemplateDef, params: readonly BlockParam[], d
           break;
         }
       }
+      continue;
+    }
+    if (bp.kind === 'label') {
+      // T160: the next label above the program's highest one, else the lowest free one.
+      const most = typeof p.max === 'number' ? p.max : 65535;
+      const least = Math.max(1, typeof p.min === 'number' ? Math.ceil(p.min) : 1);
+      const freeLabel = (n: number): boolean => !taken(doc, `LBL${n}`) && !used.has(`LBL${n}`);
+      let pick: number | null = null;
+      for (let n = Math.max(least, (doc.max ?? 0) + 1); n <= most && pick === null; n++) if (freeLabel(n)) pick = n;
+      for (let n = least; n <= most && pick === null; n++) if (freeLabel(n)) pick = n;
+      if (pick === null) continue;
+      used.add(`LBL${pick}`);
+      out[bp.id] = String(pick);
       continue;
     }
     const limit = Math.min(typeof p.max === 'number' ? p.max : profileMax, profileMax);
@@ -450,8 +556,9 @@ export function freeBlockValues(t: TemplateDef, params: readonly BlockParam[], d
   return out;
 }
 
-/** The block number as the profile writes it, for a message (`N100`). */
+/** The block number as the profile writes it, for a message (`N100`, `LBL 5`). */
 function written(bp: BlockParam, key: string, cp: CompiledProfile): string {
+  if (bp.kind === 'label') return `LBL ${key.slice(3)}`;
   if (bp.kind === 'name' || comparesByText(cp)) return key;
   return `${prefixOf(cp) ?? ''}${key}`;
 }
@@ -469,9 +576,10 @@ export function blockValueErrors(params: readonly BlockParam[], values: Record<s
     const block = doc.blocks.get(key);
     const named = doc.referenced.get(key);
     if (block !== undefined) {
-      errors[bp.id] = { key: bp.kind === 'name' ? 'templates.value.blockNameUsed' : 'templates.value.blockNumberUsed', params: { number, line: block.line } };
+      const used = bp.kind === 'name' ? 'templates.value.blockNameUsed' : bp.kind === 'label' ? 'templates.value.labelUsed' : 'templates.value.blockNumberUsed';
+      errors[bp.id] = { key: used, params: { number, line: block.line } };
     } else if (named !== undefined) {
-      errors[bp.id] = { key: 'templates.value.blockNumberNamed', params: { number, word: named.word ?? number, line: named.line } };
+      errors[bp.id] = { key: bp.kind === 'label' ? 'templates.value.labelCalled' : 'templates.value.blockNumberNamed', params: { number, word: named.word ?? number, line: named.line } };
     } else if (bp.kind === 'number' && mine.has(key)) {
       errors[bp.id] = { key: 'templates.value.blockNumberOwn', params: { number } };
     } else if (seen.has(key) && seen.get(key) !== bp.id) {

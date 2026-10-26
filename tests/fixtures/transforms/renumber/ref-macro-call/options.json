@@ -1,0 +1,22 @@
+{
+  "note": "P4.19 (plan 6.6 rule 9): G65 P9010 calls the macro program O9010, and M99 in a macro returns to the program that called it. O0001 is its one caller, so M99 P30 follows the caller's N30, which is N40 after the run.",
+  "profile": "fanuc-gcode",
+  "options": {},
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 7,
+        "severity": "info"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.referencesRewritten"
+    ],
+    "preflight": null
+  }
+}

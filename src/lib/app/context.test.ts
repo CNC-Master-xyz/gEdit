@@ -57,6 +57,9 @@ const P3B_SERVICES = ['templates'] as const;
 /** What P4e adds (Phase 4 plan §6.7; the prelude wires the stub, P4.22b implements it). */
 const P4E_SERVICES = ['channelPanes'] as const;
 
+/** What P4c adds (Phase 4 plan §6.5 rule 10; the prelude wires the stub, P4.15 implements it). */
+const P4C_SERVICES = ['print'] as const;
+
 const SERVICES = [
   ...M1_SERVICES,
   ...M2_SERVICES,
@@ -70,10 +73,11 @@ const SERVICES = [
   ...P3A_SERVICES,
   ...P3B_SERVICES,
   ...P4E_SERVICES,
+  ...P4C_SERVICES,
 ];
 
 describe('app context', () => {
-  it('exposes every M1 to M7, M12, M13, P3a, P3b and P4e service', () => {
+  it('exposes every M1 to M7, M12, M13, P3a, P3b, P4e and P4c service', () => {
     expect(Object.keys(ctx).sort()).toEqual([...SERVICES].sort());
   });
 

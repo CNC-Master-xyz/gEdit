@@ -20,7 +20,7 @@ import { BUILTIN_PROFILE_JSON } from '$lib/data/profiles';
 import { editorText, listFixtures, openFixture } from '../../../../tests/unit/helpers/fixtures';
 import { compileProfile } from './compile';
 import { detectProfile } from './detect';
-import { OutlineIndex, type OutlineItem } from './outline';
+import { OutlineIndex, sameOutlineReading, type OutlineItem } from './outline';
 import { validateProfile } from './validate';
 import type { CompiledProfile, Profile } from './types';
 
@@ -357,6 +357,35 @@ describe('tool labels', () => {
     ]);
     // A preselected tool that is not the unload is still loaded by the `M6` below it.
     expect(tools('T0\nT3\nM6\n')).toEqual([[3, 'T3']]);
+  });
+
+  // v1.2.0 manual-check fix round (D3-4c): the Fanuc mill choice "T on the M6 line is the
+  // next tool" loads the T written before the M6 line; `M6 T0` then loads that tool too, and
+  // the `T0` it preselects makes the next M6 an unload.
+  it('with toolFrom last-before, lists the tool selected before each M6', () => {
+    const cp = variant(FANUC, (p) => {
+      p.toolCall.toolFrom = 'last-before';
+    });
+    const tools = (text: string) =>
+      index(text, cp)
+        .items()
+        .filter((item) => item.kind === 'tool')
+        .map((item) => [item.line, item.text]);
+    expect(tools('T1\nM6 T2\nG1 X1 F100\nM6 T3\nG1 X2\nM6 T0\nG1 X3\nM6\nT4 M6\n')).toEqual([
+      [2, 'T1'],
+      [4, 'T2'],
+      [6, 'T3'],
+    ]);
+    // Line 9's `T4` is only preselected: its M6 still loads the pending `T0`.
+    // The same program read with the default choice: the T on the line is the tool.
+    const loaded = index('T1\nM6 T2\nG1 X1 F100\nM6 T3\n', compiled(FANUC))
+      .items()
+      .filter((item) => item.kind === 'tool')
+      .map((item) => [item.line, item.text]);
+    expect(loaded).toEqual([
+      [2, 'T2'],
+      [4, 'T3'],
+    ]);
   });
 
   // Owner decision of 2026-10-08 (M9-1): in a block with two `T` words and `M6` the first
@@ -771,5 +800,204 @@ describe('the cost of an edit', () => {
 
     outline.applyChange(1000, 1000, ['X1. F1200.']);
     expect(outline.items()).not.toBe(tree);
+  });
+});
+
+// T136: the last stage of the first build, the aggregation of the marks into the tree, runs in
+// steps, and a tree built in steps is the tree built at once. The steps are counted in lines
+// and in marks that say something, so nothing here reads a clock.
+describe('aggregating in steps (T136)', () => {
+  /** What an index answers, whole: the tree and the tool lines. */
+  function answer(outline: OutlineIndex): string {
+    return JSON.stringify([outline.items(), outline.toolLines()]);
+  }
+
+  /** Runs the steps to the end and says how many there were. */
+  function finishInSteps(outline: OutlineIndex, lines: number, marks: number): number {
+    let steps = 0;
+    while (!outline.aggregateSome(lines, marks)) {
+      steps++;
+      if (steps > 1_000_000) throw new Error('the aggregation does not end');
+    }
+    return steps + 1;
+  }
+
+  const SIZES: [number, number][] = [[1, 1], [2, 1], [7, 3], [50, 5], [20_000, 400]];
+
+  it.each(openable.map((rel) => [rel]))('%s: the tree built in steps is the tree built at once, for every step size', (rel) => {
+    const { profileId, text } = outlineOf(rel);
+    const cp = compiled(profileId);
+    const whole = answer(index(text, cp));
+    for (const [lines, marks] of SIZES) {
+      const outline = index(text, cp);
+      finishInSteps(outline, lines, marks);
+      expect(answer(outline), `steps of ${lines} lines and ${marks} marks`).toBe(whole);
+    }
+  });
+
+  it('really is in steps: a small run does not finish a program with many marks', () => {
+    const lines = ['O1000', ...Array.from({ length: 40 }, (_, i) => (i % 4 === 0 ? `T${i + 1} M6 (TOOL ${i})` : 'G1 X1.'))];
+    const outline = new OutlineIndex(compiled(FANUC));
+    outline.reset(lines);
+    expect(outline.aggregateSome(1_000_000, 5)).toBe(false);
+    expect(outline.aggregating).toBe(true);
+    // 11 marks (the program line and ten tool lines) in steps of 5: two more steps.
+    expect(outline.aggregateSome(1_000_000, 5)).toBe(false);
+    expect(outline.aggregateSome(1_000_000, 5)).toBe(true);
+    expect(outline.aggregating).toBe(false);
+    expect(outline.toolLines()).toHaveLength(10);
+  });
+
+  it('counts empty lines against the line run, so a long run of moves is covered in a few steps', () => {
+    const outline = new OutlineIndex(compiled(FANUC));
+    outline.reset(['T1 M6', ...Array.from({ length: 999 }, () => 'G1 X1. Y2.')]);
+    expect(finishInSteps(outline, 250, 400)).toBe(4);
+  });
+
+  it('answers the finished tree from items() and toolLines() mid-way, and the same tree afterwards', () => {
+    const lines = ['O1000', '(ROUGH)', 'T1 M6', 'G0 X0.', 'M1', 'T2 M6', 'X10.', 'M30'];
+    const outline = new OutlineIndex(compiled(FANUC));
+    outline.reset(lines);
+    expect(outline.aggregateSome(3, 1)).toBe(false);
+    const whole = answer(index(lines.join('\n'), compiled(FANUC)));
+    expect(answer(outline)).toBe(whole);
+    expect(outline.aggregateSome(1, 1)).toBe(true);
+    expect(answer(outline)).toBe(whole);
+  });
+
+  // The walk has read the marks before `at`, and a tool call among them looked two marks
+  // further down for its description: a change from `at + 2` on cannot have reached it.
+  it('goes on after a change below what it has read, and starts again after one that may have reached it', () => {
+    const lines = ['O1000', 'T1 M6', '(ONE)', 'G1 X1.', 'G1 X2.', 'G1 X3.', 'G1 X4.', 'T2 M6', 'G1 X5.', '(TWO)'];
+    const make = (): OutlineIndex => {
+      const outline = new OutlineIndex(compiled(FANUC));
+      outline.reset(lines);
+      // Reads the first three lines: `O1000`, `T1 M6` and `(ONE)`.
+      expect(outline.aggregateSome(3, 1_000_000)).toBe(false);
+      return outline;
+    };
+    const finished = (edit: (o: OutlineIndex, l: string[]) => void): { again: boolean; outline: OutlineIndex; lines: string[] } => {
+      const outline = make();
+      const own = [...lines];
+      edit(outline, own);
+      const again = !outline.aggregating;
+      finishInSteps(outline, 2, 1);
+      return { again, outline, lines: own };
+    };
+    const same = (r: { outline: OutlineIndex; lines: string[] }): boolean =>
+      answer(r.outline) === answer(index(r.lines.join('\n'), compiled(FANUC)));
+
+    // The walk is at mark 3 (marks 0..2 read), so a change from mark 5 (line 6) on is below it.
+    const below = finished((o, l) => {
+      l[5] = 'T9 M6';
+      o.applyChange(6, 6, ['T9 M6']);
+    });
+    expect(below.again).toBe(false);
+    expect(same(below)).toBe(true);
+
+    // Mark 4 (line 5) is the second below the last mark read: the tool call on line 2 could have taken its description from it.
+    const edge = finished((o, l) => {
+      l[4] = '(NEW)';
+      o.applyChange(5, 5, ['(NEW)']);
+    });
+    expect(edge.again).toBe(true);
+    expect(same(edge)).toBe(true);
+
+    const inside = finished((o, l) => {
+      l[1] = 'T7 M6';
+      o.applyChange(2, 2, ['T7 M6']);
+    });
+    expect(inside.again).toBe(true);
+    expect(same(inside)).toBe(true);
+
+    // A line inserted above shifts every row below it: start again, and the rows are right.
+    const inserted = finished((o, l) => {
+      l.splice(0, 0, '(HEAD)');
+      o.applyChange(1, 0, ['(HEAD)']);
+    });
+    expect(inserted.again).toBe(true);
+    expect(same(inserted)).toBe(true);
+
+    // A line appended at the end is below the walk as well.
+    const appended = finished((o, l) => {
+      l.push('M30');
+      o.applyChange(l.length, l.length - 1, ['M30']);
+    });
+    expect(appended.again).toBe(false);
+    expect(same(appended)).toBe(true);
+  });
+
+  /** A deterministic 32-bit PRNG, so a failure can be replayed. */
+  function rng(seed: number): () => number {
+    let state = seed >>> 0;
+    return () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 0x100000000;
+    };
+  }
+
+  it.each([
+    [FANUC, ['O1000', '(ROUGH)', '(T5  D12 FLAT END MILL)', 'T1 M6', 'T5', 'G0 X0. Y0.', 'M1', '(T3 M6)', 'M06T4', 'G1 Z-1. F200. (CUT)', '', 'M30', 'M98 P1000', 'N50 (ROUGHING)', 'T0 M6']],
+    [KLARTEXT, ['0 BEGIN PGM A MM', '1 * - ROUGH', '2 TOOL CALL 1 Z S100', '3 L X+1 R0 FMAX', '4 TOOL CALL 1 Z S200', '5 TOOL CALL 2 Z S300 ; D8 DRILL', '6 LBL 1', '7 CALL LBL 1', '8 STOP', '9 * - FINISH', '10 END PGM A MM', '11 BEGIN PGM B MM']],
+  ])('%s: edits between the steps never change what the tree comes to (500 random rounds)', (profileId, pool) => {
+    const cp = compiled(profileId);
+    const random = rng(profileId === FANUC ? 20261020 : 20261021);
+    for (let round = 0; round < 500; round++) {
+      const lines: string[] = [];
+      const count = 1 + Math.floor(random() * 25);
+      for (let i = 0; i < count; i++) lines.push(pool[Math.floor(random() * pool.length)]);
+      const outline = new OutlineIndex(cp);
+      outline.reset([...lines]);
+      const edits = Math.floor(random() * 4);
+      for (let e = 0; e < edits; e++) {
+        outline.aggregateSome(1 + Math.floor(random() * 6), 1 + Math.floor(random() * 3));
+        const start = 1 + Math.floor(random() * lines.length);
+        const removed = Math.floor(random() * 3);
+        const endOld = Math.min(lines.length, start + removed - 1);
+        const fresh: string[] = [];
+        for (let i = Math.floor(random() * 3); i > 0; i--) fresh.push(pool[Math.floor(random() * pool.length)]);
+        const removedCount = Math.max(0, endOld - start + 1);
+        if (lines.length - removedCount + fresh.length === 0) continue;
+        outline.applyChange(start, endOld, fresh);
+        lines.splice(start - 1, removedCount, ...fresh);
+      }
+      finishInSteps(outline, 1 + Math.floor(random() * 4), 1 + Math.floor(random() * 3));
+      const want = answer(index(lines.join('\n'), cp));
+      if (answer(outline) !== want) throw new Error(`round ${round} differs\n${JSON.stringify(lines)}\n${answer(outline)}\n${want}`);
+    }
+  });
+});
+
+// T136: a machine switch (or a reload) only rebuilds the map when the profile it reads is
+// another one. Which parts of a profile those are is what this pins.
+describe('sameOutlineReading (T136)', () => {
+  const fanuc = compiled(FANUC);
+
+  it('is true for the same profile, and for an equal one that is another object', () => {
+    expect(sameOutlineReading(fanuc, fanuc)).toBe(true);
+    expect(sameOutlineReading(fanuc, variant(FANUC, () => {}))).toBe(true);
+  });
+
+  it('is true when only what the map does not read differs: the modal power-on state, the code database, the names', () => {
+    const other = variant(FANUC, (p) => {
+      p.modal = { ...p.modal, initial: { ...p.modal?.initial, units: 'G20' }, units: 'inch', diameter: 'on' };
+      p.codes = 'something-else';
+      p.name = 'Another name';
+      p.shortName = 'Other';
+      p.version += 1;
+    });
+    expect(sameOutlineReading(fanuc, other)).toBe(true);
+  });
+
+  it.each([
+    ['an outline rule', (p: Profile) => { p.outline = p.outline.filter((rule) => rule.kind !== 'comment'); }],
+    ['the tool-call trigger', (p: Profile) => { p.toolCall.trigger = 'M0*6(?!\\d)|M0*60'; }],
+    ['the tool word', (p: Profile) => { p.toolCall.tool = 'T(?<tool>\\d{1,4})'; }],
+    ['where the tool is taken from', (p: Profile) => { p.toolCall.toolFrom = p.toolCall.toolFrom === 'same-line' ? 'same-line-or-last' : 'same-line'; }],
+    ['the tool list settings', (p: Profile) => { p.toolList = { ...p.toolList, dropLeadingZeros: !(p.toolList?.dropLeadingZeros === true) } as Profile['toolList']; }],
+    ['the comment markers', (p: Profile) => { p.syntax.comments = [...p.syntax.comments, { start: ';', end: null }]; }],
+    ['the case rule', (p: Profile) => { p.syntax.caseSensitive = true; }],
+  ])('is false when %s differs', (_what, patch) => {
+    expect(sameOutlineReading(fanuc, variant(FANUC, patch))).toBe(false);
   });
 });

@@ -71,6 +71,14 @@ describe('the word mark colours', () => {
     }
   });
 
+  it('frames the parts of a long word with lines of the same token and no darker tint (review NC-8)', () => {
+    const rule = /\.gedit-word-changed\.gedit-word-part\s*\{([^}]*)\}/.exec(wordCss)?.[1] ?? '';
+    expect(rule).toMatch(/inset 0 -2px 0 0 var\(--warning\)/);
+    expect(rule).toMatch(/inset 0 1px 0 0 var\(--warning\)/);
+    // The syntax colours read on it as on the word: no background of its own.
+    expect(rule).not.toMatch(/background/);
+  });
+
   it('names the classes diff.ts draws and hides Monaco\'s character marks under the whole-line class', () => {
     expect(wordCss).toContain('.gedit-word-changed');
     expect(wordCss).toMatch(/\.gedit-word-line\.char-insert/);

@@ -1,0 +1,30 @@
+{
+  "note": "P4.19 (plan 6.6 rule 10): two programs of the file call O3012, so which program M99 P30 returns into cannot be told. The value is reported with its reason (callers) and left exactly as it is, although each caller has an N30.",
+  "profile": "fanuc-gcode",
+  "options": {},
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 6,
+        "severity": "info"
+      },
+      {
+        "line": 11,
+        "severity": "info"
+      },
+      {
+        "line": 14,
+        "severity": "warning"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.referencesUnresolved"
+    ],
+    "preflight": "ncNumbering.renumber.references"
+  }
+}

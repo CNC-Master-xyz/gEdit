@@ -147,6 +147,37 @@ scenario('m1-dnd', { timeout: 120 }, async (h) => {
     { tabs: paths(), status: h.q('status-message')?.textContent },
   )
 
+  // T181: a dropped symbolic link, made outside the app the way a CAM post or a user would. `tauri-plugin-fs` grants a
+  // dropped path as it was written, and the answer of `files_stat` for a link depends on how the scope matches it
+  // (`allowed: false` for the link itself, or the file it points to), so the hosted run says which of the two the app
+  // gives; what must hold either way is that a link is never dropped silently and never opens a second tab on a file
+  // that is open under its real name. Waiting is by count: the drop has been looked at once `files_stat` was asked.
+  const refused = '1 item could not be opened: it is gone, or gEdit was not given access to it'
+  const links = `${h.cfg.run}/links`
+  await h.disk.symlink(nc, `${links}/to-fanuc.nc`)
+  await h.disk.symlink(`${h.cfg.run}/no-such-target.nc`, `${links}/dangling.nc`)
+  const dropAndSettle = async (/** @type {string} */ path) => {
+    const asked = h.rec.ipc.calls['files_stat'] ?? 0
+    await h.drop([path], { x: 300, y: 300 })
+    await h.waitFor(() => (h.rec.ipc.calls['files_stat'] ?? 0) > asked, { timeout: 8000 })
+    await h.idle()
+    return { text: h.q('status-message')?.textContent ?? '', error: h.q('status-message')?.getAttribute('data-error') ?? '', tabs: paths() }
+  }
+  const viaLink = await dropAndSettle(`${links}/to-fanuc.nc`)
+  h.log(`a dropped link to an open file: ${JSON.stringify(viaLink)}`)
+  h.check(
+    'a link to a file that is open adds no tab, and the status bar says something: the file is focused, or the link is refused',
+    viaLink.tabs.length === 2 && (/is already open$/.test(viaLink.text) || (viaLink.text === refused && viaLink.error === '1')),
+    viaLink,
+  )
+  // The status already says "is already open" from the link above, so the text cannot tell that this drop was handled: the
+  // CI run (40300019269) went on at once, and the next drop reached the app while this one still held the file-command lock,
+  // where a drop that arrives during a running chain is dropped on purpose (`contrib/files.ts` `dropHandler`). Wait for the
+  // stat of this drop and let it settle, as for the others.
+  await dropAndSettle(nc)
+  const dangling = await dropAndSettle(`${links}/dangling.nc`)
+  h.check('a link to a file that is not there is refused as an error, and no tab is added', dangling.tabs.length === 2 && dangling.text === refused && dangling.error === '1', dangling)
+
   // Dropping a file that is already open focuses its tab.
   await h.drop([nc], { x: 300, y: 300 })
   await h.waitFor(async () => (await h.title()) === 'f01-mill-3tools.nc — gEdit', { timeout: 5000 })

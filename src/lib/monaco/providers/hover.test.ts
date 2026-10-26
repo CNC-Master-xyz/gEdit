@@ -3,6 +3,8 @@
 // a line the inspector would not read either. Driven with a fake model and a spy for the modal
 // service, so "how often the index was asked" is counted instead of timed.
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { loadCodeDb } from '$lib/core/codes/load';
 import { resolveCodeDbFiles } from '$lib/core/codes/resolve';
@@ -139,3 +141,45 @@ describe('the hover of a channel pane', () => {
   });
 });
 
+
+// T139: the hover's parameter table ran its columns together ("… (G99 returns here)2.") and was
+// cut short at the hover's height. The styles ship with the provider (`../hover.css`).
+describe("the hover's parameter table styles (T139)", () => {
+  const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+  const css = read('../hover.css');
+  const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    selectors: m[1].split(',').map((s) => s.trim()),
+    body: m[2],
+  }));
+  const ruleFor = (selector: string) =>
+    rules
+      .filter((r) => r.selectors.includes(selector))
+      .map((r) => r.body)
+      .join('\n');
+
+  it('is imported by the hover provider, so the hover carries its own styles', () => {
+    expect(read('./hover.ts')).toContain("import '../hover.css';");
+  });
+
+  it('touches the hover markdown only, and colours it with the theme tokens', () => {
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) for (const selector of rule.selectors) expect(selector.startsWith('.monaco-hover .markdown-hover ')).toBe(true);
+    expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(/i);
+  });
+
+  it('puts a gap between the columns and keeps the word and the written value on one line', () => {
+    const cell = ruleFor('.monaco-hover .markdown-hover td');
+    const padding = /padding:\s*(\S+)\s+(\S+)/.exec(cell);
+    expect(padding, cell).not.toBeNull();
+    expect(parseFloat(padding![2])).toBeGreaterThanOrEqual(8);
+    expect(ruleFor('.monaco-hover .markdown-hover td:first-child')).toContain('white-space: nowrap');
+    expect(ruleFor('.monaco-hover .markdown-hover td:last-child')).toContain('white-space: nowrap');
+  });
+
+  it('keeps the rows compact: no paragraph margins in a cell and a tight line height', () => {
+    expect(ruleFor('.monaco-hover .markdown-hover td p')).toContain('margin: 0');
+    const lineHeight = /line-height:\s*([\d.]+)/.exec(ruleFor('.monaco-hover .markdown-hover table'));
+    expect(lineHeight).not.toBeNull();
+    expect(parseFloat(lineHeight![1])).toBeLessThan(1.5); // Monaco's hover uses 1.5em
+  });
+});

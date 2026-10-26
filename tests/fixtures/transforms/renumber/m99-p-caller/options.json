@@ -1,5 +1,5 @@
 {
-  "note": "F42: M99 P30 returns to N30 of the CALLER, which is a block of the main program above. The subprogram has an N30 of its own, so a run that resolved the value in the program it stands in would write the subprograms new number into it and the return would land inside the subprogram. The rule is rewrite: false, so the value is reported and never touched.",
+  "note": "F42: M99 P30 returns to N30 of the CALLER, which is a block of the main program above; the subprogram has an N30 of its own, which a run that resolved the value in the program it stands in would have followed, sending the return into the subprogram. P4.19 (plan 6.6 rule 10): exactly one program of the file calls O2011, so the value is resolved in O2010 (program: caller) and no longer reported. The caller's N30 keeps its number, so P30 stays as written; ref-return-single-caller shows a rewrite.",
   "profile": "fanuc-lathe",
   "options": {},
   "expect": {
@@ -12,15 +12,9 @@
       {
         "line": 5,
         "severity": "info"
-      },
-      {
-        "line": 7,
-        "severity": "warning"
       }
     ],
-    "warnings": [
-      "ncNumbering.renumber.referencesKept"
-    ],
-    "preflight": "ncNumbering.renumber.references"
+    "warnings": [],
+    "preflight": null
   }
 }

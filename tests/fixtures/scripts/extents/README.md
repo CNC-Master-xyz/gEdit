@@ -99,8 +99,8 @@ finding per code.
 | `frame` | warning | a position inside a coordinate frame (the modal `frame`, §7.4 rule 13: a tilted plane, a rotation, a mirror, a scaling, `TRANSMIT`, polar interpolation); one per position |
 | `unknown-code` | warning | the positions of a block that writes a code under the database's motion letter (`G`) that the database lacks: it may hide a machine position or a frame |
 | `multi-pass` | warning | a cycle start whose words are data (the Fanuc lathe `G71`–`G73`): the control computes its passes; one per block on each axis of the plane |
-| `cycle` | warning | a cycle whose positions are its parameters (written as a call, `CYCLE81(…)`, or defined, `CYCL DEF 200`), one per block that runs it on the tool axis (`Z` in `XY`, else the plane's axes); a call while the database describes no defined cycle |
-| `cycle-position` | warning | axis words that are a called cycle's own positions (`position: 'other'`: `CYCL CALL POS`) |
+| `cycle` | warning | a cycle whose positions are its parameters (written as a call, `CYCLE81(…)`, or defined, `CYCL DEF 200`) and that the expansion does not write out, one per block that runs it on the tool axis (`Z` in `XY`, else the plane's axes); a call while the database describes no defined cycle; the bottom of a cycle written as a word under incremental distance that the expansion does not write out; the holes of a repeat count that is not a number, under incremental distance |
+| `cycle-position` | warning | axis words that are a called cycle's own positions (`position: 'other'`: `CYCL CALL POS`), where the expansion does not write the call out |
 | `arc` | warning | an arc whose plane, centre or radius is not known (`CT`, `CIP`, a centre written as an expression, a radius shorter than half the chord): its end points are in the ranges, its bulge is not; one per arc on both plane axes |
 | `polar` | warning | a polar move (`LP`, `CP`) with no pole, or no radius or angle to start from |
 | `rotary` | warning | (M10 review, NC-10) a linear position written while a rotary axis that turns it stands turned or at an unknown angle, with tool centre point control off (above); one per position, one finding per set of rotary axes |
@@ -145,6 +145,24 @@ finding per code.
   whose positions are its parameters is `cycle`. After a block that runs a cycle, the tool
   axis (`Z` in `XY`; in another plane every axis the block wrote and the plane's) is in an
   unknown place.
+- **A drilling cycle the code database describes** (`CodeEntry.expand` and the roles of its
+  parameters, plan §6.3; v1.2.0, P4.7b, T108) is read the way Expand Drilling Cycles writes it
+  out (`_nc_cycles.holes_of`): every point its holes reach is in the ranges (the position of
+  each hole, the R point or the set-up clearance, the pecks, the bottom, a lift-off, the return
+  level), so the extents of a program and of its expansion are the same (X23,
+  `tests/python/test_expand_extents.py`). The Klartext 200/201 bottom is `Q203 + Q201`, the
+  Sinumerik `CYCLE81`–`CYCLE89` bottom `RFP − DPR` (`DP` where `DPR` is 0), a `CYCL CALL POS`
+  goes to its point and its `Z` adds to `Q203`, a Fanuc repeat count drills every hole. The
+  peck retract and clearance of `G73`/`G83`, which only shape the moves between the R point
+  and the bottom, are not asked. A cycle the expansion refuses (no description: Klartext 203,
+  `CYCLE83` with `VARI=0`; a value it cannot read; a start level not known; a return mode only
+  assumed) is read as the rest of this list says. A drilling cycle on a turning program is
+  never written out, so never read this way.
+- **A Fanuc cycle under `G91`** (v1.2.0, P4.7b): the control measures `R` from the initial level
+  and `Z` from the R point, so the `Z` word is no increment from where the tool stands: where
+  the expansion does not write the cycle out, its bottom is `cycle`. A repeat count `K` drills
+  `K` holes, each one the plane increment further, all in the ranges, and the tool ends at the
+  last; `K0` drills none and moves nothing.
 - A **single-pass cycle** (`sets.path: 'cycle'`: the lathe `G90`, `G92` and `G94`, system B
   `G77` to `G79`; v1.2.0, T111 and NCF-C): each block cuts to the point it writes, which is in
   the ranges, and goes back to where it started, which is where the tool stands after it. An
@@ -181,7 +199,10 @@ X diameter is halved for the geometry and doubled back.
   absolute tool-axis parameters (`Q203`, `RTP`/`RFP`/`DP`, R8) but not the depths relative to
   them (`Q201`, `DPR`; and Siemens' manuals say `DPR` wins over `DP` when both are written),
   so putting `DP` into a range could show a depth the cycle never reaches. Such a cycle's
-  runs are counted as `cycle`.
+  runs are counted as `cycle`. *Since v1.2.0 (P4.7b, T108) the database gives the roles
+  `surface` and `depth-relative`, and a cycle the expansion writes out is read from them
+  (above); golden `sinumerik-mill-five-axis` reaches the `CYCLE81` bottom (`Z` -20 at line
+  16), and its `MCALL CYCLE83` without `VARI` (no description) stays `cycle`.*
 
 ## Changes to P10's draft of this file
 

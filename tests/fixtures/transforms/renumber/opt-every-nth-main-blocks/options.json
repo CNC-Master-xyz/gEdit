@@ -1,0 +1,26 @@
+{
+  "note": "P4d §6.6 rule 3 on Sinumerik: every second block is numbered. The main block :2 keeps its number and its prefix (a main block without its number is no main block, and a block search could no longer start there), and N8, which GOTOF names, keeps a number too.",
+  "profile": "sinumerik",
+  "options": {
+    "everyNth": 2
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 2,
+        "severity": "info"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.everyNthRemoved",
+      "ncNumbering.renumber.everyNthKept",
+      "ncNumbering.renumber.referencesRewritten"
+    ],
+    "preflight": null
+  }
+}

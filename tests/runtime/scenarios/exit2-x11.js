@@ -83,8 +83,13 @@ const PARAM_WORDS = {
   units: { label: 'Units at power-on', value: (/** @type {string} */ v) => ({ mm: 'Millimetres (mm)', inch: 'Inches' })[/** @type {'mm'} */ (v)] },
   diameter: { label: 'X and U are diameters at power-on', value: (/** @type {string} */ v) => v },
   'variant gcodeSystem': { label: 'G-code system', value: (/** @type {string} */ v) => `G-code system ${v}` },
-  'variant incrementalAddresses': { label: 'U, W, V and H move incrementally', value: (/** @type {string} */ v) => ({ uw: 'U and W are incremental X and Z' })[/** @type {'uw'} */ (v)] },
+  // Review round CODE-3: with no machine the program is detected as system B, whose default is none (D5-3).
+  'variant incrementalAddresses': { label: 'U, W, V and H move incrementally', value: (/** @type {string} */ v) => ({ uw: 'U and W are incremental X and Z', none: 'None of them' })[/** @type {'uw'} */ (v)] },
   'variant toolWord': { label: 'Tool word: offset digits', value: (/** @type {string} */ v) => ({ byLength: 'By length' })[/** @type {'byLength'} */ (v)] },
+  // Manual-check fix D3-4a: the lathe's tool change, a turret (default) or a tool changer.
+  'variant toolChange': { label: 'Tool change', value: (/** @type {string} */ v) => ({ turret: 'Turret', atc: 'Tool changer' })[/** @type {'turret'} */ (v)] },
+  // Review round D5-7: the counter spindle, Y turns with Z (default) or stays.
+  'variant counterSpindleY': { label: 'Counter spindle', value: (/** @type {string} */ v) => ({ turns: 'Y turns with Z', stays: 'Y stays' })[/** @type {'turns'} */ (v)] },
   'power-on feedmode': { label: 'Feed mode at power-on', value: (/** @type {string} */ v) => v },
   'power-on plane': { label: 'Plane at power-on', value: (/** @type {string} */ v) => v },
   'power-on spindlemode': { label: 'Spindle-speed mode at power-on', value: (/** @type {string} */ v) => v },
@@ -96,22 +101,32 @@ const SOURCE_PHRASE = { machine: 'set by the machine', detected: 'detected in th
 /**
  * (b): the tooltip lists every effective parameter of a `machine-params.*.json` golden with its source,
  * and nothing else: one line per parameter row, `label: value — source`, in any order.
+ *
+ * `extra` are the lines the status bar adds to the golden's rows, which `report_machine_params.py` does not report: since the
+ * manual-check round (D4-2) the Fanuc lathe states its own "Point-less feeds" choice, and the tooltip names it right under
+ * the number rules of every preset that counts a point-less feed (`machineSummaryLines`, T084). The criterion's machine
+ * keeps the 0.01 mm/rev it was made with, which the choice calls "Series 15 format".
  * @param {Harness} h
  * @param {any} want the golden
  * @param {string} label
+ * @param {{ label: string, value: string, source: keyof typeof SOURCE_PHRASE }[]} [extra]
  */
-function checkTooltipLists(h, want, label) {
+function checkTooltipLists(h, want, label, extra = []) {
   const rows = want.report.rows.filter((/** @type {any} */ r) => r.key !== 'machine')
   const lines = tooltipLines(h)
   const missing = []
-  for (const r of rows) {
-    const words = /** @type {Record<string, any>} */ (PARAM_WORDS)[r.key]
-    const source = /** @type {Record<string, string>} */ (SOURCE_PHRASE)[r.source]
-    if (!words || !source) throw new Error(`the golden row ${JSON.stringify(r)} has no tooltip words in this scenario`)
-    const start = `${words.label}: ${words.value(r.value)}`
+  const wanted = [
+    ...rows.map((/** @type {any} */ r) => {
+      const words = /** @type {Record<string, any>} */ (PARAM_WORDS)[r.key]
+      if (!words || !SOURCE_PHRASE[/** @type {keyof typeof SOURCE_PHRASE} */ (r.source)]) throw new Error(`the golden row ${JSON.stringify(r)} has no tooltip words in this scenario`)
+      return { start: `${words.label}: ${words.value(r.value)}`, source: SOURCE_PHRASE[/** @type {keyof typeof SOURCE_PHRASE} */ (r.source)] }
+    }),
+    ...extra.map((e) => ({ start: `${e.label}: ${e.value}`, source: SOURCE_PHRASE[e.source] })),
+  ]
+  for (const { start, source } of wanted) {
     if (lines.filter((l) => l.startsWith(start) && l.endsWith(` — ${source}`)).length !== 1) missing.push(`${start} … — ${source}`)
   }
-  h.check(`${label}: its tooltip lists each of the golden's ${rows.length} parameters once, with its source, power-on feed mode included, and no other line`, missing.length === 0 && lines.length === rows.length, { missing, lines })
+  h.check(`${label}: its tooltip lists each of the golden's ${rows.length} parameters once${extra.length > 0 ? ` and the ${extra.map((e) => e.label).join(', ')} line of the status bar` : ''}, with its source, power-on feed mode included, and no other line`, missing.length === 0 && lines.length === wanted.length, { missing, lines })
 }
 
 scenario('exit2-x11-1', { timeout: 900, vars: { HOME: HOME_1 } }, async (h) => {
@@ -134,9 +149,18 @@ scenario('exit2-x11-1', { timeout: 900, vars: { HOME: HOME_1 } }, async (h) => {
   setField(h, 'variant.gcodeSystem', optionStarting(h, 'variant.gcodeSystem', 'G-code system B'))
   await h.frame()
   await h.idle()
+  // Manual-check fix D5-3: in system B the U/W field follows to "none" (G91 only); the criterion's
+  // machine keeps U and W incremental, so it is set back by hand.
+  const followed = /** @type {HTMLSelectElement | null} */ (machineField(h, 'variant.incrementalAddresses')?.querySelector('select') ?? null)
+  h.check('switching to system B moves "U, W, V and H move incrementally" to none (D5-3)', /^None of them/.test(followed?.selectedOptions[0]?.textContent?.trim() ?? ''), followed?.selectedOptions[0]?.textContent)
+  setField(h, 'variant.incrementalAddresses', optionStarting(h, 'variant.incrementalAddresses', 'U and W are incremental X and Z'))
+  await h.frame()
+  // Manual-check fix D4-1: the lathe's IS-B preset reads a point-less feed per revolution in
+  // 0.0001 mm/rev; the criterion's machine keeps the 0.01 mm/rev it was made with (Series 15 format).
   await saveMachineForm(h, {
     name: spec.name,
     numberInput: optionStarting(h, 'numberInput', 'Increments of 0.001 mm (IS-B)'),
+    pointlessFeeds: optionStarting(h, 'pointlessFeeds', 'Series 15 format'),
     'modal.feedmode': optionStarting(h, 'modal.feedmode', 'G95'),
   })
   await clickMachineAction(h, 'duplicate', machineRows(h)[0].id)
@@ -172,7 +196,7 @@ scenario('exit2-x11-1', { timeout: 900, vars: { HOME: HOME_1 } }, async (h) => {
     await useMachine(h, ids['Lathe IS-B'], 'Lathe IS-B')
     h.check('picking "Lathe IS-B" changes the item: the machine is named and its values are set by the machine', machineText(h).includes('Lathe IS-B') && machineItem(h)?.dataset.assumed !== '1' && tooltipLine(h, 'How the control reads numbers').endsWith('set by the machine'), { text: machineText(h), line: tooltipLine(h, 'How the control reads numbers') })
     h.check('and the tooltip differs from the none case', JSON.stringify(tooltipLines(h)) !== JSON.stringify(noneLines), tooltipLines(h))
-    checkTooltipLists(h, params['is-b'], 'with "Lathe IS-B"')
+    checkTooltipLists(h, params['is-b'], 'with "Lathe IS-B"', [{ label: 'Point-less feeds', value: 'Series 15 format', source: 'machine' }])
     await useNone(h)
     h.check('"None" returns to the dialect defaults', machineText(h) === 'Machine: none (assumed)' && JSON.stringify(tooltipLines(h)) === JSON.stringify(noneLines), machineText(h))
   }

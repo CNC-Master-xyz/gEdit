@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be written out as plain moves: 1 cycle call that is not written out, 1 block with a block skip (/). No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 16,
+      "severity": "error",
+      "message": "6 FN 9: IF +Q1 EQU +0 GOTO LBL 1: this way of calling the cycle is not written out yet (FN 9 while CYCL DEF 200 is in force).",
+      "reason": "call-form"
+    },
+    {
+      "line": 20,
+      "severity": "error",
+      "message": "10 /CYCL CALL: the block can be skipped (/), and the plain moves written for the cycle would not be skipped the same way.",
+      "reason": "block-skip"
+    }
+  ]
+}

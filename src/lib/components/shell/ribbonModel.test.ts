@@ -2,7 +2,7 @@
 // The registry sorts by tab only, so everything below is what the Ribbon adds.
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_TAB, groupsOf, resolveTab, TAB_LABEL, TAB_ORDER, tabsOf, type RibbonEntry } from './ribbonModel';
+import { DEFAULT_TAB, groupsOf, rememberTab, resolveTab, TAB_LABEL, TAB_ORDER, tabsOf, type RibbonEntry } from './ribbonModel';
 import { hasKey, t } from '$lib/i18n';
 import ScriptOutputPanel from '$lib/components/panels/ScriptOutputPanel.svelte';
 import type { RibbonGroupDef, RibbonItemDef, RibbonTab } from '$lib/app/types';
@@ -23,6 +23,28 @@ describe('tab labels', () => {
   it('lists the seven tabs in the order File, Edit, Insert, NC, Tools, Scripts, View (B1 A9)', () => {
     expect([...TAB_ORDER]).toEqual(['file', 'edit', 'insert', 'nc', 'tools', 'scripts', 'view']);
     expect(TAB_ORDER.map((tab) => t(TAB_LABEL[tab]))).toEqual(['File', 'Edit', 'Insert', 'NC', 'Tools', 'Scripts', 'View']);
+  });
+});
+
+describe('rememberTab (T141)', () => {
+  const state = { layout: {}, lastParams: {}, lastScript: null, files: {} };
+
+  it('puts the picked tab into the remembered state and keeps the rest', () => {
+    const next = rememberTab(state, 'tools');
+    expect(next.ribbonTab).toBe('tools');
+    expect(next).toEqual({ ...state, ribbonTab: 'tools' });
+    expect(state).not.toHaveProperty('ribbonTab');
+  });
+
+  it('answers the same object when the tab is already the remembered one (no write)', () => {
+    const had = rememberTab(state, 'view');
+    expect(rememberTab(had, 'view')).toBe(had);
+  });
+
+  it('is what resolveTab reads back, and a gone tab falls back without being forgotten', () => {
+    const tabs = ['file', 'view'] as const;
+    expect(resolveTab(rememberTab(state, 'view').ribbonTab, tabs)).toBe('view');
+    expect(resolveTab(rememberTab(state, 'scripts').ribbonTab, tabs)).toBe('file');
   });
 });
 

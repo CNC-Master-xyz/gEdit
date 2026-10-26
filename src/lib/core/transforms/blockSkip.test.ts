@@ -7,10 +7,12 @@
 // say: the result keeps the line count, adding then removing gives the program back, and a
 // `/` that divides is never a mark.
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readTransformCases } from '../../../../tests/unit/helpers/transformCases';
+import type { CaseMeta } from '../../../../tests/unit/helpers/transformCases';
 import { noMachine } from '$lib/core/machines/effective';
 import { BUILTIN_PROFILE_JSON } from '$lib/data/profiles';
 import { compileProfile } from '$lib/core/profiles/compile';
@@ -41,15 +43,6 @@ function context(cp: CompiledProfile, options: Record<string, unknown> = {}, fir
   return { cp, codes: NO_CODES, options, firstLine, document, machine: noMachine(cp.profile) };
 }
 
-interface CaseMeta {
-  note: string;
-  profile: string;
-  mode: 'add' | 'remove';
-  options: Record<string, unknown>;
-  scope?: { startLine: number; endLine: number };
-  expect: { summary: string; skipped: { line: number; severity: string }[]; warnings: string[] };
-}
-
 interface Golden {
   name: string;
   meta: CaseMeta;
@@ -59,24 +52,14 @@ interface Golden {
   document: string[];
 }
 
-const GOLDENS: Golden[] = readdirSync(CASES_DIR, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name)
-  .sort()
-  .map((name) => {
-    const meta = JSON.parse(readFileSync(join(CASES_DIR, name, 'options.json'), 'utf8')) as CaseMeta;
-    const document = readFileSync(join(CASES_DIR, name, 'input.nc'), 'utf8').split('\n');
-    const expectedDocument = readFileSync(join(CASES_DIR, name, 'expected.nc'), 'utf8').split('\n');
-    const { startLine, endLine } = meta.scope ?? { startLine: 1, endLine: document.length };
-    return {
-      name,
-      meta,
-      input: document.slice(startLine - 1, endLine),
-      expected: expectedDocument.slice(startLine - 1, endLine),
-      firstLine: startLine,
-      document,
-    };
-  });
+const GOLDENS: Golden[] = readTransformCases(CASES_DIR).map((golden) => ({
+  name: golden.name,
+  meta: golden.meta,
+  input: golden.input,
+  expected: golden.expected,
+  firstLine: golden.firstLine,
+  document: golden.document,
+}));
 
 const defOf = (meta: CaseMeta): TransformDef => (meta.mode === 'add' ? blockSkipAdd : blockSkipRemove);
 
@@ -92,10 +75,10 @@ describe('block-skip goldens', () => {
     const result = defOf(golden.meta).run(golden.input, ctx);
     expect(result.lines).toEqual(golden.expected);
     expect(result.lineMap).toEqual(Int32Array.from(golden.input.map((_line, i) => i)));
-    expect(result.summary.key).toBe(golden.meta.expect.summary);
-    expect(result.skipped.map((s) => ({ line: s.line, severity: s.severity }))).toEqual(golden.meta.expect.skipped);
+    expect(result.summary.key).toBe(golden.meta.expect!.summary);
+    expect(result.skipped.map((s) => ({ line: s.line, severity: s.severity }))).toEqual(golden.meta.expect!.skipped);
     expect(result.skipped.every((s) => s.message.trim() !== '' && !s.message.startsWith('ncBlockSkip.'))).toBe(true);
-    expect(result.warnings.map((w) => w.key)).toEqual(golden.meta.expect.warnings);
+    expect(result.warnings.map((w) => w.key)).toEqual(golden.meta.expect!.warnings);
     for (const key of [result.summary.key, ...result.warnings.map((w) => w.key)]) {
       expect(hasKey(key) || hasKey(`${key}_other`), key).toBe(true);
     }

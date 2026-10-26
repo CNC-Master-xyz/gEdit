@@ -1,0 +1,14 @@
+{
+  "note": "P4d §6.6 rules 1 and 7: four blocks from 9998 do not fit at or below the control's 9999, not even in steps of 1, so the run is refused and writes nothing.",
+  "profile": "okuma-osp",
+  "options": {
+    "start": 9998,
+    "fitToMax": true
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.refused.doesNotFit",
+    "skipped": [],
+    "warnings": [],
+    "preflight": null
+  }
+}

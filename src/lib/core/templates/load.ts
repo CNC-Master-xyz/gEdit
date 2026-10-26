@@ -9,7 +9,8 @@
 // replaces it whole, in its place; a new id is appended).
 //
 // Strictness, as for the codes: a member that is not an array is one problem and no template; a
-// broken template is dropped and reported with its JSON path, and the rest of the file loads. A
+// broken template is dropped and reported with its JSON path, and the rest of the file loads (every
+// problem of it that does not follow from another one, v1.2.0 T150, so the manager shows them all). A
 // template is broken when anything the engine relies on is wrong — its id, label, group or body;
 // a parameter's id, label or type; a placeholder that names no parameter; a bound or a default
 // that contradicts itself; a formula that cannot be read; a text over its limit. Text is never
@@ -23,6 +24,7 @@
 
 import { checkFormula, formulaRefs, FORMULA_CONSTANTS, FORMULA_FUNCTIONS } from './formula';
 import type {
+  TemplateCharset,
   TemplateChoice,
   TemplateDecimals,
   TemplateDef,
@@ -47,6 +49,8 @@ export const TEMPLATE_LIMITS = {
   description: 500,
   help: 300,
   affix: 16,
+  /** v1.2.0 (T154): characters of a parameter's unit (`mm/min`). */
+  unit: 16,
   text: 200,
   value: 80,
   /** Digits of `digits`, decimals of a fixed `decimals`. */
@@ -109,6 +113,16 @@ export function templatesForMachines(templates: readonly TemplateDef[] | undefin
 }
 
 const TYPES: readonly TemplateParamType[] = ['number', 'integer', 'text', 'choice', 'formula'];
+/** T155: the charsets a text parameter may name. */
+export const TEMPLATE_CHARSETS: readonly TemplateCharset[] = ['no-spaces', 'letters-digits', 'name'];
+const CHARSETS = TEMPLATE_CHARSETS;
+
+/** T155: true when `value` holds only what `charset` allows (the engine and the loader's default check share it). */
+export function charsetFits(value: string, charset: TemplateCharset): boolean {
+  if (charset === 'no-spaces') return !/\s/.test(value);
+  if (charset === 'letters-digits') return /^[A-Za-z0-9]*$/.test(value);
+  return /^[A-Za-z][A-Za-z0-9]*$/.test(value);
+}
 const MACHINE_TYPES = ['mill', 'lathe'] as const;
 /**
  * Not usable as a parameter id: `sys`, the formula's functions and constants, and the one name that
@@ -120,6 +134,8 @@ const RESERVED_PARAM_IDS = new Set<string>(['sys', '__proto__', ...FORMULA_FUNCT
 const DECIMAL_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 /** A decimal default is never longer than this: it is checked before the pattern runs. */
 const DECIMAL_MAX_CHARS = 40;
+/** T157: what may stand in front of `{{N}}` on its line: nothing, or a block-delete slash with its level and blanks. */
+const BEFORE_NUMBER = /^[ \t]*\/[0-9]?[ \t]*$/;
 /** A control character the engine could mistake for its own marks (tab and line break excepted). */
 const CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f]/;
 
@@ -204,92 +220,211 @@ function choicesOf(raw: unknown, path: string): TemplateChoice[] {
   });
 }
 
-function readParam(raw: unknown, path: string, report: Report): TemplateParam {
-  if (!isRecord(raw)) throw new Broken(path, 'a parameter has to be an object');
-  const id = raw.id;
-  if (typeof id !== 'string' || !TEMPLATE_PARAM_ID.test(id)) {
-    throw new Broken(`${path}.id`, 'the id has to start with a lower-case letter or _, then letters, digits or _, at most 32');
+/**
+ * The problems of one template (v1.2.0, T150): every check that does not depend on another runs, so
+ * the manager shows all of a template's problems at once instead of the first one only. A check that
+ * reads what an earlier one refused (a default against bounds that contradict each other, the
+ * placeholders against a parameter whose id cannot be read) is left out, so one mistake is said once.
+ */
+class Problems {
+  readonly list: TemplateProblem[] = [];
+
+  /** Runs one check: true when it passed, false when it threw `Broken` (noted). */
+  check(fn: () => void): boolean {
+    try {
+      fn();
+      return true;
+    } catch (error) {
+      if (!(error instanceof Broken)) throw error;
+      this.list.push({ path: error.path, message: error.message });
+      return false;
+    }
   }
-  if (RESERVED_PARAM_IDS.has(id)) throw new Broken(`${path}.id`, `"${id}" is a reserved name`);
-  const label = text(raw.label, `${path}.label`, 'the label', TEMPLATE_LIMITS.label, true);
-  const type = raw.type;
-  if (typeof type !== 'string' || !(TYPES as readonly string[]).includes(type)) {
-    throw new Broken(`${path}.type`, `the type has to be one of ${TYPES.join(', ')}`);
+
+  /** Runs one reader: its value, or undefined when it threw `Broken` (noted). */
+  read<T>(fn: () => T): T | undefined {
+    let out: T | undefined;
+    this.check(() => {
+      out = fn();
+    });
+    return out;
   }
-  const p: TemplateParam = { id, label, type: type as TemplateParamType };
-  const help = text(raw.help, `${path}.help`, 'the help text', TEMPLATE_LIMITS.help, false);
+}
+
+/** One parameter as far as it can be read: `id` and `type` null when they cannot be, `param` null when nothing after them can be judged. */
+interface ParamReading {
+  id: string | null;
+  type: TemplateParamType | null;
+  param: TemplateParam | null;
+}
+
+function readParam(raw: unknown, path: string, report: Report, problems: Problems): ParamReading {
+  if (!isRecord(raw)) {
+    problems.check(() => {
+      throw new Broken(path, 'a parameter has to be an object');
+    });
+    return { id: null, type: null, param: null };
+  }
+  const id =
+    problems.read(() => {
+      const id = raw.id;
+      if (typeof id !== 'string' || !TEMPLATE_PARAM_ID.test(id)) {
+        throw new Broken(`${path}.id`, 'the id has to start with a lower-case letter or _, then letters, digits or _, at most 32');
+      }
+      if (RESERVED_PARAM_IDS.has(id)) throw new Broken(`${path}.id`, `"${id}" is a reserved name`);
+      return id;
+    }) ?? null;
+  const label = problems.read(() => text(raw.label, `${path}.label`, 'the label', TEMPLATE_LIMITS.label, true));
+  const type =
+    problems.read(() => {
+      const type = raw.type;
+      if (typeof type !== 'string' || !(TYPES as readonly string[]).includes(type)) {
+        throw new Broken(`${path}.type`, `the type has to be one of ${TYPES.join(', ')}`);
+      }
+      return type as TemplateParamType;
+    }) ?? null;
+  // Every other member is read against the type.
+  if (type === null) return { id, type, param: null };
+  const p: TemplateParam = { id: id ?? '', label: label ?? '', type };
+  const help = problems.read(() => text(raw.help, `${path}.help`, 'the help text', TEMPLATE_LIMITS.help, false));
   if (help !== undefined) p.help = help;
 
   const isNumber = p.type === 'number' || p.type === 'integer';
   const notFor = (member: string, types: string): never => {
     throw new Broken(`${path}.${member}`, `${member} is only for ${types} parameters`);
   };
+  /** False once a member the default is checked against could not be read. */
+  let defaultReadable = true;
+  const member = (fn: () => void): void => {
+    if (!problems.check(fn)) defaultReadable = false;
+  };
 
   // Bounds.
-  const min = finite(raw.min, `${path}.min`);
-  const max = finite(raw.max, `${path}.max`);
-  if ((min !== undefined || max !== undefined) && !isNumber) notFor(min !== undefined ? 'min' : 'max', 'number and integer');
-  if (min !== undefined && max !== undefined && min > max) throw new Broken(`${path}.min`, 'min is larger than max');
-  if (p.type === 'integer') {
-    if (min !== undefined && !Number.isInteger(min)) throw new Broken(`${path}.min`, 'an integer parameter needs a whole min');
-    if (max !== undefined && !Number.isInteger(max)) throw new Broken(`${path}.max`, 'an integer parameter needs a whole max');
-  }
-  if (min !== undefined) p.min = min;
-  if (max !== undefined) p.max = max;
+  member(() => {
+    const min = finite(raw.min, `${path}.min`);
+    const max = finite(raw.max, `${path}.max`);
+    if ((min !== undefined || max !== undefined) && !isNumber) notFor(min !== undefined ? 'min' : 'max', 'number and integer');
+    if (min !== undefined && max !== undefined && min > max) throw new Broken(`${path}.min`, 'min is larger than max');
+    if (p.type === 'integer') {
+      if (min !== undefined && !Number.isInteger(min)) throw new Broken(`${path}.min`, 'an integer parameter needs a whole min');
+      if (max !== undefined && !Number.isInteger(max)) throw new Broken(`${path}.max`, 'an integer parameter needs a whole max');
+    }
+    if (min !== undefined) p.min = min;
+    if (max !== undefined) p.max = max;
+  });
 
   // Choices.
-  if (p.type === 'choice') p.choices = choicesOf(raw.choices, `${path}.choices`);
-  else if (raw.choices !== undefined) notFor('choices', 'choice');
+  member(() => {
+    if (p.type === 'choice') p.choices = choicesOf(raw.choices, `${path}.choices`);
+    else if (raw.choices !== undefined) notFor('choices', 'choice');
+  });
 
   // Number style.
-  const decimals = decimalsOf(raw.decimals, `${path}.decimals`);
-  if (decimals !== undefined) {
-    if (p.type !== 'number' && p.type !== 'formula') notFor('decimals', 'number and formula');
-    p.decimals = decimals;
-  }
-  if (raw.digits !== undefined) {
+  member(() => {
+    const decimals = decimalsOf(raw.decimals, `${path}.decimals`);
+    if (decimals !== undefined) {
+      if (p.type !== 'number' && p.type !== 'formula') notFor('decimals', 'number and formula');
+      p.decimals = decimals;
+    }
+  });
+  problems.check(() => {
+    if (raw.digits === undefined) return;
     const d = raw.digits;
     if (typeof d !== 'number' || !Number.isInteger(d) || d < 1 || d > TEMPLATE_LIMITS.digits) {
       throw new Broken(`${path}.digits`, `has to be a whole number from 1 to ${TEMPLATE_LIMITS.digits}`);
     }
     if (p.type !== 'integer' && p.type !== 'formula') notFor('digits', 'integer and formula');
     p.digits = d;
-  }
-  const prefix = affix(raw.prefix, `${path}.prefix`);
-  if (prefix !== undefined) p.prefix = prefix;
-  const suffix = affix(raw.suffix, `${path}.suffix`);
-  if (suffix !== undefined) p.suffix = suffix;
-  if (flag(raw.plusSign, `${path}.plusSign`, report)) {
-    if (!isNumber && p.type !== 'formula') notFor('plusSign', 'number, integer and formula');
-    p.plusSign = true;
-  }
-  if (flag(raw.uppercase, `${path}.uppercase`, report)) {
-    if (p.type !== 'text') notFor('uppercase', 'text');
-    p.uppercase = true;
-  }
-  if (flag(raw.comment, `${path}.comment`, report)) {
-    if (p.type !== 'text') notFor('comment', 'text');
-    p.comment = true;
-  }
+  });
+  problems.check(() => {
+    const prefix = affix(raw.prefix, `${path}.prefix`);
+    if (prefix !== undefined) p.prefix = prefix;
+  });
+  problems.check(() => {
+    const suffix = affix(raw.suffix, `${path}.suffix`);
+    if (suffix !== undefined) p.suffix = suffix;
+  });
+  problems.check(() => {
+    if (flag(raw.plusSign, `${path}.plusSign`, report)) {
+      if (!isNumber && p.type !== 'formula') notFor('plusSign', 'number, integer and formula');
+      p.plusSign = true;
+    }
+  });
+  member(() => {
+    if (flag(raw.uppercase, `${path}.uppercase`, report)) {
+      if (p.type !== 'text') notFor('uppercase', 'text');
+      p.uppercase = true;
+    }
+  });
+  problems.check(() => {
+    if (flag(raw.comment, `${path}.comment`, report)) {
+      if (p.type !== 'text') notFor('comment', 'text');
+      p.comment = true;
+    }
+  });
+  // T155: the length and the characters of a text.
+  member(() => {
+    if (raw.maxLength === undefined) return;
+    const n = raw.maxLength;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > TEMPLATE_LIMITS.text) {
+      throw new Broken(`${path}.maxLength`, `has to be a whole number from 1 to ${TEMPLATE_LIMITS.text}`);
+    }
+    if (p.type !== 'text') notFor('maxLength', 'text');
+    p.maxLength = n;
+  });
+  member(() => {
+    if (raw.charset === undefined) return;
+    if (typeof raw.charset !== 'string' || !(CHARSETS as readonly string[]).includes(raw.charset)) {
+      throw new Broken(`${path}.charset`, `has to be one of ${CHARSETS.map((c) => `"${c}"`).join(', ')}`);
+    }
+    if (p.type !== 'text') notFor('charset', 'text');
+    p.charset = raw.charset as TemplateCharset;
+  });
+  // T154: the unit shown beside the field.
+  problems.check(() => {
+    if (raw.unit === undefined || raw.unit === '') return;
+    if (typeof raw.unit !== 'string' || raw.unit.trim() === '') throw new Broken(`${path}.unit`, 'has to be a text');
+    const unit = raw.unit.trim();
+    if (unit.length > TEMPLATE_LIMITS.unit) throw new Broken(`${path}.unit`, `is longer than ${TEMPLATE_LIMITS.unit} characters`);
+    if (/[\r\n]/.test(unit) || CONTROL_CHARS.test(unit)) throw new Broken(`${path}.unit`, 'has to be one line without control characters');
+    if (!isNumber && p.type !== 'formula') notFor('unit', 'number, integer and formula');
+    p.unit = unit;
+  });
 
   // Formula.
   if (p.type === 'formula') {
-    if (typeof raw.formula !== 'string') throw new Broken(`${path}.formula`, 'a formula parameter needs its formula');
-    p.formula = raw.formula;
-    if (raw.required !== undefined) notFor('required', 'non-formula');
-    if (raw.default !== undefined) notFor('default', 'non-formula');
-    if (raw.remember !== undefined) notFor('remember', 'non-formula');
+    problems.check(() => {
+      if (typeof raw.formula !== 'string') throw new Broken(`${path}.formula`, 'a formula parameter needs its formula');
+      p.formula = raw.formula;
+    });
+    problems.check(() => {
+      if (raw.required !== undefined) notFor('required', 'non-formula');
+    });
+    problems.check(() => {
+      if (raw.default !== undefined) notFor('default', 'non-formula');
+    });
+    problems.check(() => {
+      if (raw.remember !== undefined) notFor('remember', 'non-formula');
+    });
     if (flag(raw.hidden, `${path}.hidden`, report)) p.hidden = true;
-    return p;
+    return { id, type, param: p };
   }
-  if (raw.formula !== undefined) notFor('formula', 'formula');
-  if (raw.hidden !== undefined) notFor('hidden', 'formula');
+  problems.check(() => {
+    if (raw.formula !== undefined) notFor('formula', 'formula');
+  });
+  problems.check(() => {
+    if (raw.hidden !== undefined) notFor('hidden', 'formula');
+  });
   if (flag(raw.required, `${path}.required`, report)) p.required = true;
   if (flag(raw.remember, `${path}.remember`, report)) p.remember = true;
 
-  // Default.
-  if (raw.default !== undefined) p.default = defaultOf(raw.default, p, `${path}.default`);
-  return p;
+  // Default: only against members that could all be read.
+  if (raw.default !== undefined && defaultReadable) {
+    problems.check(() => {
+      p.default = defaultOf(raw.default, p, `${path}.default`);
+    });
+  }
+  return { id, type, param: p };
 }
 
 /** A default that fits its parameter; never corrected. */
@@ -301,6 +436,8 @@ function defaultOf(raw: unknown, p: TemplateParam, path: string): string | numbe
     }
     if (CONTROL_CHARS.test(raw)) throw new Broken(path, 'the default has an invisible control character');
     if (p.uppercase && raw !== raw.toUpperCase()) throw new Broken(path, 'the default is not upper case');
+    if (raw !== '' && p.maxLength !== undefined && raw.length > p.maxLength) throw new Broken(path, `the default is longer than ${p.maxLength} characters`);
+    if (raw !== '' && p.charset !== undefined && !charsetFits(raw, p.charset)) throw new Broken(path, `the default does not fit the charset "${p.charset}"`);
     return raw;
   }
   if (p.type === 'choice') {
@@ -329,8 +466,9 @@ function defaultOf(raw: unknown, p: TemplateParam, path: string): string | numbe
 
 /**
  * The placeholders of a body, checked: every `{{name}}` is a parameter, `N` at the very start of
- * a line, or one of `SYS_PLACEHOLDERS`; `\{{` is a literal `{{`; a `{{` that is not closed on its
- * line is an error. Answers the parameter ids it uses.
+ * a line (or right behind a leading block-delete slash, `/{{N}}`, `/1 {{N}}`: v1.2.0 T157), or one
+ * of `SYS_PLACEHOLDERS`; `\{{` is a literal `{{`; a `{{` that is not closed on its line is an
+ * error. Answers the parameter ids it uses.
  */
 export function placeholdersOf(body: string, params: ReadonlySet<string>): { used: Set<string> } | { error: string } {
   const used = new Set<string>();
@@ -349,7 +487,9 @@ export function placeholdersOf(body: string, params: ReadonlySet<string>): { use
       if (close < 0) return { error: `line ${n + 1}: a {{ without its }}` };
       const name = line.slice(open + 2, close);
       if (name === 'N') {
-        if (open !== 0) return { error: `line ${n + 1}: {{N}} has to stand at the start of a line` };
+        if (open !== 0 && !BEFORE_NUMBER.test(line.slice(0, open))) {
+          return { error: `line ${n + 1}: {{N}} has to stand at the start of a line or right behind a block-delete /` };
+        }
       } else if (!(SYS_PLACEHOLDERS as readonly string[]).includes(name)) {
         if (name.trim() !== name) return { error: `line ${n + 1}: write {{${name.trim()}}} without spaces` };
         if (!params.has(name)) return { error: `line ${n + 1}: {{${name}}} is no parameter of this template` };
@@ -387,69 +527,113 @@ function formulaCycle(params: readonly TemplateParam[]): string[] | null {
   return null;
 }
 
-function readTemplate(raw: unknown, path: string, report: Report): TemplateDef {
-  if (!isRecord(raw)) throw new Broken(path, 'a template has to be an object');
-  const id = raw.id;
-  if (typeof id !== 'string' || !TEMPLATE_ID.test(id)) {
-    throw new Broken(`${path}.id`, 'the id has to be lower-case letters, digits and -, at most 64 characters');
-  }
+/** One template, or every problem that drops it (T150: all of them, not the first one). */
+function readTemplate(raw: unknown, path: string, report: Report): { template: TemplateDef } | { problems: TemplateProblem[] } {
+  const problems = new Problems();
+  if (!isRecord(raw)) return { problems: [{ path, message: 'a template has to be an object' }] };
+  const id = problems.read(() => {
+    const id = raw.id;
+    if (typeof id !== 'string' || !TEMPLATE_ID.test(id)) {
+      throw new Broken(`${path}.id`, 'the id has to be lower-case letters, digits and -, at most 64 characters');
+    }
+    return id;
+  });
   const t: TemplateDef = {
-    id,
-    label: text(raw.label, `${path}.label`, 'the label', TEMPLATE_LIMITS.label, true),
-    group: text(raw.group, `${path}.group`, 'the group', TEMPLATE_LIMITS.group, true),
+    id: id ?? '',
+    label: problems.read(() => text(raw.label, `${path}.label`, 'the label', TEMPLATE_LIMITS.label, true)) ?? '',
+    group: problems.read(() => text(raw.group, `${path}.group`, 'the group', TEMPLATE_LIMITS.group, true)) ?? '',
     body: '',
   };
-  const description = text(raw.description, `${path}.description`, 'the description', TEMPLATE_LIMITS.description, false);
+  const description = problems.read(() => text(raw.description, `${path}.description`, 'the description', TEMPLATE_LIMITS.description, false));
   if (description !== undefined) t.description = description;
   if (flag(raw.toolbar, `${path}.toolbar`, report)) t.toolbar = true;
   if (flag(raw.snippet, `${path}.snippet`, report)) t.snippet = true;
-  if (raw.machineType !== undefined) {
+  problems.check(() => {
+    if (raw.machineType === undefined) return;
     if (!(MACHINE_TYPES as readonly unknown[]).includes(raw.machineType)) {
       throw new Broken(`${path}.machineType`, 'has to be "mill" or "lathe"');
     }
     t.machineType = raw.machineType as 'mill' | 'lathe';
-  }
+  });
   if (raw.review !== undefined) {
     if (raw.review === 'pending') t.review = 'pending';
     else report({ path: `${path}.review`, message: 'has to be "pending"; read as reviewed' });
   }
 
   // Body.
-  if (typeof raw.body !== 'string' || raw.body.trim() === '') throw new Broken(`${path}.body`, 'the body has to be a text');
-  const body = raw.body.replace(/\r\n?/g, '\n');
-  if (body.length > TEMPLATE_LIMITS.body) throw new Broken(`${path}.body`, `the body is longer than ${TEMPLATE_LIMITS.body} characters`);
-  if (body.split('\n').length > TEMPLATE_LIMITS.bodyLines) {
-    throw new Broken(`${path}.body`, `the body has more than ${TEMPLATE_LIMITS.bodyLines} lines`);
-  }
-  if (CONTROL_CHARS.test(body)) throw new Broken(`${path}.body`, 'the body has an invisible control character');
-  t.body = body;
-
-  // Parameters.
-  const params: TemplateParam[] = [];
-  if (raw.params !== undefined) {
-    if (!Array.isArray(raw.params)) throw new Broken(`${path}.params`, 'params has to be a list');
-    if (raw.params.length > TEMPLATE_LIMITS.params) throw new Broken(`${path}.params`, `has more than ${TEMPLATE_LIMITS.params} parameters`);
-    const ids = new Set<string>();
-    raw.params.forEach((item, i) => {
-      const p = readParam(item, `${path}.params[${i}]`, report);
-      if (ids.has(p.id)) throw new Broken(`${path}.params[${i}].id`, `the id "${p.id}" is used twice`);
-      ids.add(p.id);
-      params.push(p);
-    });
-  }
-  if (t.snippet && params.length > 0) throw new Broken(`${path}.params`, 'a snippet template has no parameters (its tab stops are in the body)');
-  const types = new Map(params.map((p) => [p.id, p.type]));
-  params.forEach((p, i) => {
-    if (p.type !== 'formula') return;
-    const problem = checkFormula(p.formula ?? '', types);
-    if (problem !== null) throw new Broken(`${path}.params[${i}].formula`, problem);
+  const bodyRead = problems.check(() => {
+    if (typeof raw.body !== 'string' || raw.body.trim() === '') throw new Broken(`${path}.body`, 'the body has to be a text');
+    const body = raw.body.replace(/\r\n?/g, '\n');
+    if (body.length > TEMPLATE_LIMITS.body) throw new Broken(`${path}.body`, `the body is longer than ${TEMPLATE_LIMITS.body} characters`);
+    if (body.split('\n').length > TEMPLATE_LIMITS.bodyLines) {
+      throw new Broken(`${path}.body`, `the body has more than ${TEMPLATE_LIMITS.bodyLines} lines`);
+    }
+    if (CONTROL_CHARS.test(body)) throw new Broken(`${path}.body`, 'the body has an invisible control character');
+    t.body = body;
   });
-  const cycle = formulaCycle(params);
-  if (cycle) throw new Broken(`${path}.params`, `the formulas read each other in a circle: ${cycle.join(' → ')}`);
-  const found = placeholdersOf(body, new Set(types.keys()));
-  if ('error' in found) throw new Broken(`${path}.body`, found.error);
+
+  // Parameters. The checks across them (formulas, placeholders) run only when every id and type could be read.
+  const params: TemplateParam[] = [];
+  let paramsReadable = true;
+  if (raw.params !== undefined) {
+    if (!Array.isArray(raw.params)) {
+      problems.check(() => {
+        throw new Broken(`${path}.params`, 'params has to be a list');
+      });
+      paramsReadable = false;
+    } else if (raw.params.length > TEMPLATE_LIMITS.params) {
+      problems.check(() => {
+        throw new Broken(`${path}.params`, `has more than ${TEMPLATE_LIMITS.params} parameters`);
+      });
+      paramsReadable = false;
+    } else {
+      const ids = new Set<string>();
+      raw.params.forEach((item, i) => {
+        const read = readParam(item, `${path}.params[${i}]`, report, problems);
+        if (read.id === null || read.type === null) paramsReadable = false;
+        if (read.id !== null) {
+          const id = read.id;
+          problems.check(() => {
+            if (ids.has(id)) throw new Broken(`${path}.params[${i}].id`, `the id "${id}" is used twice`);
+          });
+          ids.add(id);
+        }
+        if (read.param !== null) params.push(read.param);
+      });
+    }
+  }
+  problems.check(() => {
+    if (t.snippet && Array.isArray(raw.params) && raw.params.length > 0) throw new Broken(`${path}.params`, 'a snippet template has no parameters (its tab stops are in the body)');
+  });
+  if (paramsReadable) {
+    const types = new Map(params.map((p) => [p.id, p.type]));
+    let formulasRead = true;
+    // Every parameter was read (an id and a type each), so `params[i]` is the file's `params[i]`.
+    params.forEach((p, i) => {
+      if (p.type !== 'formula' || p.formula === undefined) return;
+      const formula = p.formula;
+      formulasRead =
+        problems.check(() => {
+          const problem = checkFormula(formula, types);
+          if (problem !== null) throw new Broken(`${path}.params[${i}].formula`, problem);
+        }) && formulasRead;
+    });
+    if (formulasRead) {
+      problems.check(() => {
+        const cycle = formulaCycle(params);
+        if (cycle) throw new Broken(`${path}.params`, `the formulas read each other in a circle: ${cycle.join(' → ')}`);
+      });
+    }
+    if (bodyRead) {
+      problems.check(() => {
+        const found = placeholdersOf(t.body, new Set(types.keys()));
+        if ('error' in found) throw new Broken(`${path}.body`, found.error);
+      });
+    }
+  }
+  if (problems.list.length > 0) return { problems: problems.list };
   if (params.length > 0) t.params = params;
-  return t;
+  return { template: t };
 }
 
 /**
@@ -474,18 +658,18 @@ export function loadTemplates(raw: unknown, onProblem?: (p: TemplateProblem) => 
       }
       return;
     }
-    try {
-      const t = readTemplate(item, path, report);
-      if (seen.has(t.id)) {
-        report({ path: `${path}.id`, message: `the id "${t.id}" is used twice in this file` });
-        return;
-      }
-      seen.add(t.id);
-      out.push(t);
-    } catch (error) {
-      if (!(error instanceof Broken)) throw error;
-      report({ path: error.path, message: error.message });
+    const read = readTemplate(item, path, report);
+    if ('problems' in read) {
+      for (const problem of read.problems) report(problem);
+      return;
     }
+    const t = read.template;
+    if (seen.has(t.id)) {
+      report({ path: `${path}.id`, message: `the id "${t.id}" is used twice in this file` });
+      return;
+    }
+    seen.add(t.id);
+    out.push(t);
   });
   return out;
 }

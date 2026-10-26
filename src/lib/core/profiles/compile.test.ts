@@ -101,7 +101,11 @@ describe('compileProfile', () => {
     // still never rewrites those values — but it now says they are there, so a renumber
     // or a remove-block-numbers cannot quietly cut the blocks they name.
     expect(f.references.map((r) => r.addresses)).toEqual([['P'], ['Q'], ['Q'], ['P', 'Q'], ['GOTO']]);
-    expect(fanuc.numbering?.references?.map((r) => r.rewrite !== false)).toEqual([false, true, false, false, true]);
+    // P4d (plan §6.6 rules 8–10): `M99 P` names a block of the caller and is rewritten when
+    // exactly one program of the file calls this one; `M98 P… Q…` names one of the called
+    // program and stays report-only (the owner: its Q depends on a parameter).
+    expect(fanuc.numbering?.references?.map((r) => r.rewrite !== false)).toEqual([true, true, false, false, true]);
+    expect(fanuc.numbering?.references?.map((r) => r.program ?? 'own')).toEqual(['caller', 'own', 'called', 'own', 'own']);
 
     const h = compileProfile(heidenhain).re;
     expect(h.sectionHeading?.test('12 * - ROUGHING')).toBe(true);
@@ -228,11 +232,11 @@ describe('the dialect the built-in profiles describe', () => {
     expect(onLathe('N20 G71 U1.5 R0.5')).toEqual([]);
     expect(onLathe('N30 G83 Z-30. R2. Q3000 F0.1')).toEqual([]);
     // `M98 Q` is a local call and is rewritten; `M98 P… Q…` names a block of the *called*
-    // program, which this file cannot renumber (F42). G8 M6: the lathe now carries the
-    // same pair the mill does, so that second case is **reported** — two rules fire, one
-    // of them `rewrite: false`, and `referencesOn` keeps the safer of the two answers.
+    // program (F42). G8 M6: the lathe carries the same pair the mill does, so that second
+    // case is **reported**. P4d (plan §6.6): the local rule wants no `P` and no program name,
+    // so exactly one of the two fires — the two rules name different programs.
     expect(onLathe('N10 M98 Q500')).toEqual(['Q']);
-    expect(onLathe('N10 M98 P2005 Q500')).toEqual(['Q', 'Q']);
+    expect(onLathe('N10 M98 P2005 Q500')).toEqual(['Q']);
 
     // G8 M6: Fanuc lets the words of a block stand in any order and allows a space behind
     // an address, so none of these may slip past a trigger (syntax-fanuc §3.1).
@@ -241,8 +245,8 @@ describe('the dialect the built-in profiles describe', () => {
     }
     expect(onLathe('N10 M98 Q 50')).toEqual(['Q']);
     expect(onLathe('N10 M 98 Q50')).toEqual(['Q']);
-    expect(onLathe('N50 P2000 M98 Q50')).toEqual(['Q', 'Q']);
-    expect(fired('N50 P2000 M98 Q50')).toEqual(['Q', 'Q']);
+    expect(onLathe('N50 P2000 M98 Q50')).toEqual(['Q']);
+    expect(fired('N50 P2000 M98 Q50')).toEqual(['Q']);
     expect(onLathe('N10 M99 P 30')).toEqual(['P']);
     expect(fired('N10 M099 P30')).toEqual(['P']);
     // …and a number that only begins with 98 or 99 is a different M-code.

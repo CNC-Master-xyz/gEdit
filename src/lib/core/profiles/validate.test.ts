@@ -196,6 +196,22 @@ describe('the turning syntax fields', () => {
     expect(errorsOf((p) => (syntaxOf(p).continuationStart = '^[ \\t]*\\$?'))).toEqual([plain]);
   });
 
+  // T177 (M8 re-review): a leading `^` anchors only the first alternative, so `^\$ |\$\t`
+  // validated and then matched a `$` and a tab in the middle of a line.
+  it('want every alternative of the continuation marker anchored, not only the first', () => {
+    const every =
+      'syntax.continuationStart: has to be anchored at the start of the line (^) in every alternative: write ^ in front of each, or ^(?:…|…)';
+    expect(errorsOf((p) => (syntaxOf(p).continuationStart = '^\\$ |\\$\\t'))).toEqual([every]);
+    expect(errorsOf((p) => (syntaxOf(p).continuationStart = '^\\$ |^#|\\$\\t'))).toEqual([every]);
+    expect(errorsOf((p) => (syntaxOf(p).continuationStart = '^\\$ |^\\$\\t'))).toEqual([]);
+    expect(errorsOf((p) => (syntaxOf(p).continuationStart = '^(?:\\$ |\\$\\t)'))).toEqual([]);
+    // A `|` that is a character (escaped, or in a class) is no alternative.
+    expect(errorsOf((p) => (syntaxOf(p).continuationStart = '^[ \\t|]*\\$'))).toEqual([]);
+    expect(errorsOf((p) => (syntaxOf(p).continuationStart = '^\\$\\|'))).toEqual([]);
+    // JavaScript reads `[]` as an empty class, so the `|` behind it is an alternative there.
+    expect(errorsOf((p) => (syntaxOf(p).continuationStart = '^[]|]\\$'))).toEqual([every]);
+  });
+
   // An empty match used to leave both tokenizers where they were, forever: a script hung,
   // and so did the editor on the first line it tokenized.
   it('refuse a variable pattern that can match an empty string', () => {
@@ -488,8 +504,17 @@ describe('the M6 profile fields', () => {
 
 describe('the machine-parameter declaration', () => {
   it('wants every preset id once', () => {
-    expect(lathePaths((p) => (presets(p)[1].id = 'is-b'))).toEqual([
-      'machineParams.numberInput.presets[1].id',
+    // T083: the lathe lists IS-A, IS-B, IS-C and "as written", so is-b is at index 1.
+    expect(lathePaths((p) => (presets(p)[2].id = 'is-b'))).toEqual([
+      'machineParams.numberInput.presets[2].id',
+    ]);
+  });
+
+  // T083: the Digits check of Check Program leaves a preset marked `digitCheck: false` out.
+  it('takes digitCheck as a yes or no only', () => {
+    expect(lathePaths((p) => (presets(p)[1].digitCheck = true))).toEqual([]);
+    expect(lathePaths((p) => (presets(p)[1].digitCheck = 'no'))).toEqual([
+      'machineParams.numberInput.presets[1].digitCheck',
     ]);
   });
 
@@ -546,17 +571,66 @@ describe('the machine-parameter declaration', () => {
     ).toEqual([]);
   });
 
+  // T084: the machine option for point-less feeds. It is never read without a machine, so
+  // its default choice may set nothing; a choice sets the two feed classes' steps and nothing else.
+  describe('the point-less feeds option (T084)', () => {
+    const feedsOf = (p: Record<string, unknown>): Record<string, unknown> =>
+      ((p.machineParams as Record<string, unknown>).numberInput as Record<string, unknown>).pointlessFeeds as Record<
+        string,
+        unknown
+      >;
+    const feedChoices = (p: Record<string, unknown>): Record<string, unknown>[] =>
+      feedsOf(p).choices as Record<string, unknown>[];
+    const at = 'machineParams.numberInput.pointlessFeeds';
+
+    it('is declared on the mill and valid as shipped', () => {
+      // The manual-check round (D4-2, 2026-10-25): the mill offers only what its control has,
+      // the per-revolution step of parameter 1405 bit 1; the per-minute step is a lathe parameter.
+      expect(feedChoices(fanuc()).map((choice) => choice.value)).toEqual(['standard', 'per-rev']);
+      expect(pathsOf(() => {})).toEqual([]);
+    });
+
+    it('wants a default that is a choice and sets nothing', () => {
+      expect(pathsOf((p) => (feedsOf(p).default = 'fast'))).toEqual([`${at}.default`]);
+      expect(pathsOf((p) => (feedsOf(p).default = 'per-rev'))).toEqual([`${at}.default`]);
+    });
+
+    it('wants every choice value once', () => {
+      expect(pathsOf((p) => (feedChoices(p)[1].value = 'standard'))).toEqual([`${at}.choices[1].value`]);
+    });
+
+    it('sets only the steps of the two feed classes, as decimal text', () => {
+      expect(pathsOf((p) => (feedChoices(p)[1].classes = { length: { increment: '0.001' } }))).toEqual([
+        `${at}.choices[1].classes.length`,
+      ]);
+      expect(pathsOf((p) => (feedChoices(p)[1].classes = { feedPerMin: { increment: '0.002' } }))).toEqual([
+        `${at}.choices[1].classes.feedPerMin.increment`,
+      ]);
+      expect(pathsOf((p) => (feedChoices(p)[1].classes = { feedPerMin: { incrementInch: '0.00001' } }))).toEqual([
+        `${at}.choices[1].classes.feedPerMin.increment`,
+      ]);
+      expect(
+        pathsOf((p) => (feedChoices(p)[1].classes = { feedPerMin: { increment: '0.001', mode: 'calculator' } })),
+      ).toEqual([`${at}.choices[1].classes.feedPerMin.mode`]);
+    });
+  });
+
   it('wants a variant default that is one of its choices', () => {
     expect(lathePaths((p) => (variants(p)[0].default = 'C'))).toEqual(['machineParams.variants[0].default']);
   });
 
   it('wants every variant id and every choice value once', () => {
-    // The lathe declares three variants since M9 (gcodeSystem and the two R6 ones), so a
-    // copy of the first lands at index 3.
+    // The lathe declares five variants (gcodeSystem, the two R6 ones since M9, the tool
+    // change since the manual-check fix D3-4a and the counter spindle since the review round's
+    // D5-7), so a copy of the first lands at index 5.
     expect(lathePaths((p) => variants(p).push(structuredClone(variants(p)[0])))).toEqual([
-      'machineParams.variants[3].id',
+      'machineParams.variants[5].id',
     ]);
-    expect(lathePaths((p) => (choices(p)[1].value = 'A'))).toEqual(['machineParams.variants[0].choices[1].value']);
+    // D5-3: the U/W default follows system B, so that key is no choice any more either.
+    expect(lathePaths((p) => (choices(p)[1].value = 'A'))).toEqual([
+      'machineParams.variants[0].choices[1].value',
+      'machineParams.variants[1].defaultBy.values.B',
+    ]);
   });
 
   it('wants a choice to name a code database that resolves', () => {
@@ -768,6 +842,24 @@ describe('editing (P13)', () => {
     expect(pathsOf((p) => (p.editing = { tabWidth: 'wide', later: true }))).toEqual([]);
     expect(pathsOf((p) => delete p.editing)).toEqual([]);
   });
+
+  // P4c (plan §6.5; the owner's answer A13, 2026-10-17): the two typing-help members are loader
+  // defaults. Absent is off, a profile may set either, a non-boolean names its path, and no
+  // built-in profile file carries them (P4d is the sole writer of `profiles/*.json`, Q4-12).
+  it('accepts autoSpace and autoNumber as optional booleans and names a wrong one by path', () => {
+    expect(pathsOf((p) => (p.editing = { autoSpace: true, autoNumber: false }))).toEqual([]);
+    expect(pathsOf((p) => (p.editing = { autoSpace: 'on' }))).toEqual(['editing.autoSpace']);
+    expect(pathsOf((p) => (p.editing = { autoNumber: 1 }))).toEqual(['editing.autoNumber']);
+    expect(pathsOf((p) => (p.editing = { autoSpace: null, autoNumber: [] }))).toEqual(['editing.autoSpace', 'editing.autoNumber']);
+  });
+
+  it('has both off in every built-in profile (they carry neither member)', () => {
+    for (const raw of BUILTIN_PROFILE_JSON) {
+      const profile = raw as Profile;
+      expect(profile.editing, profile.id).not.toHaveProperty('autoSpace');
+      expect(profile.editing, profile.id).not.toHaveProperty('autoNumber');
+    }
+  });
 });
 
 // M13 review fix CODE-1 (plan §4: patterns <= 1,000 characters, standing rule 15).
@@ -917,5 +1009,14 @@ describe('P4a fix B1: the members the geometry scripts read (plan §7 #314, #319
     expect(pathsOf((p) => (addressesOf(p).offsetWords = ['D']))).toEqual([]);
     expect(pathsOf((p) => (addressesOf(p).offsetWords = ['D', '1D']))).toEqual(['addresses.offsetWords[1]']);
     expect(pathsOf((p) => (addressesOf(p).offsetWords = 'D'))).toEqual(['addresses.offsetWords']);
+  });
+
+  it('review round (D6-4, NC-9): takes the two notes of Translate as a flag and a list of choices', () => {
+    expect(pathsOf((p) => (syntaxOf(p).tcpTableCoordinates = true))).toEqual([]);
+    expect(pathsOf((p) => (syntaxOf(p).tcpTableCoordinates = 'yes'))).toEqual(['syntax.tcpTableCoordinates']);
+    expect(pathsOf((p) => (syntaxOf(p).cycleRAbsoluteWith = ['series-15', 'both']))).toEqual([]);
+    expect(pathsOf((p) => (syntaxOf(p).cycleRAbsoluteWith = []))).toEqual(['syntax.cycleRAbsoluteWith']);
+    expect(pathsOf((p) => (syntaxOf(p).cycleRAbsoluteWith = 'series-15'))).toEqual(['syntax.cycleRAbsoluteWith']);
+    expect(pathsOf((p) => (syntaxOf(p).cycleRAbsoluteWith = ['Series 15']))).toEqual(['syntax.cycleRAbsoluteWith[0]']);
   });
 });

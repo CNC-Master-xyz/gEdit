@@ -16,7 +16,8 @@ the script, and where it cannot judge it says so once instead of flagging every 
 tests/fixtures/scripts/program_checks/<case>/
   input.nc        the program, stdin
   params.json     optional: the checks switched off (`{ "lowerCase": false }`)
-  case.json       optional: profile, machine, machineName, scope (as tool_list and scale_feed)
+  case.json       optional: profile, machine, machineName, scope (as tool_list and scale_feed),
+                  limits (the machine's limits block, context.machine.limits; P4.10)
   preceding.nc    optional: the lines above a selection (input.precedingLines, §7.5)
   expected.json   the whole report, as `gedit_nc.report` writes it
 ```
@@ -81,6 +82,8 @@ not run and is not listed; the general checks run on every profile.
 | `speedAfterTapping` | error | a cut after leaving a tapping move that sets the speed to zero (`G332`), with no new speed word between | `sets.exitSpeed` |
 | `cssClamp` | warning | constant surface speed with no upper speed clamp earlier in the program (once per program) | `sets.speedUnit`, `sets.speedLimit`, `addresses.speedLimitWords` |
 | `threadUnderCss` | warning | a thread (a `pitchFeed` code that is no tap) cut under constant surface speed (once per stretch of it) | `pitchFeed`, `tapping`, the modal speed unit |
+| `speedLimit` | warning | a speed in rpm above the machine's top speed for its spindle (the plain speed word and `S1=` against `main`, `S2=`/`S[2]=` and any other address the limits name against their own), and a clamp above it; a surface speed, a dwell's revolutions and a lower limit are not compared; a speed before the program sets a speed unit is read as rpm and says so | `machine.limits.spindle`, `sets.speedLimit` (upper), `addresses.speedLimitWords`, `addresses.mainSpindle` |
+| `travelLimit` | error, warning | an absolute axis position outside the machine's travel in machine coordinates (a code with `axisWords: 'machine'` whose parameters do not describe the word): error; in work coordinates (the work offset is not known) a single position is never judged: positions of one axis that span more than its travel (highest minus lowest) are a warning, once per axis and program, on the line where the span first grows past the travel (P4b Q3); incremental words, positions under a frame or TCP, data blocks and contour definitions are not compared | `machine.limits.travel`, `.units`, `axisWords`, `addresses.incremental`, `addresses.diameter` |
 | `stateConflicts` | warning | a code written in a state the control refuses it in | `conflicts`: `tcp`, `radiusComp`, `lengthComp`, `cycle`, `surfaceSpeed`, `feedNotPerMinute`, `frame:<group>`, and `!` for "refused unless" |
 | `requiredWords` | error | a code whose block lacks every word of its `requires` | `requires` |
 | `aloneInBlock` | error | a code that has to stand alone shares its block; a macro call (`wordsAreData`) may carry its arguments behind it, nothing in front and no second code of its letter | `alone` |
@@ -90,10 +93,12 @@ not run and is not listed; the general checks run on every profile.
 | `languageSwitch` | warning | a code that switches the control to its ISO dialect (`G291`) | `sets.language` |
 | `profileTargets` | error | lathe: the `P`/`Q` blocks of a reference rule naming both missing from the program, or `P` after `Q` | `numbering.references` |
 | `callInProfile` | error | lathe: a subprogram call inside such a `P`…`Q` profile | the outline's `subprogram-call` rules |
+| `passRepeat` | warning | Fanuc lathe (a profile with the `gcodeSystem` variant, NC-7): a block that moves nothing — empty, a comment or blank line, or only M, S, T, F words and modal codes (`G40`, `G97`, `G96 S200`; NC-2, owner 2026-10-26) — while a single pass is in force and its values are not cleared (the control runs the pass again in it; a one-shot code other than a dwell, or a plane code, clears them; a dwell block runs no pass; a block with any other word is left alone) — manual-check fix D5-5 | a modal code of the motion group with `sets.path: 'cycle'`; `lengthAlong`; `modal` |
+| `gcodeSystemC` | warning | lathe, once per program: `G70` or `G71` written with no word but codes, or `G20`, `G21` or `G24` with a position or a taper and a feed — the shapes of G-code system C, which gEdit does not read — manual-check fix D5-4 | a `gcodeSystem` machine variant |
 | `jumpTargets` | error, warning | a jump whose target block or label is not in the program; a target written on two lines (a label defined twice is an error where the profile has `syntax.labels`); `GOTOF` to a label above, `GOTOB` to one below; `GOTOC` may miss | the `numbering.references` that rewrite (a rule with `rewrite: false` points into another program); labels at the head of a block |
 | `doEnd` | error | `DO`/`END` loop numbers outside 1–3, an `END` with no open `DO` of its number, loops that cross, a `DO` with no `END` | `syntax.keywords` with both `DO` and `END` |
 | `blockWords` | error | two plain speed words or two tool words in one block; more M codes than `syntax.maxMCodes` | `addresses`; `syntax.maxMCodes` |
-| `toolWordFormat` | warning | a tool word the effective tool rule does not describe, and tool words of more than one length in a file | a `toolWord` machine variant |
+| `toolWordFormat` | warning | a tool word the effective tool rule does not describe, and tool words of more than one length in a file; where the trigger is another code (a lathe tool changer, `M6`: D3-4a) the `tool` pattern describes the tool words | a `toolWord` machine variant |
 | `programNameBlock` | error | a program name that shares its block with other words | every `program.start` pattern ends the line (`$`) |
 | `sequenceSeparator` | error | a sequence name or block number with no space or tab behind it | `syntax.sequenceNames` |
 | `wordDigits` | error | a word with more digits than the control stores, once converted to increments, under every reading the machine or the presets allow | `syntax.maxWordDigits` |
@@ -152,7 +157,19 @@ spindle state is unknown until the next one it knows.
 - **Tool centre point control** is the modal `tcp` (§7.4 rule 14), the frame in force the
   modal `frame` (rule 13): `stateConflicts` reads them, not a list of codes.
 - **`G931`** (travel time) has its own feed unit and is never scaled (§7.16 #96); no check
-  converts it in M10.
+  converts it in M10. P4.10 (T085) adds no travel-time check either: the SINUMERIK manuals
+  give `G931` only in the tables of G group 15 and keep a feed value in force until the next
+  one, so nothing says its time counts for its own block only.
+
+## The machine's limits (P4.10, plan §6.4 rule 7)
+
+`speedLimit` and `travelLimit` read `context.machine.limits` (a case gives it as `limits` in
+`case.json`). Without a block both are silent; with one, a value the machine lacks (no top
+speed for a spindle the program uses, no travel for an axis it positions) and a distance mode
+that is not known are run notes, once each. The `limits-*` cases: a mill, a Sinumerik and a
+Fanuc lathe (clamps, spindles by number, a radius read as a diameter, an inch program against
+a travel in mm), Klartext (`M91`, a blank form, a tilted plane), the values missing, no block,
+a selection below a surface speed, and both checks switched off.
 
 ## Not checked, and why
 

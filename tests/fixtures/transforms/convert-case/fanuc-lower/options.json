@@ -1,1 +1,7 @@
-{ "case": "lower" }
+{
+  "note": "Fanuc, to lower case: the comment is left as written, which is the default.",
+  "profile": "fanuc-gcode",
+  "options": {
+    "case": "lower"
+  }
+}

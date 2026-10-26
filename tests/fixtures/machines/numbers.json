@@ -10,15 +10,80 @@
     "out what that makes of X50. The presets themselves are documented defaults of a machine",
     "configuration, never facts about a machine (section 8, section 8.8).",
     "",
-    "'inputs' are NumberInput objects a machine may carry, 'decls' are machineParams",
-    "declarations (either a built-in profile by id, or written here where the profile ships",
-    "later), and 'profiles' are the profiles the class rules are read from."
+    "'inputs' are NumberInput objects a machine may carry: a shipped preset is named by",
+    "'profile/preset' ('preset', T206) and read from the profile, so the golden set and the",
+    "shipped data cannot drift apart; only inputs no profile ships are written out here.",
+    "'decls' are machineParams declarations of a built-in profile by id (or written here for",
+    "a profile no built-in has), and 'profiles' are the profiles the class rules are read from.",
+    "A class case may name 'modes': the modal codes in force outside the cycle and motion groups",
+    "(FB-2). A mode that declares an arc-centre word lends the block those words only",
+    "(arcCentreEntry / arc_centre_entry), which both sides add to 'inForce' before they ask."
   ],
   "fmt": { "decimals": "keep", "trailingZeros": "keep", "keepPoint": true, "plusSign": "keep" },
 
   "inputs": {
+    "is-a": {
+      "note": "T083: the fanuc-gcode preset is-a, read from the profile (T206): lengths and angles in increments of 0.01 (0.001 in), the dwell in 0.01 s, as the 30i increment-system and dwell tables give them; the point-less feeds count as on is-b, because their increment is a parameter of its own. The Digits check leaves it out with no machine (digitCheck false), the readings of a word do not",
+      "preset": "fanuc-gcode/is-a"
+    },
     "is-b": {
-      "note": "the fanuc-gcode preset is-b: lengths, angles and the dwell in increments of 0.001; M9 (WP9.5a): a point-less feed per minute in 1 mm/min (0.01 in/min), per revolution in 0.01 mm/rev (0.0001 in/rev), as the control counts them without calculator-type input",
+      "note": "the fanuc-gcode preset is-b, read from the profile itself (T206): lengths, angles and the dwell in increments of 0.001; M9 (WP9.5a): a point-less feed per minute in 1 mm/min (0.01 in/min), per revolution in 0.01 mm/rev (0.0001 in/rev), as the control counts them without calculator-type input",
+      "preset": "fanuc-gcode/is-b"
+    },
+    "is-c": {
+      "note": "the fanuc-gcode preset is-c, read from the profile (T206): lengths, angles and the dwell one decimal finer; the point-less feeds count as on is-b, because their increment is a parameter of its own",
+      "preset": "fanuc-gcode/is-c"
+    },
+    "calculator": {
+      "note": "the fanuc-gcode preset calculator, read from the profile (T206): every position as written, with or without a point, and the micron parameters of a cycle in increments of 0.001",
+      "preset": "fanuc-gcode/calculator"
+    },
+    "angles-only": {
+      "note": "G8 M6: a control that declares an angular increment and no dwell increment. Section 7.15 chains the dwell to the digits of incrementMm; the angular increment is not a step on that chain, and reading a dwell in it would give a wrong time with nothing said. No shipped preset looks like this, which is why nothing caught it.",
+      "mode": "increment",
+      "incrementMm": "0.001",
+      "incrementDeg": "0.01"
+    },
+    "okuma-1mm": {
+      "note": "section 8.8, the Okuma 1 mm unit system, read from the okuma-osp profile (T206): as written (a scale whose unit is 1)",
+      "preset": "okuma-osp/okuma-1mm"
+    },
+    "okuma-1um": {
+      "note": "section 8.8, the Okuma 1 um unit system, read from the okuma-osp profile (T206): every literal is multiplied, with or without a point",
+      "preset": "okuma-osp/okuma-1um"
+    },
+    "okuma-10um": {
+      "note": "section 8.8, the Okuma 10 um unit system, read from the okuma-osp profile (T206); the control has no 10 um inch system, so M9 (WP9.5a) gives an inch word on it no value instead of inventing a unit of 0.001 in",
+      "preset": "okuma-osp/okuma-10um"
+    },
+    "mixed": {
+      "note": "not a shipped preset: one machine that reads every class differently, so the per-class rules are covered",
+      "mode": "increment",
+      "incrementMm": "0.001",
+      "classes": {
+        "angle": { "mode": "calculator" },
+        "feedPerRev": { "mode": "scale", "increment": "0.0001" },
+        "dwell": { "mode": "increment", "increment": "0.01" }
+      }
+    },
+    "lathe-is-b": {
+      "note": "manual-check fix D4-1: the fanuc-lathe preset is-b, read from the profile (T206): as the mill's is-b, but a point-less feed per revolution and a thread lead count in 0.0001 mm/rev (0.000001 in/rev), the lathe control's own default (its 0.01 mm/rev is the Series 15 format)",
+      "preset": "fanuc-lathe/is-b"
+    },
+    "lathe-per-minute": {
+      "note": "manual-check fix D4-2: the lathe's machine option 'Point-less feeds', choice 'per-minute', over the fanuc-lathe preset is-b: the feed per minute in 0.001 mm/min (0.00001 in/min), the feed per revolution keeps its 0.0001 mm/rev (numbers.test.ts and test_machine.py check this input against the profile's declaration)",
+      "mode": "increment",
+      "incrementMm": "0.001",
+      "incrementInch": "0.0001",
+      "incrementDeg": "0.001",
+      "incrementSec": "0.001",
+      "classes": {
+        "feedPerMin": { "mode": "increment", "increment": "0.001", "incrementInch": "0.00001" },
+        "feedPerRev": { "mode": "increment", "increment": "0.0001", "incrementInch": "0.000001" }
+      }
+    },
+    "lathe-series-15": {
+      "note": "manual-check fix D4-2: the lathe's machine option 'Point-less feeds', choice 'series-15', over the fanuc-lathe preset is-b: the feed per revolution and a thread lead in 0.01 mm/rev (0.0001 in/rev), the Series 15 format",
       "mode": "increment",
       "incrementMm": "0.001",
       "incrementInch": "0.0001",
@@ -29,8 +94,20 @@
         "feedPerRev": { "mode": "increment", "increment": "0.01", "incrementInch": "0.0001" }
       }
     },
-    "is-c": {
-      "note": "the fanuc-gcode preset is-c: lengths, angles and the dwell one decimal finer; the point-less feeds count as on is-b, because their increment is a parameter of its own",
+    "fine-feeds": {
+      "note": "T084: an IS-B machine whose two point-less feed parameters are set to thousandths (the per-minute and the per-revolution feed counted in 0.001 mm, 0.00001 in, as the 30i manuals describe the two parameters). It was the mill's 'Point-less feeds' choice 'both' over is-b; since the manual-check fix D4-2 the mill and the lathe offer their own choices and none of them gives this one, so it stays as a hand-written machine rule set the reader needs no rule of its own for",
+      "mode": "increment",
+      "incrementMm": "0.001",
+      "incrementInch": "0.0001",
+      "incrementDeg": "0.001",
+      "incrementSec": "0.001",
+      "classes": {
+        "feedPerMin": { "mode": "increment", "increment": "0.001", "incrementInch": "0.00001" },
+        "feedPerRev": { "mode": "increment", "increment": "0.001", "incrementInch": "0.00001" }
+      }
+    },
+    "is-c-per-rev": {
+      "note": "T084: the machine option 'Point-less feeds', choice 'per-rev', over the fanuc-gcode preset is-c: only the feed per revolution counts in 0.001 mm/rev (0.00001 in/rev); the feed per minute keeps its 1 mm/min (numbers.test.ts checks this input against the profile's declaration)",
       "mode": "increment",
       "incrementMm": "0.0001",
       "incrementInch": "0.00001",
@@ -38,54 +115,7 @@
       "incrementSec": "0.0001",
       "classes": {
         "feedPerMin": { "mode": "increment", "increment": "1", "incrementInch": "0.01" },
-        "feedPerRev": { "mode": "increment", "increment": "0.01", "incrementInch": "0.0001" }
-      }
-    },
-    "calculator": {
-      "note": "the fanuc-gcode preset calculator: every position as written, with or without a point, and the micron parameters of a cycle in increments of 0.001",
-      "mode": "calculator",
-      "incrementMm": "0.001"
-    },
-    "angles-only": {
-      "note": "G8 M6: a control that declares an angular increment and no dwell increment. Section 7.15 chains the dwell to the digits of incrementMm; the angular increment is not a step on that chain, and reading a dwell in it would give a wrong time with nothing said. No shipped preset looks like this, which is why nothing caught it.",
-      "mode": "increment",
-      "incrementMm": "0.001",
-      "incrementDeg": "0.01"
-    },
-    "okuma-1mm": {
-      "note": "section 8.8, the Okuma 1 mm unit system: as written (a scale whose unit is 1)",
-      "mode": "calculator",
-      "incrementMm": "1",
-      "incrementInch": "1"
-    },
-    "okuma-1um": {
-      "note": "section 8.8, the Okuma 1 um unit system: every literal is multiplied, with or without a point",
-      "mode": "scale",
-      "incrementMm": "0.001",
-      "incrementInch": "0.0001",
-      "incrementDeg": "0.001",
-      "incrementSec": "0.01",
-      "classes": {
-        "feedPerMin": { "increment": "0.1", "incrementInch": "0.01" },
-        "feedPerRev": { "increment": "0.001", "incrementInch": "0.0001" }
-      }
-    },
-    "okuma-10um": {
-      "note": "section 8.8, the Okuma 10 um unit system; the control has no 10 um inch system, so M9 (WP9.5a) gives an inch word on it no value instead of inventing a unit of 0.001 in",
-      "mode": "scale",
-      "incrementMm": "0.01",
-      "incrementDeg": "0.01",
-      "incrementSec": "0.1",
-      "classes": { "feedPerMin": { "increment": "1" }, "feedPerRev": { "increment": "0.01" } }
-    },
-    "mixed": {
-      "note": "not a shipped preset: one machine that reads every class differently, so the per-class rules are covered",
-      "mode": "increment",
-      "incrementMm": "0.001",
-      "classes": {
-        "angle": { "mode": "calculator" },
-        "feedPerRev": { "mode": "scale", "increment": "0.0001" },
-        "dwell": { "mode": "increment", "increment": "0.01" }
+        "feedPerRev": { "mode": "increment", "increment": "0.001", "incrementInch": "0.00001" }
       }
     },
     "broken-zero": {
@@ -104,17 +134,7 @@
     "fanuc": { "profile": "fanuc-gcode" },
     "lathe": { "profile": "fanuc-lathe" },
     "klartext": { "profile": "heidenhain-klartext" },
-    "okuma": {
-      "note": "the section 8.8 Okuma declaration, written here because that profile ships in M8 (P8)",
-      "numberInput": {
-        "default": "okuma-1mm",
-        "presets": [
-          { "id": "okuma-1um", "label": "Unit system 1 um: every number is scaled", "input": "okuma-1um" },
-          { "id": "okuma-1mm", "label": "Unit system 1 mm: every number as written", "input": "okuma-1mm" },
-          { "id": "okuma-10um", "label": "Unit system 10 um: every number is scaled", "input": "okuma-10um" }
-        ]
-      }
-    }
+    "okuma": { "profile": "okuma-osp" }
   },
 
   "profiles": {
@@ -159,6 +179,60 @@
   },
 
   "class": [
+    {
+      "note": "T212: two codes of one block that declare Q with different units tell nothing, so Q has no class (a user database can write such a pair)",
+      "profile": "mill",
+      "address": "Q",
+      "feedUnit": "per-minute",
+      "codes": [
+        { "code": "G83", "group": "cycle", "params": [{ "address": "Q", "label": "Peck", "unit": "increment" }] },
+        { "code": "G900", "group": "nonmodal", "params": [{ "address": "Q", "label": "Angle", "unit": "angle" }] }
+      ],
+      "expected": null
+    },
+    {
+      "note": "T212: the same two codes listed the other way round: still no class, because the answer never depends on the order",
+      "profile": "mill",
+      "address": "Q",
+      "feedUnit": "per-minute",
+      "codes": [
+        { "code": "G900", "group": "nonmodal", "params": [{ "address": "Q", "label": "Angle", "unit": "angle" }] },
+        { "code": "G83", "group": "cycle", "params": [{ "address": "Q", "label": "Peck", "unit": "increment" }] }
+      ],
+      "expected": null
+    },
+    {
+      "note": "T212: two codes that declare the same unit agree, and the word keeps it",
+      "profile": "mill",
+      "address": "Q",
+      "feedUnit": "per-minute",
+      "codes": [
+        { "code": "G900", "group": "nonmodal", "params": [{ "address": "Q", "label": "Depth", "unit": "increment" }] },
+        { "code": "G83", "group": "cycle", "params": [{ "address": "Q", "label": "Peck", "unit": "increment" }] }
+      ],
+      "expected": "increment"
+    },
+    {
+      "note": "T212: codes in force that disagree tell nothing either, in either order",
+      "profile": "mill",
+      "address": "Q",
+      "feedUnit": "per-minute",
+      "codes": [],
+      "inForce": [
+        { "code": "G901", "group": "pathmode", "modal": true, "params": [{ "address": "Q", "label": "Angle", "unit": "angle" }] },
+        { "code": "G83", "group": "cycle", "params": [{ "address": "Q", "label": "Peck", "unit": "increment" }] }
+      ],
+      "expected": null
+    },
+    {
+      "note": "T212: a declaration of the block itself still wins over a code in force that says something else",
+      "profile": "mill",
+      "address": "Q",
+      "feedUnit": "per-minute",
+      "codes": [{ "code": "G83", "group": "cycle", "params": [{ "address": "Q", "label": "Peck", "unit": "increment" }] }],
+      "inForce": [{ "code": "G901", "group": "pathmode", "modal": true, "params": [{ "address": "Q", "label": "Angle", "unit": "angle" }] }],
+      "expected": "increment"
+    },
     {
       "note": "M9 review F9: an incremental twin is the kind of number of the axis it moves. H of C is an angle, not a length",
       "profile": "lathe-uwvh",
@@ -527,6 +601,70 @@
       "feedUnit": "per-minute",
       "codes": [],
       "expected": "length"
+    },
+    {
+      "note": "FB-2 (T120): G43.5 in force makes I the tool direction in a block that does not write it, a count no machine reads in increments",
+      "profile": "mill",
+      "address": "I",
+      "feedUnit": "per-minute",
+      "codes": [
+        { "code": "G1", "group": "motion", "modal": true, "params": [] }
+      ],
+      "modes": [
+        { "code": "G43.5", "group": "lengthComp", "modal": true, "params": [{ "address": "H" }, { "address": "I", "label": "Tool direction X", "unit": "count" }, { "address": "J", "label": "Tool direction Y", "unit": "count" }, { "address": "K", "label": "Tool direction Z", "unit": "count" }, { "address": "Q", "label": "Angle", "unit": "angle" }] }
+      ],
+      "expected": "count"
+    },
+    {
+      "note": "FB-2 (T120): the same for K under G41.6, the 3D tool radius compensation",
+      "profile": "mill",
+      "address": "K",
+      "feedUnit": "per-minute",
+      "codes": [
+        { "code": "G1", "group": "motion", "modal": true, "params": [] }
+      ],
+      "modes": [
+        { "code": "G41.6", "group": "compensation", "modal": true, "params": [{ "address": "D" }, { "address": "I", "label": "Tool direction X", "unit": "count" }, { "address": "J", "label": "Tool direction Y", "unit": "count" }, { "address": "K", "label": "Tool direction Z", "unit": "count" }, { "address": "Q", "label": "Angle", "unit": "angle" }] }
+      ],
+      "expected": "count"
+    },
+    {
+      "note": "FB-2 (WX-NC-6): the mode lends the block its arc-centre words only: the Q angle of G43.5 does not reach the Q of a modal G83, which stays a length",
+      "profile": "mill",
+      "address": "Q",
+      "feedUnit": "per-minute",
+      "codes": [],
+      "inForce": [
+        { "code": "G83", "group": "cycle", "modal": true, "params": [{ "address": "Q", "label": "Peck", "unit": "length" }, { "address": "K", "label": "Repeats", "unit": "count" }] }
+      ],
+      "modes": [
+        { "code": "G43.5", "group": "lengthComp", "modal": true, "params": [{ "address": "H" }, { "address": "I", "label": "Tool direction X", "unit": "count" }, { "address": "J", "label": "Tool direction Y", "unit": "count" }, { "address": "K", "label": "Tool direction Z", "unit": "count" }, { "address": "Q", "label": "Angle", "unit": "angle" }] }
+      ],
+      "expected": "length"
+    },
+    {
+      "note": "FB-2: nor does it give the Q of a block without a cycle a class",
+      "profile": "mill",
+      "address": "Q",
+      "feedUnit": "per-minute",
+      "codes": [
+        { "code": "G1", "group": "motion", "modal": true, "params": [] }
+      ],
+      "modes": [
+        { "code": "G43.5", "group": "lengthComp", "modal": true, "params": [{ "address": "H" }, { "address": "I", "label": "Tool direction X", "unit": "count" }, { "address": "J", "label": "Tool direction Y", "unit": "count" }, { "address": "K", "label": "Tool direction Z", "unit": "count" }, { "address": "Q", "label": "Angle", "unit": "angle" }] }
+      ],
+      "expected": null
+    },
+    {
+      "note": "FB-2: after G49 the group names G49, which declares nothing: I is an arc centre again",
+      "profile": "mill",
+      "address": "I",
+      "feedUnit": "per-minute",
+      "codes": [],
+      "modes": [
+        { "code": "G49", "group": "lengthComp", "modal": true, "params": [] }
+      ],
+      "expected": "length"
     }
   ],
 
@@ -609,7 +747,34 @@
     { "note": "a word the class rules left without a class is never converted either", "literal": "1200", "class": null, "input": "is-b", "units": "mm", "expected": null },
     { "note": "an unusable increment gives no value rather than a wrong one", "literal": "50", "class": "length", "input": "broken-zero", "units": "mm", "expected": null },
     { "note": "2026-09: a Klartext feed written with a decimal comma keeps the comma in its raw text, and it is the same value as the point", "literal": "500,5", "class": "feedPerMin", "input": "calculator", "units": "mm", "expected": "500.5" },
-    { "note": "2026-09: the comma is the point in an increment system too, so the word is millimetres as written", "literal": "-10,25", "class": "length", "input": "is-b", "units": "mm", "expected": "-10.25" }
+    { "note": "2026-09: the comma is the point in an increment system too, so the word is millimetres as written", "literal": "-10,25", "class": "length", "input": "is-b", "units": "mm", "expected": "-10.25" },
+    {"note": "T084: with the feed parameters at thousandths a point-less feed per minute is a count of 0.001 mm/min: F200 is 0.2 mm/min", "literal": "200", "class": "feedPerMin", "input": "fine-feeds", "units": "mm", "expected": "0.2"},
+    {"note": "T084: a feed with a point is as written there too", "literal": "200.", "class": "feedPerMin", "input": "fine-feeds", "units": "mm", "expected": "200"},
+    {"note": "T084: a point-less feed per revolution counts in 0.001 mm/rev: F250 is 0.25 mm/rev", "literal": "250", "class": "feedPerRev", "input": "fine-feeds", "units": "mm", "expected": "0.25"},
+    {"note": "T084: in an inch program the per-minute count is 0.00001 in/min", "literal": "200", "class": "feedPerMin", "input": "fine-feeds", "units": "inch", "expected": "0.002"},
+    {"note": "T084: and the per-revolution count 0.00001 in/rev", "literal": "2500", "class": "feedPerRev", "input": "fine-feeds", "units": "inch", "expected": "0.025"},
+    {"note": "T084: the lengths of that machine are untouched by the feed parameters", "literal": "50", "class": "length", "input": "fine-feeds", "units": "mm", "expected": "0.05"},
+    {"note": "T084: an inverse-time feed still has no value: no machine declares how it reads one", "literal": "125", "class": "inverseTime", "input": "fine-feeds", "units": "mm", "expected": null},
+    {"note": "T084: nor has a feed per tooth", "literal": "12", "class": "feedPerTooth", "input": "fine-feeds", "units": "mm", "expected": null},
+    {"note": "T083: IS-A: a length without a point is a count of 0.01 mm", "literal": "50", "class": "length", "input": "is-a", "units": "mm", "expected": "0.5"},
+    {"note": "T083: IS-A: with a point it is millimetres as written", "literal": "50.", "class": "length", "input": "is-a", "units": "mm", "expected": "50"},
+    {"note": "T083: IS-A in an inch program: a count of 0.001 in, a tenth of the metric step as the increment table gives it", "literal": "50", "class": "length", "input": "is-a", "units": "inch", "expected": "0.05"},
+    {"note": "T083: IS-A: a point-less angle is a count of 0.01 degree, in an inch program too", "literal": "9000", "class": "angle", "input": "is-a", "units": "inch", "expected": "90"},
+    {"note": "T083: IS-A: a point-less dwell is a count of 0.01 s", "literal": "250", "class": "dwell", "input": "is-a", "units": "mm", "expected": "2.5"},
+    {"note": "T083: IS-A: a cycle parameter in least increments counts in 0.01 mm (Q600 is 6 mm)", "literal": "600", "class": "increment", "input": "is-a", "units": "mm", "expected": "6"},
+    {"note": "T083: IS-A: a point-less feed per minute is 1 mm/min, as on IS-B", "literal": "200", "class": "feedPerMin", "input": "is-a", "units": "mm", "expected": "200"},
+    {"note": "T083: IS-A: a point-less feed per revolution is 0.01 mm/rev, as on IS-B", "literal": "25", "class": "feedPerRev", "input": "is-a", "units": "mm", "expected": "0.25"},
+    {"note": "manual-check fix D4-1: a lathe on IS-B counts a point-less feed per revolution in 0.0001 mm/rev, so G99 F12345 is 1.2345 mm/rev", "literal": "12345", "class": "feedPerRev", "input": "lathe-is-b", "units": "mm", "expected": "1.2345"},
+    {"note": "D4-1: and in 0.000001 in/rev in an inch program", "literal": "12345", "class": "feedPerRev", "input": "lathe-is-b", "units": "inch", "expected": "0.012345"},
+    {"note": "D4-1: its feed per minute stays at 1 mm/min", "literal": "200", "class": "feedPerMin", "input": "lathe-is-b", "units": "mm", "expected": "200"},
+    {"note": "D4-2: the lathe choice 'per-minute': F200 per minute is 0.2 mm/min, the feed per revolution keeps its 0.0001 mm/rev", "literal": "200", "class": "feedPerMin", "input": "lathe-per-minute", "units": "mm", "expected": "0.2"},
+    {"note": "D4-2: F2500 per revolution on that machine is 0.25 mm/rev", "literal": "2500", "class": "feedPerRev", "input": "lathe-per-minute", "units": "mm", "expected": "0.25"},
+    {"note": "D4-2: the lathe choice 'series-15': F25 per revolution is 0.25 mm/rev", "literal": "25", "class": "feedPerRev", "input": "lathe-series-15", "units": "mm", "expected": "0.25"},
+    {"note": "D4-2: and 0.0025 in/rev in an inch program", "literal": "25", "class": "feedPerRev", "input": "lathe-series-15", "units": "inch", "expected": "0.0025"},
+    {"note": "T084: the point-less-feeds choice 'per-rev' on IS-C: a point-less feed per revolution counts in 0.001 mm/rev, F25 is 0.025 mm/rev", "literal": "25", "class": "feedPerRev", "input": "is-c-per-rev", "units": "mm", "expected": "0.025"},
+    {"note": "T084: and in 0.00001 in/rev in an inch program", "literal": "2500", "class": "feedPerRev", "input": "is-c-per-rev", "units": "inch", "expected": "0.025"},
+    {"note": "T084: the feed per minute of that machine keeps its 1 mm/min", "literal": "200", "class": "feedPerMin", "input": "is-c-per-rev", "units": "mm", "expected": "200"},
+    {"note": "T084: and its lengths their 0.0001 mm", "literal": "50", "class": "length", "input": "is-c-per-rev", "units": "mm", "expected": "0.005"}
   ],
 
   "writeBack": [
@@ -641,15 +806,20 @@
     { "note": "and a word without a class has nothing to write back into", "value": "3", "original": "3", "class": null, "input": "is-b", "units": "mm", "expected": { "error": "noReading" } },
     { "note": "an unusable increment refuses the write instead of guessing", "value": "1", "original": "50", "class": "length", "input": "broken-zero", "units": "mm", "expected": { "error": "noReading" } },
     { "note": "a value that is not a number is refused with its own reason", "value": "fifty", "original": "50", "class": "length", "input": "is-b", "units": "mm", "expected": { "error": "notANumber" } },
-    { "note": "2026-09: a value written back into a word written with a decimal comma is written with the comma again", "value": "250.2", "original": "500,5", "class": "feedPerMin", "input": "calculator", "units": "mm", "expected": { "text": "250,2", "rounded": false } }
+    { "note": "2026-09: a value written back into a word written with a decimal comma is written with the comma again", "value": "250.2", "original": "500,5", "class": "feedPerMin", "input": "calculator", "units": "mm", "expected": { "text": "250,2", "rounded": false } },
+    {"note": "T084: 0.2005 mm/min into a point-less F200 on that machine is 200.5 counts, written back as 201 and flagged", "value": "0.2005", "original": "200", "class": "feedPerMin", "input": "fine-feeds", "units": "mm", "expected": {"text": "201", "rounded": true}},
+    {"note": "T084: 0.18 mm/rev into a point-less F250 is 180 counts, exact", "value": "0.18", "original": "250", "class": "feedPerRev", "input": "fine-feeds", "units": "mm", "expected": {"text": "180", "rounded": false}},
+    {"note": "T083: IS-A: 0.005 mm does not fit a point-less length counted in 0.01 mm; it goes back rounded and flagged", "value": "0.005", "original": "50", "class": "length", "input": "is-a", "units": "mm", "expected": {"text": "1", "rounded": true}},
+    {"note": "T083: IS-A: 0.37 mm is 37 counts, exact", "value": "0.37", "original": "50", "class": "length", "input": "is-a", "units": "mm", "expected": {"text": "37", "rounded": false}}
   ],
 
   "readings": [
     {
-      "note": "no machine: the three Fanuc presets read a point-less length differently, so nothing is settled",
+      "note": "no machine: the Fanuc presets read a point-less length differently, so nothing is settled (T083: IS-A, the declared order after the default, makes it 0.5 mm)",
       "literal": "50", "class": "length", "decl": "fanuc", "units": "mm",
       "expected": [
         { "preset": "is-b", "value": "0.05" },
+        { "preset": "is-a", "value": "0.5" },
         { "preset": "is-c", "value": "0.005" },
         { "preset": "calculator", "value": "50" }
       ]
@@ -659,6 +829,7 @@
       "literal": "50.", "class": "length", "decl": "fanuc", "units": "mm",
       "expected": [
         { "preset": "is-b", "value": "50" },
+        { "preset": "is-a", "value": "50" },
         { "preset": "is-c", "value": "50" },
         { "preset": "calculator", "value": "50" }
       ]
@@ -668,6 +839,7 @@
       "literal": "155", "class": "feedPerMin", "decl": "fanuc", "units": "mm",
       "expected": [
         { "preset": "is-b", "value": "155" },
+        { "preset": "is-a", "value": "155" },
         { "preset": "is-c", "value": "155" },
         { "preset": "calculator", "value": "155" }
       ]
@@ -677,15 +849,17 @@
       "literal": "2500", "class": "dwell", "decl": "fanuc", "units": "mm",
       "expected": [
         { "preset": "is-b", "value": "2.5" },
+        { "preset": "is-a", "value": "25" },
         { "preset": "is-c", "value": "0.25" },
         { "preset": "calculator", "value": "2500" }
       ]
     },
     {
-      "note": "G8 M6: no machine, and all three presets of the mill now read a cycle parameter in microns as a count; they differ only in how fine the count is",
+      "note": "G8 M6: no machine, and every preset of the mill now reads a cycle parameter in microns as a count; they differ only in how fine the count is",
       "literal": "6000", "class": "increment", "decl": "fanuc", "units": "mm",
       "expected": [
         { "preset": "is-b", "value": "6" },
+        { "preset": "is-a", "value": "60" },
         { "preset": "is-c", "value": "0.6" },
         { "preset": "calculator", "value": "6" }
       ]
@@ -695,6 +869,7 @@
       "literal": "25", "class": "feedPerRev", "decl": "fanuc", "units": "mm",
       "expected": [
         { "preset": "is-b", "value": "0.25" },
+        { "preset": "is-a", "value": "0.25" },
         { "preset": "is-c", "value": "0.25" },
         { "preset": "calculator", "value": "25" }
       ]
@@ -704,24 +879,27 @@
       "literal": "0.25", "class": "feedPerRev", "decl": "fanuc", "units": "mm",
       "expected": [
         { "preset": "is-b", "value": "0.25" },
+        { "preset": "is-a", "value": "0.25" },
         { "preset": "is-c", "value": "0.25" },
         { "preset": "calculator", "value": "0.25" }
       ]
     },
     {
-      "note": "M9 (WP9.5a): the lathe's increment presets are the mill's, so with no machine a lathe F25 is 25 as written on its default and 0.25 mm/rev on IS-B and IS-C: not settled, where it used to pass as 25 mm/rev",
+      "note": "M9 (WP9.5a): with no machine a lathe F25 is 25 as written on its default and a count of increments on IS-A, IS-B and IS-C: not settled. Manual-check fix D4-1: the lathe's increment presets count a point-less feed per revolution in 0.0001 mm/rev, so F25 is 0.0025 mm/rev there (the mill's 0.01 mm/rev is the lathe's Series 15 format)",
       "literal": "25", "class": "feedPerRev", "decl": "lathe", "units": "mm",
       "expected": [
         { "preset": "calculator", "value": "25" },
-        { "preset": "is-b", "value": "0.25" },
-        { "preset": "is-c", "value": "0.25" }
+        { "preset": "is-a", "value": "0.0025" },
+        { "preset": "is-b", "value": "0.0025" },
+        { "preset": "is-c", "value": "0.0025" }
       ]
     },
     {
-      "note": "the lathe inherits the same three presets and lists its own default first",
+      "note": "the lathe states the same four presets (T083: IS-A among them) and lists its own default first",
       "literal": "50", "class": "length", "decl": "lathe", "units": "mm",
       "expected": [
         { "preset": "calculator", "value": "50" },
+        { "preset": "is-a", "value": "0.5" },
         { "preset": "is-b", "value": "0.05" },
         { "preset": "is-c", "value": "0.005" }
       ]
@@ -745,6 +923,26 @@
       ]
     },
     {
+      "note": "T083: no machine: a point-less angle is 9 degrees on IS-B, 90 on IS-A, 0.9 on IS-C and 9000 as written",
+      "literal": "9000", "class": "angle", "decl": "fanuc", "units": "mm",
+      "expected": [
+        { "preset": "is-b", "value": "9" },
+        { "preset": "is-a", "value": "90" },
+        { "preset": "is-c", "value": "0.9" },
+        { "preset": "calculator", "value": "9000" }
+      ]
+    },
+    {
+      "note": "T084: no machine: the point-less-feeds option is a machine's and never a preset, so every preset still reads a point-less feed per minute F200 as 200 mm/min",
+      "literal": "200", "class": "feedPerMin", "decl": "fanuc", "units": "mm",
+      "expected": [
+        { "preset": "is-b", "value": "200" },
+        { "preset": "is-a", "value": "200" },
+        { "preset": "is-c", "value": "200" },
+        { "preset": "calculator", "value": "200" }
+      ]
+    },
+    {
       "note": "a profile that declares no presets offers no readings",
       "literal": "50", "class": "length", "decl": "klartext", "units": "mm",
       "expected": []
@@ -753,19 +951,25 @@
 
   "resolve": [
     { "note": "the machine decides, and there is nothing to ask about", "literal": "50", "class": "length", "source": "machine", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": "0.05", "readings": [] } },
-    { "note": "no machine: a point-less length has no value, and the readings say why", "literal": "50", "class": "length", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-c", "calculator"] } },
+    { "note": "no machine: a point-less length has no value, and the readings say why", "literal": "50", "class": "length", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-a", "is-c", "calculator"] } },
     { "note": "no machine: a length with a point is settled, because every preset agrees", "literal": "50.", "class": "length", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": "50", "readings": [] } },
     { "note": "no machine: a feed is settled on the Fanuc presets", "literal": "155", "class": "feedPerMin", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": "155", "readings": [] } },
-    { "note": "M9 (WP9.5a): no machine: a point-less feed per revolution is not settled any more on the Fanuc presets", "literal": "25", "class": "feedPerRev", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-c", "calculator"] } },
+    { "note": "M9 (WP9.5a): no machine: a point-less feed per revolution is not settled any more on the Fanuc presets", "literal": "25", "class": "feedPerRev", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-a", "is-c", "calculator"] } },
     { "note": "M9: an IS-B machine reads it as 0.25 mm/rev", "literal": "25", "class": "feedPerRev", "source": "machine", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": "0.25", "readings": [] } },
     { "note": "M9: a calculator-input machine reads it as written", "literal": "25", "class": "feedPerRev", "source": "machine", "input": "calculator", "decl": "fanuc", "units": "mm", "expected": { "value": "25", "readings": [] } },
-    { "note": "M9: an inverse-time feed on the Fanuc presets has no reading, so nothing is settled and nothing is guessed", "literal": "125", "class": "inverseTime", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-c", "calculator"] } },
-    { "note": "no machine: a dwell is not", "literal": "2500", "class": "dwell", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-c", "calculator"] } },
+    { "note": "M9: an inverse-time feed on the Fanuc presets has no reading, so nothing is settled and nothing is guessed", "literal": "125", "class": "inverseTime", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-a", "is-c", "calculator"] } },
+    { "note": "no machine: a dwell is not", "literal": "2500", "class": "dwell", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-a", "is-c", "calculator"] } },
     { "note": "no machine on an Okuma: no length word has a value, with or without a point", "literal": "1000.", "class": "length", "source": "profile", "input": "okuma-1mm", "decl": "okuma", "units": "mm", "expected": { "value": null, "readings": ["okuma-1mm", "okuma-1um", "okuma-10um"] } },
     { "note": "a profile that declares nothing needs no machine: its JSON is the answer", "literal": "50", "class": "length", "source": "profile", "input": null, "decl": "klartext", "units": "mm", "expected": { "value": "50", "readings": [] } },
     { "note": "a word with no class has no value and nothing to show", "literal": "1200", "class": null, "source": "machine", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": [] } },
     { "note": "a count has none either", "literal": "3", "class": "count", "source": "machine", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": [] } },
     { "note": "G8 M6: a machine on the lathe's own default preset answers the micron parameters of a turning program instead of leaving every one of them blank", "literal": "6000", "class": "increment", "source": "machine", "input": "calculator", "decl": "fanuc", "units": "mm", "expected": { "value": "6", "readings": [] } },
-    { "note": "no machine: the same parameter is unsettled, and the calculator preset shows as no reading", "literal": "6000", "class": "increment", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-c", "calculator"] } }
+    { "note": "no machine: the same parameter is unsettled, and the calculator preset shows as no reading", "literal": "6000", "class": "increment", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": ["is-b", "is-a", "is-c", "calculator"] } },
+    { "note": "T083: no machine, and IS-A among the presets does not unsettle a point-less feed per minute: every preset counts it in 1 mm/min", "literal": "155", "class": "feedPerMin", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": "155", "readings": [] } },
+    { "note": "T083: an IS-A machine decides: X50 is 0.5 mm", "literal": "50", "class": "length", "source": "machine", "input": "is-a", "decl": "fanuc", "units": "mm", "expected": { "value": "0.5", "readings": [] } },
+    { "note": "T084: a machine with its point-less feeds in thousandths decides: F200 per minute is 0.2 mm/min", "literal": "200", "class": "feedPerMin", "source": "machine", "input": "fine-feeds", "decl": "fanuc", "units": "mm", "expected": { "value": "0.2", "readings": [] } },
+    { "note": "T084: the same word with no machine is 200 mm/min: the option is never assumed", "literal": "200", "class": "feedPerMin", "source": "profile", "input": "is-b", "decl": "fanuc", "units": "mm", "expected": { "value": "200", "readings": [] } },
+    { "note": "T084: an inverse-time feed has no value on that machine either", "literal": "125", "class": "inverseTime", "source": "machine", "input": "fine-feeds", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": [] } },
+    { "note": "T084: nor has a feed per tooth", "literal": "12", "class": "feedPerTooth", "source": "machine", "input": "fine-feeds", "decl": "fanuc", "units": "mm", "expected": { "value": null, "readings": [] } }
   ]
 }

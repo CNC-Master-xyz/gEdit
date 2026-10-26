@@ -74,10 +74,16 @@ the first run in a dialect:
 | **Start at** | The number the first block gets (default 10) |
 | **Increment** | The step between blocks (default 10) |
 | **Digits** | Pad with leading zeros to this width; 0 writes the number as short as it is. On a control with a hard limit, at most as many digits as its highest block number (Okuma: 4, Sinumerik: 10) |
-| **Maximum** | Leave empty for no maximum (default 99999 on Fanuc). On Okuma and Sinumerik it is required and at most the highest block number the control accepts: 9999 on Okuma, 2147483647 on Sinumerik (a whole number there, so real 5-axis posts that number past N3,700,000 still fit) |
+| **Maximum** | Leave empty to use the dialect's maximum (99999 on Fanuc); a dialect that sets none has no maximum. On Okuma and Sinumerik it is required and at most the highest block number the control accepts: 9999 on Okuma, 2147483647 on Sinumerik (a whole number there, so real 5-axis posts that number past N3,700,000 still fit) |
 | **Above the maximum** | Start over at the start value, or stop and warn (Okuma and Sinumerik: stop by default) |
+| **Fit the increment to the maximum** | Off by default. Uses the largest whole increment (at least 1) that keeps the last numbered block at or below the **Maximum**, so **Increment** is not used. With several programs in the file and **Start over at each program start** on, the program with the most blocks decides. The increment is not rounded to a "round" number: 1,000 blocks from 10 with a maximum of 99999 get an increment of 100. Needs a maximum, and the blocks must fit even in steps of 1; otherwise nothing is renumbered and the status bar says why |
 | **Spaces after the number** | Between `N120` and the rest of the block |
+| **Start the code at column** | 0 is off. The code behind each new block number starts at this column (1-based, counted in characters from the start of the line, leading blanks and skip marks included). A block number that already reaches the column gets one space. It replaces **Spaces after the number**, and like it does not apply where a skip mark follows the number (`N120/ G0`). A tab counts as one character, so Results warns once when a tabbed line may not line up on screen |
+| **Number every Nth block** | 1 numbers every block. With 5, the 1st, 6th, 11th … block gets the next number and the blocks between **lose** their number (the number and the gap behind it; skip marks stay). A block that a jump, a return or a cycle names always keeps a number, and so does a Sinumerik main block; Results says how many blocks lost one and how many kept one. Counts start over at each program when **Start over at each program start** is on |
 | **Skip lines starting with** | Separated by spaces. Fanuc skips `%`, `O` and `(`; Okuma `$`, `%`, `O` and `(`; Sinumerik `%`, `;`, `PROC`, `DEF` and `EXTERN`. A program marker (`%`, `O1001`, Okuma's `$NAME.MIN%`, Sinumerik's `%_N_…`) is never numbered, whatever the list says — on Okuma only an `O` line with nothing behind it counts as one, so `O1001 (NAME)` is protected only by the `O` in the list. An Okuma line that starts with `$` continues the block above it and is never numbered either, even if you take `$` out of the list; Results lists it as *Skipped: this line continues the block above it.* |
+| **Skip lines containing** | Separated by spaces. A line that contains one of these texts anywhere, comments included, keeps its text and is listed like a skipped prefix. Upper and lower case are told apart as the dialect does. Each text is one word without blanks (the field splits at blanks); a [profile](profiles.md) that sets a text with a blank in it is refused when it is loaded |
+| **Skip the first lines**, **Skip the last lines** | That many lines at the start and at the end of the selection (or of the program) keep their text. Every line counts, empty ones too. Together they must be shorter than the run, otherwise there is nothing to renumber |
+| **Start at the line containing**, **Start at the line after it** | Empty starts at the first line. Otherwise numbering starts at the first line that contains this text, or at the line after it. The lines above keep their text and their numbers, and Results says in one row where numbering started. It applies once per run, not once per program. A text that is not in the lines of the run stops the run |
 | **Skip empty lines** | On by default |
 | **Start over at each program start** | For files that hold several programs. On by default |
 | **Only renumber blocks that already have a number** | Leaves unnumbered blocks unnumbered |
@@ -86,10 +92,26 @@ the first run in a dialect:
 On Klartext there is no dialog: the control needs its blocks numbered from 0 in steps of 1,
 so that is what the command writes, and the continuation lines of a `~` block get no number.
 
+**Which option wins on a line.** A line is looked at in this order, and the first reason
+that applies decides: it continues the block above, it is empty, it is a program marker,
+it is among the first or last lines to skip, it is above the start line, it starts with a
+skipped prefix, it contains a skipped text, it has a name instead of a number, it has no
+number and only numbered blocks are renumbered, numbering has stopped at the maximum,
+**Number every Nth block** passes over it. A line an option leaves alone keeps its number,
+and a jump that names it still finds it.
+
+**A run an option cannot carry out writes nothing.** That is a refused run, not a
+half-done one: *Fit the increment to the maximum* without a maximum, with blocks that do
+not fit even in steps of 1, or a start text that is nowhere in the run. The document stays
+as it was and the status bar gives the reason ("Not renumbered: …"). The options are
+remembered per dialect with the other answers, and a [profile](profiles.md) can set their
+defaults (`fitToMax`, `alignColumn`, `everyNth`, `skipContaining`, `skipFirst`, `skipLast`,
+`startTrigger`, `startAfterTrigger`).
+
 #### Jumps and cycles that point at a block number
 
-`GOTO 100`, `M98 Q100`, `M99 P100` and, on a lathe, the `P`/`Q` of `G70`–`G73` all name a
-block by its number, and so do `GOTO N100`, `IF […] N100` and a LAP call on Okuma and
+`GOTO 100`, `M98 Q100`, `M99 P100`, `M98 P1000 Q100` and, on a lathe, the `P`/`Q` of
+`G70`–`G73` all name a block by its number, and so do `GOTO N100`, `IF […] N100` and a LAP call on Okuma and
 `GOTO`, `GOTOF`, `GOTOB` or `GOTOC` followed by `N100` on Sinumerik. **Renumbering rewrites
 the ones it can prove and reports the rest.** A jump to a name — an Okuma sequence name such
 as `NLOOP`, a Sinumerik label such as `LAST_CUT` — needs nothing, because names are never
@@ -99,19 +121,21 @@ A reference is rewritten when all four of these hold:
 
 1. Exactly one block in the program carries that number — a number used twice is an
    ambiguity, not an answer.
-2. That block is in the **same program**. `GOTO 100` means the `N100` of the program it
-   stands in, and a file can hold several programs.
+2. That block is in the program the reference **names**. `GOTO 100` means the `N100` of
+   the program it stands in, and a file can hold several programs. `M99 P100` names a block
+   of the program that calls this one — see
+   [References into other programs](#references-into-other-programs).
 3. That block is inside the lines this run renumbers. A jump that points at a block outside
    the selection keeps its number, because that block keeps its number too.
-4. The rule allows it at all. `M99 P` returns to a block of the **calling** program, which
-   this file does not show, so it is never rewritten — a number from this program would
-   send the return somewhere else entirely. The same goes for `M98 P2000 Q50`: the `Q`
-   names a block of program 2000, not of this one.
+4. The rule allows it at all. `M98 P2000 Q50` is the case that does not: the `Q` names a
+   block of program 2000, not of this one, and gEdit reports it and never rewrites it,
+   also when `O2000` is in the file. A rule of your own can forbid a rewrite the same way.
 
 A turning program opened with the Fanuc **mill** profile is the same case: the mill does not
 know `G70`–`G73` as turning cycles, so their `P` and `Q` are never rewritten — you are asked
-first and the lines are listed — while the blocks they name are renumbered like any other,
-so afterwards `P` and `Q` point at numbers that are gone. Set the lathe profile first (see
+first and the lines are listed, with a row that says why (on a mill, `G73 P… Q…` is a peck
+drilling cycle, not a turning cycle) — while the blocks they name are renumbered like any
+other, so afterwards `P` and `Q` point at numbers that are gone. Set the lathe profile first (see
 [Dialects](dialects.md#which-dialect-a-file-gets)).
 
 Anything else is left exactly as written and listed in Results with the reason: the target
@@ -120,6 +144,75 @@ the run, the jump itself is outside the run and points into it, the reference is
 or an expression (`GOTO #100`), the block carries the same address twice so nothing can say
 which word is meant, or the rule forbids it. A jump target rewritten wrongly is worse than
 one left behind — the program still runs, and lands in the wrong place.
+
+##### References into other programs
+
+A file can hold several programs, and some references name a block of a program other
+than the one they stand in. Which program that is, is read from the file:
+
+- **`M99 P30` in a subprogram** returns to block 30 of the program that **calls** the
+  subprogram. It is rewritten when exactly one program in the file calls it and that
+  program is renumbered by this run. It is reported, and left as it is, when no program of
+  the file calls this one (a main program, where `M99 P` jumps inside it, reads the same
+  way, so the file alone cannot say which applies), when the subprogram has no program
+  number or name, or when several programs call it. The same goes for a call gEdit cannot
+  read (`M98 P#100`): next to one known caller it is a second possible one, so nothing is
+  rewritten. The caller is looked for **in this file only**. A main program in another open
+  document that calls the same subprogram is not looked at, so when exactly one program of
+  the file calls it, the `M99 P` is rewritten for that one. If you keep the main program in
+  a file of its own, check those `M99 P` values after the run.
+- **`M98 P1000 Q30`** starts program 1000 at its block 30. The program is the one the
+  call names, and it has to be in the file exactly once. gEdit follows it and renumbers
+  the blocks of `O1000` like any other, but **reports** the `Q` instead of rewriting it:
+  Results says that this dialect never rewrites this reference. Check it by hand, or
+  keep the numbers of that program.
+- **`M98 Q30`** without a `P` is a **local call**: the program runs its own blocks from
+  `N30` up to the next `M99` as a subprogram. The `Q` itself is rewritten as before (it names
+  a block of its own program). As a caller it proves one thing only: an `M99 P` **inside that
+  part** returns into the same program, so that `P` is rewritten with the program's own
+  numbers. An `M99 P` anywhere else in the program is not proved by it and is reported like
+  any other without a caller. When the part cannot be found (`M98 Q#100`, no block `N30`,
+  `N30` twice, no `M99` behind it), the call proves nothing, and the program counts as a
+  possible caller of every `M99 P` in it: next to another caller, those are reported.
+- **A call code without its program** is no call. `M96`, `G65` or `G66` without a `P`, or
+  with a `P` that is a variable, calls no program that can be read. Only `M98 Q` is a local
+  call without a `P`.
+- **`M96 P2000`** (a Fanuc interrupt) starts program 2000 when a signal arrives, and that
+  program returns into whichever program it interrupted. An interrupt therefore **never
+  proves which program an `M99 P` returns to**: an `M99 P` in a program that an interrupt of
+  the file may start is reported with its own row (*This return is in a program that an
+  interrupt (M96) starts…*) and left as it is, also when another program calls it by
+  `M98`. The same goes for every `M99 P` of a file with an interrupt whose program cannot
+  be named (`M96 P#100`).
+- **`M198 P…`** (a subprogram call from a memory card or data server) is read like `M98 P`.
+  On a control where parameter 3404 bit 2 is off and the program comes from a Handy File or
+  floppy disk, its `P` is a file number, not a program number; gEdit does not know that
+  setting. See the machine facts in
+  [docs/planning/reviews/machine-facts.md](../planning/reviews/machine-facts.md).
+- **`GOTO`, `IF […] GOTO`, the `P`/`Q` of `G70`–`G73` (lathe), Okuma's `GOTO N…` and
+  Sinumerik's `GOTOF`/`GOTOB`** always name a block of their own program.
+
+How a call names its program: on Fanuc the `P` of `M98` (also `M198`), `G65`, `G66`,
+`G66.1`, `G72.1`, `G72.2` and `M96` (an interrupt, see above), or a bracketed name such as `<SHAFT_T12>`. The `M98 P`
+follows the control's rule: up to four digits are the program number, and a longer value
+without `L` is a repeat count followed by a four-digit program number, so `M98 P21010`
+calls `O1010` twice. A program of five to eight digits is called with its count in `L`
+(`M98 P12345 L2`). A variable or an expression (`P#100`) names no program that can be
+read. Program numbers are compared as numbers (`O0100` is `P100`), names as upper case
+text. A program without a name or number cannot be called from elsewhere, and a name
+that two programs of the file carry is ambiguous.
+
+Every reference that cannot be followed gets its own row in Results with the reason: the
+line does not say which program it calls, the program is not in this file (if it is open in
+another tab, renumber it there — see
+[the next section](#references-in-other-open-documents)), two programs have the same name,
+no program calls this one, several do, or an interrupt may start it. These are rows for
+single references: a renumber of a correct program still renumbers it.
+
+A reference like that **outside** the renumbered lines is listed too, and asked about
+before the run, when one program it may point into has the block it names inside those
+lines: an `M99 P` in a subprogram further down, whose caller cannot be told, may name a
+block you are about to renumber.
 
 The rules do not care in which order a block writes its words, and they allow a space
 between an address and its value: `G71 P 100 Q 200` is read like `G71 P100 Q200`, and
@@ -154,6 +247,71 @@ if the new number needs them). An Okuma control reads its sequence numbers as na
 it, is rewritten with exactly the text that block gets — also when only the zeros change —
 and a jump whose zeros match no block is reported as a missing target.
 
+#### References in other open documents
+
+A subprogram is often a file of its own. When you renumber the file that holds `O1000`, a
+main program open in another tab that says `M98 P1000 Q30` still points at the old block
+30. After a Renumber Blocks run that wrote something, gEdit therefore looks at your **other
+open documents that use the same dialect profile** (documents of another profile are not
+read, and a file that is not open is never read or written) and lists the references in
+them that point into a program you just renumbered:
+
+- an `M98 P… Q…` of the other document that names a
+  program the renumbered document holds and the other one does not;
+- an `M99 P…` in a named subprogram of the other document that no program of the other
+  document calls, when exactly one program among the open documents calls it, in the
+  renumbered one.
+
+Only values whose block the run changed, removed or created are listed. They appear in
+Results below the renumber's own rows, with the columns **Document**, **Line**, **Line as
+written** and **What happens**; a click opens the line. The status bar says how many there
+are. The rows say:
+
+| Row | Meaning |
+|---|---|
+| *{value} becomes {new value} (program …)* | The block has a new number; **Update References in Other Documents** can write it |
+| *The renumber took away the number … pointed at* | The run removed the block's number (**Number every Nth block**). Not changed; check it |
+| *The number now on … is on several blocks of program …* | Not changed; check it |
+| *… named no block before and names one now* | Not changed; check it |
+| *The block has a new number, but gEdit never rewrites … here* | The `Q` of `M98 P… Q…`, or a line that carries two words of the address. Left as it is; check it |
+| *Several programs call this one* | Not changed; check it |
+
+**Update References in Other Documents…** (NC tab, Numbering group) is available only while
+the list holds at least one row marked to update; with only *check it* rows it stays grey.
+It asks once, saying how many references it writes in how many documents and how many it
+cannot write, then rewrites the values marked to update. **Each document gets its own undo
+step**, so Undo in a document takes back the update there only. The new value is written the
+way the old one was (`0030` stays four digits). Rows that are not marked to update are never
+written.
+
+**It looks again before it writes.** The documents may have changed since the list was made,
+so Update finds the references in them again, as they are now:
+
+- The same rows: it writes.
+- Other rows (you edited, opened or closed a listed document, or opened another one that
+  now holds the program): nothing is written. The fresh list replaces the old one in
+  Results and the status bar says so; check it and run Update again.
+- The **renumbered** document changed after the run: nothing is written, and the list stays.
+  The status bar says *Undo your changes in {name}, or undo the renumber and run it again.*
+  If you undo only your changes, the list is right again and Update works. A closed
+  renumbered document takes the list away.
+- A listed document that is locked against editing, or that cannot be edited yet: nothing is
+  written anywhere and the status bar says which one. Unlock it and run Update again.
+
+Otherwise it is **all or nothing**. If a write still fails part-way, the status bar says
+*Updated X of Y documents. Undo in each document to take it back.*; the list stays, and
+documents are only counted when something was actually written to them.
+
+**A new renumber replaces the list.** Any Renumber Blocks run that writes something, in any
+document, drops the list that is waiting; the two runs are never combined, because the
+second run's numbers are not the first run's. When the dropped list still held rows marked
+to update, the status bar and one row in Results say so: *{count} references from the earlier
+renumber of {name} were not updated and are no longer listed. Undo both renumbers, renumber
+once, then update.* A run that writes nothing, or that you decline, leaves the list as it
+is. The list also goes away after a successful update and when the renumbered document is
+closed. A program that two open documents both hold cannot be told apart, so nothing is
+listed for it.
+
 #### Other things it tells you about
 
 - If the numbers pass the maximum and start over (with **Above the maximum** set to
@@ -165,9 +323,14 @@ and a jump whose zeros match no block is reported as a missing target.
   program now carries twice is not rewritten but listed: a value that names several blocks
   is not an answer. Use a larger maximum, a smaller increment, or "Stop and warn".
 - Renumbering a selection starts at **Start at** and does not look at the numbers around
-  it. Nothing warns you when a new number is one that a block outside the selection already
-  carries, unless a jump inside the selection, or one pointing into it, names that number —
-  choose a start above the numbers in front of the selection.
+  it. When a new number is one that a block outside the selection already carries — or a
+  line the options leave alone (a skipped prefix, the lines above the start text), which
+  keeps its number — the program now has that number twice. That is a warning, not a
+  refusal, and Results lists those lines (*After this renumber, this block number is on more
+  than one block of this program…*). A control takes the first one it finds, so block search,
+  `GOTO` and `M99 P` may go to the wrong block. Choose a start above the numbers in front of
+  the selection. (A run that started over at the maximum has said this already, with a row
+  on each block.)
 - On a dialect that numbers blocks consecutively (Klartext), renumbering only a selection
   does not fit the blocks around it, and you are asked first.
 - A selection that starts inside a Klartext block (below a line that ends in `~`) is read

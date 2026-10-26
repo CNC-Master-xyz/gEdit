@@ -1,5 +1,5 @@
 {
-  "about": "R6 (M9, WP9.4; byLength and the M6 and three-digit-G rows M12.5 WP-RP3; the all-zero tool part and the control's own three-digit G codes M12.5 review): what a tool word reads as under each choice of the toolWord variant. Shared by src/lib/data/profiles/r6Variants.test.ts and tests/python/test_r6_variants.py. A string is the tool (the station) the word selects; null is a word that is not a tool change (an offset cancel, a tool of 00, a word the choice has no reading for).",
+  "about": "R6 (M9, WP9.4; byLength and the M6 and three-digit-G rows M12.5 WP-RP3; the all-zero tool part and the control's own three-digit G codes M12.5 review; the six-digit Okuma word under offset3 v1.2 T086, owner 2026-10-22: not a tool change, as the plan's R6 table says — the manuals describe a plain T of four or six digits, six being nose radius, station and offset, and no six-digit three-digit-offset form; the three-digit word under two-digit offsets, manual-check fix D3-2, 2026-10-25: station of one digit and offset of two, `T100` indexes station 1): what a tool word reads as under each choice of the toolWord variant. Shared by src/lib/data/profiles/r6Variants.test.ts and tests/python/test_r6_variants.py. A string is the tool (the station) the word selects; null is a word that is not a tool change (an offset cancel, a tool of 00, a word the choice has no reading for).",
   "fanuc-lathe": {
     "byLength": {
       "T0101": "01",
@@ -99,7 +99,11 @@
       "T0001": null,
       "T000102": "01",
       "T010002": null,
-      "T123": null,
+      "T100": "1",
+      "T123": "1",
+      "T012": null,
+      "T000": null,
+      "T12": null,
       "T12345": null,
       "G71 U1. R0.5 T0405": null
     },
@@ -115,6 +119,9 @@
       "T00123": null,
       "T0000123": null,
       "T010101": null,
+      "T002003": null,
+      "T012005": null,
+      "T000005": null,
       "T12": null,
       "G71 U1. R0.5 T1405": null
     }

@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { REPO, RUNTIME_DIR, binaryPath, rhDir, withLock } from './core.mjs'
+import { patchTauriConf } from './patch.mjs'
 
 const args = process.argv.slice(2)
 let repo = REPO
@@ -82,18 +83,23 @@ function patchCargoToml(src) {
   return `${src.trimEnd()}\n\n${header}\nobjc2 = "0.6"\n`
 }
 
-function patchTauriConf(src) {
-  const cfg = JSON.parse(src)
-  for (const w of cfg.app?.windows ?? []) w.visible = false
-  return JSON.stringify(cfg, null, 2) + '\n'
-}
-
 await withLock(rh, 'sync', async () => {
   const t0 = Date.now()
   fs.mkdirSync(app, { recursive: true })
   fs.mkdirSync(logs, { recursive: true })
   if (!fs.existsSync(path.join(repo, 'src-tauri/src/lib.rs'))) fail(`${repo} is not a gEdit checkout`)
   if (!fs.existsSync(path.join(repo, 'node_modules'))) fail(`${repo}/node_modules is missing; run npm install`)
+  // The build folder holds one build. Say so when this sync replaces another checkout's (T195):
+  // that checkout's runs refuse from now on (`foreignBuild` in core.mjs) until it syncs again.
+  try {
+    const earlier = JSON.parse(fs.readFileSync(path.join(rh, 'sync.json'), 'utf8'))
+    const before = earlier.harness ?? earlier.repo
+    if (typeof before === 'string' && before !== REPO) {
+      console.error(`sync: warning: ${rh} held the build of ${before}; it is the build of ${REPO} from now on, and runs from ${before} refuse until it syncs again`)
+    }
+  } catch {
+    // no earlier build
+  }
 
   // Patched files are excluded here and written below only when they change.
   step('copy', 'rsync', [
@@ -154,7 +160,7 @@ await withLock(rh, 'sync', async () => {
   fs.writeFileSync(
     path.join(rh, 'sync.json'),
     JSON.stringify(
-      { repo, head: git('rev-parse', 'HEAD'), dirty: git('status', '--porcelain') !== '', syncedAt: new Date().toISOString(), binary: binaryPath(rh) },
+      { repo, harness: REPO, head: git('rev-parse', 'HEAD'), dirty: git('status', '--porcelain') !== '', syncedAt: new Date().toISOString(), binary: binaryPath(rh) },
       null,
       2,
     ) + '\n',

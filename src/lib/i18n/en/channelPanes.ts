@@ -42,6 +42,11 @@ export default {
     marks: '{matched} of {total} waits lined up',
     unmatched_one: '{count} wait has no partner',
     unmatched_other: '{count} waits have no partner',
+    /** A wait names a channel the machine does not have (v1.2.0 T037); the hover of the wait says it too. */
+    unknown_one: '{count} wait names a channel this machine does not have',
+    unknown_other: '{count} waits name a channel this machine does not have',
+    /** Said aloud (never shown) when the last wait without a partner has found one (v1.2.0 T031). */
+    allLinedUp: 'All waits are lined up.',
     close: 'Close the view',
     closeHint: 'Back to one editor (Close Split)',
   },
@@ -71,6 +76,9 @@ export default {
 
   /** The title of a pane whose channel is no longer in the program. */
   gone: '{name} (no longer in the program)',
+
+  /** The close button in a channel pane's header names the channel (v1.2.0 T030); `{channel}` is the pane's title. */
+  closePane: 'Close the pane of {channel}',
 
   /** Status bar. */
   status: {

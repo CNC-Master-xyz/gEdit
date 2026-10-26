@@ -14,11 +14,11 @@
       {"ruleId":"m100","mark":"","line":16,"channel":"a","partners":["a","b"],"blocking":true},
       {"ruleId":"p-code","mark":"P5","line":21,"channel":"b","partners":["a","b"],"blocking":true},
       {"ruleId":"m100","mark":"","line":26,"channel":"b","partners":["a","b"],"blocking":true},
-      {"ruleId":"p-code","mark":"P15","line":35,"channel":"a","partners":["a","b"],"blocking":true},
-      {"ruleId":"m100","mark":"","line":37,"channel":"a","partners":["a","b"],"blocking":true},
+      {"ruleId":"m100","mark":"","line":36,"channel":"a","partners":["a","b"],"blocking":true},
+      {"ruleId":"p-code","mark":"P15","line":37,"channel":"a","partners":["a","b"],"blocking":true},
       {"ruleId":"p-code","mark":"P35","line":38,"channel":"a","partners":["a","b"],"blocking":true},
-      {"ruleId":"p-code","mark":"P25","line":46,"channel":"b","partners":["a","b"],"blocking":true},
-      {"ruleId":"m100","mark":"","line":49,"channel":"b","partners":["a","b"],"blocking":true},
+      {"ruleId":"m100","mark":"","line":46,"channel":"b","partners":["a","b"],"blocking":true},
+      {"ruleId":"p-code","mark":"P25","line":49,"channel":"b","partners":["a","b"],"blocking":true},
       {"ruleId":"p-code","mark":"P35","line":50,"channel":"b","partners":["a","b"],"blocking":true}
     ],
     "problems": []

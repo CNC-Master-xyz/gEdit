@@ -90,6 +90,15 @@ const ADDRESS = /^[A-Za-z][A-Za-z0-9]*$/;
 /** Phase 4 (plan §6.2): an arc direction word, an address and its sign (`DR+`). */
 const DIRECTION_WORD = /^[A-Za-z][A-Za-z0-9]*[+-]$/;
 const ARC_DIRECTIONS = ['cw', 'ccw'] as const;
+/** P4d (plan §6.6 rule 8): which program's block a `numbering.references` value names. */
+const REFERENCE_PROGRAMS = ['own', 'called', 'caller'] as const;
+/** P4d (§6.6 rules 2–6): the bounds of the advanced renumber options. */
+const MAX_ALIGN_COLUMN = 120;
+const MAX_EVERY_NTH = 1000;
+const MAX_SKIP_LINES = 1_000_000;
+const MAX_SKIP_TEXT = 200;
+/** P4d review CODE-6: a `skipContaining` text has no blank in it (the form splits at blanks). */
+const NO_BLANK = /^\S+$/;
 
 /** P9. A main-block prefix: one character that is neither a letter, a digit nor a blank (`:`). */
 const MAIN_PREFIX = /^[^A-Za-z0-9\s]$/;
@@ -479,6 +488,46 @@ function matchesPlainBlock(source: string, caseSensitive: boolean): boolean {
   return PLAIN_BLOCKS.some((line) => re.test(line));
 }
 
+/**
+ * T177: whether every top-level alternative of a pattern starts with `^`.
+ *
+ * A leading `^` is not enough: in `^\$ |\$\t` it anchors only the first alternative, and the
+ * second matches in the middle of a line. The pattern is split at the `|` that stand outside
+ * groups, character classes and escapes, and each part has to start with `^` itself. An
+ * alternation inside a group behind the `^` (`^(?:\$ |\$\t)`) is anchored by it. A pattern that
+ * hides its anchor in a group (`(?:^\$|^#)`) is refused too: the rule is kept simple enough to
+ * be checked by reading, and the message says what to write.
+ */
+export function anchoredAtLineStart(source: string): boolean {
+  const branches: string[] = [];
+  let depth = 0;
+  let inClass = false;
+  let start = 0;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === '\\') {
+      i++; // the escaped character is never syntax
+    } else if (inClass) {
+      if (c === ']') inClass = false;
+    } else if (c === '[') {
+      // JavaScript reads `[]` as an empty class and `[^]` as any character, so a `]` right
+      // after `[` or `[^` closes the class here (Python would read it as a character: the
+      // stricter reading is the one that refuses).
+      inClass = true;
+      if (source[i + 1] === '^') i++;
+    } else if (c === '(') {
+      depth++;
+    } else if (c === ')') {
+      depth = Math.max(0, depth - 1);
+    } else if (c === '|' && depth === 0) {
+      branches.push(source.slice(start, i));
+      start = i + 1;
+    }
+  }
+  branches.push(source.slice(start));
+  return branches.every((branch) => branch.startsWith('^'));
+}
+
 /** A variable pattern: compiles, stays in the AD-11 subset, and always takes a character. */
 function optVariablePattern(value: unknown, path: string, caseSensitive: boolean, p: Problems): void {
   if (value === undefined) return;
@@ -599,10 +648,13 @@ function checkSyntax(value: unknown, p: Problems): void {
   // that could match further in would make a `$` in the middle of a block a new block's
   // continuation, and one that needs no marker at all (`^`, `^\s*`) would make the whole
   // program one block, with the first thread cycle's lead protecting every feed after it.
+  // T177: every alternative is anchored, not only the first (`^\$ |\$\t` matched mid-line).
   const marker = syntax.continuationStart;
   optPattern(marker, 'syntax.continuationStart', p);
   if (typeof marker === 'string' && !marker.startsWith('^')) {
     p.add('syntax.continuationStart', 'has to be anchored at the start of the line (^)');
+  } else if (typeof marker === 'string' && !anchoredAtLineStart(marker)) {
+    p.add('syntax.continuationStart', 'has to be anchored at the start of the line (^) in every alternative: write ^ in front of each, or ^(?:…|…)');
   } else if (typeof marker === 'string' && matchesPlainBlock(marker, caseSensitive)) {
     p.add('syntax.continuationStart', 'matches a line without a marker, so every line would join the block above');
   }
@@ -659,6 +711,11 @@ function checkSyntax(value: unknown, p: Problems): void {
   optVariablePattern(syntax.systemVariables, 'syntax.systemVariables', caseSensitive, p);
   // P4a fix B1 (NC-6): the first number of a numbered system variable (Fanuc #1000).
   optNum(syntax.systemVariableNumbers, 'syntax.systemVariableNumbers', p, { int: true, min: 1 });
+  // D6-7: an increment after a shift travels the shift too (Sinumerik SD42440).
+  optBool(syntax.incrementTravelsShift, 'syntax.incrementTravelsShift', p);
+  // Review round (D6-4, NC-9): two notes of Translate.
+  optBool(syntax.tcpTableCoordinates, 'syntax.tcpTableCoordinates', p);
+  optStrArr(syntax.cycleRAbsoluteWith, 'syntax.cycleRAbsoluteWith', p, { min: 1, allow: /^[a-z0-9][a-z0-9-]*$/ });
   optPattern(syntax.header, 'syntax.header', p);
   // M8 integration (§7.16): the names a program gives itself, one token each.
   optPattern(syntax.names, 'syntax.names', p);
@@ -915,7 +972,7 @@ function checkToolCall(value: unknown, p: Problems): void {
   if (typeof toolCall.tool === 'string' && !toolCall.tool.includes('(?<tool>')) {
     p.add('toolCall.tool', 'has to carry the named group (?<tool>…)');
   }
-  enumOf(toolCall.toolFrom, 'toolCall.toolFrom', p, ['same-line', 'same-line-or-last'] as const);
+  enumOf(toolCall.toolFrom, 'toolCall.toolFrom', p, ['same-line', 'same-line-or-last', 'last-before'] as const);
   // M6 (§7.1): a trigger line whose masked text also matches this is not a tool change.
   optPattern(toolCall.ignore, 'toolCall.ignore', p);
 }
@@ -948,6 +1005,21 @@ function checkNumbering(value: unknown, p: Problems): void {
   optBool(numbering.skipEmpty, 'numbering.skipEmpty', p);
   optBool(numbering.restartAtProgramStart, 'numbering.restartAtProgramStart', p);
   optBool(numbering.onlyNumbered, 'numbering.onlyNumbered', p);
+  // P4d (plan §6.6 rules 1–6): the advanced options, each optional; a profile that leaves
+  // them out renumbers exactly as before.
+  optBool(numbering.fitToMax, 'numbering.fitToMax', p);
+  optNum(numbering.alignColumn, 'numbering.alignColumn', p, { int: true, min: 0, max: MAX_ALIGN_COLUMN });
+  optNum(numbering.everyNth, 'numbering.everyNth', p, { int: true, min: 1, max: MAX_EVERY_NTH });
+  // P4d review CODE-6: the form field is a space-separated list, so a text with a blank in
+  // it would come back from the form as two texts; it is refused here instead.
+  optStrArr(numbering.skipContaining, 'numbering.skipContaining', p, { max: MAX_SKIP_TEXT, cap: MAX_PATTERN_LIST, allow: NO_BLANK });
+  optNum(numbering.skipFirst, 'numbering.skipFirst', p, { int: true, min: 0, max: MAX_SKIP_LINES });
+  optNum(numbering.skipLast, 'numbering.skipLast', p, { int: true, min: 0, max: MAX_SKIP_LINES });
+  // An empty text is "from the first line", the same as leaving it out.
+  if (numbering.startTrigger !== undefined && numbering.startTrigger !== '') {
+    str(numbering.startTrigger, 'numbering.startTrigger', p, undefined, MAX_SKIP_TEXT);
+  }
+  optBool(numbering.startAfterTrigger, 'numbering.startAfterTrigger', p);
 
   if (numbering.references !== undefined) {
     const references = patternArr(numbering.references, 'numbering.references', p);
@@ -959,6 +1031,24 @@ function checkNumbering(value: unknown, p: Problems): void {
       // M6 (§7.1, F42): `false` means "report, do not rewrite" — a Fanuc `M99 P` may name
       // a block in the caller, which a renumber of this file cannot see.
       optBool(rule.rewrite, `numbering.references[${i}].rewrite`, p);
+      // P4d (§6.6 rule 8): which program's block the value names.
+      optEnum(rule.program, `numbering.references[${i}].program`, p, REFERENCE_PROGRAMS);
+    });
+  }
+
+  // P4d (§6.6 rule 9): the lines that call another program, and the word that names it.
+  if (numbering.calls !== undefined) {
+    const calls = patternArr(numbering.calls, 'numbering.calls', p);
+    calls?.forEach((entry, i) => {
+      const rule = obj(entry, `numbering.calls[${i}]`, p);
+      if (!rule) return;
+      pattern(rule.trigger, `numbering.calls[${i}].trigger`, p);
+      str(rule.address, `numbering.calls[${i}].address`, p, ADDRESS);
+      optNum(rule.maxDigits, `numbering.calls[${i}].maxDigits`, p, { int: true, min: 1, max: 16 });
+      optStr(rule.repeatAddress, `numbering.calls[${i}].repeatAddress`, p, ADDRESS);
+      // P4d review NC-1 and NC-2: the word of a local call, and a call that is an interrupt.
+      optStr(rule.localAddress, `numbering.calls[${i}].localAddress`, p, ADDRESS);
+      optBool(rule.interrupt, `numbering.calls[${i}].interrupt`, p);
     });
   }
 }
@@ -996,6 +1086,58 @@ function checkNumberInput(value: unknown, path: string, p: Problems): void {
       increment(entry.incrementInch, `${at}.incrementInch`, p);
     }
   }
+}
+
+/** The feed classes a point-less-feeds choice may set (T084). */
+const POINTLESS_FEED_CLASSES = ['feedPerMin', 'feedPerRev'] as const;
+
+/**
+ * T084: `machineParams.numberInput.pointlessFeeds`, the machine option for feeds written
+ * without a point. Its default choice sets nothing: the option is never read without a
+ * machine, and a machine that leaves it alone reads its feeds as the preset says.
+ */
+function checkPointlessFeeds(value: unknown, path: string, p: Problems): void {
+  const decl = optObj(value, path, p);
+  if (!decl) return;
+  optStr(decl.source, `${path}.source`, p);
+  optBool(decl.verify, `${path}.verify`, p);
+  const choices = arr(decl.choices, `${path}.choices`, p, 1);
+  const values = new Set<string>();
+  const plain = new Set<string>();
+  choices?.forEach((entry, i) => {
+    const at = `${path}.choices[${i}]`;
+    const choice = obj(entry, at, p);
+    if (!choice) return;
+    const id = str(choice.value, `${at}.value`, p);
+    if (id !== null) {
+      if (values.has(id)) p.add(`${at}.value`, `"${id}" is already taken`);
+      values.add(id);
+    }
+    str(choice.label, `${at}.label`, p);
+    const classes = optObj(choice.classes, `${at}.classes`, p);
+    if (!classes || Object.keys(classes).length === 0) {
+      if (id !== null) plain.add(id);
+      return;
+    }
+    for (const [name, spec] of Object.entries(classes)) {
+      const where = `${at}.classes.${name}`;
+      if (!(POINTLESS_FEED_CLASSES as readonly string[]).includes(name)) {
+        p.add(where, `"${name}" is not a feed class (${POINTLESS_FEED_CLASSES.join(', ')})`);
+        continue;
+      }
+      const step = obj(spec, where, p);
+      if (!step) continue;
+      for (const key of Object.keys(step)) {
+        if (key !== 'increment' && key !== 'incrementInch') p.add(`${where}.${key}`, 'only increment and incrementInch may be set');
+      }
+      increment(step.increment, `${where}.increment`, p, true);
+      increment(step.incrementInch, `${where}.incrementInch`, p);
+    }
+  });
+  const fallback = str(decl.default, `${path}.default`, p);
+  if (fallback === null || choices === null) return;
+  if (!values.has(fallback)) p.add(`${path}.default`, `"${fallback}" is not one of the choices`);
+  else if (!plain.has(fallback)) p.add(`${path}.default`, `the default choice "${fallback}" has to set no classes`);
 }
 
 /** A least increment: decimal text, a power of ten no larger than one. */
@@ -1054,6 +1196,15 @@ function checkOverlay(value: unknown, path: string, p: Problems): void {
       if (isRecord(entry)) optPattern(entry.trigger, `${path}.numbering.references[${i}].trigger`, p);
     });
   }
+  // P4d (§6.6 rule 9): an overlay's call rules hold patterns too.
+  const calls = numbering?.calls;
+  if (Array.isArray(calls) && calls.length > MAX_PATTERN_LIST) {
+    p.add(`${path}.numbering.calls`, `lists more than ${MAX_PATTERN_LIST} entries`);
+  } else if (Array.isArray(calls)) {
+    calls.forEach((entry, i) => {
+      if (isRecord(entry)) optPattern(entry.trigger, `${path}.numbering.calls[${i}].trigger`, p);
+    });
+  }
 }
 
 /** One `machineParams.variants` entry (§7.15): the choices, their databases and their rules. */
@@ -1100,6 +1251,46 @@ function checkVariant(value: unknown, path: string, p: Problems, o: ProfileValid
   if (fallback !== null && choices !== null && !values.has(fallback)) {
     p.add(`${path}.default`, `"${fallback}" is not one of the choices`);
   }
+
+  // D5-3: the default that follows another variant. Its values have to be choices of this
+  // variant; the other variant and its keys are checked in `checkVariantDefaults`.
+  const by = optObj(variant.defaultBy, `${path}.defaultBy`, p);
+  if (by) {
+    str(by.variant, `${path}.defaultBy.variant`, p, VARIANT_ID);
+    const map = obj(by.values, `${path}.defaultBy.values`, p);
+    if (map) {
+      if (Object.keys(map).length === 0) p.add(`${path}.defaultBy.values`, 'names no value');
+      for (const [key, target] of Object.entries(map)) {
+        const at = `${path}.defaultBy.values.${key}`;
+        if (typeof target !== 'string') p.add(at, 'has to be a choice of this variant');
+        else if (choices !== null && !values.has(target)) p.add(at, `"${target}" is not one of the choices`);
+      }
+    }
+  }
+}
+
+/**
+ * D5-3: a `defaultBy` names another declared variant (not itself, not one whose own default
+ * follows a third: no chains) and only that variant's choices as keys.
+ */
+function checkVariantDefaults(list: unknown[], p: Problems): void {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const entry of list) if (isRecord(entry) && typeof entry.id === 'string') byId.set(entry.id, entry);
+  list.forEach((entry, i) => {
+    if (!isRecord(entry) || !isRecord(entry.defaultBy)) return;
+    const at = `machineParams.variants[${i}].defaultBy`;
+    const name = entry.defaultBy.variant;
+    if (typeof name !== 'string') return;
+    const other = byId.get(name);
+    if (name === entry.id) p.add(`${at}.variant`, 'cannot name the variant itself');
+    else if (other === undefined) p.add(`${at}.variant`, `"${name}" is not a variant of this profile`);
+    else if (other.defaultBy !== undefined) p.add(`${at}.variant`, `"${name}" has a defaultBy of its own`);
+    if (other === undefined || !isRecord(entry.defaultBy.values)) return;
+    const keys = new Set((Array.isArray(other.choices) ? other.choices : []).map((c) => (isRecord(c) ? c.value : undefined)));
+    for (const key of Object.keys(entry.defaultBy.values)) {
+      if (!keys.has(key)) p.add(`${at}.values.${key}`, `"${key}" is not a choice of "${name}"`);
+    }
+  });
 }
 
 /**
@@ -1142,6 +1333,7 @@ function checkMachineParams(root: Record<string, unknown>, p: Problems, o: Profi
       if (ids.has(id)) p.add(`machineParams.variants[${i}].id`, `"${id}" is already taken`);
       ids.add(id);
     });
+    if (list) checkVariantDefaults(list, p);
   }
 
   checkChannelPresets(decl.channels, p);
@@ -1166,8 +1358,10 @@ function checkMachineParams(root: Record<string, unknown>, p: Problems, o: Profi
     str(preset.label, `${at}.label`, p);
     optStr(preset.source, `${at}.source`, p);
     optBool(preset.verify, `${at}.verify`, p);
+    optBool(preset.digitCheck, `${at}.digitCheck`, p);
     checkNumberInput(preset.value, `${at}.value`, p);
   });
+  checkPointlessFeeds(numberInput.pointlessFeeds, 'machineParams.numberInput.pointlessFeeds', p);
 
   const fallback = str(numberInput.default, 'machineParams.numberInput.default', p);
   if (fallback !== null && presets !== null && !ids.has(fallback)) {
@@ -1270,14 +1464,17 @@ function checkCompare(value: unknown, p: Problems): void {
 }
 
 /**
- * P13 (AD-30). `forceUppercase` and `preventLineJoin` are optional booleans; any other
- * member (`tabWidth` on `fanuc-gcode`, a field of a later phase) is carried unread.
+ * P13 (AD-30), P4c (plan §6.5). `forceUppercase`, `preventLineJoin`, `autoSpace` and
+ * `autoNumber` are optional booleans (an absent one is off); any other member (`tabWidth`
+ * on `fanuc-gcode`, a field of a later phase) is carried unread.
  */
 function checkEditing(value: unknown, p: Problems): void {
   const editing = optObj(value, 'editing', p);
   if (!editing) return;
   optBool(editing.forceUppercase, 'editing.forceUppercase', p);
   optBool(editing.preventLineJoin, 'editing.preventLineJoin', p);
+  optBool(editing.autoSpace, 'editing.autoSpace', p);
+  optBool(editing.autoNumber, 'editing.autoNumber', p);
 }
 
 // ---------------------------------------------------------------------------

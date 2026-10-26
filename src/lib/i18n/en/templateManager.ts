@@ -81,7 +81,7 @@ export default {
   body: 'Text',
   placeholders: 'Placeholders',
   insertPlaceholder: 'Insert at the cursor:',
-  placeholderBlockNumber: 'The next block number, at the start of a line',
+  placeholderBlockNumber: 'The next block number, at the start of a line or right behind /',
   placeholderSystem: 'Filled in when the template is inserted',
   placeholderParam: 'The value of this parameter',
   params: 'Parameters',
@@ -121,6 +121,18 @@ export default {
     remember: 'Remember',
     formula: 'Formula',
     hidden: 'Hidden',
+    /** T154: shown beside the field in the form, nothing more. */
+    unit: 'Unit (shown beside the field)',
+    /** T155: the length and the characters of a name. */
+    maxLength: 'Most characters',
+    charset: 'Allowed characters',
+  },
+  /** T155: the choices of "Allowed characters". */
+  charset: {
+    any: 'Any',
+    noSpaces: 'No spaces',
+    lettersDigits: 'Letters and digits only',
+    name: 'A letter, then letters and digits',
   },
   flag: {
     toolbar: 'Button on the Insert tab',

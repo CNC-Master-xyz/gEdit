@@ -1,0 +1,74 @@
+{
+  "title": "Program checks",
+  "columns": [
+    {
+      "key": "line",
+      "label": "Line"
+    },
+    {
+      "key": "check",
+      "label": "Check"
+    },
+    {
+      "key": "severity",
+      "label": "Severity"
+    },
+    {
+      "key": "message",
+      "label": "Finding"
+    }
+  ],
+  "rows": [
+    {
+      "line": 4,
+      "check": "Spindle speed limit",
+      "checkId": "speedLimit",
+      "severity": "warning",
+      "message": "LIMS=5000: the speed clamp is above the top speed of this machine, 4000 rpm"
+    },
+    {
+      "line": 6,
+      "check": "Spindle speed limit",
+      "checkId": "speedLimit",
+      "severity": "warning",
+      "message": "S4800 is above the top speed of this machine, 4000 rpm"
+    },
+    {
+      "line": 8,
+      "check": "Spindle speed limit",
+      "checkId": "speedLimit",
+      "severity": "warning",
+      "message": "S2=7000 is above the top speed of spindle S2 on this machine, 6000 rpm"
+    },
+    {
+      "line": 12,
+      "check": "Spindle speed limit",
+      "checkId": "speedLimit",
+      "severity": "warning",
+      "message": "G26 S6000: the speed clamp is above the top speed of this machine, 4000 rpm"
+    },
+    {
+      "line": 13,
+      "check": "Travel",
+      "checkId": "travelLimit",
+      "severity": "error",
+      "message": "X700 is outside the travel of this machine, X (diameter) -10 to 600 mm (in machine coordinates, SUPA)"
+    },
+    {
+      "line": 14,
+      "check": "Travel",
+      "checkId": "travelLimit",
+      "severity": "warning",
+      "message": "Z=AC(-700) (line 14) to Z2 (line 5): the positions of Z in work coordinates span 702 mm, more than the travel of this machine, Z -500 to 10 mm (510 mm), so no work offset brings them all inside"
+    },
+    {
+      "line": 16,
+      "check": "Travel",
+      "checkId": "travelLimit",
+      "severity": "error",
+      "message": "X350 (700 mm) is outside the travel of this machine, X (diameter) -10 to 600 mm (in machine coordinates, SUPA)"
+    }
+  ],
+  "message": "7 findings in 2 checks. Machine 'Lathe 1'.",
+  "findings": []
+}

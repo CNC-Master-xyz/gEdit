@@ -63,6 +63,19 @@ describe('sanitizeUiState', () => {
     }
   });
 
+  it('keeps the ribbon tab as text and drops anything else (T141)', () => {
+    expect(sanitizeUiState({ ribbonTab: 'tools' }).ribbonTab).toBe('tools');
+    // a retired or unknown id is kept: `resolveTab` falls back, the file is not rewritten
+    expect(sanitizeUiState({ ribbonTab: 'home' }).ribbonTab).toBe('home');
+    // a value that cannot be a tab id is dropped (WX-CODE-12)
+    expect(sanitizeUiState({ ribbonTab: 'x'.repeat(32) }).ribbonTab).toBe('x'.repeat(32));
+    expect(sanitizeUiState({ ribbonTab: 'x'.repeat(33) })).not.toHaveProperty('ribbonTab');
+    for (const bad of [7, null, {}, ['view'], true]) {
+      expect(sanitizeUiState({ ribbonTab: bad })).not.toHaveProperty('ribbonTab');
+    }
+    expect(sanitizeUiState({})).toEqual(emptyUiState());
+  });
+
   it('keeps the members a saved layout may carry', () => {
     const state = sanitizeUiState({
       layout: {
@@ -257,6 +270,17 @@ describe('the 1 s debounce', () => {
         files: {},
       },
     ]);
+  });
+
+  it('writes the ribbon tab with the rest, and reads it back (T141)', async () => {
+    const h = harness();
+    h.store.update((s) => ({ ...s, ribbonTab: 'nc' }));
+    await h.store.flush();
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0].ribbonTab).toBe('nc');
+    const next = harness({ load: async () => ({ ui: structuredClone(h.saved[0]), error: null }) });
+    await next.store.load();
+    expect(get(next.store.state).ribbonTab).toBe('nc');
   });
 
   it('writes again for a change made after the first write', async () => {

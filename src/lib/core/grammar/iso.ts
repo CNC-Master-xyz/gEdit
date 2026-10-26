@@ -136,7 +136,7 @@ export function isoRules(p: Profile, db: CodeDb): GrammarRule[] {
   const blockNumber =
     p.syntax?.blockNumber?.mode === 'leading-integer' ? '\\d+' : prefix === null ? null : `${prefix}\\s*\\d+`;
   const skip = blockSkipPattern(p);
-  if (skip?.before) rules.push(...stackedSkipRules(p, skip.pattern), [lineStart(`\\s*${skip.pattern}`), 'skip']);
+  if (skip?.before) rules.push(...stackedSkipRules(p, skip.pattern), [lineStart(`(\\s*)(${skip.pattern})`), ['', 'skip']]);
   if (skip?.after && blockNumber !== null) {
     rules.push([lineStart(`(\\s*)(${blockNumber})(\\s*)(${skip.pattern})`), ['', 'blockNumber', '', 'skip']]);
   }

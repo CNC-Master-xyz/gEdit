@@ -37,6 +37,32 @@ export function rhDir() {
 export const binaryPath = (rh) => path.join(rh, 'target', 'debug', 'gedit')
 
 /**
+ * Why this checkout must not run scenarios against the build in `rh`, or `null` (T195). The
+ * scenarios come from this checkout and the app from the last sync: when a second checkout (a
+ * worktree) syncs into the same folder, the run would judge someone else's code and report
+ * it as this one's. That used to be a warning in the result's notes; it is a refusal now, because
+ * nobody reads the notes of a green run. `GEDIT_RH_ALLOW_FOREIGN_BUILD=1` runs anyway (a
+ * measurement across checkouts on purpose); a folder with no `sync.json` is `no test build`'s business.
+ * @param {string} rh the harness folder
+ * @param {string} [repo] the checkout the scenarios come from (default: this one)
+ * @returns {string | null}
+ */
+export function foreignBuild(rh, repo = REPO) {
+  if (process.env.GEDIT_RH_ALLOW_FOREIGN_BUILD === '1') return null
+  let synced
+  try {
+    const sync = JSON.parse(fs.readFileSync(path.join(rh, 'sync.json'), 'utf8'))
+    // `harness` is the checkout whose sync.sh made the build (its scenarios are the ones that
+    // belong to it); `sync.sh --repo DIR` builds another checkout's app from this one's harness.
+    synced = sync.harness ?? sync.repo
+  } catch {
+    return null
+  }
+  if (typeof synced !== 'string' || synced === repo) return null
+  return `the build in ${rh} was synced by ${synced}, not by ${repo}: run tests/runtime/sync.sh from this checkout, or give this checkout a folder of its own (GEDIT_RH_DIR=<dir>; share the lock with GEDIT_RH_LOCK). GEDIT_RH_ALLOW_FOREIGN_BUILD=1 runs it anyway.`
+}
+
+/**
  * Whether the WP3.0 robustness layer is on: the activation gate in harness.rs, the
  * frame-synced waits in lib/api.js and the retry in suite.sh. `GEDIT_RH_ROBUST=0` turns
  * all three off, which is how the harness is measured against its earlier self.
@@ -93,6 +119,56 @@ function keepDisplayAwake() {
 }
 
 /**
+ * The owner's clipboard text, put back whatever happens to the app (WX-CODE-6). The runner
+ * keeps it - not the app: an app that is killed (the watchdog's SIGKILL, a crash, a hang) or a
+ * runner that is interrupted can no longer lose the text. A run starts with an empty clipboard;
+ * `restore()` gives the text back once. Only the text is kept, not images, files or rich text.
+ * `HARNESS_CLIPBOARD=keep` (and any system but macOS) leaves the clipboard alone.
+ * @typedef {{ status: number | null, stdout: string }} ToolResult
+ * @param {{ env?: Record<string, string | undefined>, platform?: string, exec?: (program: string, args: string[], input?: string) => ToolResult }} [o]
+ * @returns {{ active: boolean, restore: () => void }}
+ */
+export function isolateClipboard(o = {}) {
+  const env = o.env ?? process.env
+  const platform = o.platform ?? process.platform
+  const exec =
+    o.exec ??
+    ((program, args, input) => {
+      // A pasteboard service that does not answer must not hold a run for more than 3 s.
+      const r = spawnSync(program, args, { input, encoding: 'utf8', timeout: 3000, env: { LANG: 'en_US.UTF-8' } })
+      return { status: r.error ? null : r.status, stdout: r.stdout ?? '' }
+    })
+  const none = { active: false, restore: () => {} }
+  if (env.HARNESS_CLIPBOARD === 'keep' || platform !== 'darwin') return none
+  const read = exec('/usr/bin/pbpaste', [])
+  if (read.status !== 0) {
+    console.error('clipboard: not isolated (pbpaste did not answer)')
+    return none
+  }
+  const saved = read.stdout
+  const put = (text) => exec('/usr/bin/pbcopy', [], text).status === 0
+  if (!put('')) console.error('clipboard: could not empty it')
+  let done = false
+  const restore = () => {
+    if (done) return
+    done = true
+    pendingRestores.delete(restore)
+    if (!put(saved)) console.error('clipboard: could not put the text back')
+  }
+  pendingRestores.add(restore)
+  return { active: true, restore }
+}
+
+/** The runs whose clipboard is not yet given back; an interrupt or the exit event gives it back first. */
+const pendingRestores = new Set()
+
+/** Gives every clipboard back that a run still holds (idempotent). */
+export function restoreClipboardsNow() {
+  for (const restore of [...pendingRestores]) restore()
+}
+process.on('exit', restoreClipboardsNow)
+
+/**
  * Where the run lock lives. It guards the screen, not the build, so two harness folders
  * on one Mac must share it: `GEDIT_RH_LOCK=<dir>` points them at the same one.
  */
@@ -130,6 +206,8 @@ export async function withLock(rh, what, fn) {
   }
   const release = () => fs.rmSync(lock, { recursive: true, force: true })
   const onSignal = (sig) => {
+    // The owner's clipboard goes back before anything else is torn down.
+    restoreClipboardsNow()
     release()
     process.exit(sig === 'SIGINT' ? 130 : 143)
   }
@@ -305,16 +383,12 @@ export async function runScenario(rh, name, known, opts = {}) {
   }
   // The scenario comes from this checkout, the binary from the last sync; say so when
   // they are not the same, because then the run tests someone else's code.
-  try {
-    const sync = JSON.parse(fs.readFileSync(path.join(rh, 'sync.json'), 'utf8'))
-    if (sync.repo !== REPO) {
-      const note = `the build in ${rh} was synced from ${sync.repo}, not from ${REPO}`
-      result.notes.push(note)
-      console.error(`warning: ${note}`)
-    }
-  } catch {
-    result.notes.push('no sync.json; run tests/runtime/sync.sh')
+  const foreign = foreignBuild(rh)
+  if (foreign) {
+    result.notes.push(foreign)
+    return finish()
   }
+  if (!fs.existsSync(path.join(rh, 'sync.json'))) result.notes.push('no sync.json; run tests/runtime/sync.sh')
 
   const o = entry.options
   const runDir = path.join(rh, 'runs', name)
@@ -355,6 +429,7 @@ export async function runScenario(rh, name, known, opts = {}) {
           PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
         }
       : { ...process.env, HOME: home }
+  /** @type {Record<string, string | undefined>} */
   const env = { ...base }
   delete env.GEDIT_PYTHON
   const py = o.python === undefined ? '{python}' : o.python
@@ -379,6 +454,9 @@ export async function runScenario(rh, name, known, opts = {}) {
   const logFile = fs.openSync(logPath, 'w')
   const records = []
   let buf = ''
+  // The runner holds the owner's clipboard text (it survives a killed app); the app is told to leave it alone.
+  const clipboard = isolateClipboard()
+  env.HARNESS_CLIPBOARD = 'keep'
   const child = spawn(bin, [], { cwd: o.env === 'finder' ? '/' : run, env, stdio: ['ignore', 'pipe', 'pipe'] })
   child.stdout.on('data', (chunk) => {
     fs.writeSync(logFile, chunk)
@@ -406,6 +484,7 @@ export async function runScenario(rh, name, known, opts = {}) {
   fs.closeSync(logFile)
   // Scripts, shells and background jobs the run started all carry the run folder in their arguments.
   killMatching(run)
+  clipboard.restore()
   result.exit = { code, signal }
 
   judge(result, records)
@@ -536,12 +615,20 @@ export function focusStats(r) {
   return { lost: of('lost'), regained: of('regained'), dropped: of('dropped'), gaveUp: of('gave-up') }
 }
 
-/** One line per run for the console. */
+/**
+ * One line per run for the console. A blocked run says so first and why; the checks that failed
+ * after the block follow as what they are (a scenario whose input could not be delivered
+ * fails its own checks as a result), not as a list of failures that reads like the verdict (T194).
+ */
 export function summarize(r) {
   const failed = r.checks.filter((c) => !c.pass).map((c) => c.name)
-  const word = r.status === 'pass' ? 'PASS' : r.status === 'blocked' ? 'BLOCKED' : 'FAIL'
+  const blocked = r.status === 'blocked'
+  const word = r.status === 'pass' ? 'PASS' : blocked ? 'BLOCKED' : 'FAIL'
   const f = focusStats(r)
   const focus = f.lost ? `\n  focus: lost ${f.lost}x, regained ${f.regained}x, dropped ${f.dropped}x` : ''
   const why = r.blocked.length ? '\n  blocked: ' + r.blocked.map((b) => `${b.reason} (${b.where})`).join('; ') : ''
-  return `${word} ${r.scenario} (${(r.durationMs / 1000).toFixed(1)} s, ${r.checks.filter((c) => c.pass).length}/${r.checks.length} checks)${failed.length ? '\n  failed: ' + failed.join('\n  failed: ') : ''}${why}${focus}${r.notes.length && !r.pass ? '\n  notes: ' + r.notes.join('; ') : ''}`
+  const label = blocked ? 'not judged, the run was blocked' : 'failed'
+  const checks = failed.length ? '\n  ' + failed.map((name) => `${label}: ${name}`).join('\n  ') : ''
+  const notes = r.notes.length && !r.pass ? '\n  notes: ' + r.notes.join('; ') : ''
+  return `${word} ${r.scenario} (${(r.durationMs / 1000).toFixed(1)} s, ${r.checks.filter((c) => c.pass).length}/${r.checks.length} checks)${why}${checks}${focus}${notes}`
 }

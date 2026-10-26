@@ -6,6 +6,10 @@
    colours are tokens of both themes, each held at 3:1 or better against the editor background by
    `channelPanes.test.ts`; the fallbacks are the dark theme's values.
 
+   The two are told apart by shape as well as by colour (v1.2.0 T029, the rest of CODE-11): a matched
+   wait is a solid bar, an unmatched one a dashed bar, and in the overview ruler an unmatched wait
+   fills the whole width of the lane where a matched one takes the right third.
+
    Monaco writes the width of the margin into the element's own style, so the width of the bar has
    to be `!important`. The filler zone is the empty space that lines the panes up. */
 
@@ -31,7 +35,8 @@
 }
 
 .monaco-editor .gedit-wait-unmatched {
-  background-color: var(--gedit-wait-unmatched, #f85149);
+  /* Dashes, not a solid bar: no colour is needed to tell it from a matched wait. */
+  background-image: repeating-linear-gradient(to bottom, var(--gedit-wait-unmatched, #f85149) 0 3px, transparent 3px 6px);
 }
 
 .gedit-align-zone {

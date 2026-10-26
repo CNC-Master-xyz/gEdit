@@ -64,6 +64,7 @@ import {
   isFeedWord,
   keywordEntry,
   paramOf,
+  valueWordEntry,
   readWord,
   unitsAfter,
   type WordReading,
@@ -326,6 +327,41 @@ function isFeedKeyword(token: NcToken, profile: Profile, db: CodeDb): boolean {
   if (Object.keys(profile.addresses?.feedUnitWords ?? {}).some((w) => upper(w) === name)) return true;
   const entry = lookupCode(db, name);
   return entry !== null && entry.verify !== true && (entry.group === 'feedmode' || entry.sets?.feedUnit !== undefined);
+}
+
+/**
+ * T166: a feed written apart from its keyword (Klartext `F MAX`, `F AUTO`), as one token from the
+ * feed address to the keyword: the feed word without a value and, over blanks only, a keyword
+ * that joined to it is a feed keyword (`FMAX`, `FAUTO`; `isFeedKeyword`). `index` may be either
+ * half. `first` and `last` are the two tokens' indexes; null for anything else, so `F MAX` is
+ * one row and one hover as `FMAX` is, and `MAX` is never read as a code of its own.
+ */
+export function splitFeedKeyword(
+  tokens: readonly NcToken[],
+  index: number,
+  text: string,
+  profile: Profile,
+  db: CodeDb,
+): { token: NcToken; first: number; last: number } | null {
+  const isFeedHalf = (t: NcToken | undefined): boolean =>
+    t !== undefined && t.kind === 'word' && t.address !== undefined && (t.valueText ?? '') === '' && isFeedWord(profile, t.address);
+  let first = index;
+  if (!isFeedHalf(tokens[first])) {
+    // The keyword half: the feed word is the content token before it.
+    let before = index - 1;
+    while (before >= 0 && tokens[before].kind === 'whitespace') before--;
+    if (before < 0 || before === index - 1 || !isFeedHalf(tokens[before])) return null;
+    first = before;
+  }
+  const last = nextContent(tokens, first);
+  if (last < 0 || last === first + 1 || (index !== first && index !== last)) return null;
+  const feed = tokens[first];
+  const word = tokens[last];
+  const named = word.kind === 'keyword' || (word.kind === 'word' && word.address !== undefined && (word.valueText ?? '') === '');
+  if (!named) return null;
+  const name = upper(feed.address) + upper(word.address || word.text);
+  const token: NcToken = { kind: 'word', start: feed.start, end: word.end, text: text.slice(feed.start, word.end), address: name, valueText: '' };
+  return isFeedKeyword(token, profile, db) ? { token, first, last } : null;
 }
 
 /**
@@ -664,7 +700,7 @@ function notesOf(
   // 1. What kind of number it is.
   if (isFeedWord(profile, address)) {
     if (reading.lead) {
-      const code = [...blockCodes, ...inForceEntries(after, blockCodes, db)].find(
+      const code = [...blockCodes, ...inForceEntries(after, blockCodes, db, profile)].find(
         (entry) => entry.pitchFeed === true && paramOf(entry, address)?.unit === 'feedPerRev',
       )?.code;
       notes.push({ key: 'inspector.note.lead', params: { code: code ?? '' } });
@@ -830,7 +866,7 @@ export function inspectBlock(
   const lines = tokenizeBlock(input, cp, first, last);
   const blockTokens = lines.flatMap((l) => l.tokens);
   const blockCodes = blockEntries(blockTokens, db);
-  const inForce = after ? inForceEntries(after, blockCodes, db) : [];
+  const inForce = after ? inForceEntries(after, blockCodes, db, profile) : [];
   const found = findCycle(input, view, lines, blockCodes, after, first, last);
   const cycleEntry = found?.entry ?? null;
   const cycleBlock = found?.block ?? null;
@@ -926,13 +962,25 @@ export function inspectBlock(
         }
         case 'word': {
           if (token.address === undefined) return; // a bare value of a keyword: `TOOL CALL 1`
+          const split = splitFeedKeyword(tokens, i, text, profile, db);
+          if (split) {
+            // T166: `F MAX` is one feed keyword, as `FMAX` is.
+            consumed.add(split.last);
+            const joined = lookupCode(db, split.token.address ?? '');
+            const shown = joined && joined.verify !== true ? joined : null;
+            push(line, split.token, shown ? 'code' : 'address', shown?.label ?? addressLabel(db, token), null);
+            return;
+          }
           const lookup = lookupWord(db, token);
           const entry = lookup?.entry ?? null;
           const described = entry && entry.verify !== true ? entry : null;
           if (isAssignmentWord(token)) {
+            // T138: a name the database describes as an entry of its own (`ADIS=`, `CTOL=`,
+            // `SVC=`) says what it is, as the hover does; the value behind `=` is data.
+            const meaning = lookup?.address?.label ?? valueWordEntry(db, token, lookup)?.label ?? null;
             if (entry) push(line, token, described ? 'code' : 'unknown', described?.label ?? null, null);
-            else if (token.value === null) push(line, token, 'variable', lookup?.address?.label ?? null, null);
-            else push(line, token, 'assignment', lookup?.address?.label ?? null, paramFor(token.address, cycleEntry, blockCodes, inForce, cycleBlock));
+            else if (token.value === null) push(line, token, 'variable', meaning, null);
+            else push(line, token, 'assignment', meaning, paramFor(token.address, cycleEntry, blockCodes, inForce, cycleBlock));
             return;
           }
           if (entry) {

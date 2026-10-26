@@ -254,7 +254,11 @@
               "syncMarks": [
                 {
                   "id": "waitm",
-                  "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                  "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                  "markValues": {
+                    "max": 99,
+                    "min": 0
+                  },
                   "match": {
                     "kind": "regex",
                     "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -271,9 +275,10 @@
                   "blocking": false,
                   "id": "setm",
                   "label": "SETM: sets a mark without waiting; it answers a WAITM of that mark in another channel",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -283,9 +288,10 @@
                   "blocking": false,
                   "id": "clearm",
                   "label": "CLEARM: clears a mark without waiting; it answers nothing",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -317,7 +323,11 @@
               "syncMarks": [
                 {
                   "id": "waitm",
-                  "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                  "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                  "markValues": {
+                    "max": 99,
+                    "min": 0
+                  },
                   "match": {
                     "kind": "regex",
                     "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -334,9 +344,10 @@
                   "blocking": false,
                   "id": "setm",
                   "label": "SETM: sets a mark without waiting; it answers a WAITM of that mark in another channel",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -346,9 +357,10 @@
                   "blocking": false,
                   "id": "clearm",
                   "label": "CLEARM: clears a mark without waiting; it answers nothing",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -379,7 +391,11 @@
               "syncMarks": [
                 {
                   "id": "waitm",
-                  "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                  "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                  "markValues": {
+                    "max": 99,
+                    "min": 0
+                  },
                   "match": {
                     "kind": "regex",
                     "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -396,9 +412,10 @@
                   "blocking": false,
                   "id": "setm",
                   "label": "SETM: sets a mark without waiting; it answers a WAITM of that mark in another channel",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -408,9 +425,10 @@
                   "blocking": false,
                   "id": "clearm",
                   "label": "CLEARM: clears a mark without waiting; it answers nothing",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -442,7 +460,11 @@
               "syncMarks": [
                 {
                   "id": "waitm",
-                  "label": "WAITM / WAITMC: wait for a mark number in the channels listed",
+                  "label": "WAITM / WAITMC: wait for a mark number (0 to 99) in the channels listed",
+                  "markValues": {
+                    "max": 99,
+                    "min": 0
+                  },
                   "match": {
                     "kind": "regex",
                     "pattern": "\\bWAITMC?\\s*\\(\\s*(?<mark>[^,)\\s]+)"
@@ -459,9 +481,10 @@
                   "blocking": false,
                   "id": "setm",
                   "label": "SETM: sets a mark without waiting; it answers a WAITM of that mark in another channel",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bSETM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -471,9 +494,10 @@
                   "blocking": false,
                   "id": "clearm",
                   "label": "CLEARM: clears a mark without waiting; it answers nothing",
+                  "markSeparator": ",",
                   "match": {
                     "kind": "regex",
-                    "pattern": "\\bCLEARM\\s*\\(\\s*(?<mark>[^,)\\s]+)"
+                    "pattern": "\\bCLEARM\\s*\\((?<mark>[^)]*)\\)"
                   },
                   "partners": {
                     "kind": "all"
@@ -689,6 +713,7 @@
       ],
       "exponentMarker": "EX",
       "header": "^;?%(?:_N_)?\\w+_(?:MPF|SPF)",
+      "incrementTravelsShift": true,
       "keywords": [
         "IF",
         "ELSE",
@@ -743,10 +768,25 @@
         "ASCALE",
         "MIRROR",
         "AMIRROR",
+        "ROTS",
+        "AROTS",
+        "CROTS",
+        "TOFRAME",
+        "TOFRAMEZ",
+        "TOFRAMEY",
+        "TOFRAMEX",
+        "TOROT",
+        "TOROTZ",
+        "TOROTY",
+        "TOROTX",
+        "TOROTOF",
+        "PAROT",
+        "PAROTOF",
         "SUPA",
         "DIAMON",
         "DIAMOF",
         "DIAM90",
+        "DIAMCYCOF",
         "SOFT",
         "BRISK",
         "FFWON",

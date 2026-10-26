@@ -19,8 +19,11 @@ exports[`the okuma grammar > is stable 1`] = `
     "comment",
   ],
   [
-    "^\\s*[/]",
-    "skip",
+    "^(\\s*)([/])",
+    [
+      "",
+      "skip",
+    ],
   ],
   [
     "^(\\s*)(N\\s*\\d+)(\\s*)([/])",

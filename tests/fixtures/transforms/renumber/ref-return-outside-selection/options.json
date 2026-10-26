@@ -1,0 +1,30 @@
+{
+  "note": "P4.19 (plan 6.6 rule 10): only the main program is selected. M99 P20 in the subprogram below is resolved in its one caller, whose N20 is now N30, so the line outside the selection is reported as pointing into it (incoming), and the second row says that N20 now names the M98 block (M13 review NC-8).",
+  "profile": "fanuc-lathe",
+  "scope": {
+    "startLine": 1,
+    "endLine": 5
+  },
+  "options": {},
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 8,
+        "severity": "warning"
+      },
+      {
+        "line": 8,
+        "severity": "warning"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.referencesUnresolved"
+    ],
+    "preflight": "ncNumbering.renumber.references"
+  }
+}

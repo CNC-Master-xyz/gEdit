@@ -17,7 +17,8 @@
 // Cases: a mill G83 (the Q changed, K added), the same confirmed unchanged (nothing written, nothing dirty), a
 // G81 with a comment after it (K before the comment, Y cleared), a packed G81, a point-less Z under an IS-B machine
 // (the literal stays), a ten-line Klartext definition, an Okuma G181 and a Sinumerik CYCLE83 (by position) and an
-// MCALL. Refusals say why in plain words and write nothing (a two-block lathe cycle, a position under a modal
+// MCALL; the two blocks of a two-block lathe cycle each in a form of its own (v1.2.0 T119: G71 first block, G76
+// second block on an IS-B machine). Refusals say why in plain words and write nothing (a position under a modal
 // cycle that runs the cycle written on another line). Insert mode: with the cursor on no cycle a picker lists the
 // cycles of the dialect; the chosen one opens the empty form, and OK writes a new block after the cursor's
 // block, numbered by the template rule - and in Klartext the blocks behind it are renumbered in the same edit.
@@ -147,11 +148,13 @@ scenario('p3-cycleforms', { timeout: 600 }, async (h) => {
     await editCase(h, { golden: 'sinumerik/s02-cycle83-edit', profile: 'sinumerik', code: 'CYCLE83' }, maker)
     await editCase(h, { golden: 'sinumerik/s02-mcall-edit', profile: 'sinumerik', code: 'CYCLE83' }, maker)
   })
+  await guard(h, 'D2. Fanuc lathe, one block of a two-block cycle (T119)', async () => {
+    await editCase(h, { golden: 'fanuc-lathe/l01-g71-first-edit', profile: 'fanuc-lathe', code: 'G71' }, maker)
+    await editCase(h, { golden: 'fanuc-lathe/l01-g76-second-edit', profile: 'fanuc-lathe', code: 'G76' }, maker)
+  })
 
   // ============================================================ E. refusals
   await guard(h, 'E. refusals', async () => {
-    await refusalCase(h, { golden: 'fanuc-lathe/l01-g71-first-refused', profile: 'fanuc-lathe' })
-    await refusalCase(h, { golden: 'fanuc-lathe/l01-g76-second-refused', profile: 'fanuc-lathe' })
     await refusalCase(h, { golden: 'fanuc-gcode/f01-position-refused', profile: 'fanuc-gcode' })
   })
 

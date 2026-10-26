@@ -1,0 +1,30 @@
+{
+  "note": "P4d §6.6 rule 3: every third block is numbered and the blocks between lose their number, except N80 and N120, which G71 and G70 name: they keep a number (the next of the sequence) and the P/Q values follow them. The count goes on as if they had been passed over, so N100 and N130 are still the 10th and 13th block.",
+  "profile": "fanuc-lathe",
+  "options": {
+    "everyNth": 3
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 2,
+        "severity": "info"
+      },
+      {
+        "line": 18,
+        "severity": "info"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.everyNthRemoved",
+      "ncNumbering.renumber.everyNthKept",
+      "ncNumbering.renumber.referencesRewritten"
+    ],
+    "preflight": null
+  }
+}

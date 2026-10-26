@@ -1,6 +1,6 @@
 # Review: the code data filled in from the manuals
 
-184 entries of the code databases carry `"review": "pending"`. Bug-fix round 1 filled them in from the manuals (the record is [bugfix-round-1.md](../bugfix-round-1.md#manual-sources-of-the-data), section 6 lists the manuals and pages). The app does not show the mark; removing it is the sign-off.
+220 entries of the code databases carry `"review": "pending"`. Bug-fix round 1 filled them in from the manuals (the record is [bugfix-round-1.md](../bugfix-round-1.md#manual-sources-of-the-data), section 6 lists the manuals and pages). The app does not show the mark; removing it is the sign-off.
 
 How to work through it:
 
@@ -9,17 +9,17 @@ How to work through it:
 3. The source column is what the round recorded. The record names the manual and the pages by topic, not per entry; where the page of one entry is not recorded, the row says so.
 4. When a dialect is fully ticked, a later batch removes the marks.
 
-The record in bugfix-round-1.md section 7 counts the entries differently (10 Okuma, 24 Sinumerik, 24 Klartext, "the Fanuc entries"); these are the counts in the data today (151 before the v1.2.0 NC fix round, 33 added):
+The record in bugfix-round-1.md section 7 counts the entries differently (10 Okuma, 24 Sinumerik, 24 Klartext, "the Fanuc entries"); these are the counts in the data today, from the `review: pending` marks of the files (151 before the v1.2.0 NC fix round, 33 added there, 23 added by P4b, and 13 that no earlier count had a row for: the three system B turning passes that the system A file also carries, and ten Sinumerik drilling and tapping cycles; their rows are below):
 
 | Dialect | File | Entries |
 |---|---|---|
-| Fanuc mill | `fanuc.json` | 25 |
-| Fanuc lathe (system A) | `fanuc-lathe.json` | 15 |
+| Fanuc mill | `fanuc.json` | 35 |
+| Fanuc lathe (system A) | `fanuc-lathe.json` | 18 |
 | Fanuc lathe, system B | `fanuc-lathe-b.json` | 4 |
-| Heidenhain Klartext | `heidenhain.json` | 56 |
+| Heidenhain Klartext | `heidenhain.json` | 60 |
 | Okuma | `okuma.json` | 23 |
-| Sinumerik (turning and milling) | `sinumerik.json` | 61 |
-| **Total** | | **184** |
+| Sinumerik (turning and milling) | `sinumerik.json` | 80 |
+| **Total** | | **220** |
 
 The 49 templates have their own page: [templates.md](templates.md).
 
@@ -102,9 +102,95 @@ File `sinumerik.json`.
 | [ ] | `FRC` | Feed of the chamfer or rounding | Sinumerik 840D sl NC programming manual 06/2019 (page for this entry not recorded) | Read that it is a feed and not a length (the transforms keep it), the label and hover text. |
 | [ ] | `FRCM` | Feed of the chamfers and roundings | Sinumerik 840D sl NC programming manual 06/2019 (page for this entry not recorded) | Read that it holds until the next `FRCM=` and that 0 goes back to the path feed, the label and hover text. |
 
+## Added in P4b (drilling cycles, time and limits)
+
+The P4b milestone changed the data of 41 entries. **23 entries are new to the review** (they were not marked before; 15 got their cycle, dwell or return description, 1 got a feed for its own block, 7 turning cycles got their machine type) and **18 entries that were already on this page changed**; the rows of the 18 are in the last table of this section. The 23 new rows are counted in the totals above. The three readings that the manuals leave open are questions to answer from your machine: the restart direction after `G86`, parameter 3405 bit 1 and the German text of Klartext cycle 9 (all in [machine facts](machine-facts.md)).
+
+Also in the data, with no review mark: the flag `call` on the codes that run another program or a section and come back (Klartext `CALL LBL`, `CALL PGM`; Sinumerik `CALL`, `PCALL`, `EXTCALL`; Okuma `CALL`, `MODIN`). Expand Drilling Cycles refuses such a block while a cycle is in force, and the time estimate leaves it out. `PCALL`, `EXTCALL` and `MODIN` were added with the flag on top of the codes first named for it.
+
+Not in the data on purpose: Klartext `203` and `CYCLE83` with `VARI=0` have no expansion description (their moves are not plain ones); Klartext `201` with `Q208=0` is read as the plunging feed `Q206`.
+
+### Fanuc mill: added in P4b (10)
+
+File `fanuc.json`.
+
+| Done | Code | Label | Source | What to check |
+|---|---|---|---|---|
+| [ ] | `G73` | Peck drilling cycle with chip break | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), drilling canned cycles (page not recorded) | Read the description of how the cycle moves (the plain-move description the expansion and the time estimate use: the rapid to the R point, the feed to the bottom, the way out), the parameter roles and the label and hover text against your control. **Open question:** the retract between pecks is a setting of the control (the form asks for it). |
+| [ ] | `G81` | Drilling cycle | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), drilling canned cycles (page not recorded) | Read the description of how the cycle moves (the plain-move description the expansion and the time estimate use: the rapid to the R point, the feed to the bottom, the way out), the parameter roles and the label and hover text against your control. |
+| [ ] | `G82` | Drilling cycle with dwell at the bottom | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), drilling canned cycles (page not recorded) | Read the description of how the cycle moves (the plain-move description the expansion and the time estimate use: the rapid to the R point, the feed to the bottom, the way out), the parameter roles and the label and hover text against your control. |
+| [ ] | `G83` | Deep peck drilling cycle | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), drilling canned cycles (page not recorded) | Read the description of how the cycle moves (the plain-move description the expansion and the time estimate use: the rapid to the R point, the feed to the bottom, the way out), the parameter roles and the label and hover text against your control. **Open question:** the clearance above the last depth is a setting of the control (the form asks for it). |
+| [ ] | `G85` | Boring cycle, feed out | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), drilling canned cycles (page not recorded) | Read the description of how the cycle moves (the plain-move description the expansion and the time estimate use: the rapid to the R point, the feed to the bottom, the way out), the parameter roles and the label and hover text against your control. |
+| [ ] | `G86` | Boring cycle, spindle stop | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), drilling canned cycles (page not recorded) | Read the description of how the cycle moves (the plain-move description the expansion and the time estimate use: the rapid to the R point, the feed to the bottom, the way out), the parameter roles and the label and hover text against your control. **Open question:** after the spindle stop at the bottom, in which direction does your control restart the spindle? The expansion writes the direction in force before the cycle (see [machine facts](machine-facts.md)). |
+| [ ] | `G89` | Boring cycle with dwell, feed out | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), drilling canned cycles (page not recorded) | Read the description of how the cycle moves (the plain-move description the expansion and the time estimate use: the rapid to the R point, the feed to the bottom, the way out), the parameter roles and the label and hover text against your control. |
+| [ ] | `G98` | Cycle return to the initial level | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), drilling canned cycles (page not recorded) | Read what it sets in force (the return level of the cycle that follows) and the label and hover text. The expansion refuses a cycle when neither the program nor the machine says which of `G98` and `G99` is in force. |
+| [ ] | `G99` | Cycle return to the retract plane | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), drilling canned cycles (page not recorded) | As `G98`: the cycle returns to the R point. |
+| [ ] | `G4` | Dwell (Fanuc mill) | Fanuc 30i/31i/32i Model A user's manual (B-63944GE/02), dwell (page not recorded) | Read that `X` is seconds and `P` is in the machine's least time increments (the dwell form the time estimate and the expansion use). **Open question:** parameter 3405 bit 1 makes a dwell revolutions under feed per revolution (see [machine facts](machine-facts.md)). |
+
+### Heidenhain Klartext: added in P4b (4)
+
+File `heidenhain.json`.
+
+| Done | Code | Label | Source | What to check |
+|---|---|---|---|---|
+| [ ] | `CYCL DEF 9` | Dwell time | TNC 640 Klartext programming manual (10/2017) (page not recorded) | Read that the two lines `9.0` and `9.1` stop the program for the seconds of `9.1`, where defined, and that nothing calls it. **Open question:** the German text of cycle 9 (see [machine facts](machine-facts.md)). |
+| [ ] | `CYCL DEF 200` | Drilling | TNC 640 cycle programming manual (10/2017), drilling cycles (page not recorded) | Read the description of how the cycle moves (the plain-move description the expansion and the time estimate use: the rapid to the R point, the feed to the bottom, the way out), the parameter roles and the label and hover text against your control. |
+| [ ] | `CYCL DEF 201` | Reaming | TNC 640 cycle programming manual (10/2017), drilling cycles (page not recorded) | Read the description of how the cycle moves (the plain-move description the expansion and the time estimate use: the rapid to the R point, the feed to the bottom, the way out), the parameter roles and the label and hover text against your control. **Changed in P4b:** a retract feed `Q208` of 0 now means the plunging feed `Q206` (the manual says so for `Q208`), and a `Q206` of 0 refuses the cycle. Klartext 203 is deliberately not described (its full retract runs at `Q208`). |
+| [ ] | `CYCL CALL POS` | Cycle call at a position | TNC 640 cycle programming manual (10/2017), calling a cycle (page not recorded) | Read that the block moves to the position it names and runs the cycle that was defined last there. **Changed in P4b:** the `F` of this block is the feed of the move to that position **for this block only**; the next block runs at the feed that was in force before it (the flag `blockFeed`). Check on your control that an `F` written on a `CYCL CALL POS` does not stay in force for the blocks after it. |
+
+### Sinumerik: added in P4b (9)
+
+File `sinumerik.json`.
+
+| Done | Code | Label | Source | What to check |
+|---|---|---|---|---|
+| [ ] | `G4` | Dwell (Sinumerik) | Sinumerik 840D sl NC programming manual 06/2019 (page not recorded) | Read that `F` is seconds and `S` is spindle revolutions (`S2=` another spindle), the block stands alone, and neither is a feed or a speed. |
+| [ ] | `SPOS` | Spindle to an angle | Sinumerik 840D sl NC programming manual 06/2019 (page not recorded) | Read that the spindle stops at the angle and stays in position control until `M3`, `M4` or `M5`, and that `CYCLE86` makes its oriented stop with it. |
+| [ ] | `CYCLE99` | Thread turning cycle | Sinumerik cycles programming manual 01/2008 (section for this cycle not recorded) | **New to the review:** the entry is marked as a turning cycle (`machineType: lathe`), so a milling machine's cycle list and the template filter leave it out. Tick if it is a turning cycle only. |
+| [ ] | `CYCLE92` | Parting-off cycle | Sinumerik cycles programming manual 01/2008 (section for this cycle not recorded) | **New to the review:** the entry is marked as a turning cycle (`machineType: lathe`), so a milling machine's cycle list and the template filter leave it out. Tick if it is a turning cycle only. |
+| [ ] | `CYCLE930` | Grooving cycle | Sinumerik cycles programming manual 01/2008 (section for this cycle not recorded) | **New to the review:** the entry is marked as a turning cycle (`machineType: lathe`), so a milling machine's cycle list and the template filter leave it out. Tick if it is a turning cycle only. |
+| [ ] | `CYCLE940` | Undercut cycle | Sinumerik cycles programming manual 01/2008 (section for this cycle not recorded) | **New to the review:** the entry is marked as a turning cycle (`machineType: lathe`), so a milling machine's cycle list and the template filter leave it out. Tick if it is a turning cycle only. |
+| [ ] | `CYCLE951` | Stock removal cycle for a corner | Sinumerik cycles programming manual 01/2008 (section for this cycle not recorded) | **New to the review:** the entry is marked as a turning cycle (`machineType: lathe`), so a milling machine's cycle list and the template filter leave it out. Tick if it is a turning cycle only. |
+| [ ] | `CYCLE952` | Contour turning and grooving cycle | Sinumerik cycles programming manual 01/2008 (section for this cycle not recorded) | **New to the review:** the entry is marked as a turning cycle (`machineType: lathe`), so a milling machine's cycle list and the template filter leave it out. Tick if it is a turning cycle only. |
+| [ ] | `CYCLE98` | Thread chain cycle | Sinumerik cycles programming manual 01/2008 (section for this cycle not recorded) | **New to the review:** the entry is marked as a turning cycle (`machineType: lathe`), so a milling machine's cycle list and the template filter leave it out. Tick if it is a turning cycle only. |
+
+### Changed in P4b, already on this page (18)
+
+These rows are on the page already (under their dialect below). Read the change; tick again when it is right.
+
+| Done | Code | Label | Source | What to check |
+|---|---|---|---|---|
+| [ ] | `CYCLE81` | (see its row under Sinumerik, Cycles) | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | **Changed in P4b:** Gained its expansion description (the roles of the parameters). Read the level and depth arguments (`RTP`, `RFP`, `SDIS`, `DP`, `DPR`: an absolute depth `DP`, or the depth from the reference plane `DPR`), the dwell and the defaults, an empty argument is refused (*value missing*). |
+| [ ] | `CYCLE82` | (see its row under Sinumerik, Cycles) | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | **Changed in P4b:** Gained its expansion description (the roles of the parameters). Read the level and depth arguments (`RTP`, `RFP`, `SDIS`, `DP`, `DPR`: an absolute depth `DP`, or the depth from the reference plane `DPR`), the dwell and the defaults, an empty argument is refused (*value missing*). |
+| [ ] | `CYCLE83` | (see its row under Sinumerik, Cycles) | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | **Changed in P4b:** Gained its expansion description (the roles of the parameters). Read the level and depth arguments (`RTP`, `RFP`, `SDIS`, `DP`, `DPR`: an absolute depth `DP`, or the depth from the reference plane `DPR`), the dwell and the defaults, an empty argument is refused (*value missing*). Only `VARI=1` is described; `VARI=0` (`_VRT=0` means 1 mm) is deliberately not, so it is refused. |
+| [ ] | `CYCLE85` | (see its row under Sinumerik, Cycles) | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | **Changed in P4b:** Gained its expansion description (the roles of the parameters). Read the level and depth arguments (`RTP`, `RFP`, `SDIS`, `DP`, `DPR`: an absolute depth `DP`, or the depth from the reference plane `DPR`), the dwell and the defaults, an empty argument is refused (*value missing*). |
+| [ ] | `CYCLE86` | (see its row under Sinumerik, Cycles) | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | **Changed in P4b:** Gained its expansion description (the roles of the parameters). Read the level and depth arguments (`RTP`, `RFP`, `SDIS`, `DP`, `DPR`: an absolute depth `DP`, or the depth from the reference plane `DPR`), the dwell and the defaults, an empty argument is refused (*value missing*). Read the oriented stop (`SPOS`) angle argument. |
+| [ ] | `CYCLE89` | (see its row under Sinumerik, Cycles) | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | **Changed in P4b:** Gained its expansion description (the roles of the parameters). Read the level and depth arguments (`RTP`, `RFP`, `SDIS`, `DP`, `DPR`: an absolute depth `DP`, or the depth from the reference plane `DPR`), the dwell and the defaults, an empty argument is refused (*value missing*). |
+| [ ] | `G71` | Fanuc lathe, system A, roughing cycles | Fanuc lathe system manual (B-63944GE-1/02), section 4.2, pp. 49-89 | **Changed in P4b:** `P` and `Q` are required in the second block (the block that runs the cycle), the first block `U R` does not need them. Hover on the first block says *Required P, Q* (a known side effect), and completion inserts the second-block form. |
+| [ ] | `G72` | Fanuc lathe, system A, roughing cycles | Fanuc lathe system manual (B-63944GE-1/02), section 4.2, pp. 49-89 | **Changed in P4b:** `P` and `Q` are required in the second block (the block that runs the cycle), the first block `U R` does not need them. Hover on the first block says *Required P, Q* (a known side effect), and completion inserts the second-block form. |
+| [ ] | `G73` | Fanuc lathe, system A, roughing cycles | Fanuc lathe system manual (B-63944GE-1/02), section 4.2, pp. 49-89 | **Changed in P4b:** `P` and `Q` are required in the second block (the block that runs the cycle), the first block `U R` does not need them. Hover on the first block says *Required P, Q* (a known side effect), and completion inserts the second-block form. |
+| [ ] | `CYCLE61` | Face milling cycle | (see its row under Sinumerik, Cycles) | **Changed in P4b, taken back in v1.2.0** (owner, 2026-10-22): P4b marked it as a milling cycle (`machineType: mill`), which hid it from a turning program. It has no machine type again, so the cycle form offers it on the Sinumerik turning profile too (a lathe with driven tools runs it). Nothing to read beyond the old row. |
+| [ ] | `POCKET3` | Rectangular pocket milling cycle | (see its row under Sinumerik, Cycles) | **Changed in P4b, taken back in v1.2.0** (owner, 2026-10-22): P4b marked it as a milling cycle (`machineType: mill`), which hid it from a turning program. It has no machine type again, so the cycle form offers it on the Sinumerik turning profile too (a lathe with driven tools runs it). Nothing to read beyond the old row. |
+| [ ] | `POCKET4` | Circular pocket milling cycle | (see its row under Sinumerik, Cycles) | **Changed in P4b, taken back in v1.2.0** (owner, 2026-10-22): P4b marked it as a milling cycle (`machineType: mill`), which hid it from a turning program. It has no machine type again, so the cycle form offers it on the Sinumerik turning profile too (a lathe with driven tools runs it). Nothing to read beyond the old row. |
+| [ ] | `SLOT1` | Slot milling cycle | (see its row under Sinumerik, Cycles) | **Changed in P4b, taken back in v1.2.0** (owner, 2026-10-22): P4b marked it as a milling cycle (`machineType: mill`), which hid it from a turning program. It has no machine type again, so the cycle form offers it on the Sinumerik turning profile too (a lathe with driven tools runs it). Nothing to read beyond the old row. |
+| [ ] | `SLOT2` | Circular slot milling cycle | (see its row under Sinumerik, Cycles) | **Changed in P4b, taken back in v1.2.0** (owner, 2026-10-22): P4b marked it as a milling cycle (`machineType: mill`), which hid it from a turning program. It has no machine type again, so the cycle form offers it on the Sinumerik turning profile too (a lathe with driven tools runs it). Nothing to read beyond the old row. |
+| [ ] | `CYCLE72` | Path milling cycle | (see its row under Sinumerik, Cycles) | **Changed in P4b, taken back in v1.2.0** (owner, 2026-10-22): P4b marked it as a milling cycle (`machineType: mill`), which hid it from a turning program. It has no machine type again, so the cycle form offers it on the Sinumerik turning profile too (a lathe with driven tools runs it). Nothing to read beyond the old row. |
+| [ ] | `CYCLE93` | Grooving cycle | (see its row under Sinumerik, Cycles) | **Changed in P4b:** marked as a turning cycle (`machineType: lathe`). |
+| [ ] | `CYCLE95` | Stock removal cycle | (see its row under Sinumerik, Cycles) | **Changed in P4b:** marked as a turning cycle (`machineType: lathe`). |
+| [ ] | `CYCLE97` | Thread cutting cycle | (see its row under Sinumerik, Cycles) | **Changed in P4b:** marked as a turning cycle (`machineType: lathe`). |
+
+### Changed in P4b fix batch 5, no review mark (2)
+
+These two Sinumerik entries carry no `review` mark and are not in the counts above. They are here because the fix batch changed what they set in force: both are now rapid moves, so a block that carries one is not given a motion code back by a script (a block that moves on its own).
+
+| Done | Code | Label | Source | What to check |
+|---|---|---|---|---|
+| [x] | `G74` | Reference point approach | Source not recorded on this page (set by the data, answered by the owner) | **Answered by the owner, 2026-10-22:** `G74` is a rapid move to the reference points of the axes written with it (the values say which axes). Nothing more to read. |
+| [ ] | `G75` | Approach a fixed machine point | Source not recorded on this page (the manual fact is in the entry's description) | Read that the axes written with it move at rapid traverse, each on its own, to the fixed point `FP=` names, in machine coordinates, and that the values of the axis words are not positions. The manual states the rapid traverse. |
+
 ## Fanuc mill
 
-File `fanuc.json`, 25 entries (24 below, 1 in [the v1.2.0 section](#added-in-the-v120-nc-fix-round)).
+File `fanuc.json`, 35 entries (24 below, 1 in [the v1.2.0 section](#added-in-the-v120-nc-fix-round), 10 in [the P4b section](#added-in-p4b-drilling-cycles-time-and-limits)).
 
 ### Fanuc mill: Motion, reference positions and coordinate system (9)
 
@@ -147,7 +233,7 @@ File `fanuc.json`, 25 entries (24 below, 1 in [the v1.2.0 section](#added-in-the
 
 ## Fanuc lathe (system A)
 
-File `fanuc-lathe.json`, 15 entries (12 below, 3 in [the v1.2.0 section](#added-in-the-v120-nc-fix-round)).
+File `fanuc-lathe.json`, 18 entries (15 below, 3 in [the v1.2.0 section](#added-in-the-v120-nc-fix-round)).
 
 ### Fanuc lathe (system A): Compensation (G40-G49 family) (2)
 
@@ -176,6 +262,16 @@ File `fanuc-lathe.json`, 15 entries (12 below, 3 in [the v1.2.0 section](#added-
 | [ ] | `G75` | Grooving cycle along X | Fanuc lathe system manual (B-63944GE-1/02), section 4.2 (multiple repetitive cycles), pp. 49-89 | Read parameter names, order and units, what it sets in force, the label and hover text against your control. |
 | [ ] | `G76` | Multi-pass threading cycle | Fanuc lathe system manual (B-63944GE-1/02), section 4.2 (multiple repetitive cycles), pp. 49-89 | Read parameter names, order and units, what it sets in force, the label and hover text against your control. |
 
+### Fanuc lathe (system A): system B turning passes in the system A file (3)
+
+These three are in the data of the system A file as well as in the system B file (their rows are under [Fanuc lathe, system B](#fanuc-lathe-system-b)). The earlier counts did not have a row for the system A copies.
+
+| Done | Code | Label | Source | What to check |
+|---|---|---|---|---|
+| [ ] | `G77` | Turning pass (G-code system B) | Fanuc lathe system manual (B-63944GE-1/02) (section for this entry not recorded) | Read that system A does not use this number, that it is read as the system B turning pass here too (the taper `R` along X, X, Z and R in force), and that the hover text tells the reader to set a machine with that G-code system. |
+| [ ] | `G78` | Threading pass (G-code system B) | Fanuc lathe system manual (B-63944GE-1/02) (section for this entry not recorded) | As `G77`, for the threading pass (the `F` is the lead per revolution, the taper `R` along X). |
+| [ ] | `G79` | Facing pass (G-code system B) | Fanuc lathe system manual (B-63944GE-1/02) (section for this entry not recorded) | As `G77`, for the facing pass (the taper `R` along Z). |
+
 ## Fanuc lathe, system B
 
 File `fanuc-lathe-b.json`, 4 entries (1 below, 3 in [the v1.2.0 section](#added-in-the-v120-nc-fix-round)).
@@ -188,7 +284,7 @@ File `fanuc-lathe-b.json`, 4 entries (1 below, 3 in [the v1.2.0 section](#added-
 
 ## Heidenhain Klartext
 
-File `heidenhain.json`, 56 entries (42 below, 14 in [the v1.2.0 section](#added-in-the-v120-nc-fix-round)).
+File `heidenhain.json`, 60 entries (42 below, 14 in [the v1.2.0 section](#added-in-the-v120-nc-fix-round), 4 in [the P4b section](#added-in-p4b-drilling-cycles-time-and-limits)).
 
 ### Heidenhain Klartext: Program, stock and radius compensation (5)
 
@@ -291,7 +387,7 @@ File `okuma.json`, 23 entries (18 below, 5 in [the v1.2.0 section](#added-in-the
 
 ## Sinumerik (turning and milling)
 
-File `sinumerik.json`, 61 entries (54 below, 7 in [the v1.2.0 section](#added-in-the-v120-nc-fix-round)).
+File `sinumerik.json`, 80 entries (64 below, 7 in [the v1.2.0 section](#added-in-the-v120-nc-fix-round), 9 in [the P4b section](#added-in-p4b-drilling-cycles-time-and-limits)).
 
 ### Sinumerik (turning and milling): G codes (motion, path control, compensation) (11)
 
@@ -309,7 +405,7 @@ File `sinumerik.json`, 61 entries (54 below, 7 in [the v1.2.0 section](#added-in
 | [ ] | `G41` | Radius compensation, tool left | Sinumerik 840D sl NC programming manual 06/2019, section 4.3 (G groups), pp. 1230-1236 | Read what it sets in force, the label and hover text against your control. |
 | [ ] | `G42` | Radius compensation, tool right | Sinumerik 840D sl NC programming manual 06/2019, section 4.3 (G groups), pp. 1230-1236 | Read what it sets in force, the label and hover text against your control. |
 
-### Sinumerik (turning and milling): Cycles (11)
+### Sinumerik (turning and milling): Cycles (21)
 
 | Done | Code | Label | Source | What to check |
 |---|---|---|---|---|
@@ -324,6 +420,16 @@ File `sinumerik.json`, 61 entries (54 below, 7 in [the v1.2.0 section](#added-in
 | [ ] | `CYCLE97` | Thread cutting cycle | Sinumerik cycles programming manual 01/2008, section 4.7 | Read parameter names, order and units, what it sets in force, the label and hover text against your control. |
 | [ ] | `CYCLE62` | Contour call | Sinumerik cycles programming manual 01/2008 (section for this cycle not recorded) | Read what it sets in force, the label and hover text against your control. |
 | [ ] | `CYCLE800` | Swivel the working plane | Sinumerik cycles programming manual 01/2008 (section for this cycle not recorded) | Read parameter names, order and units, how it shifts or frames the coordinates, the label and hover text against your control. |
+| [ ] | `CYCLE81` | Drilling or centring cycle | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. Read the level and depth arguments (`RTP`, `RFP`, `SDIS`, `DP`, `DPR`) and the expansion description added in P4b. |
+| [ ] | `CYCLE82` | Drilling cycle with a dwell | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. Read the dwell `DTB` and the expansion description added in P4b. |
+| [ ] | `CYCLE83` | Deep-hole drilling cycle | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. Only `VARI=1` has an expansion description added in P4b; `VARI=0` is refused on purpose. |
+| [ ] | `CYCLE84` | Rigid tapping cycle | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. Read that the lead comes from `MPIT` or `PIT` and the tapping speed from `SST`, not from the feed in force, the pitch unit `_PITA`, and the label and hover text. |
+| [ ] | `CYCLE840` | Tapping cycle with a compensating chuck | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. Read `ENC`: with 1 the lead is the feed in force (speed times pitch, never scaled), with 0, 11 or 20 it comes from `MPIT` or `PIT`. |
+| [ ] | `CYCLE85` | Reaming cycle, feed in and feed out | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. Read the expansion description added in P4b. |
+| [ ] | `CYCLE86` | Boring cycle with an oriented stop | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. Read the oriented stop (`SPOS`) angle and the expansion description added in P4b. |
+| [ ] | `CYCLE87` | Boring cycle with a stop at depth | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. Read that it stops the spindle without orienting it and stops the program, and that the next NC start pulls the tool out to the retraction plane at rapid. |
+| [ ] | `CYCLE88` | Boring cycle with a dwell and a stop at depth | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. As `CYCLE87`, with the dwell `DTB` at depth. |
+| [ ] | `CYCLE89` | Boring cycle with a dwell, feed out | Sinumerik cycles programming manual 01/2008, drilling cycles (page not recorded) | Read parameter names, order and units, what it sets in force, the label and hover text against your control. Read the dwell `DTB` and the expansion description added in P4b. |
 
 ### Sinumerik (turning and milling): Tolerances, frames and surface machining (9)
 

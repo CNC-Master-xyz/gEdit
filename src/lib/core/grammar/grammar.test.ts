@@ -196,6 +196,30 @@ describe('the iso grammar', () => {
     expect(iso('/ N120 G0 X0.')).toEqual(['skip:/', 'blockNumber:N120', 'gcode:G0', 'axis:X0.']);
   });
 
+  // T114: a block skip written behind indentation (`  /N120`) used to paint the blanks as
+  // part of the skip mark. The mark is the `/` alone, on every dialect that reads one.
+  it.each(['fanuc-gcode', 'fanuc-lathe', 'okuma-osp', 'sinumerik'])(
+    '%s: the indent in front of a block skip is not part of the skip mark',
+    (id) => {
+      const line = (text: string) => roles(byId(id).grammar, text);
+      const skips = (text: string) => line(text).filter((entry) => entry.startsWith('skip:'));
+      expect(skips('  /N120 G0 X0.')).toEqual(['skip:/']);
+      expect(skips('\t/ G0 X0.')).toEqual(['skip:/']);
+      expect(skips('    /')).toEqual(['skip:/']);
+    },
+  );
+
+  it('heidenhain-klartext: the indent in front of a block skip is not part of the skip mark (T114)', () => {
+    const skips = (text: string) => roles(byId('heidenhain-klartext').grammar, text).filter((entry) => entry.startsWith('skip:'));
+    expect(skips('  /15 L X+0')).toEqual(['skip:/']);
+    expect(skips('\t/ 15 L X+0')).toEqual(['skip:/']);
+  });
+
+  it('keeps the level digit in the skip mark behind an indent', () => {
+    expect(roles(byId('fanuc-gcode').grammar, '   /2 N10 G0 X0.').slice(0, 2)).toEqual(['skip:/2', 'blockNumber:N10']);
+    expect(roles(byId('sinumerik').grammar, '  /3 G0 X0.')[0]).toBe('skip:/3');
+  });
+
   it('puts the macro keywords in front of the single-letter addresses', () => {
     expect(at('GOTO10')).toEqual(['keyword:GOTO', 'number:10']);
     // `EQ` has to win against the `Q` parameter address, or a comparison is painted as a

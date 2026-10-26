@@ -43,7 +43,10 @@ replace by a ``-``, as #310 allows the decimals; and under a rotation the rows o
 work offset may grow by the position of a word the rotation adds (they list written axes only); under
 a Sinumerik frame (``ATRANS`` and its kin) the zero increment word a rotation adds
 (``G91 G1 X-33.1`` turned is ``X0.000 Y-33.1``) is one more position the extents cannot resolve,
-though it moves nothing (FZ-10, the Sinumerik twin of FZ-3).
+though it moves nothing (FZ-10, the Sinumerik twin of FZ-3). Since the manual-check fix round
+(D6-7) the shipped Sinumerik profiles refuse to turn or mirror such an increment, because with
+the setting SD42440 at 1 it travels the change of the shift as well (``shift-increment``); the
+reading stays for a machine whose increments do not (``syntax.incrementTravelsShift`` off).
 
 **How the scripts are run.** In this process, not as a child process: ``main()`` of each
 script is called with ``gedit_nc.load_context``, ``gedit_nc.read_input`` and the JSON writer
@@ -2664,7 +2667,12 @@ class KnownFindingTest(unittest.TestCase):
 
 
 class OracleReadingFz10Test(unittest.TestCase):
-    """FZ-10, the Sinumerik twin of FZ-3: an oracle reading, the program written is correct."""
+    """FZ-10, the Sinumerik twin of FZ-3: an oracle reading, the program written is correct.
+
+    v1.2.0 manual-check fix round (D6-7): with the shipped profile, whose control travels the
+    change of a shift with the next increment (SD42440 at 1), the rotation refuses the increment
+    after ``ATRANS`` instead; the reading is held on a machine where SD42440 is 0
+    (``syntax.incrementTravelsShift`` off), where the increment is only the increment."""
 
     TEXT = (
         "%_N_FZ10_MPF\nN10 G71 G90 G54 G17\nG0 X-5 Y5 Z10\nG1 X10 Y10 F500\n"
@@ -2676,7 +2684,9 @@ class OracleReadingFz10Test(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.scripts = Scripts.get()
         profile_set = [p for p in PROFILE_SETS if p.name == "sinumerik-mill"][0]
-        cls.context = context_of(profile_set, profile_set.contexts[0][0])
+        cls.shipped = context_of(profile_set, profile_set.contexts[0][0])
+        cls.context = copy.deepcopy(cls.shipped)
+        cls.context["profile"]["syntax"]["incrementTravelsShift"] = False
         cls.out = cls.scripts.run("rotate", cls.TEXT, cls.context, cls.PARAMS)
         cls.plan = oracle.plan_rotate(90, cls.PARAMS["cx"], cls.PARAMS["cy"])
         cls.before = cls.scripts.run("extents", cls.TEXT, cls.context).payload
@@ -2687,6 +2697,21 @@ class OracleReadingFz10Test(unittest.TestCase):
 
     def accepted(self, problem: str, after_text: Optional[str] = None, before_text: Optional[str] = None) -> bool:
         return added_zero_word(problem, self.TEXT if before_text is None else before_text, self.out.text if after_text is None else after_text, self.before, self.after, self.plan)
+
+    def test_d6_7_with_the_shipped_profile_the_increment_after_the_frame_is_refused(self) -> None:
+        self.assertTrue(self.shipped["profile"]["syntax"].get("incrementTravelsShift"))
+        out = self.scripts.run("rotate", self.TEXT, self.shipped, self.PARAMS)
+        self.assertEqual(out.crash, "")
+        self.assertTrue(out.refused)
+        self.assertIn((6, "shift-increment"), [(f["line"], f["reason"]) for f in out.payload.get("findings", []) if f.get("severity") == "error"])
+        # Written absolutely after the frame, the increment is turned, and the extents see no
+        # position they cannot resolve: the reading is not needed there.
+        text = self.TEXT.replace("N20 ATRANS X0 Y0\n", "N20 ATRANS X0 Y0\nG90 G1 X10 Y10\n")
+        out = self.scripts.run("rotate", text, self.shipped, self.PARAMS)
+        self.assertFalse(out.refused)
+        after = self.scripts.run("extents", out.text, self.shipped).payload
+        before = self.scripts.run("extents", text, self.shipped).payload
+        self.assertEqual(oracle.check_extents(before, after, self.plan), [])
 
     def test_the_rotation_writes_a_zero_increment_word_and_the_path_is_the_same(self) -> None:
         """The program is correct: the block after the frame gets ``X0.000``, a word that moves

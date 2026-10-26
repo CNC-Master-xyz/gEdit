@@ -276,7 +276,7 @@ describe('the caps', () => {
     /** What `serde_json::to_vec_pretty` really writes for a `state.json` holding these. */
     function prettyBytes(files: Record<string, FileMemo>): number {
       const whole = { $version: 1, recent: [], ui: { layout: {}, lastParams: {}, lastScript: null, files } };
-      return JSON.stringify(whole, null, 2).length + 1;
+      return new TextEncoder().encode(JSON.stringify(whole, null, 2)).length + 1;
     }
 
     /** A heavily bookmarked program with a path of the length a job folder produces. */
@@ -305,6 +305,22 @@ describe('the caps', () => {
       expect(prettyBytes(h.files)).toBeLessThan(1024 * 1024);
       // And it is not empty: the recent files keep everything they had.
       expect(Object.keys(h.files).length).toBeGreaterThan(50);
+    });
+
+    it('counts UTF-8 bytes, not characters: names and paths in Kanji are three bytes a character (CODE-8)', () => {
+      const h = harness();
+      const name = '\u65e5\u672c\u8a9e'.repeat(20); // 60 characters, 180 bytes
+      for (let n = 0; n < 40; n += 1) {
+        const marks = Array.from({ length: MAX_REMEMBERED_BOOKMARKS }, (_, i) => 10 + i);
+        h.tick();
+        h.memory.remember(`/\u30d7\u30ed\u30b0\u30e9\u30e0/\u65e5\u672c/job-${n}.nc`, {
+          line: 5,
+          bookmarks: marks,
+          bookmarkNames: marks.map((line) => ({ line, name })),
+        });
+      }
+      expect(prettyBytes(h.files)).toBeLessThan(MAX_REMEMBERED_BYTES + 4096);
+      expect(Object.keys(h.files).length).toBeGreaterThan(5);
     });
 
     it('is crossed by ordinary bookmarking, not only by the caps', () => {

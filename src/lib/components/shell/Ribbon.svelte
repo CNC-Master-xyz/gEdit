@@ -14,21 +14,32 @@
   import { ribbon } from '$lib/app/registry/ribbon';
   import { formatKey, resolveKeys } from '$lib/core/keys/keySpec';
   import { t } from '$lib/i18n';
+  import { uiState } from '$lib/stores/uiState';
   import { isMacPlatform } from '$lib/utils/platform';
   import RibbonButton from './RibbonButton.svelte';
-  import { groupsOf, resolveTab, TAB_LABEL, tabsOf } from './ribbonModel';
+  import { groupsOf, rememberTab, resolveTab, TAB_LABEL, tabsOf } from './ribbonModel';
   import type { CommandDef, RibbonItemDef, RibbonTab } from '$lib/app/types';
 
   const entries = ribbon.entries;
   const changed = commands.changed;
   const isMac = isMacPlatform();
 
-  let activeTab = $state<RibbonTab>('file');
+  const remembered = uiState.state;
+
+  /** The tab the user picked in this window; null until they pick one. */
+  let activeTab = $state<RibbonTab | null>(null);
 
   const tabs = $derived(tabsOf($entries));
-  // A tab can disappear when its contribution is disposed (HMR, tests), and a retired id
-  // ('home') falls back to the File tab.
-  const currentTab = $derived(resolveTab(activeTab, tabs));
+  // The tab picked in this window, else the one the last session ended on (T141, read from
+  // `state.json` once it has loaded). A tab can disappear when its contribution is disposed
+  // (HMR, tests) or never come back, and a retired id ('home') or an unknown one falls back
+  // to the File tab. The fallback is not written back: only a pick is remembered.
+  const currentTab = $derived(resolveTab(activeTab ?? $remembered.ribbonTab, tabs));
+
+  function selectTab(tab: RibbonTab): void {
+    activeTab = tab;
+    uiState.update((s) => rememberTab(s, tab));
+  }
 
   interface Button {
     item: RibbonItemDef;
@@ -76,7 +87,7 @@
     const next = targets[e.key];
     if (next === undefined) return;
     e.preventDefault();
-    activeTab = tabs[next];
+    selectTab(tabs[next]);
     const sibling = e.currentTarget.parentElement?.children[next];
     if (sibling instanceof HTMLElement) sibling.focus();
   }
@@ -96,7 +107,7 @@
         aria-controls="ribbon-panel"
         data-testid="ribbon-tab"
         data-tab={tab}
-        onclick={() => (activeTab = tab)}
+        onclick={() => selectTab(tab)}
         onkeydown={(e) => onTabKey(e, i)}
       >{t(TAB_LABEL[tab])}</button>
     {/each}

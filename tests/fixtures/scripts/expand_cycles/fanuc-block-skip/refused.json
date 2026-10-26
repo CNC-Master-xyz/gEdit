@@ -1,0 +1,23 @@
+{
+  "message": "Nothing was changed: 3 blocks cannot be written out as plain moves: 3 blocks with a block skip (/). No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "/N50 X20.: the block can be skipped (/), and the plain moves written for the cycle would not be skipped the same way.",
+      "reason": "block-skip"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "/N70 X30.: the block can be skipped (/), and the plain moves written for the cycle would not be skipped the same way (the motion code in force before the cycle on line 6 is written back here).",
+      "reason": "block-skip"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "/N90 G98 G81 X40. Y10. Z-5. R2. F150.: the block can be skipped (/), and the plain moves written for the cycle would not be skipped the same way.",
+      "reason": "block-skip"
+    }
+  ]
+}

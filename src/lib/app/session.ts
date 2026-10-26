@@ -48,6 +48,8 @@
 // the real modules (AD-2), so a unit test drives the debounce with a fake clock and
 // never needs Tauri or Monaco.
 
+import { memoMarks, namesOf, type BookmarkMark } from '$lib/core/nav/bookmarks';
+import { memoWaiting } from '$lib/app/memoWaiting';
 import { bookmarks as appBookmarks } from '$lib/monaco/bookmarks';
 import { docs as appDocs } from '$lib/stores/documents';
 import { editor as appEditor } from '$lib/monaco/editorService';
@@ -414,10 +416,10 @@ export interface FileTrackerDeps {
    * an editor that was never given it.
    */
   enabled(): boolean;
-  /** The bookmarked lines of a document, read out of Monaco's decorations. */
-  bookmarkLines(id: DocId): number[];
-  /** Puts `lines` back; out-of-range lines are dropped by the service (§7.9). */
-  setBookmarks(id: DocId, lines: number[]): void;
+  /** The bookmarks of a document (lines and names), read out of Monaco's decorations. */
+  bookmarkMarks(id: DocId): BookmarkMark[];
+  /** Puts the bookmarks back; out-of-range lines and bad names are dropped by the service (§7.9, §6.5 rule 4). */
+  restoreBookmarks(id: DocId, marks: BookmarkMark[]): void;
   /** Whether the editor has a model for `id`; without one there is nothing to read. */
   hasModel(id: DocId): boolean;
   /** Cursor and first visible line, or null when `id` is not the document on screen. */
@@ -469,21 +471,26 @@ export function createFileTracker(deps: FileTrackerDeps): Disposable {
     if (!path) return;
     note(id);
     const at = seen.get(id);
-    let marks: number[] = [];
+    let marks: BookmarkMark[] = [];
     try {
-      marks = deps.bookmarkLines(id);
+      marks = deps.bookmarkMarks(id);
     } catch (err) {
       console.warn('the bookmarks of a document could not be read', err);
       return;
     }
     // A document on screen while Monaco had no cursor to give has no position of its
     // own; leaving the three members out of the patch keeps what was remembered before.
-    deps.memory.remember(path, at === undefined ? { bookmarks: marks } : { ...at, bookmarks: marks });
+    // The names go beside the lines (`FileMemo.bookmarkNames`); `undefined` removes the member.
+    const names = namesOf(marks);
+    const bookmarks = marks.map((mark) => mark.line);
+    const patch = { bookmarks, bookmarkNames: names.length > 0 ? names : undefined };
+    deps.memory.remember(path, at === undefined ? patch : { ...at, ...patch });
   }
 
   function forget(id: DocId): void {
     seen.delete(id);
     waiting.delete(id);
+    memoWaiting.delete(id);
     live.delete(id);
   }
 
@@ -504,8 +511,15 @@ export function createFileTracker(deps: FileTrackerDeps): Disposable {
       if (!deps.applyPosition(id, at)) return;
       // After the position, so the bookmark decorations land on a model that is already
       // the one on screen; `set` drops any line past the end of the file.
-      deps.setBookmarks(id, memo.bookmarks);
+      // The memo as it is now, not as it was when the file opened: the bookmark panel changes
+      // the bookmarks of a tab that has no model yet (a delete, Clear All), and a stale copy
+      // would bring them back. A memo that is gone since means "none"; a document that has no path any
+      // more has nothing to look up, so the memo it was waiting with stands.
+      const path = deps.docs.get(id)?.path;
+      const latest = path ? deps.memory.get(path) : memo;
+      deps.restoreBookmarks(id, latest === undefined ? [] : memoMarks(latest));
       waiting.delete(id);
+      memoWaiting.delete(id);
       seen.set(id, at);
     }
     live.add(id);
@@ -515,7 +529,11 @@ export function createFileTracker(deps: FileTrackerDeps): Disposable {
     deps.onDidOpen((id, path) => {
       if (!deps.enabled()) return;
       const memo = deps.memory.get(path);
-      if (memo !== undefined) waiting.set(id, memo);
+      if (memo !== undefined) {
+        waiting.set(id, memo);
+        // The bookmarks of this tab are in its memo until it is in front (the bookmark panel reads them there).
+        memoWaiting.add(id);
+      }
       apply(id);
     }),
     deps.onDidCreateModel((id) => {
@@ -570,6 +588,7 @@ export function createFileTracker(deps: FileTrackerDeps): Disposable {
     disposed = true;
     for (const stop of stops.reverse()) stop();
     seen.clear();
+    for (const id of waiting.keys()) memoWaiting.delete(id);
     waiting.clear();
     live.clear();
   };
@@ -656,8 +675,8 @@ export function startFileTracker(): Disposable {
     memory: appFileMemory,
     enabled: () => appSettings.get('files.rememberPerFile'),
     hasModel: (id) => appEditor.hasModel(id),
-    bookmarkLines: (id) => appBookmarks.lines(id),
-    setBookmarks: (id, lines) => appBookmarks.set(id, lines),
+    bookmarkMarks: (id) => appBookmarks.marks(id),
+    restoreBookmarks: (id, marks) => appBookmarks.restore(id, marks),
     ...editorPositionDeps(appEditor, () => appDocs.getActiveId()),
     // The same two promises `contrib/bookmarks.ts` awaits before it installs the
     // decoration service, and in the same order — the contributions are loaded by file

@@ -709,35 +709,53 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
     // The P4a prelude (Phase 4 plan §6.2) adds the arc direction to G2/G3 and the compensation
     // side to G41/G42 (RL/RR on Klartext) and marks those entries the same way; the P4a Wave B
     // integration (§7 #299 to #307) the resets (G52, TRANS, ATRANS, Klartext cycles 7, 8, 10),
-    // PATTERN DEF, CIP, CYCLE95 and the Fanuc lathe's G70.
+    // PATTERN DEF, CIP, CYCLE95 and the Fanuc lathe's G70. P4.6 (Phase 4 plan §6.3 rule 11): the
+    // drilling cycles with an expansion schema, the cycle returns G98/G99, the dwell codes (Fanuc
+    // and Sinumerik G4, Klartext cycle 9) and the new Sinumerik SPOS.
     const marked = (dialect: string): string[] =>
       (BUILTIN_CODE_DB_JSON[dialect] as { codes: { code: string; review?: string }[] }).codes
         .filter((e) => e.review === 'pending')
         .map((e) => e.code);
     expect(marked('fanuc')).toEqual([
-      'G2', 'G3', 'G5.4', 'G6.2', 'G10', 'G29', 'G30.1', 'G41', 'G42', 'G41.2', 'G41.3', 'G41.4', 'G41.5', 'G41.6', 'G42.2', 'G42.4', 'G42.5', 'G42.6', 'G43.1', 'G52', 'G53.1', 'G92.1',
+      'G2', 'G3', 'G4', 'G5.4', 'G6.2', 'G10', 'G29', 'G30.1', 'G41', 'G42', 'G41.2', 'G41.3', 'G41.4', 'G41.5', 'G41.6', 'G42.2', 'G42.4', 'G42.5', 'G42.6', 'G43.1', 'G43.4', 'G43.5', 'G52', 'G53.1',
+      // The manual-check round (D6-2, D6-3, 2026-10-25): G53.6, and tilt and TCP together.
+      'G53.6', 'G68.2', 'G68.3', 'G68.4',
+      'G73', 'G81', 'G82', 'G83', 'G85', 'G86', 'G89', 'G92.1', 'G98', 'G99',
       // P4a fix B1 (§7 #312): the flow codes.
       'GOTO', 'DO', 'END',
     ]);
     // v1.2 NC fix round: G10's tool-offset tables (T013) and the single passes' taper (T009).
     // v1.2.0 (NCR-4): system A's G77-G79 read as system B's single passes.
-    expect(marked('fanuc-lathe')).toEqual(['G41', 'G42', 'G50.3', 'G68.1', 'G69.1', 'G70', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76', 'G77', 'G78', 'G79', 'G90', 'G92', 'G94']);
-    expect(marked('fanuc-lathe-b')).toEqual(['G77', 'G78', 'G79', 'G92.1']);
+    // Manual-check fix round (B2): the tilted planes without the tcp conflict (D6-3), the lathe's
+    // own G53.6 with D, and the drilling cycles G83-G89 with their roles (D5-8).
+    expect(marked('fanuc-lathe')).toEqual([
+      'G41', 'G42', 'G50.3', 'G68.1', 'G68.2', 'G68.3', 'G68.4', 'G69.1', 'G53.6', 'G70', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76',
+      'G77', 'G78', 'G79', 'G83', 'G84', 'G85', 'G87', 'G88', 'G89', 'G90', 'G92', 'G94',
+    ]);
+    expect(marked('fanuc-lathe-b')).toEqual(['G77', 'G78', 'G79', 'G92.1', 'G83', 'G84', 'G85', 'G87', 'G88', 'G89']);
     // The Okuma lathe codes (package A7-O).
     // P4a fix B1 (§7 #312, #316): the chamfer and corner round, and the jumps.
     // v1.2 NC fix round (NCF-A follow-up): the thread passes and the L-radius arcs (lengthAlong).
-    expect(marked('okuma')).toEqual(['G2', 'G3', 'G20', 'G21', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'M85', 'GOTO', 'IF']);
+    // Manual-check review round (NC-5): the turret wait M100.
+    expect(marked('okuma')).toEqual(['G2', 'G3', 'G20', 'G21', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'M85', 'M100', 'GOTO', 'IF']);
     // The Sinumerik and Klartext codes (package A7-S); SLOT2, CYCLE72, ADIS and ADISPOS were
     // added from the manuals afterwards (owner decision 2026-10-12) and carry the same mark,
     // as does CYCLE62, whose description now names CYCLE72 next to the turning cycles.
     expect(marked('sinumerik')).toEqual([
-      'G2', 'G3', 'CIP', 'G601', 'G602', 'G603', 'G643', 'G644', 'G645', 'G41', 'G42',
+      'G2', 'G3', 'CIP', 'G4', 'G601', 'G602', 'G603', 'G643', 'G644', 'G645', 'G41', 'G42',
+      // v1.2.0 manual-check fix round (D5-9): diameter programming off while a cycle runs.
+      'DIAMCYCOF',
       // v1.2.0 (NCR-9b): the drilling cycles' depth twins (DP and DPR, FDEP and FDPR).
       'CYCLE81', 'CYCLE82', 'CYCLE83', 'CYCLE84', 'CYCLE840', 'CYCLE85', 'CYCLE86', 'CYCLE87', 'CYCLE88', 'CYCLE89',
       'CYCLE61', 'POCKET3', 'POCKET4', 'SLOT1', 'SLOT2', 'CYCLE72', 'CYCLE93',
-      'CYCLE95', 'CYCLE97', 'CYCLE62', 'CYCLE800', 'CTOL', 'OTOL', 'ADIS', 'ADISPOS',
+      'CYCLE95', 'CYCLE97',
+      // v1.2.0 T144: the turning cycles of the newer manual, marked with their machine type.
+      'CYCLE99', 'CYCLE92', 'CYCLE930', 'CYCLE940', 'CYCLE951', 'CYCLE952', 'CYCLE98',
+      'CYCLE62', 'CYCLE800', 'SPOS', 'CTOL', 'OTOL', 'ADIS', 'ADISPOS',
       // v1.2 NC fix round (FZ-7): the corner words, a length each; (NCF-C) their feeds.
       'CHF', 'CHR', 'RND', 'RNDM', 'CR', 'FRC', 'FRCM', 'WAITM', 'WAITMC', 'WAITE', 'SETM', 'CLEARM', 'INIT', 'START', 'TRANS', 'ATRANS',
+      // v1.2.0 manual-check fix round (D6-1): the frames by solid angles, along the tool and on the workpiece.
+      'ROTS', 'AROTS', 'CROTS', 'TOFRAME', 'TOFRAMEZ', 'TOFRAMEY', 'TOFRAMEX', 'TOROT', 'TOROTZ', 'TOROTY', 'TOROTX', 'TOROTOF', 'PAROT', 'PAROTOF',
       'COMPSURF', 'CUT3DCC', 'CUT3DCCD',
       // P4a fix B1 (§7 #312): the flow codes.
       'GOTOF', 'GOTOB', 'GOTO', 'GOTOC', 'IF', 'ELSE', 'ENDIF', 'WHILE', 'ENDWHILE', 'FOR', 'ENDFOR', 'REPEAT', 'REPEATB', 'UNTIL', 'LOOP', 'ENDLOOP',
@@ -747,12 +765,15 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
     // v1.2 NC fix round (FZ-6): the approach and departure codes describe LEN, CCA and R.
     expect(marked('heidenhain')).toEqual([
       // The corner and arc words of the contour (CR, RND, CHF), marked lengthAlong.
-      'BLK FORM', 'CR', 'RND', 'CHF', 'APPR LT', 'APPR LN', 'APPR CT', 'APPR LCT', 'DEP LT', 'DEP LN', 'DEP CT', 'DEP LCT', 'RL', 'RR', 'VC', 'LBL', 'FN 9', 'FN 10', 'FN 11', 'FN 12', 'FN 17', 'CYCL DEF 7', 'CYCL DEF 8', 'CYCL DEF 10', 'CYCL DEF 11', 'CYCL DEF 19',
+      'BLK FORM', 'CR', 'RND', 'CHF', 'APPR LT', 'APPR LN', 'APPR CT', 'APPR LCT', 'DEP LT', 'DEP LN', 'DEP CT', 'DEP LCT', 'RL', 'RR', 'VC', 'LBL', 'FN 9', 'FN 10', 'FN 11', 'FN 12', 'FN 17', 'CYCL DEF 7', 'CYCL DEF 8', 'CYCL DEF 9', 'CYCL DEF 10', 'CYCL DEF 11', 'CYCL DEF 19',
       // v1.2 NC fix round (NCF-A follow-up): the bore and thread milling diameters, the centring diameter.
-      'CYCL DEF 26', 'PATTERN DEF', 'CYCL DEF 208', 'CYCL DEF 240', 'CYCL DEF 262', 'CYCL DEF 251', 'CYCL DEF 252', 'CYCL DEF 253', 'CYCL DEF 254', 'CYCL DEF 256',
+      // P4b fix batch 3 (NC-6): CYCL CALL POS, whose feed counts for its own block only.
+      'CYCL DEF 26', 'PATTERN DEF', 'CYCL CALL POS', 'CYCL DEF 200', 'CYCL DEF 201', 'CYCL DEF 208', 'CYCL DEF 240', 'CYCL DEF 262', 'CYCL DEF 251', 'CYCL DEF 252', 'CYCL DEF 253', 'CYCL DEF 254', 'CYCL DEF 256',
       'CYCL DEF 257', 'CYCL DEF 14', 'CYCL DEF 21', 'CYCL DEF 22', 'CYCL DEF 23', 'CYCL DEF 24', 'CYCL DEF 25',
       'PLANE SPATIAL', 'PLANE PROJECTED', 'PLANE EULER', 'PLANE VECTOR', 'PLANE POINTS', 'PLANE RELATIV',
       'PLANE AXIAL', 'PLANE RESET', 'TRANS DATUM', 'M128', 'M140', 'MOVE', 'TURN',
+      // v1.2.0 manual-check fix round (D6-8): the words that choose between the two rotary solutions.
+      'SEQ+', 'SEQ-', 'SYM+', 'SYM-',
     ]);
   });
 });
@@ -875,6 +896,58 @@ describe('P4a fix B1: the members the geometry fixes read (plan §7 #311-#318)',
       'codes[3].params[0].keepsRotary',
       'codes[4].params[0].inPlane',
       'codes[4].params[0].signOf',
+    ]);
+  });
+
+  it('D6-3: accepts a condition that names one code (code:G68), negated or not', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        { code: 'G43.4', label: 'Tool centre point', conflicts: ['code:G68', '!code:G68.2', 'cycle'] },
+        { code: 'G43.5', label: 'Tool centre point', conflicts: ['code:', 'code:68', 'code:G6 8'] },
+      ],
+    });
+    expect(db.codes.find((e) => e.code === 'G43.4')?.conflicts).toEqual(['code:G68', '!code:G68.2', 'cycle']);
+    expect(db.codes.find((e) => e.code === 'G43.5')?.conflicts).toBeUndefined();
+    expect(problems.map((p) => p.path)).toEqual(['codes[1].conflicts[0]', 'codes[1].conflicts[1]', 'codes[1].conflicts[2]']);
+  });
+
+  it('D6-5, D6-6: carries frameZero, frameCloses and turnsRotary, and drops them without their partner', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        {
+          code: 'CYCLE800',
+          label: 'Swivel',
+          frame: 'open',
+          params: [
+            { address: '_TC', label: 'Data set', frameCloses: '"0"' },
+            { address: '_ST', label: 'State', frameZero: 'onesDigit' },
+            { address: '_A', label: 'Angle', frameZero: 'zero' },
+          ],
+        },
+        { code: 'CYCL DEF 19', label: 'Tilt', positionsRotary: true, params: [{ address: 'F', label: 'Feed', turnsRotary: true }] },
+        { code: 'CYCLE832', label: 'Tolerance', params: [{ address: '_TOL', label: 'Tolerance', frameZero: 'zero', turnsRotary: true }] },
+        { code: 'CYCLE801', label: 'Grid', frame: 'open', params: [{ address: '_A', label: 'Angle', frameZero: 'half', frameCloses: '' }] },
+      ],
+    });
+    const at = (code: string) => db.codes.find((e) => e.code === code);
+    expect(at('CYCLE800')?.params?.map((p) => [p.frameCloses ?? null, p.frameZero ?? null])).toEqual([
+      ['"0"', null],
+      [null, 'onesDigit'],
+      [null, 'zero'],
+    ]);
+    expect(at('CYCL DEF 19')?.params?.[0].turnsRotary).toBe(true);
+    expect(at('CYCLE832')?.params?.[0].frameZero).toBeUndefined();
+    expect(at('CYCLE832')?.params?.[0].turnsRotary).toBeUndefined();
+    expect(at('CYCLE801')?.params?.[0].frameZero).toBeUndefined();
+    expect(problems.map((p) => p.path)).toEqual([
+      'codes[2].params[0].turnsRotary',
+      'codes[2].params[0].frameZero',
+      'codes[3].params[0].frameZero',
+      'codes[3].params[0].frameCloses',
     ]);
   });
 
@@ -1044,5 +1117,101 @@ describe('P4a fix B1: the members the geometry fixes read (plan §7 #311-#318)',
     });
     expect(db.codes[0].params?.map((p) => p.label)).toEqual(['Allowance']);
     expect(problems.map((p) => p.path)).toEqual(['codes[0].params[1].lengthAlong']);
+  });
+});
+
+describe('P4b follow-ups (v1.2.0)', () => {
+  it('T144: reads machineType "mill" or "lathe" and drops any other value', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        { code: 'POCKET3', label: 'Pocket', machineType: 'mill' },
+        { code: 'CYCLE95', label: 'Stock removal', machineType: 'lathe' },
+        { code: 'CYCLE81', label: 'Drilling' },
+        { code: 'CYCLE97', label: 'Thread', machineType: 'turning' },
+        { code: 'CYCLE98', label: 'Thread chain', machineType: true },
+      ],
+    });
+    expect(db.codes.map((e) => e.machineType ?? null)).toEqual(['mill', 'lathe', null, null, null]);
+    expect(problems.map((p) => p.path)).toEqual(['codes[3].machineType', 'codes[4].machineType']);
+  });
+
+  it('T144: marks the Sinumerik turning cycles as the cycle manuals sort them; the milling and drilling cycles stay for every machine', () => {
+    // 840D sl NC programming manual 06/2019 §3.25.1 (the technology table: turning CYCLE951,
+    // 930, 940, 99, 98, 92 and contour turning CYCLE952); 840D cycles manual 01/2008 chapter 4
+    // (the turning cycles CYCLE93, 95, 97, 98). The milling cycles (CYCLE61, POCKET3, POCKET4,
+    // SLOT1, SLOT2, contour milling CYCLE72) are unmarked: a lathe with driven tools runs them
+    // too (owner 2026-10-22, WX-NC-4), so the cycle form offers them on the turning profile.
+    const typed = (type: 'mill' | 'lathe'): string[] => sinumerik.db.codes.filter((e) => e.machineType === type).map((e) => e.code);
+    expect(typed('lathe')).toEqual(['CYCLE93', 'CYCLE95', 'CYCLE97', 'CYCLE99', 'CYCLE92', 'CYCLE930', 'CYCLE940', 'CYCLE951', 'CYCLE952', 'CYCLE98']);
+    expect(typed('mill')).toEqual([]);
+    // The milling and drilling cycles, the contour call both technologies use, and every other entry are unmarked.
+    for (const code of ['CYCLE61', 'POCKET3', 'POCKET4', 'SLOT1', 'SLOT2', 'CYCLE72', 'CYCLE81', 'CYCLE82', 'CYCLE83', 'CYCLE84', 'CYCLE840', 'CYCLE85', 'CYCLE86', 'CYCLE87', 'CYCLE88', 'CYCLE89', 'CYCLE62', 'CYCLE800']) {
+      expect(lookupCode(sinumerik.db, code)?.machineType, code).toBeUndefined();
+    }
+    // Every marked entry is on the owner's review page, and no other database marks one.
+    for (const code of [...typed('lathe'), ...typed('mill')]) expect(lookupCode(sinumerik.db, code)?.review, code).toBe('pending');
+    for (const raw of Object.values(BUILTIN_CODE_DB_JSON)) {
+      const db = load(raw).db;
+      if (db.dialect === 'sinumerik') continue;
+      expect(db.codes.filter((e) => e.machineType !== undefined).map((e) => e.code), db.dialect).toEqual([]);
+    }
+  });
+
+  it('the Fanuc lathe roughing cycles G71, G72 and G73 need P and Q in their second block (30i lathe manual §4.2.1-4.2.3)', () => {
+    // The cycle runs from the block that writes P (ns) and Q (nf); the first block has neither.
+    const lathe = resolveCodeDbs(BUILTIN_CODE_DB_JSON);
+    for (const dialect of ['fanuc-lathe', 'fanuc-lathe-b']) {
+      for (const code of ['G71', 'G72', 'G73']) {
+        const params = lookupCode(lathe[dialect], code)?.params ?? [];
+        const required = params.filter((p) => p.required === true).map((p) => `${p.address}${p.block}`);
+        expect(required, `${dialect} ${code}`).toEqual(['P2', 'Q2']);
+      }
+    }
+  });
+
+  it('Klartext 201 reads Q208=0 as the plunging feed Q206 (the owner, 2026-10-20; TNC 640 cycles manual §3.4)', () => {
+    const entry = lookupCode(heidenhain.db, 'CYCL DEF 201');
+    expect(entry?.expand && 'kind' in entry.expand ? entry.expand.feedOutZero : null).toBe('feed');
+    expect(entry?.params?.find((p) => p.address === 'Q208')?.label).toBe('Retract feed (0: the plunging feed Q206)');
+    // No other schema gives a feed of 0 a meaning: there it still refuses.
+    for (const db of [fanuc.db, heidenhain.db, sinumerik.db]) {
+      for (const e of db.codes) {
+        if (e.code === 'CYCL DEF 201' || e.expand === undefined) continue;
+        const schemas = 'by' in e.expand ? Object.values(e.expand.cases) : [e.expand];
+        for (const schema of schemas) expect(schema.feedOutZero, e.code).toBeUndefined();
+      }
+    }
+  });
+
+  it('P4b fix batch 3 (NC-6): reads blockFeed true and reports any other value', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        { code: 'CYCL CALL POS', label: 'Call at a position', blockFeed: true },
+        { code: 'CYCL CALL', label: 'Call' },
+        { code: 'CYCL CALL PAT', label: 'Call on a pattern', blockFeed: 'yes' },
+        { code: 'M99', label: 'Call once', blockFeed: false },
+      ],
+    });
+    expect(db.codes.map((e) => e.blockFeed ?? null)).toEqual([true, null, null, null]);
+    expect(problems.map((p) => p.path)).toEqual(['codes[2].blockFeed']);
+  });
+
+  it('P4b fix batch 3 (NC-1, NC-6): the subprogram calls carry call, and CYCL CALL POS a feed for its block only', () => {
+    const calls = (db: CodeDb): string[] => db.codes.filter((e) => e.call === true).map((e) => e.code);
+    expect(calls(heidenhain.db)).toEqual(['CALL LBL', 'CALL PGM']);
+    expect(calls(sinumerik.db)).toEqual(['CALL', 'PCALL', 'EXTCALL']);
+    expect(calls(okuma.db)).toEqual(['CALL', 'MODIN']);
+    // A cycle entry is never a call: Expand Drilling Cycles reads CYCL CALL and M99 itself.
+    for (const db of [fanuc.db, heidenhain.db, sinumerik.db, okuma.db]) {
+      expect(db.codes.filter((e) => e.call === true && e.sets?.cycle !== undefined).map((e) => e.code), db.dialect).toEqual([]);
+    }
+    for (const raw of Object.values(BUILTIN_CODE_DB_JSON)) {
+      const db = load(raw).db;
+      expect(db.codes.filter((e) => e.blockFeed === true).map((e) => e.code), db.dialect).toEqual(db.dialect === 'heidenhain' ? ['CYCL CALL POS'] : []);
+    }
   });
 });

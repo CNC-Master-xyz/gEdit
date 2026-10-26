@@ -1,0 +1,29 @@
+{
+  "$format": 1,
+  "about": "v1.2.0 T119: the second block of the two-block G71 opens the form of that block (P, Q, U finishing allowance, W, F, S, T). The allowance U and the feed change; the first block's U is not this U.",
+  "input": "../../nc/fanuc-lathe/l01-turning-a.nc",
+  "line": 16,
+  "form": {
+    "values": {
+      "P": "100",
+      "Q": "200",
+      "U": "0.4",
+      "W": "0.1",
+      "F": "0.25",
+      "S": "",
+      "T": ""
+    },
+    "kept": []
+  },
+  "values": {
+    "U": "0.5",
+    "F": "0.28"
+  },
+  "expected": {
+    "first": 16,
+    "last": 16,
+    "lines": [
+      "G71 P100 Q200 U0.5 W0.1 F0.28"
+    ]
+  }
+}

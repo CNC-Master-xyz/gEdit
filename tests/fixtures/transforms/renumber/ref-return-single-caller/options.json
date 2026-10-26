@@ -1,0 +1,30 @@
+{
+  "note": "P4.19 (plan 6.6 rule 10): M99 P20 in O2011 returns to N20 of the program that called it (the 30i manuals). Exactly one program of the file calls O2011, so the value is resolved in O2010, whose N20 is N30 after the run, and rewritten to P30. The subprogram's own N30 and N40 are not where it returns to.",
+  "profile": "fanuc-lathe",
+  "options": {},
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 2,
+        "severity": "info"
+      },
+      {
+        "line": 9,
+        "severity": "info"
+      },
+      {
+        "line": 13,
+        "severity": "info"
+      }
+    ],
+    "warnings": [
+      "ncNumbering.renumber.referencesRewritten"
+    ],
+    "preflight": null
+  }
+}

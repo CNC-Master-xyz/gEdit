@@ -153,7 +153,8 @@ scenario('m0-py3-default', { timeout: 120, env: 'finder', python: '{run}/alt/pyt
   await h.setenv('GEDIT_PYTHON', null)
   const first = await runScript(h)
   h.check('without it, the login shell profile decides which python3 runs a script', first.success && first.data.via === 'profile' && !first.data.geditPython, first)
-  h.check('the lookup does not delay the first run', first.ms < 3000, { ms: first.ms })
+  // A clock, so it goes through `checkTime`: the budget is this Mac's, and a hosted runner gets ten times as much.
+  h.checkTime('the lookup does not delay the first run', first.ms, 3000, { ms: first.ms })
 
   // With the profile changed, a second lookup would find another interpreter (`profile-changed`)
   // and read the profile a second time; neither may happen. This used to compare two run times
@@ -182,12 +183,17 @@ scenario('m0-py3-zdotdir', { timeout: 120, env: 'finder', python: '{run}/alt/pyt
   await installProbe(h)
   await h.setenv('GEDIT_PYTHON', null)
   const first = await runScript(h)
+  // Counted, not timed: the job sleeps for 8 s and holds the shell's output open. A lookup that waited for the
+  // output to close would only have come back once the job was over, so the job still running when the answer is
+  // in is the proof that it did not wait (the old check held the first run to 3 s and the difference to the second
+  // to 1 s, which a loaded runner stretches on its own).
+  const heldWhenAnswered = await h.pgrep(`perl -e sleep 8 ${h.cfg.run}`)
   const second = await runScript(h)
   h.check('a profile with a background job still answers', first.success && first.data.via === 'profile', first)
   h.check(
-    'a job that holds the shell output open does not stall the lookup',
-    first.ms < 3000 && first.ms - second.ms < 1000,
-    { first: first.ms, second: second.ms },
+    'a job that holds the shell output open does not stall the lookup: it was still running when the answer came',
+    first.success && heldWhenAnswered.length > 0,
+    { held: heldWhenAnswered, first: first.ms, second: second.ms },
   )
   const held = await h.pgrep(`perl -e sleep 8 ${h.cfg.run}`)
   h.check('the background job is indeed still running', held.length > 0, held)

@@ -81,6 +81,7 @@
         "plainTextRun": 3,
         "programNames": "<[A-Za-z0-9+\\-_.]+>",
         "systemVariableNumbers": 1000,
+        "tcpTableCoordinates": true,
         "variables": "#\\d+",
         "wordSeparatorRequired": false
       },
@@ -107,6 +108,10 @@
             "end": ")",
             "start": "("
           }
+        ],
+        "cycleRAbsoluteWith": [
+          "series-15",
+          "both"
         ],
         "decimalPointSignificant": false,
         "decimalSeparator": ".",
@@ -158,6 +163,7 @@
         "plainTextRun": 3,
         "programNames": "<[A-Za-z0-9+\\-_.]+>",
         "systemVariableNumbers": 1000,
+        "tcpTableCoordinates": true,
         "variables": "#\\d+",
         "wordSeparatorRequired": false
       },
@@ -198,7 +204,9 @@
           "(?:BEGIN|END)\\s+PGM\\s+(?<text>[^\\s;]+)(?=\\s*$)",
           "CYCL\\s+DEF\\s+12\\.1\\s+PGM\\s+(?<text>[^\\s;~]+)",
           "FN\\s*16\\s*:\\s*(?<text>[^\\s;](?:[^;]*?[^\\s;])?)(?=\\s*(?:;|$))",
-          "CALL\\s+PGM\\s+(?<text>[^\\s;~\"]+)"
+          "CALL\\s+PGM\\s+(?<text>[^\\s;~\"]+)",
+          "SEL\\s+PGM\\s+(?<text>[^\\s;~\"]+)",
+          "SEL\\s+(?:CYCLE|TABLE|PATTERN|CORR-TABLE)\\s+(?<text>[^\\s;~\"]+)"
         ],
         "incrementalPrefix": "I",
         "keywords": [
@@ -442,10 +450,25 @@
           "ASCALE",
           "MIRROR",
           "AMIRROR",
+          "ROTS",
+          "AROTS",
+          "CROTS",
+          "TOFRAME",
+          "TOFRAMEZ",
+          "TOFRAMEY",
+          "TOFRAMEX",
+          "TOROT",
+          "TOROTZ",
+          "TOROTY",
+          "TOROTX",
+          "TOROTOF",
+          "PAROT",
+          "PAROTOF",
           "SUPA",
           "DIAMON",
           "DIAMOF",
           "DIAM90",
+          "DIAMCYCOF",
           "SOFT",
           "BRISK",
           "FFWON",
@@ -500,7 +523,8 @@
         "strings": true,
         "systemVariables": "\\$[A-Z_][A-Z0-9_]*",
         "variables": "R\\d+",
-        "wordSeparatorRequired": false
+        "wordSeparatorRequired": false,
+        "incrementTravelsShift": true
       },
       "callRules": [
         "^\\s*(?:/\\d?[ \\t]*)?(?:N\\d+[ \\t]+)?(?:MCALL[ \\t]+)?(?!(?:AC|IC|DC|ACP|ACN|MSG|IF|WHILE|FOR|CASE|UNTIL|REPEATB|REPEAT|LOOP|GOTOF|GOTOB|GOTOC|GOTO|DEF|SETMS|SETM|CLEARM|WAITMC|WAITM|WAITE|WAITS|INIT|START|ORIRESET|FGROUP|TRAORI|TRANSMIT|TRACYL|TRAANG|EXTCALL|CALLPATH)[ \\t]*\\()(?<text>[A-Z_][A-Z0-9_]*(?=\\()|[A-Z_]{2}[A-Z0-9_]*(?=[ \\t]+\\())[ \\t]*\\(",
@@ -593,10 +617,25 @@
           "ASCALE",
           "MIRROR",
           "AMIRROR",
+          "ROTS",
+          "AROTS",
+          "CROTS",
+          "TOFRAME",
+          "TOFRAMEZ",
+          "TOFRAMEY",
+          "TOFRAMEX",
+          "TOROT",
+          "TOROTZ",
+          "TOROTY",
+          "TOROTX",
+          "TOROTOF",
+          "PAROT",
+          "PAROTOF",
           "SUPA",
           "DIAMON",
           "DIAMOF",
           "DIAM90",
+          "DIAMCYCOF",
           "SOFT",
           "BRISK",
           "FFWON",
@@ -651,7 +690,8 @@
         "strings": true,
         "systemVariables": "\\$[A-Z_][A-Z0-9_]*",
         "variables": "R\\d+",
-        "wordSeparatorRequired": false
+        "wordSeparatorRequired": false,
+        "incrementTravelsShift": true
       },
       "callRules": [
         "^\\s*(?:/\\d?[ \\t]*)?(?:N\\d+[ \\t]+)?(?:MCALL[ \\t]+)?(?!(?:AC|IC|DC|ACP|ACN|MSG|IF|WHILE|FOR|CASE|UNTIL|REPEATB|REPEAT|LOOP|GOTOF|GOTOB|GOTOC|GOTO|DEF|SETMS|SETM|CLEARM|WAITMC|WAITM|WAITE|WAITS|INIT|START|ORIRESET|FGROUP|TRAORI|TRANSMIT|TRACYL|TRAANG|EXTCALL|CALLPATH)[ \\t]*\\()(?<text>[A-Z_][A-Z0-9_]*(?=\\()|[A-Z_]{2}[A-Z0-9_]*(?=[ \\t]+\\())[ \\t]*\\(",

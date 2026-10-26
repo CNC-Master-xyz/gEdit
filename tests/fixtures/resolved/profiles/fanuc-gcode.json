@@ -119,7 +119,54 @@
     ],
     "numberInput": {
       "default": "is-b",
+      "pointlessFeeds": {
+        "choices": [
+          {
+            "label": "Feed per minute in 1 mm/min (F200 is 200 mm/min), feed per revolution in 0.01 mm/rev (F25 is 0.25 mm/rev)",
+            "value": "standard"
+          },
+          {
+            "classes": {
+              "feedPerRev": {
+                "increment": "0.001",
+                "incrementInch": "0.00001"
+              }
+            },
+            "label": "Feed per minute in 1 mm/min (F200 is 200 mm/min), feed per revolution in 0.001 mm/rev (F250 is 0.25 mm/rev; parameter 1405 bit 1)",
+            "value": "per-rev"
+          }
+        ],
+        "default": "standard",
+        "source": "syntax-fanuc.md §3.2",
+        "verify": true
+      },
       "presets": [
+        {
+          "digitCheck": false,
+          "id": "is-a",
+          "label": "Increments of 0.01 mm (IS-A): X50 is 0.50 mm, X50. is 50 mm, C9000 is 90°; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution in 0.01 mm/rev (F25 is 0.25 mm/rev)",
+          "source": "syntax-fanuc.md §3.2",
+          "value": {
+            "classes": {
+              "feedPerMin": {
+                "increment": "1",
+                "incrementInch": "0.01",
+                "mode": "increment"
+              },
+              "feedPerRev": {
+                "increment": "0.01",
+                "incrementInch": "0.0001",
+                "mode": "increment"
+              }
+            },
+            "incrementDeg": "0.01",
+            "incrementInch": "0.001",
+            "incrementMm": "0.01",
+            "incrementSec": "0.01",
+            "mode": "increment"
+          },
+          "verify": true
+        },
         {
           "id": "is-b",
           "label": "Increments of 0.001 mm (IS-B): X50 is 0.050 mm, X50. is 50 mm, C90000 is 90°; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution in 0.01 mm/rev (F25 is 0.25 mm/rev)",
@@ -182,7 +229,29 @@
         }
       ]
     },
-    "units": "mm"
+    "units": "mm",
+    "variants": [
+      {
+        "choices": [
+          {
+            "label": "Is the tool M6 loads: T5 M6 changes to tool 5 (default, verify)",
+            "value": "loaded"
+          },
+          {
+            "label": "Is the next tool: M6 loads the T written before it, and M6 T5 preselects tool 5 for the next change (verify)",
+            "overlay": {
+              "toolCall": {
+                "toolFrom": "last-before"
+              }
+            },
+            "value": "next"
+          }
+        ],
+        "default": "loaded",
+        "id": "toolOnChangeLine",
+        "label": "T on the M6 line"
+      }
+    ]
   },
   "machineType": "mill",
   "modal": {
@@ -192,6 +261,34 @@
   },
   "name": "Fanuc (ISO) mill",
   "numbering": {
+    "calls": [
+      {
+        "address": "P",
+        "localAddress": "Q",
+        "maxDigits": 4,
+        "repeatAddress": "L",
+        "trigger": "(?<![A-Z])M\\s*0*98(?!\\d)"
+      },
+      {
+        "address": "P",
+        "trigger": "(?<![A-Z])G\\s*0*(?:65|66(?:\\.1)?)(?![\\d.])"
+      },
+      {
+        "address": "P",
+        "trigger": "(?<![A-Z])G\\s*0*72\\.[12](?![\\d.])"
+      },
+      {
+        "address": "P",
+        "interrupt": true,
+        "trigger": "(?<![A-Z])M\\s*0*96(?!\\d)"
+      },
+      {
+        "address": "P",
+        "maxDigits": 4,
+        "repeatAddress": "L",
+        "trigger": "(?<![A-Z])M\\s*0*198(?!\\d)"
+      }
+    ],
     "digits": 0,
     "max": 99999,
     "onOverflow": "wrap",
@@ -200,21 +297,22 @@
         "addresses": [
           "P"
         ],
-        "rewrite": false,
+        "program": "caller",
         "trigger": "(?<![A-Z])M\\s*0*99(?!\\d)"
       },
       {
         "addresses": [
           "Q"
         ],
-        "trigger": "^(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)"
+        "trigger": "^(?![^(]*(?:(?<![A-Z])P|<))(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)"
       },
       {
         "addresses": [
           "Q"
         ],
+        "program": "called",
         "rewrite": false,
-        "trigger": "^(?=[^(]*P\\s*\\d)(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)"
+        "trigger": "^(?=[^(]*(?:(?<![A-Z])P|<))(?=[^(]*Q\\s*\\d)[^(]*(?<![A-Z])M\\s*0*98(?!\\d)"
       },
       {
         "addresses": [
@@ -351,6 +449,7 @@
     "plainTextRun": 3,
     "programNames": "<[A-Za-z0-9+\\-_.]+>",
     "systemVariableNumbers": 1000,
+    "tcpTableCoordinates": true,
     "variables": "#\\d+",
     "wordSeparatorRequired": false
   },

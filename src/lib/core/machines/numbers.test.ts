@@ -12,16 +12,19 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CodeEntry } from '$lib/core/codes/types';
+import { arcCentreEntry } from '$lib/core/codes/wordValue';
 import type { NumericLiteral } from '$lib/core/nc/types';
 import type { FeedUnit, MachineParamsDecl, NumberFormatOptions, Profile } from '$lib/core/profiles/types';
 import { parseNumber } from '$lib/core/nc/numbers';
 import { BUILTIN_PROFILE_JSON } from '$lib/data/profiles';
+import { withPointlessFeeds } from './fields';
 import { numberClassOf, readingsOf, resolveValue, valueOf, writeBack, WRITE_BACK_ERRORS } from './numbers';
 import type { EffectiveMachine, MachineParams, NumberInput, ResolvedClass } from './types';
 
 interface Golden {
   fmt: NumberFormatOptions;
-  inputs: Record<string, NumberInput>;
+  /** A `NumberInput` written out, or (T206) a shipped preset named `profile/preset`. */
+  inputs: Record<string, NumberInput | { note?: string; preset: string }>;
   decls: Record<string, { profile?: string; numberInput?: { default: string; presets: { id: string; label: string; input: string }[] } }>;
   profiles: Record<string, { profile?: string; inline?: unknown }>;
   class: {
@@ -33,6 +36,8 @@ interface Golden {
     codes: unknown[];
     /** M9: the entries of the codes in force the block does not write. */
     inForce?: unknown[];
+    /** FB-2: modal codes in force outside the cycle and motion groups; each lends its arc-centre words. */
+    modes?: unknown[];
     expected: ResolvedClass;
   }[];
   value: {
@@ -113,7 +118,20 @@ function inputOf(name: string | null): NumberInput | null {
   if (name === null) return null;
   const input = GOLDEN.inputs[name];
   expect(input, `no number input ${name} in the golden set`).toBeDefined();
+  if ('preset' in input) return shippedPreset(input.preset);
   return input;
+}
+
+/**
+ * T206: a preset the golden set names (`fanuc-gcode/is-b`) instead of copying it, read from the
+ * shipped profile, so the cases always test the data the app ships. Mirrors `input_of` in
+ * `test_machine.py`.
+ */
+function shippedPreset(ref: string): NumberInput {
+  const [profileId, presetId] = ref.split('/');
+  const found = builtin(profileId).machineParams?.numberInput?.presets.find((preset) => preset.id === presetId);
+  expect(found, `no preset ${ref} in the shipped profiles`).toBeDefined();
+  return found!.value;
 }
 
 /** The machine parameters a case describes; only `numberInput` matters to these functions. */
@@ -143,13 +161,17 @@ describe('machines/numbers.json', () => {
   });
 
   it.each(GOLDEN.class.map((c, i) => [`${i + 1}. ${c.note}`, c] as const))('class %s', (_name, c) => {
+    const profile = profileOf(c.profile);
+    // FB-2: what the modes in force lend, as `inForceEntries` adds it (`arc_centre_entry` in Python).
+    const lent = ((c.modes ?? []) as CodeEntry[]).map((entry) => arcCentreEntry(entry, profile)).filter((e): e is CodeEntry => e !== null);
+    const inForce = c.inForce !== undefined || lent.length > 0 ? [...((c.inForce ?? []) as CodeEntry[]), ...lent] : undefined;
     expect(
       numberClassOf(c.address, {
-        profile: profileOf(c.profile),
+        profile,
         feedUnit: c.feedUnit,
         blockCodes: c.codes as CodeEntry[],
         pitchFeed: c.pitchFeed === true,
-        ...(c.inForce !== undefined ? { inForce: c.inForce as CodeEntry[] } : {}),
+        ...(inForce !== undefined ? { inForce } : {}),
       }),
     ).toBe(c.expected);
   });
@@ -224,12 +246,15 @@ const KEEP: NumberFormatOptions = { decimals: 'keep', trailingZeros: 'keep', kee
 describe('numberClassOf', () => {
   const mill = builtin('fanuc-gcode');
 
-  it('takes the first parameter that declares a unit when two codes name the same address', () => {
+  // T212: this used to take the first code's unit, so the answer hung on the order the caller
+  // listed the block's codes in. Two codes that disagree now tell nothing, in either order.
+  it('gives no class when two codes declare the same address with different units, in either order', () => {
     const codes = [
       { code: 'G4', label: 'Dwell', params: [{ address: 'X', label: 'Time', unit: 'dwell' as const }] },
       { code: 'G83', label: 'Peck', params: [{ address: 'X', label: 'Position', unit: 'increment' as const }] },
     ] as CodeEntry[];
-    expect(numberClassOf('X', { profile: mill, feedUnit: 'per-minute', blockCodes: codes, pitchFeed: false })).toBe('dwell');
+    expect(numberClassOf('X', { profile: mill, feedUnit: 'per-minute', blockCodes: codes, pitchFeed: false })).toBeNull();
+    expect(numberClassOf('X', { profile: mill, feedUnit: 'per-minute', blockCodes: [...codes].reverse(), pitchFeed: false })).toBeNull();
   });
 
   it('ignores a parameter of another address and a parameter without a unit', () => {
@@ -324,5 +349,40 @@ describe('readingsOf', () => {
 
   it('answers nothing for a profile that declares no machine parameters at all', () => {
     expect(readingsOf(literalOf('50'), 'length', undefined, 'mm')).toEqual([]);
+  });
+});
+
+// T084: the golden set writes two machine number inputs out (`fine-feeds`, `is-c-per-rev`)
+// because no profile ships them as presets. They are exactly what the Machines page stores
+// for a preset with a "Point-less feeds" choice over it, so the golden values are the values
+// such a machine gets, in both languages.
+describe('the point-less feeds option (T084) and the golden set', () => {
+  const feedsDecl = () => builtin('fanuc-gcode').machineParams?.numberInput?.pointlessFeeds;
+  const choice = (value: string) => feedsDecl()?.choices.find((entry) => entry.value === value);
+  const written = (name: string): NumberInput => {
+    const { note: _note, ...input } = GOLDEN.inputs[name] as NumberInput & { note?: string };
+    return input;
+  };
+
+  // Manual-check fix D4-2: the lathe states its own choices; `fine-feeds` is a hand-written
+  // machine rule set since then (no choice of either profile makes it).
+  const latheChoice = (value: string) =>
+    builtin('fanuc-lathe').machineParams?.numberInput?.pointlessFeeds?.choices.find((entry) => entry.value === value);
+
+  it('lathe-per-minute and lathe-series-15 are the lathe is-b preset with the lathe choices', () => {
+    expect(latheChoice('per-minute')).toBeDefined();
+    expect(withPointlessFeeds(shippedPreset('fanuc-lathe/is-b'), latheChoice('per-minute'))).toEqual(written('lathe-per-minute'));
+    expect(withPointlessFeeds(shippedPreset('fanuc-lathe/is-b'), latheChoice('series-15'))).toEqual(written('lathe-series-15'));
+  });
+
+  it('is-c-per-rev is the is-c preset with the choice "per-rev"', () => {
+    expect(withPointlessFeeds(shippedPreset('fanuc-gcode/is-c'), choice('per-rev'))).toEqual(written('is-c-per-rev'));
+  });
+
+  it('the default choice and an "as written" preset change nothing', () => {
+    const isB = shippedPreset('fanuc-gcode/is-b');
+    expect(withPointlessFeeds(isB, choice(feedsDecl()!.default))).toEqual(isB);
+    const calculator = shippedPreset('fanuc-lathe/calculator');
+    expect(withPointlessFeeds(calculator, latheChoice('both'))).toEqual(calculator);
   });
 });

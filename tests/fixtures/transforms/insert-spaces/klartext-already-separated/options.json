@@ -1,1 +1,5 @@
-{}
+{
+  "note": "Klartext already separates its words, so the program comes back unchanged.",
+  "profile": "heidenhain-klartext",
+  "options": {}
+}

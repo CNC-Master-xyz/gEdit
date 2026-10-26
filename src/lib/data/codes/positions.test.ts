@@ -102,25 +102,42 @@ describe('what the roles decide (the reasons are in the G10 table, plan §8.7)',
     }
   });
 
-  it('Fanuc lathe: roles on G70 to G76 only — R of a lathe drilling cycle is a machine parameter', () => {
-    // On a lathe in G-code system A, whether R of a drilling cycle (G83 to G89) is a distance
-    // from the initial level or a position is a parameter of the control; nothing there is
-    // certain, so those cycles are refused and listed. The lathe replaces or removes every
-    // mill drilling cycle. P4a integration (§7 #305): the multiple repetitive cycles G70 to
-    // G76 are reviewed from the lathe manual — depths, retracts, allowances, block numbers,
-    // counts and feeds, no positions; their X and Z are axis words. Okuma has no role.
+  it('Fanuc lathe: G70 to G76, the drilling cycles G83 to G89 and the start angle of a threading pass', () => {
+    // P4a integration (§7 #305): the multiple repetitive cycles G70 to G76 are reviewed from
+    // the lathe manual — depths, retracts, allowances, block numbers, counts and feeds, no
+    // positions; their X and Z are axis words. Manual-check fix D5-8 (owner 2026-10-25): the
+    // drilling cycles G83 to G89 too. Their hole bottom (Z, X for G87 to G89) is an axis word
+    // and moves with a shift; R is incremental in G-code system A (`'none'`; NC-9: in the standard
+    // drilling format, the Series 15 format can make it absolute), and follows
+    // G90/G91 in system B, where gEdit cannot tell which (`'other'`: a shift refuses the cycle).
+    // D5-9: the start-angle shift Q of the threading passes G92 and G78 is no position. Okuma:
+    // NC-6, only the phase shift C of the fixed thread cycles G31 to G33 (an angle, no
+    // position, so the path does not read it as a C-axis move); nobody reviewed the rest.
     const repetitive = ['G70', 'G71', 'G72', 'G73', 'G74', 'G75', 'G76'];
-    expect(GOLDEN.databases['fanuc-lathe'].map((row) => row.code)).toEqual(repetitive);
-    for (const row of GOLDEN.databases['fanuc-lathe']) {
-      for (const [address, role] of row.params) {
-        expect(role, `${row.code} ${address}`).toBe(['X', 'Z', 'U', 'W'].includes(address) ? null : 'none');
+    const drilling = ['G83', 'G84', 'G85', 'G87', 'G88', 'G89'];
+    const threads = ['G78', 'G92'];
+    expect(GOLDEN.databases['fanuc-lathe'].map((row) => row.code)).toEqual([...repetitive, 'G78', ...drilling, 'G92']);
+    expect(GOLDEN.databases['fanuc-lathe-b'].map((row) => row.code)).toEqual(['G78', ...drilling]);
+    for (const dialect of ['fanuc-lathe', 'fanuc-lathe-b']) {
+      for (const row of GOLDEN.databases[dialect]) {
+        for (const [address, role] of row.params) {
+          let wanted: Role = ['X', 'Z', 'U', 'W'].includes(address) ? null : 'none';
+          if (threads.includes(row.code)) wanted = address === 'Q' ? 'none' : null;
+          if (drilling.includes(row.code) && address === 'R') wanted = dialect === 'fanuc-lathe' ? 'none' : 'other';
+          expect(role, `${dialect} ${row.code} ${address}`).toBe(wanted);
+        }
       }
     }
-    for (const dialect of ['fanuc-lathe', 'fanuc-lathe-b', 'okuma']) {
-      if (dialect !== 'fanuc-lathe') expect(GOLDEN.databases[dialect], dialect).toEqual([]);
-      const inherited = LOADED[dialect].codes.filter((e) => (e.params ?? []).some((p) => positionOf(p) !== null));
-      expect(inherited.map((e) => e.code).sort(), dialect).toEqual(dialect === 'okuma' ? [] : repetitive);
+    const okumaThreads = ['G31', 'G32', 'G33'];
+    expect(GOLDEN.databases.okuma.map((row) => row.code)).toEqual(okumaThreads);
+    for (const row of GOLDEN.databases.okuma) {
+      for (const [address, role] of row.params) expect(role, `okuma ${row.code} ${address}`).toBe(address === 'C' ? 'none' : null);
     }
+    const inherited = (dialect: string) =>
+      LOADED[dialect].codes.filter((e) => (e.params ?? []).some((p) => positionOf(p) !== null)).map((e) => e.code).sort();
+    expect(inherited('fanuc-lathe')).toEqual([...repetitive, ...drilling, ...threads].sort());
+    expect(inherited('fanuc-lathe-b')).toEqual([...repetitive, ...drilling, 'G78'].sort());
+    expect(inherited('okuma')).toEqual(okumaThreads);
   });
 
   it('Klartext: Q203 is the one tool-axis position, every depth and clearance is measured from it', () => {

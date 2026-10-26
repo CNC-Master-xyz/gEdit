@@ -655,13 +655,49 @@ describe('the machine parameters', () => {
     // G96 and G97 belong to the feed type on this control (G group 15), so there is no
     // spindle mode of its own for a machine to start in.
     expect(decl?.modalGroups).toEqual(['feedmode', 'plane', 'distance']);
-    expect(decl?.variants).toBeUndefined();
+    // v1.2.0 manual-check fix round (D3-4b): the tool change, T as built or M6 (MD22550).
+    // Review round D5-7: the counter spindle, Y turns with Z (default) or stays.
+    expect(decl?.variants?.map((v) => [v.id, v.default, v.choices.map((c) => c.value)])).toEqual([
+      ['toolChange', 't', ['t', 'm6']],
+      ['counterSpindleY', 'turns', ['turns', 'stays']],
+    ]);
     // G90 since the owner decision of 2026-10-08 (M10-1); a machine can still override it.
     expect(sinumerik.profile.modal?.initial).toEqual({ plane: 'G18', feedmode: 'G95', distance: 'G90' });
     expect(sinumerik.profile.machineType).toBe('lathe');
     // M12 (P12, §8.9): channel presets are offered, never applied, all `verify`;
     // `channelPresets.test.ts` pins them.
     for (const preset of decl?.channels?.presets ?? []) expect(preset.verify, preset.id).toBe(true);
+  });
+
+  it('D3-4b: lets a turning machine change tools at M6, as a chain or disc magazine does (MD22550 = 1)', () => {
+    const toolRows = (cp: CompiledProfile, lines: string[]): [number, string | undefined][] => {
+      const index = new OutlineIndex(cp);
+      index.reset(lines);
+      return index
+        .items()
+        .flatMap((item) => [item, ...(item.children ?? [])])
+        .filter((item) => item.kind === 'tool')
+        .map((item) => [item.line, item.tool]);
+    };
+    const withMachine = (value: string | null): CompiledProfile => {
+      const machine = { id: 'm', name: 'm', profile: SINUMERIK, params: value === null ? {} : { variants: { toolChange: value } } };
+      const applied = applyMachine(sinumerik.profile, effectiveMachine(sinumerik.profile, machine, 'document', {})).profile;
+      const checked = validateProfile(applied, { applied: true });
+      if (!checked.ok) throw new Error(checked.errors.join('; '));
+      return compileProfile(checked.profile);
+    };
+    const program = ['N10 T3 D1', 'N20 G0 X50 Z2', 'N30 T="DRILL" D1', 'N40 M6', 'N50 T0'];
+    // As built, T changes the tool on the turret; M6 is no change.
+    expect(toolRows(withMachine(null), program)).toEqual([
+      [1, '3'],
+      [3, '"DRILL"'],
+    ]);
+    expect(toolRows(withMachine('t'), program)).toEqual(toolRows(withMachine(null), program));
+    // With M6, T only selects: the change is the M6 line, with the T selected last.
+    expect(toolRows(withMachine('m6'), program)).toEqual([[4, '"DRILL"']]);
+    const [t, m6] = decl?.variants?.[0].choices ?? [];
+    expect(/verify/.test(t.label)).toBe(true);
+    expect(/MD22550/.test(m6.label)).toBe(true);
   });
 
   it('reads numbers as written, the only reading Siemens mode has', () => {

@@ -15,13 +15,18 @@
 // `RunEvent::Exit`, and the harness's own end of run (`h_done`) is a `process::exit`
 // that never gets there.
 //
-// BLOCKED, and named in the h2 hand-off: whether the saved geometry is *applied* to the
-// window cannot be observed from the page. `tests/runtime/harness/harness.rs:96-102`
-// (`prepare_main_window`) sets the window to 1100x700 and centres it on every start,
-// after the plugin's own restore, so every run is the same size whatever the file says.
-// What is checked here is everything else: the file is read at startup, the live geometry
-// is written back to it at exit, it lands in the config folder and not in `state.json`,
-// and it survives into the next run.
+// Whether the saved geometry is *applied* to the window is checked here too (T188). The harness
+// used to size the window to 1100x700 and centre it on every start (`prepare_main_window` in
+// `harness.rs`), after the plugin's own restore, so every run was the same size whatever the file
+// said. Both runs set `HARNESS_KEEP_GEOMETRY=1`, which leaves what the plugin restored alone, and
+// read the window through `h.window.geometry()` in physical pixels, the unit of the file:
+//
+//   run 1  the seeded size reaches the window; the scenario then resizes it (`h.window.setSize`),
+//          and the plugin writes that size at exit;
+//   run 2  the window starts at the size run 1 left, not at the harness's default.
+//
+// Besides that: the file is read at startup, the live geometry is written back to it at exit, it
+// lands in the config folder and not in `state.json`, and it survives into the next run.
 
 import { scenario } from '../lib/index.js'
 import { configPaths, listDir, read, tempLeftovers } from './m2-common.js'
@@ -30,8 +35,19 @@ const HOME_1 = '{run}/state-home'
 const HOME_2 = '{run}/../m2-window-state-1/state-home'
 const CONFIG = 'state-home/Library/Application Support/com.pburg.gedit'
 
-/** A geometry no default would produce, so "this file was read" is unambiguous. */
-const SEED = { width: 1210, height: 810, x: 141, y: 201, prev_x: 7, prev_y: 9, maximized: false, visible: false, decorated: true, fullscreen: false }
+/**
+ * A geometry no default would produce, so "this file was read" is unambiguous. It is small enough for any
+ * screen (1000 x 650 physical pixels) that the window server has no reason to change it.
+ */
+const SEED = { width: 1000, height: 650, x: 141, y: 201, prev_x: 7, prev_y: 9, maximized: false, visible: false, decorated: true, fullscreen: false }
+
+/** What run 1 resizes the window to, in logical pixels: not the seed and not the harness's 1100x700. */
+const RESIZED = { width: 900, height: 600 }
+/** Both runs keep the size the window-state plugin restored. */
+const KEEP = { HARNESS_KEEP_GEOMETRY: '1' }
+/** How far a size the window server applied may be from the one asked for, in physical pixels. */
+const SLACK = 2
+const near = (/** @type {number} */ a, /** @type {number} */ b) => Math.abs(a - b) <= SLACK
 
 const otherRun = (/** @type {string} */ run, /** @type {string} */ name) => run.replace(/\/[^/]+$/, `/${name}`)
 const windowStateFile = (/** @type {{ configDir: string }} */ paths) => `${paths.configDir}/.window-state.json`
@@ -40,7 +56,7 @@ scenario(
   'm2-window-state-1',
   {
     timeout: 180,
-    vars: { HOME: HOME_1 },
+    vars: { HOME: HOME_1, ...KEEP },
     files: { [`${CONFIG}/.window-state.json`]: `${JSON.stringify({ main: SEED }, null, 2)}\n` },
   },
   async (h) => {
@@ -50,14 +66,12 @@ scenario(
 
     h.check('the app runs on the shared home of this pair', paths.settingsFile.startsWith(`${h.cfg.run}/state-home/`), paths.settingsFile)
     h.check('the window state lives in the config folder, next to settings.json (D5)', !!(await h.disk.stat(stateFile)), stateFile)
-    h.log(`geometry: dpr=${window.devicePixelRatio} inner=${window.innerWidth}x${window.innerHeight} screen=${window.screenX},${window.screenY}`)
-    // Living documentation of the blocked half: the day the harness stops fixing the
-    // window size, this check fails and the pair can assert the real restore instead.
-    h.check('BLOCKED: the harness re-sizes the window after the restore, so the seeded size never reaches the page', window.innerWidth * window.devicePixelRatio !== SEED.width, {
-      inner: [window.innerWidth, window.innerHeight],
-      dpr: window.devicePixelRatio,
-      seed: [SEED.width, SEED.height],
-    })
+    const started = await h.window.geometry()
+    h.log(`geometry: ${JSON.stringify(started)} dpr=${window.devicePixelRatio} inner=${window.innerWidth}x${window.innerHeight}`)
+    h.check('the seeded size reached the window: the plugin\'s restore is not undone by the harness', near(started.width, SEED.width) && near(started.height, SEED.height), { started, seed: [SEED.width, SEED.height] })
+    // The user drags the window's edge: that is the size the plugin must write at exit.
+    const resized = await h.window.setSize(RESIZED.width, RESIZED.height)
+    h.check('the window takes a new size, as a drag of its edge would give it', near(resized.width, Math.round(RESIZED.width * resized.scale)) && near(resized.height, Math.round(RESIZED.height * resized.scale)), resized)
 
     // The three halves of the config folder, each written by a different owner.
     await ctx.commands.run('view.setTheme', 'light')
@@ -96,7 +110,7 @@ scenario(
     h.check('the theme is in settings.json, which holds only it', JSON.stringify(JSON.parse(await h.disk.read(paths.settingsFile))) === JSON.stringify({ $version: 1, 'appearance.theme': 'light' }), await h.disk.read(paths.settingsFile))
 
     // The plugin saves on RunEvent::Exit, so the run has to end through the window.
-    h.expectExit({
+    await h.expectExit({
       within: 15000,
       files: [
         { path: stateFile, includes: '"width"' },
@@ -104,16 +118,11 @@ scenario(
         { path: paths.stateFile, includes: '"recent"' },
       ],
     })
-    // `h.expectExit` only *queues* its record for the runner; the flush is an IPC round
-    // trip of its own. Under load the window can be gone before it lands, and the run is
-    // then judged as "the scenario never finished" (seen once in a full suite). A moment
-    // here is enough — see the h2 hand-off.
-    await h.sleep(500)
     await h.nativeKeys([{ key: 'w', mods: ['cmd', 'shift'] }])
   },
 )
 
-scenario('m2-window-state-2', { timeout: 180, vars: { HOME: HOME_2 } }, async (h) => {
+scenario('m2-window-state-2', { timeout: 180, vars: { HOME: HOME_2, ...KEEP } }, async (h) => {
   const ctx = /** @type {any} */ (h.app.ctx)
   const paths = configPaths(ctx)
   const stateFile = windowStateFile(paths)
@@ -126,10 +135,14 @@ scenario('m2-window-state-2', { timeout: 180, vars: { HOME: HOME_2 } }, async (h
 
   // ------------------------------------------------------------ the window geometry
   const saved = JSON.parse(await h.disk.read(stateFile)).main
-  h.log(`geometry: dpr=${window.devicePixelRatio} inner=${window.innerWidth}x${window.innerHeight} saved=${JSON.stringify(saved)}`)
+  const started = await h.window.geometry()
+  h.log(`geometry: ${JSON.stringify(started)} dpr=${window.devicePixelRatio} inner=${window.innerWidth}x${window.innerHeight} saved=${JSON.stringify(saved)}`)
   h.check('the last session wrote its own geometry over the seed', saved.width !== SEED.width && saved.height !== SEED.height, saved)
   h.check('it is a real window size', saved.width > 0 && saved.height > 0 && saved.maximized === false && saved.fullscreen === false, saved)
-  h.check('what was written is this window, in physical pixels', saved.width === Math.round(window.innerWidth * window.devicePixelRatio), { saved: saved.width, inner: window.innerWidth, dpr: window.devicePixelRatio })
+  h.check('it is the size run 1 gave the window, in physical pixels', near(saved.width, Math.round(RESIZED.width * started.scale)) && near(saved.height, Math.round(RESIZED.height * started.scale)), { saved: [saved.width, saved.height], resized: RESIZED, scale: started.scale })
+  // T188: the restore itself. The window is as big as the file says, and not the harness's own 1100x700.
+  h.check('this window started at the size the file holds: the geometry was restored and applied', near(started.width, saved.width) && near(started.height, saved.height), { started, saved })
+  h.check('and not at the harness\'s default size', !near(started.width, Math.round(1100 * started.scale)) && !near(started.height, Math.round(700 * started.scale)), { started })
   h.check('the seeded file was read: its position is the one the window started from', saved.prev_x === SEED.x && saved.prev_y === SEED.y, { prev: [saved.prev_x, saved.prev_y], seed: [SEED.x, SEED.y] })
   h.check('`visible` is never restored, so a window cannot come back hidden (AD-9)', saved.visible === SEED.visible && !!(await h.disk.stat(stateFile)), saved.visible)
 

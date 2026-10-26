@@ -1,0 +1,23 @@
+{
+  "note": "P4d §6.6 rules 6 and 7: numbering starts at the line after (--- CUT ---); the lines above keep their text and their numbers, and the IF jump to N9002 above still names that block, so it is left as it is and not reported.",
+  "profile": "okuma-osp",
+  "options": {
+    "startTrigger": "(--- CUT ---)",
+    "startAfterTrigger": true
+  },
+  "expect": {
+    "summary": "ncNumbering.renumber.summarySkipped",
+    "skipped": [
+      {
+        "line": 1,
+        "severity": "info"
+      },
+      {
+        "line": 5,
+        "severity": "info"
+      }
+    ],
+    "warnings": [],
+    "preflight": null
+  }
+}

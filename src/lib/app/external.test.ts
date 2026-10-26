@@ -14,7 +14,12 @@
 // and `app/fileOps.ts`'s disk half are replaced by `deps`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createExternalChangeService, POLL_INTERVAL_MS, type ExternalChangeDeps } from './external';
+import {
+  createExternalChangeService,
+  POLL_INTERVAL_MS,
+  type ExternalChangeDeps,
+  type ExternalChangeInternals,
+} from './external';
 import { createDocumentStore } from '$lib/stores/documents';
 import { fnv1a32 } from '$lib/core/text';
 import { MAX_OPEN_BYTES } from '$lib/app/fileOps';
@@ -47,7 +52,7 @@ interface Disk {
 
 interface Harness {
   docs: DocumentStore;
-  service: ExternalChangeService;
+  service: ExternalChangeService & ExternalChangeInternals;
   disk: Map<string, Disk>;
   messages: { text: string; error: boolean }[];
   reloaded: DocId[];
@@ -764,5 +769,48 @@ describe('a stamp the file system cannot tell apart from a rewrite (racy)', () =
     await h.service.checkNow();
 
     expect(h.reads).toBe(0);
+  });
+});
+
+// T218. The three per-document maps were emptied only when their own document was reported
+// on again, so a tab closed while its banner was up (or after "Keep mine" on a vanished
+// file) stayed in them for the whole session.
+describe('closed documents', () => {
+  it('are forgotten once the document is gone, banner up or not', async () => {
+    const h = harness();
+    const id = h.add();
+    h.disk.set(PATH, { text: 'O2000 (posted again)', mtimeMs: 6000 });
+    await h.service.checkNow();
+    expect(h.docs.get(id)?.external).toBe('changed');
+    expect(h.service.trackedCount()).toBe(1);
+
+    h.docs.remove(id);
+    await h.service.checkNow();
+    expect(h.service.trackedCount()).toBe(0);
+  });
+
+  it('are forgotten when a deleted file was kept and the tab is closed', async () => {
+    const h = harness();
+    const id = h.add();
+    h.disk.set(PATH, { text: null, mtimeMs: null });
+    await h.service.checkNow();
+    h.service.keepMine(id);
+    expect(h.service.trackedCount()).toBe(1);
+
+    h.docs.remove(id);
+    await h.service.checkNow();
+    expect(h.service.trackedCount()).toBe(0);
+  });
+
+  it('leaves the entries of the documents that are still open alone', async () => {
+    const h = harness();
+    const id = h.add();
+    h.disk.set(PATH, { text: 'O2000', mtimeMs: 6000 });
+    await h.service.checkNow();
+    await h.service.checkNow();
+    expect(h.service.trackedCount()).toBe(1);
+    // The banner is still up, and the file was read only once: nothing was dropped early.
+    expect(h.reads).toBe(1);
+    expect(h.docs.get(id)?.external).toBe('changed');
   });
 });

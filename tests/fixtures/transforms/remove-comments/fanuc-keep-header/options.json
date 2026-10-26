@@ -1,1 +1,9 @@
-{ "keepFirstLines": 3, "keepProgramName": false, "dropEmptied": true }
+{
+  "note": "Fanuc: keepFirstLines keeps the comments of the first three lines, and keepProgramName off removes the program name comment.",
+  "profile": "fanuc-gcode",
+  "options": {
+    "keepFirstLines": 3,
+    "keepProgramName": false,
+    "dropEmptied": true
+  }
+}

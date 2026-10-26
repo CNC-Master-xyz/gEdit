@@ -838,6 +838,27 @@ pub fn header_changed(req: &RunRequest, now: Option<&ScriptMeta>) -> bool {
         || req.output.is_some_and(|assumed| assumed != output)
 }
 
+/// A header whose two modes cannot be run together, answered as the refusal text, or
+/// `None` when the run may go ahead (T211).
+///
+/// `input = "none"` with `output = "replace"` hands the script nothing and then asks the
+/// app to replace a range of the document with what it wrote: the range is empty, so the
+/// result would land on the first line and quietly overwrite it. The webview refuses the
+/// combination before it asks for parameters (`headerRefusal` in `scripts.ts`); this is
+/// the same rule on the side that actually starts the process, so a run request that did
+/// not come through that check — a stale webview, a future caller — is refused too.
+pub fn header_conflict(meta: Option<&ScriptMeta>, script_id: &str) -> Option<String> {
+    let meta = meta?;
+    (meta.input == ScriptInput::None && meta.output == ScriptOutput::Replace).then(|| {
+        let name = if meta.name.is_empty() {
+            script_id
+        } else {
+            meta.name.as_str()
+        };
+        format!("{name} has no input to replace; check its header")
+    })
+}
+
 /// The plan for one script, given everything already resolved.
 fn plan_run(
     script: &Resolved,
@@ -893,6 +914,9 @@ pub fn script_run(
             "{HEADER_CHANGED} the header of {} was changed after the scripts were listed",
             req.script_id
         ));
+    }
+    if let Some(refusal) = header_conflict(header.meta.as_ref(), &req.script_id) {
+        return Err(refusal);
     }
     let from_header = header.meta.as_ref().and_then(|meta| meta.timeout);
     let timeout = Duration::from_secs(timeout_secs(req.timeout_secs, from_header, &settings));
@@ -1220,6 +1244,58 @@ mod tests {
         ));
         // A request that does not say what it assumed is not compared.
         assert!(!header_changed(&request(None, None), Some(&now)));
+    }
+
+    /// T211: the combination the webview refuses is refused here as well, and nothing
+    /// else is: every other pairing of the modes still runs.
+    #[test]
+    fn a_header_with_no_input_and_a_replace_output_is_refused() {
+        let broken = meta(ScriptInput::None, ScriptOutput::Replace);
+        let refusal = header_conflict(Some(&broken), "user:a.py").expect("must be refused");
+        assert!(refusal.contains("no input to replace"), "{refusal}");
+        // The script's own name is what the user knows it by.
+        assert!(refusal.starts_with("A "), "{refusal}");
+
+        for input in [
+            ScriptInput::SelectionOrDocument,
+            ScriptInput::Selection,
+            ScriptInput::Document,
+            ScriptInput::None,
+        ] {
+            for output in [
+                ScriptOutput::Panel,
+                ScriptOutput::Replace,
+                ScriptOutput::NewDocument,
+                ScriptOutput::Report,
+            ] {
+                let refused = header_conflict(Some(&meta(input, output)), "user:a.py").is_some();
+                let expected = input == ScriptInput::None && output == ScriptOutput::Replace;
+                assert_eq!(refused, expected, "{input:?} with {output:?}");
+            }
+        }
+        // No header at all is the v1 panel mode: nothing to refuse.
+        assert_eq!(header_conflict(None, "user:a.py"), None);
+    }
+
+    /// The command asks `header_conflict` about the header it just read, and does so
+    /// before anything is planned or started: removing the call would leave the pure
+    /// function above correct and the run unguarded.
+    #[test]
+    fn the_run_command_asks_about_the_header_before_it_plans_a_process() {
+        let source = crate::source_scan::lf(include_str!("runner.rs"));
+        let signature = concat!("pub fn script_", "run(");
+        let at = source.find(signature).expect("the signature changed");
+        let after = &source[at..];
+        let body = &after[..after.find("\n}\n").expect("the body does not end")];
+        let guard = body
+            .find(concat!("header_", "conflict(header.meta"))
+            .expect("script_run never asks about the header combination");
+        let plan = body.find(concat!("plan_", "run(")).expect("no plan");
+        assert!(guard < plan, "the guard comes after the process is planned");
+        assert!(
+            body.contains("return Err(refusal)"),
+            "the refusal is not returned"
+        );
     }
 
     #[test]

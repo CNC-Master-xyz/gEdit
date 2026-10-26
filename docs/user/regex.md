@@ -123,7 +123,16 @@ Two habits that save a program:
 ## When a pattern is slow
 
 A pattern with a group inside a group that both repeat (`(\d+)*`) can take very long on a
-line that almost matches. If a search seems to hang, write the pattern with fewer
-repeats: `\d+` instead of `(\d+)*`. gEdit has no way to stop a pattern that runs away (the
-editor's own find box is the same), and the program is frozen until it ends or you close
-the application, so **save your work before you try a pattern with nested repeats**.
+line that almost matches. gEdit runs the pattern you wrote in **Find All**, **Replace All**
+and the channel rules of a machine in the background first. A pattern that needs more than
+2 seconds (half a second for the lines you just edited, when channels are read again) is
+stopped, and gEdit says so: *The regular expression took longer than 2 seconds and was
+stopped. Nothing was found or changed.* For channel rules the status bar shows
+*Channels: pattern stopped* and the program shows no channels until the pattern is
+changed. Write the pattern with fewer repeats: `\d+` instead of `(\d+)*`, and no repeat
+inside a repeat such as `(a+)+`.
+
+Two places are not guarded yet: the editor's own find box and the file-name and outline
+patterns of a profile. A pattern that runs away there freezes the program until it ends or
+you close the application, so **save your work before you try a pattern with nested
+repeats** in them.

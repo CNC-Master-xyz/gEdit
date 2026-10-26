@@ -77,14 +77,96 @@ export interface NumberingOptions {
   /** Only renumber lines that already carry a block number. */
   onlyNumbered?: boolean;
   /**
+   * P4d (plan §6.6 rule 1): pick the largest whole increment that keeps the last numbered
+   * block at or below `max`; `step` is then not used. Needs a `max`.
+   */
+  fitToMax?: boolean;
+  /**
+   * P4d (§6.6 rule 2): the column (1-based, counted in characters) where the code behind
+   * a new block number starts. 0 or missing: off, `spacesAfter` decides the gap.
+   */
+  alignColumn?: number;
+  /**
+   * P4d (§6.6 rule 3): number every Nth block; the blocks between lose their number,
+   * except a block a reference names. 1 or missing: every block.
+   */
+  everyNth?: number;
+  /** P4d (§6.6 rule 4): lines containing one of these texts keep their text unnumbered. */
+  skipContaining?: string[];
+  /** P4d (§6.6 rule 5): the first this many lines of the run's scope are left as they are. */
+  skipFirst?: number;
+  /** P4d (§6.6 rule 5): the last this many lines of the run's scope are left as they are. */
+  skipLast?: number;
+  /**
+   * P4d (§6.6 rule 6): numbering starts at the first line of the scope that contains this
+   * text (or at the line after it, `startAfterTrigger`); the lines above keep their text.
+   * Empty or missing: from the first line.
+   */
+  startTrigger?: string;
+  startAfterTrigger?: boolean;
+  /**
    * Block-number references that have to follow a renumber (`M99 P…`, `GOTO…`).
    *
    * P6: `rewrite` defaults to true — the value is rewritten with the number it points at.
    * `false` means "report only": a Fanuc `M99 P` may name a block in the **caller**, which
    * a renumber of this file cannot see, so rewriting it would point the return somewhere
-   * else (F42).
+   * else (F42). P4d adds `program` (§6.6 rule 8): which program's block the value names.
    */
-  references?: { trigger: Pattern; addresses: string[]; rewrite?: boolean }[];
+  references?: ReferenceRule[];
+  /**
+   * P4d (§6.6 rule 9): the lines that call another program, and the word that names it
+   * (`M98 P1000`, `G65 P9010`). Read only to find the program a `program: 'called'` or
+   * `'caller'` reference points into; nothing else reads them.
+   */
+  calls?: CallRule[];
+}
+
+/**
+ * Which program's block a reference names (P4d, plan §6.6 rule 8). `own` (the default):
+ * the program the reference stands in (`GOTO`, `M98 Q` without `P`, `G71 P… Q…`).
+ * `called`: the program the same line calls through a `numbering.calls` rule (`M98 P1000
+ * Q30`). `caller`: the program that calls the one the reference stands in (`M99 P30`).
+ */
+export type ReferenceProgram = 'own' | 'called' | 'caller';
+
+/** One `numbering.references` rule (§7.1, P4d §6.6). */
+export interface ReferenceRule {
+  trigger: Pattern;
+  addresses: string[];
+  rewrite?: boolean;
+  program?: ReferenceProgram;
+}
+
+/**
+ * One `numbering.calls` rule (P4d, plan §6.6 rule 9). A line calls a program when the
+ * trigger matches the comment-masked line; the program is the plain number of the word
+ * `address` on that line, or a program-name token (`syntax.programNames`, `<NAME>`).
+ *
+ * `maxDigits` and `repeatAddress` say how the number is read when a repeat count may share
+ * the word (Fanuc `M98 P21010` = 2 × O1010; with 5 to 8 digits the count is an `L` word):
+ * a value of at most `maxDigits` digits, or any value on a line that carries a
+ * `repeatAddress` word, is the program number; a longer value without it is a repeat count
+ * followed by a program number of `maxDigits` digits. Without `maxDigits` the whole value is
+ * the program number.
+ */
+export interface CallRule {
+  trigger: Pattern;
+  address: string;
+  maxDigits?: number;
+  repeatAddress?: string;
+  /**
+   * P4d review NC-1 (§7 row): the word that makes a line on which the rule fires without
+   * `address` and without a program name a **local call** (Fanuc `M98 Q30`: the program
+   * runs its own blocks from N30 up to the next return as a subprogram). A rule without it
+   * that fires without its word calls nothing (a bare `M96`, `G65` without `P`).
+   */
+  localAddress?: string;
+  /**
+   * P4d review NC-2 (§7 row): the rule starts its program as an interrupt (Fanuc `M96 P…`).
+   * Such a program runs when a signal arrives and returns into whichever program it
+   * interrupted, so this call never proves which program an `M99 P` in it returns to.
+   */
+  interrupt?: boolean;
 }
 
 /** `profile.numberFormat`, read by `formatNumber` (WP3.2) and the M4 transforms. */
@@ -103,7 +185,7 @@ export interface NumberFormatOptions {
 }
 
 /**
- * P13 (AD-30). The typing options of a profile; both default to false when absent.
+ * P13 (AD-30), P4c. The typing options of a profile; every one defaults to false when absent.
  *
  * - `forceUppercase`: a plain letter typed outside a comment, a string and kept text
  *   (`TokenKind` `'comment'`, `'string'`, `'text'`) is typed in upper case. Paste, a
@@ -111,10 +193,23 @@ export interface NumberFormatOptions {
  * - `preventLineJoin`: Backspace at column 1 and Delete at the end of a line, with one
  *   empty selection, do nothing and say why in the status bar. A selected line break can
  *   still be deleted.
+ * - `autoSpace` (P4c, plan §6.5): a letter that starts a new address word, typed straight
+ *   after a finished word, gets a space in front of it (`G1X` becomes `G1 X`).
+ * - `autoNumber` (P4c, plan §6.5): Enter at the end of a numbered block starts the next
+ *   line with the next block number.
+ *
+ * `autoSpace` and `autoNumber` are **read as `=== true`**: absent means off, which is the
+ * loader default of the owner's answer A13 (2026-10-17). No built-in profile carries them
+ * (P4d is the sole writer of `src/lib/data/profiles/*.json`), and no default is written into
+ * a resolved profile, so an effective profile and its goldens stay as they were. A profile
+ * that wants them on sets them itself; the session switches of `contrib/typing.ts` override
+ * the profile for the running session.
  */
 export interface ProfileEditing {
   forceUppercase?: boolean;
   preventLineJoin?: boolean;
+  autoSpace?: boolean;
+  autoNumber?: boolean;
 }
 
 /**
@@ -332,6 +427,30 @@ export interface Profile {
      */
     systemVariableNumbers?: number;
     /**
+     * v1.2.0 manual-check fix round (D6-7). An incremental move after a change of the zero point
+     * (a shift code, a work offset code) also travels that change, until the axis is written
+     * absolutely (Sinumerik setting data SD42440 at 1). Read by the geometry scripts only:
+     * rotate and mirror refuse such a move (`shift-increment`). It changes no token.
+     */
+    incrementTravelsShift?: boolean;
+    /**
+     * v1.2.0 review round (D6-4). The control's tool centre point control can read its
+     * coordinates in the table's or in the workpiece's coordinate system (a machine parameter:
+     * Fanuc 19696 bit 5), and gEdit's Translate reads them in the table's. Read by Translate
+     * only: the first block it moves under tool centre point control carries an information
+     * row and the message a sentence that says so (`tcp-table`). It changes no token.
+     */
+    tcpTableCoordinates?: boolean;
+    /**
+     * v1.2.0 review round (NC-9). The point-less-feeds choices
+     * (`machineParams.numberInput.pointlessFeeds`) that stand for a tape format in which a
+     * drilling cycle's `R` can be an absolute position (Fanuc lathe: the Series 15 format, with
+     * parameter 5102 bit 6). Read by Translate only: on a machine with one of these choices, a
+     * cycle block whose `R` the shift leaves as written (`position: 'none'`) carries an
+     * information row (`cycle-r-left`). It changes no token.
+     */
+    cycleRAbsoluteWith?: string[];
+    /**
      * P8. A header on the **first line** of the file, read as one `programMarker`: Okuma
      * `^\$[^%]*%`, Sinumerik `^%_N_\w+_(MPF|SPF)`. It is not an NC block, and the `$` of
      * the Okuma form is not the hexadecimal constant of an expression.
@@ -536,8 +655,15 @@ export interface Profile {
     trigger: Pattern;
     /** Carries the named group `tool`. */
     tool: Pattern;
-    /** `same-line-or-last`: the tool is the `T` on the line, or the last `T` before it. */
-    toolFrom: 'same-line' | 'same-line-or-last';
+    /**
+     * `same-line-or-last`: the tool is the `T` on the line, or the last `T` before it.
+     * `last-before` (v1.2.0 manual-check fix round, D3-4c: a Fanuc mill whose `T` on the `M6`
+     * line preselects the next tool): the tool is the last `T` written **before** the line; a
+     * `T` on the tool line itself is the next tool, preselected for the following change.
+     * There `ignore` no longer stops a tool line (`M6 T0` loads the tool selected before it);
+     * it only says that its `T` word unloads, so the next change loads no tool.
+     */
+    toolFrom: 'same-line' | 'same-line-or-last' | 'last-before';
     /**
      * P6. A trigger line whose **masked** text also matches this is not a tool change.
      * A Fanuc lathe writes `T0100` to cancel the offset of station 1 and `G00 X100. T0100`
@@ -608,6 +734,47 @@ export interface NumberInputPreset {
   /** Where the notes say so (`'syntax-okuma.md §3.3'`); absent with `verify: true` = a documented default. */
   source?: string;
   verify?: boolean;
+  /**
+   * T083 (the owner's decision of 2026-10-19). `false`: the Digits check of Check Program
+   * (`wordDigits`, `program_checks.py`) leaves this preset out when no machine is chosen. That
+   * check reports a word only when it has too many digits on **every** preset; a coarse
+   * increment system few machines run (Fanuc IS-A, 0.01 mm) has the fewest digits of all and
+   * would hide every such word on the common ones. Absent or `true`: the preset takes part.
+   * Nothing else reads it: the readings of a word with no machine list every preset.
+   */
+  digitCheck?: boolean;
+}
+
+/**
+ * T084. A machine option on top of the number-input preset: how the control counts a feed
+ * written **without** a decimal point (Fanuc: two parameters switch the feed per minute and
+ * the feed per revolution to steps of 0.001 mm, 0.00001 in). It is never a preset and never
+ * read without a machine: the Machines page writes the chosen steps into the machine's own
+ * number rules (`NumberInput.classes`), where every reader already looks, and the default
+ * choice changes nothing (the validator holds it to that).
+ */
+export interface PointlessFeedsDecl {
+  /** The choice a machine has until it says otherwise; it has no `classes`. */
+  default: string;
+  choices: PointlessFeedChoice[];
+  /** Where the notes say so. */
+  source?: string;
+  /** A documented default nobody has confirmed for a machine: the choices say "unconfirmed". */
+  verify?: boolean;
+}
+
+/** One choice of `PointlessFeedsDecl`. */
+export interface PointlessFeedChoice {
+  /** `'standard'`, `'per-minute'`. */
+  value: string;
+  /** Display text; data, not a translation key. */
+  label: string;
+  /**
+   * The steps this choice puts over the preset's own, per feed class. Applied only where the
+   * preset counts that class in increments: with calculator-type input a feed is read as
+   * written whatever the feed parameters say. Absent: the preset as it is.
+   */
+  classes?: Partial<Record<'feedPerMin' | 'feedPerRev', { increment: string; incrementInch?: string }>>;
 }
 
 /**
@@ -644,13 +811,27 @@ export interface VariantDecl {
   label: string;
   /** One of the `choices` values; what applies when nothing is chosen and nothing detected. */
   default: string;
+  /**
+   * v1.2.0 manual-check fix round (D5-3). The default follows another variant: while the
+   * variant named here has one of the `values` keys, the default is that key's value (Fanuc
+   * lathe: in G-code system B `incrementalAddresses` defaults to `none`, G91 only). It
+   * applies only where the default would (nothing chosen for this variant on the machine,
+   * nothing detected); on the machine page it is the form's default, and it follows a switch
+   * of the other variant until this one is changed by hand.
+   */
+  defaultBy?: { variant: string; values: Record<string, string> };
   choices: VariantChoice[];
 }
 
 /** `profile.machineParams` (§7.15, §8.8). */
 export interface MachineParamsDecl {
   /** Absent: numbers are read as the profile's JSON says, with no choice (Klartext). */
-  numberInput?: { default: string; presets: NumberInputPreset[] };
+  numberInput?: {
+    default: string;
+    presets: NumberInputPreset[];
+    /** T084: the machine option for point-less feeds; absent = the presets as they are. */
+    pointlessFeeds?: PointlessFeedsDecl;
+  };
   /** Power-on default; absent = `'mm'`. */
   units?: 'mm' | 'inch';
   /** Lathes only; absent = not a parameter of this profile. */
@@ -724,6 +905,20 @@ export interface CompiledProfile {
     programEnd: RegExp[];
     outline: { kind: OutlineKind; re: RegExp }[];
     references: { trigger: RegExp; addresses: string[] }[];
+    /**
+     * P4d (§6.6 rule 9): `numbering.calls`, compiled. Optional so that a hand-built
+     * compiled profile (a fallback, a test) needs no entry; `compileProfile` always sets it.
+     */
+    calls?: {
+      trigger: RegExp;
+      address: string;
+      maxDigits: number | null;
+      repeatAddress: string | null;
+      /** P4d review NC-1: `CallRule.localAddress`, or null; optional for a hand-built profile. */
+      localAddress?: string | null;
+      /** P4d review NC-2: `CallRule.interrupt`; optional for a hand-built profile. */
+      interrupt?: boolean;
+    }[];
     commentFilter?: RegExp;
   };
   /** `syntax.keywords`, upper-cased and longest first, so the tokenizer can match greedily. */

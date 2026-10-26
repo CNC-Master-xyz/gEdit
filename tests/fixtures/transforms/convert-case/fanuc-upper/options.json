@@ -1,1 +1,7 @@
-{ "case": "upper" }
+{
+  "note": "Fanuc, to upper case.",
+  "profile": "fanuc-gcode",
+  "options": {
+    "case": "upper"
+  }
+}

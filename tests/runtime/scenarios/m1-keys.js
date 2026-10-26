@@ -49,7 +49,7 @@ scenario('m1-keys', { timeout: 180 }, async (h) => {
   await h.dialogs.queue('save', first)
   await h.nativeKeys([{ key: 's', mods: ['cmd'] }])
   await h.waitFor(async () => (await h.title()) === 'from-editor.nc — gEdit', { timeout: 6000 })
-  await h.sleep(600)
+  await h.idle()
   h.check(
     'Cmd+S with the editor focused saves once, through the Monaco action',
     h.dialogs.calls().slice(calls).filter((c) => c.kind === 'save').length === 1 && (await h.disk.read(first)).includes('T1 M6'),
@@ -70,7 +70,7 @@ scenario('m1-keys', { timeout: 180 }, async (h) => {
   await h.dialogs.queue('save', second)
   await h.nativeKeys([{ key: 's', mods: ['cmd'] }])
   await h.waitFor(async () => (await h.title()) === 'from-ribbon.nc — gEdit', { timeout: 6000 })
-  await h.sleep(600)
+  await h.idle()
   h.check(
     'Cmd+S with a ribbon button focused saves once, through the window dispatcher',
     h.dialogs.calls().slice(calls).filter((c) => c.kind === 'save').length === 1 && (await h.disk.read(second)).includes('T2 M6'),
@@ -125,7 +125,8 @@ scenario('m1-keys', { timeout: 180 }, async (h) => {
   )
 
   await h.nativeType('Save')
-  await h.sleep(600)
+  await h.waitFor(() => [...document.querySelectorAll('.quick-input-list .monaco-list-row')].some((r) => r.textContent?.includes('File: Save As')), { timeout: 8000 })
+  await h.idle()
   const rows = [...document.querySelectorAll('.quick-input-list .monaco-list-row')].map((r) => ({
     label: r.querySelector('.label-name')?.textContent?.trim() ?? r.textContent?.trim() ?? '',
     keys: [...r.querySelectorAll('.monaco-keybinding-key')].map((k) => k.textContent).join(''),
@@ -138,7 +139,8 @@ scenario('m1-keys', { timeout: 180 }, async (h) => {
     { rows, filter: /** @type {HTMLInputElement | null} */ (document.querySelector('.quick-input-box input'))?.value },
   )
   await h.nativeKeys([{ key: 'Escape' }])
-  await h.sleep(500)
+  await h.waitFor(() => getComputedStyle(/** @type {Element} */ (document.querySelector('.quick-input-widget'))).display === 'none', { timeout: 5000 })
+  await h.idle()
   h.check(
     'Esc closes the palette and types nothing into the buffer',
     getComputedStyle(/** @type {Element} */ (document.querySelector('.quick-input-widget'))).display === 'none' && !h.app.text().includes('Save'),
@@ -165,7 +167,7 @@ scenario('m1-keys', { timeout: 180 }, async (h) => {
   const prompt = await h.alert.wait()
   h.check('Cmd+Shift+W goes through the unsaved-changes guard', JSON.stringify(prompt?.buttons) === JSON.stringify(['Save', "Don't Save", 'Cancel']), prompt)
   await h.alert.click('Cancel')
-  await h.sleep(900)
+  await h.idle()
   h.check('Cancel keeps the window', (await h.window.state()).exists, await h.window.state())
 
   // Cmd+Shift+W is the webview's own command: it confirms, then destroys the window, so

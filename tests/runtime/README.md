@@ -81,8 +81,8 @@ tests/runtime/suite.sh tests/runtime/suites/m0.txt   # run a suite and print the
 
 ## On a hosted runner
 
-`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt` on `macos-14`
-(150 minute limit since P4a; it was 45: `p4-perf` runs five scripts on 300,000 lines, about 100 minutes for the job, see the comment in `harness.yml`), always uploads `$GEDIT_RH_DIR/out`, the app logs and the sync logs, and
+`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e}.txt` on `macos-14`
+(150 minute limit since P4a; it was 45: `p4-perf` runs five scripts on 300,000 lines, about 100 minutes for the job, see the comment in `harness.yml`; its P4e sections D to F add about ten minutes of key presses and three programs opened), always uploads `$GEDIT_RH_DIR/out`, the app logs and the sync logs, and
 caches the build directory. A run started by hand can be limited to some scenarios or suites (the
 `scenarios` input: space-separated names, scenario names and/or suite names such as `p4e`, letters, digits, `.`, `_`, `-` only;
 empty runs the whole list as a push to `main` does), for the answer on one change without the whole 100 minutes:
@@ -115,11 +115,11 @@ What differs from the owner's Mac, and how the scenarios deal with it:
 
 ## Suites
 
-One file per milestone, `suites/m0.txt` … `suites/m12.txt`, then `suites/rp.txt` (M12.5, "Real programs, second pass"), `suites/m13.txt` (M13 and the Phase 2 exit criteria), `suites/p3a.txt` (Phase 3, P3a "Understand a block"), `suites/p3b.txt` (Phase 3, P3b "Write with templates"), `suites/b1.txt` (the bug-fix round B1) `suites/p4a.txt` (Phase 4, P4a "Move the path") and `suites/p4e.txt` (Phase 4, P4e "Side by side"): one scenario name per line, `#`
+One file per milestone, `suites/m0.txt` … `suites/m12.txt`, then `suites/rp.txt` (M12.5, "Real programs, second pass"), `suites/m13.txt` (M13 and the Phase 2 exit criteria), `suites/p3a.txt` (Phase 3, P3a "Understand a block"), `suites/p3b.txt` (Phase 3, P3b "Write with templates"), `suites/b1.txt` (the bug-fix round B1) `suites/p4a.txt` (Phase 4, P4a "Move the path"), `suites/p4b.txt` (Phase 4, P4b "Drilling cycles and time"), `suites/p4c.txt` (Phase 4, P4c "Typing help and bookmarks"), `suites/p4d.txt` (Phase 4, P4d "Renumber, all of it") and `suites/p4e.txt` (Phase 4, P4e "Side by side"): one scenario name per line, `#`
 starts a comment. A cumulative run is all of them in order:
 
 ```sh
-tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4e}.txt
+tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e}.txt
 ```
 
 The Phase 2 exit criteria (plan §2.2) and where each is proven; `suites/m13.txt` has the same table in its comments:
@@ -160,7 +160,16 @@ The Phase 4 criteria that the running app proves (`suites/p4a.txt`, plan `docs/p
 | X19 to X22 Translate, Rotate and Mirror from the Tools tab's Built-in Scripts on the goldens of `tests/fixtures/scripts/{translate,rotate,mirror}`: the form, the golden's text, message and findings, one undo; a refused run that changes nothing and lists every refused block in Results | `p4-geometry` |
 | X34 (geometry) the three scripts on a 300,000-line program, and rotate and mirror at 30 degrees on an arc-heavy one, within the 900 s of their timeout (a target of 450 s on the development Mac), the result compared line by line, one undo; never retried | `p4-perf` |
 
-The Phase 4 criteria of P4e "Side by side" that the running app proves (`suites/p4e.txt`, plan `docs/planning/phase-4-implementation.md` §2.2 and §5 P4e):
+The Phase 4 criteria of P4c "Typing help and bookmarks" that the running app proves (`suites/p4c.txt`, plan `docs/planning/phase-4-implementation.md` §2.2 and §6.5; none of them has been run on a runner yet). The programs are `tests/fixtures/p4c/harness/` (its README lists the lines the checks rely on, `tests/unit/p4cHarnessFixtures.test.ts` holds the expected texts to what the core says for them). No scenario opens a system dialog: `h.app.ctx.print.setPrintFunction` is a stub and the save and open dialogs are the harness's queued answers.
+
+| Criterion | Scenario |
+|---|---|
+| X26 Auto Space (`G1X` is `G1 X`, one undo, a comment and `GOTO` untouched, a paste not a key, off until switched on, never saved) and the automatic block number on Enter (the gap number in a Fanuc program, the renumber below in a Klartext program as one undo, a refusal said in the status bar, a continuation line never numbered, Enter after a typed `M3` that may open the suggestion list), with both switches on together | `p4-comfort` (A, B, C) |
+| X27 (bookmarks) names (trimmed, the limit, an empty answer, Cancel), names that follow their line and survive closing the file, the panel (rows of all documents, jump, rename, delete, Clear All asks once), Bookmark All Matches from the find widget (case, regular expression, find in selection, names kept), the 201st refused | `p4-comfort` (D) |
+| X27 (bookmarks) named bookmarks across a restart: a tab nobody has shown is listed from its waiting memo, a click shows it and jumps, a delete changes the memo | `p4-comfort-names-1`, `p4-comfort-names-2` |
+| X27 (ranges, files, print) Select and Delete Block Range (the form's refusals, the remembered kind, a block with continuation lines whole, one undo), Insert File and Append File (placement, at line 1 below the leading `%` and the program start, Append before the closing `%` or `END PGM`, selected lines, the program-end and tape-end warnings, the file's `%` lines left out, a program start where blocks follow, Klartext renumbering as one undo, the refusals), Print (Mod+P, the view's pages, rows, colours and numbers, a selection, the 20,000-line limit, the view removed at `afterprint`, at the next print and with the document) and Export as HTML (the stubbed save dialog, escaping, one section per page) | `p4-comfort` (E, F, G, H) |
+
+The Phase 4 criteria of P4e "Side by side" that the running app proves (`suites/p4e.txt`, plan `docs/planning/phase-4-implementation.md` §2.2 and §5 P4e; the three `p4-perf` rows at the end stay in `suites/p4a.txt`, with the rest of that scenario, and have not been run on a runner yet):
 
 | Criterion | Scenario |
 |---|---|
@@ -168,6 +177,37 @@ The Phase 4 criteria of P4e "Side by side" that the running app proves (`suites/
 | X29 (channel view) one program with two channel sections and one file per path (`tests/fixtures/p4e/`): the file dialog for the other files, the bar's data attributes, the filler zones and the panes level at the owner's wait codes (`M901P12`, `M910P123`), matched and unmatched marks and the hover of an unmatched one, panes that always scroll together without drift, one undo step from either pane (and one history over three files), the compare overlay, closing by the bar, Close Split and a pane's X; Go to the Matching Mark follows the `P` set | `p4-channels` |
 | X29 (merge back) Split into Channel Documents, an edit in each channel document, Merge Channels Back as one undo step (and again after the undo), and the refusal when the program changed in a channel's lines | `p4-channels` |
 | X30 word marks (`F1200` to `F1000` marks both whole words) in the raw view and review mode; the Aligned view: two panes with fillers that keep them level, the block arrow and the filler arrow (a real click) copy a block as one undo step of the target, "Word" copies the marked word, a review toggle takes a renumbered-only difference out, the editor and its focus come back | `p4-compare` |
+| X34 (P4e, split view) the typing budget of P1 with a second pane on the 300,000-line simple program: 40 characters typed with real key presses in one editor (the baseline), in group 1 while group 2 draws the same lines, in group 1 while group 2 is at the top, in group 2 while group 1 draws the same lines, and in the one editor again after Close Split; each p95 of the keypress to the frame under 50 ms (the other group drawing the character within the same 50 ms, and no more than one frame, 17 ms, over the baseline), and Split Editor shows both groups drawn within 2 s (the open budget of P1; proposed, the plan states none) | `p4-perf` (D) |
+| X34 (P4e, channel view) a 300,000-line program with two channel sections and 20,000 waits (the program of `m12-perf`): Channels Side by Side shows both panes drawn, with the bar saying all 20,000 waits are lined up, within 2 s (proposed); 40 characters typed in pane 2 and in pane 1, each p95 under 50 ms and within one frame of the one-editor baseline; 20 line breaks in pane 2, each moving every wait below it, p95 within 100 ms (the figure `channelPanes.typing.slow.test.ts` holds the code to; proposed for the page); the waits found again afterwards | `p4-perf` (E) |
+| X34 (P4e, aligned view) two 100,000-line programs that differ in 450 places (150 changed feeds, 150 removed lines, 150 new lines): the Aligned view shows its 450 blocks on both sides, counted against the construction, within 6 s from `compare.open` (the review normalization's 5 s and the diff's 1 s; proposed), 40 characters typed in the current document's pane with p95 under 50 ms, and the typed line drawn as a block of its own within 9 s of the last key (the view's longest wait before it aligns again, 3 s, and the alignment after it; proposed) | `p4-perf` (F) |
+
+The Phase 4 criteria of P4b "Drilling cycles and time" that the running app proves (`suites/p4b.txt`, plan `docs/planning/phase-4-implementation.md` §2.2 and §5 P4b; `p4-perf` stays in `suites/p4a.txt`):
+
+| Criterion | Scenario |
+|---|---|
+| X25 (the page) the page "Motion and limits" of the machine form: the unit first, one rapid field and one pair of travel ends per axis, the labels that follow the unit, a value outside its bound refused next to the field with the bound named (mm and inch) and Save disabled while one field fails, the two blocks written as the page makes them, an untouched page keeping a hand-edited block and a touched one rewriting it, a broken block listed on the machine's row and on the page with its JSON path and removed by "Start this page again" | `p4-machines` |
+| X23 Expand Drilling Cycles from the Tools tab on the goldens of `tests/fixtures/scripts/expand_cycles`: Fanuc `G81` under `G98`/`G99`, `G83` and `G73` with the two peck values, Klartext cycle 200 with its calls; the refusals (a return level that is not stated, the peck values missing, a turning program) that leave the text the same bytes with one row per refused block; the peck fields prefilled from the machine's motion block, empty under a machine without one | `p4-cycles` |
+| X24 Statistics and Time on the goldens of `tests/fixtures/scripts/statistics`: the form from the machine's motion block, typed values, the form left empty, the CSV as a new document and the table worked out from it, the findings in Results | `p4-cycles-time` |
+| X25 (the checks) the "Spindle speed limit" and "Travel" rows of the program checks with a machine that has limits (`program_checks/limits-fanuc-mill`), and none with a machine that has none, or none at all | `p4-cycles-time` |
+| X34 (P4b) Expand Drilling Cycles on a 300,000-line drilling program (about 50,000 holes, 440,000 lines written) and Statistics and Time on the simple program, within the 900 s of their `# timeout` (a target of 450 s on the development Mac), the expansion held to a walk of the program's own text, the totals to the program's own lengths, one undo; never retried | `p4-perf` (sections B and C) |
+The Phase 4 criteria of P4d "Renumber, all of it" that the running app proves (`suites/p4d.txt`, plan `docs/planning/phase-4-implementation.md` section 6.6; `m6-lathe-renumber` stays in `suites/m6.txt` and its part B was brought up to the reference model):
+
+| Criterion | Scenario |
+|---|---|
+| P4.18 the options of Renumber Blocks as fields of the form (Fit to maximum, Every Nth block, Skip lines containing, Start trigger, Align to a column, Skip the first and last lines) with their defaults and bounds, remembered per dialect, each golden `opt-*` typed into the form and giving its text, status line, warnings and rows, one undo; the three refusals that write nothing | `p4-renumber` (sections A to C) |
+| P4.19 the references across programs: `M99 P` into the one program that calls this one (also through a packed `M98 P21010`, a program name, a macro call and the local call `M98 Q`), the questions asked for two callers, no caller and a program in the file twice with their reasons as rows, the kept row of `M98 P Q`, Continue and Cancel | `p4-renumber` (section D), `m6-lathe-renumber` (part B) |
+| P4.20 references in other open documents: the list after a renumber (a row per reference with its own document and line, another dialect's document left out, a click on a row), Update References in Other Documents (one question, one undo step per document, the reference that is never rewritten left), all or nothing (a changed document, a locked one, Cancel, a closed one) and the enabled state of the command and its ribbon button | `p4-renumber-others` |
+
+The v1.2.0 harness batch (BL-harness) closed gaps on the paths that can lose work, all in `suites/m1.txt` and the scenarios they belong to; none of them has been run on a runner yet:
+
+| What | Where |
+|---|---|
+| Save All on the quit question: the note's Save As declined stops the quit with the programs already written, then Save writes everything and the app exits (T179) | `m1-quit-save-all` |
+| A file dropped while the quit question is up is not opened, not even looked at; after Cancel a drop is taken again (T182) | `m1-quit-multi` |
+| A dropped symbolic link to an open file adds no tab and is never silent; one with no target is refused (T181) | `m1-dnd` |
+| Save over a file another program changed: the question, Cancel, Overwrite; a file that is gone is written again without one (T183) | `m1-save-changed` |
+| The window-state plugin's restore reaches the window: the seeded size at the start of run 1, the size run 1 left at the start of run 2 (T188) | `m2-window-state-1`, `m2-window-state-2` |
+| The line-join guard and the capitals in both panes of the aligned view (T034) | `p4-compare` (D6) |
 
 The bug-fix round B1 (`suites/b1.txt`) adds one scenario or pair for each behaviour only the running app can prove:
 
@@ -193,7 +233,7 @@ again when it failed and reports:
 | `PASS` | passed the first time | 0 |
 | `FLAKY` | failed, passed on the retry — the harness's problem, not the app's; the first failure is kept in `out/<scenario>.attempt1.json` | 0 |
 | `FAIL` | failed twice | 1 |
-| `BLOCKED` | could not be carried out: an input the scenario needed could not be delivered, because another app held the keyboard (a locked screen is one of those). Not retried — a second run would say the same — and never silently green | 1 |
+| `BLOCKED` | could not be carried out: an input the scenario needed could not be delivered, because another app held the keyboard. A locked screen is final and is not retried — a second run would say the same. With the screen unlocked it is a hiccup of the machine (the main thread did not answer an input in time; `m0-trusted` on the hosted runner) and is retried once: a pass on the retry is `FLAKY`, a second block stays `BLOCKED`. Never silently green. A `…-2` whose `…-1` was blocked is blocked too, and printed so from the first line | 1 |
 
 `--no-retry` runs each scenario once, and `--retry` turns the retry back on where
 `GEDIT_RH_ROBUST=0` switched it off. A scenario that declares `retry: false` (`p4-perf`: five
@@ -303,6 +343,9 @@ scenario('m1-example', { timeout: 90 }, async (h) => {
   to `scripts.running`, and fills every field so no remembered value leaks in) and the answer for the 300,000-line program worked out
   from its own text (`wantedLine`; for the arc-heavy program of the angled runs `arcProgram` and `wantedArcLine`, compared by `nearDifferences` to one last place). Expected text comes from `tests/fixtures/scripts/**`, never from what the app shows.
   The P4e scenarios (`p4-split`, `p4-channels`, `p4-compare`) share `p4e-common.js`: the editor groups read from the DOM (`groupsOnScreen`, `waitGroups`, `hostLayout`, `hostGroups`) and from the service (`views`, `groupIds`, `focusedGroup`, `editorOf`), the keyboard of a group (`textFocusIn`, `waitFocus`, `placeCursor`; a group is given the keyboard with `ctx.editor.focusGroup`, never with `h.focusEditor()`, which takes the first textarea of the host), the keys (`nextPane`, `previousPane`, `undoKey`, `redoKey`, `pressKey`), a ribbon button clicked on its tab (`clickRibbon`, `ribbonEnabled`, `ribbonDisabled`) and the theme of every Monaco root (`editorLooks`). Expected text comes from the programs (`tests/fixtures/p4e/`, the pair written in `p4-compare`) and from `ctx.t(...)`. While a comparison is open `editorInstance()` is undefined (the groups are detached): read the editor only after `waitGroups` or after waiting for `editorInstance()`, never as `editorInstance()?.… ?? 0`.
+  The two-pane sections of `p4-perf` (D split view, E channel view, F aligned view) share `p4e-perf-common.js`: the budgets with the reason for each (`KEYPRESS_P95_BUDGET_MS` the P1 typing budget; `TYPING_COST_BUDGET_MS`, `VIEW_OPEN_BUDGET_MS`, `ENTER_BUDGET_MS`, `ALIGNED_OPEN_BUDGET_MS` and `ALIGNED_REALIGN_BUDGET_MS` proposed, derived from numbers the repo already holds), the programs (`channelProgram`: 300,000 lines, two sections, 20,000 waits, and `channelLineAt`, which gives a line of the program and the pane line that shows it; `alignedPair`: two 100,000-line programs with a known set of differences and a typing line far from all of them), and the measuring of a key press in one of several editors (`measureChars`: the keydown to the DOM change that draws the typed line in the typed editor and in each editor that shows it too; `measureEnters`; `groupsDrawn`; `until`). Held to the real resolution and mapping by `tests/unit/p4ePerfHarness.test.ts`.
+  The P4b scenarios (`p4-cycles`, `p4-cycles-time`, `p4-machines`, `p4-perf` sections B and C) share `p4-cycles-common.js`: a built-in script started from the Tools tab with the form read untouched first (that is where a prefill is seen) and then filled by field id (`runTools`, which tells the end of the run by a subscription to `scripts.running`; `formValues`, `fillForm`, `fieldText`, `fieldPicked`), machines made through the service with a `motion` and a `limits` block (`makeMill`, `useMachine`), the golden's message cut before the sentence about the machine where a machine is chosen (`beforeMachineSentence`), the statistics goldens (`statisticsGolden`, `openStatistics`), the CSV and its table (`csvRows`, `clock`), and for `p4-perf` the 300,000-line drilling program, the oracle that holds its expansion to a walk of the program's text (`drillProgram`, `checkDrillExpansion`, `walkLines`) and the totals of the simple program worked out from its text (`largeProgramTotals`). `p4-machines` finds a field of the page inside the page (`machine-motion-form`): the machine's own form has a `units` field too. Expected text comes from the goldens (`tests/fixtures/scripts/**`, `tests/fixtures/p4b/harness/`) and from `ctx.t(...)`.
+  The P4d scenarios (`p4-renumber`, `p4-renumber-others`, and part B of `m6-lathe-renumber`) share `p4-renumber-common.js`: the option and reference cases (`OPTION_CASES`, `REFERENCE_CASES`) with the parameters of the messages they expect, held to the real transform by `tests/unit/p4dHarness.test.ts`; the goldens' options turned into the form's fields (`formFieldsOf`), the form's memory forgotten before a run (`resetRenumberForm`), read without running (`peekForm`) or tried with values (`tryForm`); a run that answers the question the golden says is asked (`renumberAsking`); a case's document undone and closed (`finishCase`, `closeDoc`: a document of the dialect that stays open is read for references after the next run); and the four documents of the other-documents scenario (`world(base)`, one set of program numbers per phase). Expected text comes from the goldens and from `ctx.t(...)`.
   The B1 scenarios (`b1-*`) share `b1-common.js`: the seven ribbon tabs (`TABS`), a symbolic link made outside the app (`symlink`), the
   visible hover as a rectangle (`hoverBox`) and whether a row is inside its scrolling panel (`rowVisible`); a folder made read-only
   with `osOp(h, 'chmod', …)` is made writable again in a `finally`.
@@ -369,16 +412,21 @@ defaults:
 | `h.dialogs.queue('open' \| 'save' \| 'folder', result)` | the answer of the next file dialog (a path, a list, or `null` for Cancel); the stub grants it like the plugin |
 | `h.dialogs.calls()`, `h.dialogs.clear()` | every dialog the app asked for, with its arguments; drop the queued answers, resolving to the ones nobody used |
 | `h.alert.visible()`, `h.alert.wait()`, `h.alert.click(label)` | the real NSAlert (`'OK\|Ok'` accepts either label) |
-| `h.disk.read/hex/write/touch/stat/copy` | the file system, from outside the app |
+| `h.disk.read/hex/write/touch/stat` | the file system, from outside the app |
+| `h.disk.copy(from, to)` | a file or a folder with its content, the folders above `to` created |
+| `h.disk.remove(path, { recursive })`, `h.disk.list(path)`, `h.disk.symlink(target, link)` | delete (only below the run folder or the app's HOME; a missing path is no error), list a folder sorted by name (`{ name, isFile, isDir, isSymlink, len }`), make a symbolic link |
+| `h.clipboard.read/write/clear` | the system clipboard's text; a run starts with it empty and the runner puts the owner's text back at the end (`HARNESS_CLIPBOARD=keep` leaves it alone; only text is kept) |
+| `h.monaco.modelCount()`, `h.monaco.service(id, method)` | the number of Monaco text models, and the one place that reads Monaco's internals (pinned to 0.55; `-1`/`null` when they moved) |
 | `h.config.read('settings.json' \| 'machines.json' \| 'state.json')` | one of the app's own files, parsed, from the folder the app really uses; `null` while it does not exist |
 | `h.recoveryDir()` | `<data>/recovery`, where the crash-recovery snapshots live |
 | `h.drop(paths, { x, y })` | grants like tauri-plugin-fs, then emits `tauri://drag-drop` at that position |
 | `h.pgrep(pattern)`, `h.children()` | processes |
 | `h.fixture(rel, { from })` | a fresh copy of `tests/fixtures/<rel>` in the run folder (`from: 'runtime'` for `tests/runtime/fixtures/<rel>`) |
 | `h.app` | `window.__gedit`: `ready`, `version`, `text()`, `cursor()`, `activeProfile()`, `setProfile()`, and `ctx`, the service aggregate (`src/lib/app/context.ts`: commands, docs, editor, files, dialogs, settings, machines, fileMemory, session, recovery, …) |
-| `h.window.close/performClose/quitKey/terminate/state` | the ways an app ends, and what AppKit sees |
+| `h.window.close/performClose/quitKey/terminate/state` | the ways an app ends, and what AppKit sees; while an exit is expected each one first hands the queued records to Rust |
+| `h.window.geometry()`, `h.window.setSize(w, h, { x, y })` | the window's size and place in physical pixels (the unit of `.window-state.json`, with the `scale`), and a resize in logical pixels that resolves once the window shows it. `vars: { HARNESS_KEEP_GEOMETRY: '1' }` stops the 1100x700 sizing at start, so what the window-state plugin restored stays |
 | `h.window.focus()`, `h.window.ensureFront()` | who owns the keyboard; take it back and wait for the confirmation |
-| `h.expectExit({ code, signal, within, files, events })` | say the app is about to exit; the runner then judges the exit — the code (default 0) or the `signal`, within `within` ms (default 10000) — and checks the `files` afterwards, each `{ path, includes, excludes, hex, missing }` |
+| `h.expectExit({ code, signal, within, files, events })` | say the app is about to exit; the runner then judges the exit — the code (default 0) or the `signal`, within `within` ms (default 10000) — and checks the `files` afterwards, each `{ path, includes, excludes, hex, missing }`. It resolves once the record is in Rust, and every call that can end the app flushes first, so no scenario sleeps "to let the queue empty" |
 | `h.exitExpectation()` | the exit expectation declared so far, or `null` |
 | `h.crash({ files })` | kills the app with SIGKILL, the way a power cut does; it declares the exit itself and never resolves, so snapshot first (`h.app.ctx.recovery.flushNow()`) |
 | `h.allowErrors(re)`, `h.expectViolations(fn)` | expected console errors and CSP violations |
@@ -396,15 +444,15 @@ defaults:
   `tauri::Builder::default()`, and one `harness::h_…,` line per command after the single
   `generate_handler![`. The last two are the only anchors in the app's code, so a change to
   either of them in `lib.rs` breaks the sync loudly (phase 1 plan AD-15). It also adds
-  `objc2` to `Cargo.toml` and starts the window hidden in `tauri.conf.json`; on every run
-  the plugin sizes the window to 1100×700, centres it, turns WebKit's occlusion detection
+  `objc2` to `Cargo.toml` and starts the window hidden, with a non-persistent web view store, in `tauri.conf.json` (`harness/patch.mjs`); on every run
+  the plugin sizes the window to 1100×700 (unless `HARNESS_KEEP_GEOMETRY=1`), centres it, turns WebKit's occlusion detection
   off (an occluded page stops drawing) and shows it.
 - `harness.rs` is compiled only inside the patched copy, so `cargo fmt` and `clippy` in
   `src-tauri/` never see it. Run `rustfmt --edition 2021 tests/runtime/harness/harness.rs`
   after editing it; CI checks the formatting.
 - The Node side is in `harness/`: `core.mjs` (paths, the run lock, finding scenarios,
-  bundling the page script, running one scenario and judging it), `run.mjs`, `suite.mjs`
-  and `sync.mjs`. The three `.sh` files only start them.
+  bundling the page script, running one scenario and judging it), `run.mjs`, `suite.mjs`,
+  `sync.mjs` and `patch.mjs` (what `sync.sh` changes in `tauri.conf.json`). The three `.sh` files only start them.
 - `lib/` is the page side: `index.js` is what a scenario file imports (`scenario()`), the
   recorder installs at document start, `api.js` builds `h`, `keys.js` turns key specs into
   native events, and `runner.js` runs the scenario and reports.
@@ -416,10 +464,26 @@ defaults:
   the production CSP and the embedded `tauri://` assets. A release build never
   contains `__gedit`; CI checks that.
 
-Two things a run cannot isolate: WebKit's own storage lives in the real
-`~/Library/WebKit/gedit` (only `HOME`, and with it the app's config folder, is
-redirected), and a scenario that leaves a process behind is cleaned up by matching the
-run folder in its command line.
+What a run isolates, and what it cannot:
+
+- `HOME`, and with it the app's config and data folders, is the run's own.
+- WebKit's storage is **non-persistent** in a test build: `sync.sh` sets `incognito` on the
+  window (`harness/patch.mjs`), so the web view neither reads nor writes the owner's
+  `~/Library/WebKit/<identifier>`. `GEDIT_RH_PERSISTENT_WEBKIT=1` at sync time keeps the old store.
+- The clipboard is empty when a run starts and the owner's text is back when it ends. The
+  runner (`harness/core.mjs`, not the app) keeps the text, so it comes back after a normal
+  end, a crash, a hang the watchdog kills, a SIGKILL of the app, and a Ctrl-C or SIGTERM of
+  the runner itself. Only the text is saved and restored: an image, a file list or rich text
+  that was on the clipboard is not, and a SIGKILL of the runner itself leaves it empty.
+  `HARNESS_CLIPBOARD=keep` leaves the clipboard alone. (The app gets `HARNESS_CLIPBOARD=keep`
+  from the runner and only isolates the clipboard itself when the test build is started by hand.)
+- A scenario that leaves a process behind is cleaned up by matching the run folder in its
+  command line.
+
+One build folder holds one build. `sync.sh` records which checkout made it, and `run.sh` and
+`suite.sh` **refuse** (exit code 2) to run another checkout's scenarios against it instead of
+judging someone else's code; sync from this checkout, give it a folder of its own
+(`GEDIT_RH_DIR`, with `GEDIT_RH_LOCK` shared), or set `GEDIT_RH_ALLOW_FOREIGN_BUILD=1`.
 
 ## Native input and the keyboard
 

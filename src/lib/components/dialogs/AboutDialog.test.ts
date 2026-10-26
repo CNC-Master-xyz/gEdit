@@ -6,7 +6,7 @@
 
 import { render } from 'svelte/server';
 import { describe, expect, it } from 'vitest';
-import AboutDialog, { ISSUES_URL, REPOSITORY_URL, packageKey, type LicenseData } from './AboutDialog.svelte';
+import AboutDialog, { ISSUES_URL, NOTICE_PAGE, REPOSITORY_URL, packageKey, visiblePackages, type LicenseData } from './AboutDialog.svelte';
 
 const html = render(AboutDialog, { props: { close: () => {} } }).body;
 
@@ -68,5 +68,24 @@ describe('licenses.json', () => {
   it('gives every package a distinct key', async () => {
     const data = ((await import('$lib/data/licenses.json')) as { default: unknown }).default as LicenseData;
     expect(new Set(data.packages.map(packageKey)).size).toBe(data.packages.length);
+  });
+});
+
+// T219: the notices list had several hundred rows, all drawn at once.
+describe('the notice list is drawn a page at a time', () => {
+  it('starts with one page and adds one page per request, then stops', () => {
+    const all = Array.from({ length: 460 }, (_, i) => i);
+    expect(visiblePackages(all, NOTICE_PAGE)).toHaveLength(NOTICE_PAGE);
+    expect(visiblePackages(all, NOTICE_PAGE * 2)).toHaveLength(NOTICE_PAGE * 2);
+    expect(visiblePackages(all, NOTICE_PAGE * 20)).toHaveLength(460);
+    expect(visiblePackages(all, 0)).toEqual([]);
+    expect(visiblePackages(all, -5)).toEqual([]);
+    expect(visiblePackages(all, NOTICE_PAGE)[0]).toBe(0);
+  });
+
+  it('is a page that is much smaller than the real list', async () => {
+    const data = ((await import('$lib/data/licenses.json')) as { default: unknown }).default as LicenseData;
+    expect(NOTICE_PAGE).toBeGreaterThan(0);
+    expect(data.packages.length).toBeGreaterThan(NOTICE_PAGE * 2);
   });
 });

@@ -83,6 +83,9 @@ export default {
       'It decides what a written number means — above all whether a word without a decimal point is a count of input increments.',
     numberInputUnconfirmed:
       'A preset marked "unconfirmed" is the usual setting for this kind of control, not one checked against your machine. Compare it with your machine\'s parameters before you rely on it.',
+    pointlessFeeds: 'Point-less feeds',
+    pointlessFeedsHelp:
+      'How the control counts a feed written without a decimal point. Machine parameters can change the steps of the feed per minute, of the feed per revolution, or of both; each choice says the steps it means on this kind of control. It applies to the increment presets only: with "as written" every feed is read as written. Without a machine gEdit never assumes it.',
     units: 'Units at power-on',
     unitsHelp: 'What the control measures in until the program says otherwise.',
     diameter: 'Diameter programming at power-on',
@@ -447,6 +450,66 @@ export default {
       decodeSplit: 'A list of names',
       decodeDigits: '{Noun} numbers, 0 = {noun} 10',
       decodeBitmask: 'A bit sum',
+    },
+  },
+  /**
+   * The page "Motion and limits" of the machine form (P4.8, plan §6.4, AD-46). Every value is
+   * optional and none has a default: the machine's documentation is the only source (Q4-10).
+   */
+  motion: {
+    title: 'Motion and limits',
+    note: 'Every value comes from your machine’s documentation. gEdit assumes none: a field left empty is “not set”, and whatever needs it says so.',
+    units: 'Units',
+    unitsHelp: 'Every length and rate on this page is read in this unit.',
+    unitsNotSet: 'Not set',
+    unitMm: 'Millimetres (mm)',
+    unitInch: 'Inches',
+
+    motionTitle: 'Motion',
+    rapidTitle: 'Rapid rate',
+    rapid: 'Rapid rate {axis} ({unit})',
+    rapidKind: 'How a rapid move runs',
+    rapidKindHelp: 'Left empty, a straight line is assumed and the time estimate says so.',
+    kindNotSet: 'Not set',
+    kindStraight: 'Straight line: all axes arrive together',
+    kindPerAxis: 'Each axis at its own rate',
+    maxFeed: 'Top cutting feed ({unit})',
+    maxFeedHelp: 'A programmed feed above it is cut back to it in the time estimate.',
+    toolChange: 'Tool change time (seconds)',
+    peckRetract: 'Retract of a high-speed peck, G73 ({unit})',
+    peckClearance: 'Clearance of a deep peck, G83 ({unit})',
+    peckHelp: 'Only fills in the expansion and statistics forms; you can change it there for a run.',
+
+    limitsTitle: 'Limits',
+    spindleTitle: 'Top spindle speed',
+    spindleMain: 'Main spindle (rpm)',
+    spindleMainHelp: 'The spindle the plain S word drives.',
+    spindleOthers: 'Other spindles (rpm)',
+    spindleOthersHelp: 'Speed address, =, top speed: for example S2=4000, SB=3000.',
+    travelTitle: 'Travel in machine coordinates',
+    travelMin: 'Travel {axis}, lowest ({unit})',
+    travelMax: 'Travel {axis}, highest ({unit})',
+    travelMinDiameter: 'Travel {axis} (diameter), lowest ({unit})',
+    travelMaxDiameter: 'Travel {axis} (diameter), highest ({unit})',
+    travelDiameterHelp: 'On this lathe {axis} is a diameter: enter the travel as a diameter, the way {axis} is written in the program. The travel check compares the {axis} positions with it.',
+    perMinute: 'per minute',
+    chosenUnit: 'chosen unit',
+    degrees: 'degrees',
+    degreesPerMinute: 'degrees/min',
+
+    problemsTitle: 'This block is kept as written but cannot be used',
+    problemsHelp: 'The machine works without it and scripts get no value from it. Changing a field rewrites the block from the fields below; whatever the fields do not show is removed.',
+    startAgain: 'Start this page again',
+
+    err: {
+      above0: 'Enter a number above 0 and at most {max}.',
+      from0: 'Enter a number, 0 or more and at most {max}.',
+      between: 'Enter a number between -{max} and {max}.',
+      minMax: 'The lowest position has to be below the highest.',
+      bothEnds: 'Enter both ends of the travel, or neither.',
+      units: 'Choose mm or inch first: the numbers on this page are read in it.',
+      spindles: '“{part}” is not a spindle. Write the speed address, =, and the top speed, for example S2=4000.',
+      otherSpeed: 'The top speed of {address} is a number of rpm above 0 and at most {max}.',
     },
   },
 } as const satisfies Messages;

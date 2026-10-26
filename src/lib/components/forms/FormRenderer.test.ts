@@ -17,6 +17,7 @@ interface Props {
   values: Record<string, unknown>;
   errors?: Record<string, Msg>;
   context?: { addresses?: string[] };
+  idPrefix?: string;
   onChange: (id: string, value: unknown) => void;
 }
 
@@ -228,5 +229,56 @@ describe('a read-only field (Phase 3 plan §7 #226)', () => {
     expect(html).toMatch(/<select[^>]*disabled/);
     expect(html).toMatch(/type="checkbox"[^>]*disabled/);
     expect(html).not.toMatch(/data-field="n"[^>]*data-readonly/);
+  });
+});
+
+describe('v1.2.0 T154: a unit beside the control', () => {
+  it('draws the unit after a text or number control, display only', () => {
+    const html = field([{ id: 'f', type: 'text', label: 'Feed', unit: 'mm/min' }], { f: '120' });
+    expect(html).toMatch(/<input[^>]*id="field-f"[^>]*>\s*(<!--[^>]*-->\s*)*<span class="form-unit[^"]*"[^>]* data-testid="form-unit">mm\/min<\/span>/);
+    const number = field([{ id: 'n', type: 'number', label: 'Depth', unit: 'mm' }], { n: 3 });
+    expect(number).toContain('data-testid="form-unit">mm</span>');
+  });
+
+  it('names the unit in aria-describedby, before the help and the error (WX-CODE-10)', () => {
+    const spec: FieldSpec = { id: 'f', type: 'number', label: 'Feed', unit: 'mm/min', help: 'Per minute' };
+    const html = field([spec], { f: 120 }, { errors: { f: { key: 'forms.errors.min', params: { min: 1 } } } });
+    expect(html).toContain('id="field-f-unit"');
+    expect(html).toContain('aria-describedby="field-f-unit field-f-help field-f-error"');
+    // a unit alone, and the id prefix of a form that shares a page
+    const alone = field([{ id: 'f', type: 'text', label: 'Feed', unit: 'mm' }], { f: '1' }, { idPrefix: 'tpl-' });
+    expect(alone).toContain('id="tpl-field-f-unit"');
+    expect(alone).toContain('aria-describedby="tpl-field-f-unit"');
+  });
+
+  it('leaves aria-describedby out for a field with no unit, help or error', () => {
+    expect(field([{ id: 'f', type: 'text', label: 'Feed' }], { f: '1' })).not.toContain('aria-describedby');
+    // a checkbox draws no unit, so it does not point at one
+    const check = field([{ id: 'b', type: 'bool', label: 'On', unit: 'x' }], { b: true });
+    expect(check).not.toContain('field-b-unit');
+  });
+
+  it('draws nothing more for a field without a unit', () => {
+    expect(field([{ id: 'f', type: 'text', label: 'Feed' }], { f: '120' })).not.toContain('form-unit');
+  });
+});
+
+describe('idPrefix', () => {
+  const spec: FieldSpec = { id: 'units', type: 'choice', label: 'Units', help: 'Pick one', choices: [{ label: 'mm', value: 'mm' }] };
+
+  it('puts the prefix in front of the control, label, help and error ids', () => {
+    const html = field([spec], { units: 'mm' }, { idPrefix: 'motion-', errors: { units: { key: 'forms.errors.min', params: { min: 1 } } } });
+    expect(html).toContain('id="motion-field-units"');
+    expect(html).toContain('for="motion-field-units"');
+    expect(html).toContain('id="motion-field-units-help"');
+    expect(html).toContain('id="motion-field-units-error"');
+    expect(html).toContain('aria-describedby="motion-field-units-help motion-field-units-error"');
+    expect(html).not.toContain('id="field-units"');
+  });
+
+  it('keeps the plain ids without a prefix', () => {
+    const html = field([spec], { units: 'mm' });
+    expect(html).toContain('id="field-units"');
+    expect(html).toContain('id="field-units-help"');
   });
 });

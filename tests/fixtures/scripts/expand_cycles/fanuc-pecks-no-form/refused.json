@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be written out as plain moves: 1 cycle without the high-speed peck retract, 1 cycle without the deep peck clearance. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "N40 G98 G83 X5. Y5. Z-20. R2. Q6. F80.: this cycle needs the deep peck clearance of the machine; enter it in the form.",
+      "reason": "peck-clearance-missing"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N50 G73 X15. Q4.: this cycle needs the high-speed peck retract of the machine; enter it in the form.",
+      "reason": "peck-retract-missing"
+    }
+  ]
+}
