@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
+  "id": "shop-siemens",
+  "name": "Siemens lathe with builder axes",
+  "shortName": "SHOP 840D",
+  "version": 1,
+  "extends": "sinumerik",
+  "syntax": {
+    "extraAxisNames": ["AA", "QQ"]
+  },
+  "numbering": {
+    "step": 5,
+    "alignColumn": 8
+  },
+  "editing": {
+    "rulers": []
+  }
+}

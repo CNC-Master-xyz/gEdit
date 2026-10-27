@@ -10,6 +10,8 @@ import { get, writable } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocId, NewDocMeta, ProfileInfo } from '$lib/app/types';
 import type { ProfileProblem } from '$lib/core/profiles/types';
+import profileSchema from '../../../schemas/profile.schema.json';
+import codesSchema from '../../../schemas/codes.schema.json';
 
 const fake = vi.hoisted(() => {
   const state = {
@@ -187,7 +189,8 @@ vi.mock('$lib/stores/machines', async () => {
 });
 
 const contrib = (await import('./userConfig')).default;
-const { MAX_REPORT_ROWS, formatMs, newFileText, nameProblem, parentChoices, reportOf, stemOf } = await import('./userConfig');
+const { MAX_REPORT_ROWS, SCHEMA_URL, formatMs, newFileText, nameProblem, parentChoices, reportOf, stemOf } = await import('./userConfig');
+const CODES_SCHEMA_ID = codesSchema.$id;
 const { docs } = await import('$lib/stores/documents');
 const { profiles } = await import('$lib/stores/profiles');
 const { results } = await import('$lib/stores/results');
@@ -393,6 +396,22 @@ describe('names', () => {
 });
 
 describe('the text of a new file loads clean', () => {
+  // Q4h-2 (P4.39a): every kind of new file starts with the line that names its schema, so an
+  // editor such as VS Code checks it while it is typed; the loaders drop the line.
+  it('starts every kind with the $schema line of its schema', () => {
+    const texts: [string, string][] = [
+      [newFileText('profiles', 'fanuc-lathe', 'shop-lathe'), profileSchema.$id],
+      [newFileText('codes', 'fanuc-lathe', 'fanuc-lathe'), CODES_SCHEMA_ID],
+      [newFileText('codes', 'fanuc-lathe', 'my-codes'), CODES_SCHEMA_ID],
+    ];
+    for (const [text, id] of texts) {
+      expect(text.split('\n')[1]).toBe(`  "$schema": "${id}",`);
+      expect(Object.keys(JSON.parse(text) as object)[0]).toBe('$schema');
+    }
+    expect(SCHEMA_URL.profiles).toBe(profileSchema.$id);
+    expect(SCHEMA_URL.codes).toBe(codesSchema.$id);
+  });
+
   it('is a profile that resolves and validates, for every built-in parent', () => {
     for (const info of profiles.list()) {
       const text = newFileText('profiles', info.id, 'shop-test');
@@ -415,7 +434,7 @@ describe('the text of a new file loads clean', () => {
 
   it('is an overlay of a built-in set under its own name, with nothing to extend', () => {
     const text = newFileText('codes', 'fanuc-lathe', 'fanuc-lathe');
-    expect(JSON.parse(text)).toEqual({ dialect: 'fanuc-lathe', version: 1, codes: [] });
+    expect(JSON.parse(text)).toEqual({ $schema: CODES_SCHEMA_ID, dialect: 'fanuc-lathe', version: 1, codes: [] });
     // Laid over the built-in set by the registry (WP13.2); on its own it is a valid, empty file.
     const problems: unknown[] = [];
     const db = resolveCodeDbs({ 'fanuc-lathe': JSON.parse(text) }, (_d, p) => problems.push(p));
@@ -425,7 +444,7 @@ describe('the text of a new file loads clean', () => {
 
   it('is a database of its own, built on its parent, under another name', () => {
     const text = newFileText('codes', 'fanuc-lathe', 'my-codes');
-    expect(JSON.parse(text)).toEqual({ dialect: 'my-codes', version: 1, extends: 'fanuc-lathe', codes: [] });
+    expect(JSON.parse(text)).toEqual({ $schema: CODES_SCHEMA_ID, dialect: 'my-codes', version: 1, extends: 'fanuc-lathe', codes: [] });
     const problems: unknown[] = [];
     const db = resolveCodeDbs({ ...BUILTIN_CODE_DB_JSON, 'my-codes': JSON.parse(text) }, (_d, p) => problems.push(p));
     expect(problems).toEqual([]);

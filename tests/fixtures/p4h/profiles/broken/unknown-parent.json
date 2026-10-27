@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
+  "id": "unknown-parent",
+  "name": "A child of a profile that does not exist",
+  "shortName": "ORPHAN",
+  "version": 1,
+  "extends": "fanuc-mill"
+}
