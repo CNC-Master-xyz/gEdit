@@ -15,7 +15,10 @@
 //      document's effective machine and the profile's `machineParams` declaration, so with no
 //      machine and a reading that depends on one there is no value but the list of readings,
 //      the assumed default first. A feed word while a cycle in force is `pitchFeedAmbiguous`
-//      has no class: nothing says whether it is a feed or a lead.
+//      has no class: nothing says whether it is a feed or a lead. P4h (plan §6.10 rule 11;
+//      T118): the block of a two-block cycle the block is (`blockCycleOf`) goes with it, so a
+//      parameter declared with another unit per block (`G76` `P`) is read with this block's
+//      unit, and has no class while the block cannot be told.
 //   3. Diameter or radius (AD-19 rule 11) for a word of `addresses.diameter`:
 //      `diameterReading`, never the diameter mode alone.
 //   4. Incremental: an address of `addresses.incremental` (`U`, `W`), a Klartext `I` prefix,
@@ -40,6 +43,7 @@ import { numberClassOf, resolveValue } from '$lib/core/machines/numbers';
 import type { EffectiveMachine, ParamSource, Reading, ResolvedClass } from '$lib/core/machines/types';
 import type { ModalState, ModalValue, NcToken } from '$lib/core/nc/types';
 import type { Profile } from '$lib/core/profiles/types';
+import { cycleBlockOf, declaresBlocks, type CycleBlock } from './blocks';
 import { axisWordsOf, isAssignmentWord, lookupCode } from './lookup';
 import type { CodeDb, CodeEntry, CodeLookup, CodeParam } from './types';
 
@@ -248,6 +252,26 @@ export function valueWordEntry(db: CodeDb, token: NcToken, lookup: CodeLookup | 
   return entry && entry.verify !== true ? entry : null;
 }
 
+/**
+ * P4h (plan §6.10 rule 11; T118). Which block of a two-block cycle the block of `blockTokens`
+ * is: `cycleBlockOf` of the entry of `blockCodes` that declares its blocks, read from the
+ * addresses the block writes. Null when no entry of the block declares blocks, when the words
+ * do not tell, and when two such entries in one block answer differently (refuse rather than
+ * guess). The Python callers of `number_class_of` ask `cycle_block_of` the same way.
+ */
+export function blockCycleOf(blockCodes: readonly CodeEntry[], blockTokens: readonly NcToken[]): CycleBlock | null {
+  const cycles = blockCodes.filter((entry) => declaresBlocks(entry));
+  if (cycles.length === 0) return null;
+  const written: string[] = [];
+  for (const t of blockTokens) {
+    if (t.kind === 'word' && t.address !== undefined && t.valueText !== undefined) written.push(t.address);
+  }
+  const answers = new Set(cycles.map((entry) => cycleBlockOf(entry, written)));
+  if (answers.size !== 1) return null;
+  const [only] = answers;
+  return only ?? null;
+}
+
 /** The parameter of `entry` written with `address`, if it declares one. */
 export function paramOf(entry: CodeEntry | null | undefined, address: string): CodeParam | null {
   const want = upper(address);
@@ -344,7 +368,8 @@ export function readWord(
   const pitchFeed = after.block.pitchFeed === true || after.activeCycle?.pitchFeed === true;
   const feedWord = isFeedWord(profile, address);
 
-  let cls = numberClassOf(address, { profile, feedUnit: after.feedUnit, blockCodes, pitchFeed, inForce });
+  const cycleBlock = blockCycleOf(blockCodes, blockTokens);
+  let cls = numberClassOf(address, { profile, feedUnit: after.feedUnit, blockCodes, pitchFeed, inForce, cycleBlock });
   // Rule 2: a cycle in force whose number is a threading cycle elsewhere tells nothing about F.
   if (feedWord && after.pitchFeedAmbiguous !== null && after.pitchFeedAmbiguous !== undefined) cls = null;
 
