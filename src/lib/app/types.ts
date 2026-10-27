@@ -20,6 +20,7 @@ import type { Readable } from 'svelte/store';
 import type { PrintService } from '$lib/app/print';
 import type { ChannelMember, ChannelRef, ChannelSet, SyncFinding } from '$lib/core/channels/types';
 import type { CodeDb, CodeEntry, CodeLookup } from '$lib/core/codes/types';
+import type { UserBindings } from '$lib/core/keys/userKeys';
 import type { CompareOptions } from '$lib/core/compare/types';
 import type { FieldSpec } from '$lib/core/forms/types';
 import type { ModalSnapshot } from '$lib/core/nc/modal';
@@ -173,6 +174,14 @@ export interface CommandRegistry {
   context(): CommandContext;
   /** Bumps on (un)register and on context changes. */
   readonly changed: Readable<number>;
+  /**
+   * The user's key bindings (P4g, §6.9 rule 5). From now on `get` and `list` answer each command
+   * with its keys in force, and so does a command registered later; `changed` bumps. `{}` puts
+   * the declared keys back.
+   */
+  setKeyOverrides(bindings: UserBindings): void;
+  /** The keys the command was registered with, whatever the user bound; undefined for an unknown id. */
+  defaultKeys(id: string): CommandDef['keys'];
 }
 
 export interface RibbonRegistry {

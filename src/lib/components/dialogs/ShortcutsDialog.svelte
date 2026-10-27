@@ -21,6 +21,10 @@
     category?: string;
     /** The platform label of the shortcut ('⇧⌘S', 'Ctrl+Shift+S'), or undefined. */
     keys?: string;
+    /** The user changed this command's key on this platform (P4g, §6.9 rule 6). */
+    changed?: boolean;
+    /** The label of the key the command was registered with, on a changed row that had one. */
+    builtIn?: string;
   }
 
   /** Rows that share one heading. */
@@ -40,18 +44,31 @@
    * without a category sort last. A command whose key spec does not parse is listed
    * without a shortcut instead of throwing: `commands.register` already reported it.
    */
-  export function shortcutRows(defs: readonly CommandDef[], isMac: boolean): ShortcutRow[] {
+  export function shortcutRows(
+    defs: readonly CommandDef[],
+    isMac: boolean,
+    /** The keys a command was registered with; a row whose key differs from it is marked `changed`. */
+    declared?: (id: string) => CommandDef['keys'],
+  ): ShortcutRow[] {
+    const label = (spec: string | undefined): string | undefined => {
+      if (!spec) return undefined;
+      try {
+        return formatKey(spec, isMac);
+      } catch {
+        return undefined;
+      }
+    };
     const rows = defs.map((def) => {
-      const spec = resolveKeys(def.keys, isMac);
-      let keys: string | undefined;
-      if (spec) {
-        try {
-          keys = formatKey(spec, isMac);
-        } catch {
-          keys = undefined;
+      const keys = label(resolveKeys(def.keys, isMac));
+      const row: ShortcutRow = { id: def.id, title: def.title, keys };
+      if (declared) {
+        const builtIn = resolveKeys(declared(def.id), isMac);
+        if (resolveKeys(def.keys, isMac) !== builtIn) {
+          row.changed = true;
+          const builtInLabel = label(builtIn);
+          if (builtInLabel) row.builtIn = builtInLabel;
         }
       }
-      const row: ShortcutRow = { id: def.id, title: def.title, keys };
       if (def.category) row.category = def.category;
       return row;
     });
@@ -103,6 +120,7 @@
   import { untrack } from 'svelte';
   import Modal from '$lib/components/common/Modal.svelte';
   import { commands } from '$lib/app/registry/commands';
+  import { modals } from '$lib/app/modals';
   import { t } from '$lib/i18n';
   import { isMacPlatform } from '$lib/utils/platform';
 
@@ -120,7 +138,15 @@
   let input = $state<HTMLInputElement | undefined>(undefined);
 
   // The registry does not change while a modal is open, so one snapshot is enough.
-  const rows = shortcutRows(commands.list(), isMacPlatform());
+  const rows = shortcutRows(commands.list(), isMacPlatform(), (id) => commands.defaultKeys(id));
+
+  /** Closes this dialog and opens Settings on the Keyboard page (one modal at a time). */
+  async function openKeyboardPage(): Promise<void> {
+    close();
+    const { default: SettingsDialog, KEYBOARD_TAB, settingsModal } = await import('$lib/components/dialogs/SettingsDialog.svelte');
+    const { props, options } = settingsModal(KEYBOARD_TAB);
+    await modals.open(SettingsDialog, props, options);
+  }
 
   function labelOf(row: ShortcutRow): string {
     return row.category ? t(row.category) : t('help.otherGroup');
@@ -164,6 +190,9 @@
     </label>
 
     <p class="hint">
+      <button type="button" class="link" data-testid="shortcuts-change" onclick={() => void openKeyboardPage()}>
+        {t('keyboardPage.openPage')}
+      </button>
       {t('help.platformHint')}
       {t('help.commands', { count: matching.length })}
       {#if hidden > 0}
@@ -187,6 +216,9 @@
                 <tr data-testid="shortcuts-row" data-command={row.id} data-keys={row.keys}>
                   <td>{t(row.title)}</td>
                   <td class="keys">
+                    {#if row.changed}
+                      <span class="changed" data-testid="shortcuts-changed" title={row.builtIn ? t('keyboardPage.changedMarkHint', { key: row.builtIn }) : undefined}>{t('keyboardPage.changedMark')}</span>
+                    {/if}
                     {#if row.keys}<kbd>{row.keys}</kbd>{:else}<span class="none">{t('help.noShortcut')}</span>{/if}
                   </td>
                 </tr>
@@ -302,6 +334,23 @@
 
   .none {
     color: var(--text-disabled);
+  }
+
+  .changed {
+    margin-right: 6px;
+    color: var(--accent-text);
+    font-size: 11px;
+  }
+
+  .link {
+    margin-right: 8px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent-text);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   .empty {

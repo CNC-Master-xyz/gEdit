@@ -68,6 +68,35 @@ describe('shortcutRows', () => {
   });
 });
 
+describe('shortcutRows with the declared keys (P4g, §6.9 rule 6)', () => {
+  const declared = (keys: CommandDef['keys']) => () => keys;
+
+  it('marks a row whose key differs from the declared one, with the built-in key', () => {
+    const rows = shortcutRows([def({ id: 'a', keys: 'Mod+Shift+K' })], false, declared('Mod+K'));
+    expect(rows).toEqual([{ id: 'a', title: 't.a', keys: 'Ctrl+Shift+K', changed: true, builtIn: 'Ctrl+K' }]);
+  });
+
+  it('marks a command that lost its key, and one that got a key it did not have', () => {
+    const lost = shortcutRows([def({ id: 'a' })], false, declared('Mod+K'))[0];
+    expect(lost).toMatchObject({ changed: true, builtIn: 'Ctrl+K' });
+    expect(lost.keys).toBeUndefined();
+    const gained = shortcutRows([def({ id: 'a', keys: 'Mod+K' })], false, declared(undefined))[0];
+    expect(gained.changed).toBe(true);
+    expect(gained.builtIn).toBeUndefined();
+  });
+
+  it('does not mark a row that has its declared key, or one that differs only on the other platform', () => {
+    const same = shortcutRows([def({ id: 'a', keys: 'Mod+K' })], false, declared('Mod+K'));
+    expect(same[0].changed).toBeUndefined();
+    const otherPlatform = shortcutRows([def({ id: 'a', keys: { mac: 'Mod+J', other: 'Ctrl+K' } })], false, declared({ mac: 'Mod+K', other: 'Ctrl+K' }));
+    expect(otherPlatform[0].changed).toBeUndefined();
+  });
+
+  it('marks nothing when no declared keys are given', () => {
+    expect(shortcutRows([def({ id: 'a', keys: 'Mod+K' })], false)[0].changed).toBeUndefined();
+  });
+});
+
 describe('groupRows', () => {
   /** Two different category keys, one shared heading - exactly what the real catalog has. */
   const labelOf = (r: ShortcutRow): string => {
@@ -117,6 +146,7 @@ describe('ShortcutsDialog markup', () => {
   afterEach(() => {
     registered?.();
     registered = undefined;
+    commands.setKeyOverrides({});
   });
 
   function markup(showUnbound = false): string {
@@ -159,6 +189,25 @@ describe('ShortcutsDialog markup', () => {
     expect(html.match(/data-testid="shortcuts-row"/g)).toHaveLength(2);
     expect(html).toContain('data-command="help.about"');
     expect(html).not.toContain('data-testid="shortcuts-hidden"');
+  });
+
+  it('shows the key in force, marks a key the user changed and links to the Keyboard page', () => {
+    registered = commands.register([
+      def({ id: 'help.shortcuts', title: 'help.shortcuts', category: 'help.category', keys: 'Mod+K' }),
+      def({ id: 'help.about', title: 'help.about', category: 'help.category', keys: 'Mod+J' }),
+    ]);
+    commands.setKeyOverrides({ 'help.shortcuts': 'Mod+Shift+K' });
+    const html = markup();
+    expect(html).toMatch(/data-command="help\.shortcuts"[^>]*data-keys="(⇧⌘K|Ctrl\+Shift\+K)"/);
+    expect(html.match(/data-testid="shortcuts-changed"/g)).toHaveLength(1);
+    expect(html).toContain('You set this key. The built-in key is');
+    expect(html).toContain('data-testid="shortcuts-change"');
+    expect(html).toContain('Change keys…');
+  });
+
+  it('marks nothing while no key is changed', () => {
+    registered = commands.register(def({ id: 'help.shortcuts', title: 'help.shortcuts', keys: 'Mod+K' }));
+    expect(markup()).not.toContain('data-testid="shortcuts-changed"');
   });
 
   it('says so when no command is registered', () => {

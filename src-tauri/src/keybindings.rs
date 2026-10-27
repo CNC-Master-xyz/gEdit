@@ -192,6 +192,48 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// The cap is inclusive, and a `bindings` member that is not an object (null included) is
+    /// refused, so the webview's `parseUserKeys` never has to read a list or a string.
+    #[test]
+    fn exactly_the_cap_is_kept_and_a_null_bindings_member_is_refused() {
+        let (root, dirs) = scratch("cap-edge");
+        let mut bindings = serde_json::Map::new();
+        for i in 0..MAX_BINDINGS {
+            bindings.insert(format!("cmd.n{i}"), json!("Mod+K"));
+        }
+        save(&dirs, json!({ "bindings": bindings })).unwrap();
+        let loaded = load(&dirs);
+        assert_eq!(
+            loaded.keybindings["bindings"].as_object().unwrap().len(),
+            MAX_BINDINGS
+        );
+        assert!(save(&dirs, json!({ "bindings": null })).is_err());
+        assert!(save(&dirs, json!({ "bindings": "Mod+K" })).is_err());
+        // The refused saves left the good file as it was.
+        assert_eq!(
+            load(&dirs).keybindings["bindings"]
+                .as_object()
+                .unwrap()
+                .len(),
+            MAX_BINDINGS
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Entries are stored as they come: a null (the key removed), a pair and a command that does not exist.
+    #[test]
+    fn null_pairs_and_unknown_commands_come_back_untouched() {
+        let (root, dirs) = scratch("shapes");
+        let bindings = json!({
+            "a": null,
+            "b": { "mac": null, "other": "Mod+K" },
+            "script.run:user:gone.py": "Mod+Shift+F9",
+        });
+        save(&dirs, json!({ "bindings": bindings.clone() })).unwrap();
+        assert_eq!(load(&dirs).keybindings["bindings"], bindings);
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_broken_file_is_kept_as_bak_by_the_next_save() {
         let (root, dirs) = scratch("bak");
