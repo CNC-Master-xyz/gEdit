@@ -28,12 +28,19 @@
 // A `runLast` of a script that fits another profile is therefore refused with a reason
 // rather than run against a program it was never written for.
 
+import { packageOfRoot } from '$lib/core/packages/packages';
 import type { ScriptEntry } from '$lib/platform/commands';
 
 /** One menu section: the scripts of one subfolder, or of the root. */
 export interface ScriptGroup {
   /** The subfolder name, or null for the scripts that sit directly in a root. */
   group: string | null;
+  /**
+   * P4g (§6.9 rule 10): the folder name of the script package the section belongs to; unset for the
+   * scripts of `bundled`, `user` and the extra folders. A package's scripts are never in a section
+   * with another root's, so the menu can show them under the package's display name.
+   */
+  package?: string;
   scripts: ScriptEntry[];
 }
 
@@ -59,23 +66,31 @@ export function scriptsForProfile(
  * subfolder. Within a section the order is `scripts_list`'s.
  *
  * The sections follow the order their first script appears in, rather than an alphabetical
- * one, so the menu mirrors what the backend listed — bundled scripts first, then the user
- * folder, then the extra folders — and a rescan cannot reshuffle it.
+ * one, so the menu mirrors what the backend listed — bundled scripts first, then the packages
+ * by name, then the user folder, then the extra folders — and a rescan cannot reshuffle it.
+ * The scripts of a package are sections of their own (`ScriptGroup.package`), one per package
+ * and subfolder, after the ungrouped section of everything else.
  */
 export function groupScripts(entries: readonly ScriptEntry[]): ScriptGroup[] {
-  const sections = new Map<string | null, ScriptEntry[]>();
+  const sections = new Map<string, ScriptGroup>();
+  const sectionOf = (pkg: string | null, group: string | null): ScriptGroup => {
+    const key = `${pkg ?? ''}\u0000${group ?? ''}`;
+    let section = sections.get(key);
+    if (section === undefined) {
+      section = { group, ...(pkg === null ? {} : { package: pkg }), scripts: [] };
+      sections.set(key, section);
+    }
+    return section;
+  };
   // The ungrouped section always comes first, even when every script sits in a subfolder:
   // an empty one is dropped again below.
-  sections.set(null, []);
+  sectionOf(null, null);
 
   for (const entry of entries) {
-    const key = entry.group === null || entry.group === '' ? null : entry.group;
-    const section = sections.get(key);
-    if (section === undefined) sections.set(key, [entry]);
-    else section.push(entry);
+    sectionOf(packageOfRoot(entry.root), entry.group === null || entry.group === '' ? null : entry.group).scripts.push(entry);
   }
 
-  return [...sections].filter(([, scripts]) => scripts.length > 0).map(([group, scripts]) => ({ group, scripts }));
+  return [...sections.values()].filter((section) => section.scripts.length > 0);
 }
 
 /** The display name of a script: its header `name`, or the file name. Data, untranslated. */

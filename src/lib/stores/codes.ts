@@ -25,6 +25,7 @@ import { CodeDbError, loadCodeDb, emptyCodeDb, type CodeDbProblem } from '$lib/c
 import { completionsFor, lookupWord as lookupWordIn, normalizeCode } from '$lib/core/codes/lookup';
 import { MAX_CODE_DB_DEPTH, resolveCodeDbFiles, type CodeDbMergeNotice } from '$lib/core/codes/resolve';
 import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
+import { layerSorted } from '$lib/core/packages/packages';
 import { loadTemplates, TEMPLATE_LIMITS } from '$lib/core/templates/load';
 import { profiles } from '$lib/stores/profiles';
 import type { CodeDbService, UserFileText } from '$lib/app/types';
@@ -100,9 +101,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Bytewise, so the order is the same on every platform and every locale. */
-function byName(a: UserFileText, b: UserFileText): number {
-  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+/** `package` for the problem of a package's file, nothing for the user's own (P4g, §6.9 rule 11). */
+function inPackage(name: string | undefined): { package?: string } {
+  return name === undefined ? {} : { package: name };
+}
+
+/**
+ * The database id without a layer mark: `fanuc-lathe@base` and `fanuc-lathe@l0` (the layers of a
+ * database that packages and the user lay over a built-in one, see `sourcesOf`) are `fanuc-lathe`.
+ */
+function unlayered(id: string): string {
+  const at = id.indexOf('@');
+  return at < 0 ? id : id.slice(0, at);
 }
 
 /** A message without the entry numbers, to tell the same complaint at two paths apart from two complaints. */
@@ -112,6 +122,8 @@ function shape(message: string): string {
 
 /** One accepted user file. */
 interface Layer {
+  /** The script package the file is in; unset for the user's own file (P4g, §6.9 rule 11). */
+  package?: string;
   file: string;
   raw: Record<string, unknown>;
   /** The index in the file of each entry of `raw.codes` (broken entries are left out of it). */
@@ -137,9 +149,15 @@ function shown(value: unknown): string {
   return text.length > 60 ? `${text.slice(0, 57)}...` : text;
 }
 
-/** A database id as a notice names it: an overlay's untouched built-in is "the built-in fanuc". */
-function dbName(id: string): string {
-  return id.endsWith(BASE) ? `the built-in ${id.slice(0, -BASE.length)}` : `"${id}"`;
+/**
+ * A database id as a notice names it: an overlay's untouched built-in is "the built-in fanuc",
+ * the layer of a package under it "the fanuc of package shop-a". `packageOf` finds the package
+ * of a layer id.
+ */
+function dbName(id: string, packageOf: (id: string) => string | undefined = () => undefined): string {
+  if (id.endsWith(BASE)) return `the built-in ${id.slice(0, -BASE.length)}`;
+  const pkg = packageOf(id);
+  return pkg === undefined ? `"${id}"` : `"${unlayered(id)}" of package ${pkg}`;
 }
 
 /** What a notice adds for the members whose change the scripts act on most. */
@@ -149,16 +167,18 @@ const CONSEQUENCE: Record<string, (after: unknown) => string | null> = {
 };
 
 /** The `info` text of one changed member (NC-1). */
-function noticeText(n: CodeDbMergeNotice): string {
-  const parent = dbName(n.parent);
+function noticeText(n: CodeDbMergeNotice, packageOf?: (id: string) => string | undefined): string {
+  const parent = dbName(n.parent, packageOf);
+  // An entry of a package's file is not "yours" (P4g).
+  const who = packageOf?.(n.dialect) === undefined ? 'your entry' : 'this entry';
   const head =
     n.after === undefined || n.after === false
       ? n.replaced && n.after === undefined
         ? `${n.code}: "replace": true drops ${n.member} (${parent} has ${shown(n.before)})`
-        : `${n.code}: your entry sets ${n.member} to ${shown(n.after)} (${parent} has ${shown(n.before)})`
+        : `${n.code}: ${who} sets ${n.member} to ${shown(n.after)} (${parent} has ${shown(n.before)})`
       : n.before === undefined
-        ? `${n.code}: your entry adds ${n.member}: ${shown(n.after)} (${parent} has none)`
-        : `${n.code}: your entry changes ${n.member} from ${shown(n.before)} to ${shown(n.after)} (${parent})`;
+        ? `${n.code}: ${who} adds ${n.member}: ${shown(n.after)} (${parent} has none)`
+        : `${n.code}: ${who} changes ${n.member} from ${shown(n.before)} to ${shown(n.after)} (${parent})`;
   const tail = CONSEQUENCE[n.member]?.(n.after);
   return tail ? `${head}; ${tail}` : head;
 }
@@ -194,20 +214,43 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
   const none = emptyCodeDb('');
   /** The resolved set, built once: resolution is by dialect id, not by profile (AD-17). */
   let resolved: Record<string, CodeDb> | null = null;
-  /** The user files that were accepted by the last `reload`. */
-  let overlays = new Map<string, Layer>();
+  /**
+   * The user files that were accepted by the last `reload`. An overlay is a stack of layers,
+   * lowest first: the packages' files by package name, then the user's own (§6.9 rule 11).
+   */
+  let overlays = new Map<string, Layer[]>();
   let own = new Map<string, Layer>();
 
   /** The stored files of a set: built-ins, overlays over them, user databases. */
-  function sourcesOf(ov: Map<string, Layer>, ow: Map<string, Layer>): Record<string, unknown> {
+  function sourcesOf(ov: Map<string, Layer[]>, ow: Map<string, Layer>): Record<string, unknown> {
     const base = deps.sources?.() ?? {};
     if (ov.size === 0 && ow.size === 0) return base;
     const out: Record<string, unknown> = { ...base };
-    for (const [dialect, layer] of ov) {
+    for (const [dialect, stack] of ov) {
       out[`${dialect}${BASE}`] = base[dialect];
-      out[dialect] = { ...layer.raw, extends: `${dialect}${BASE}` };
+      // Each layer extends the one below it; the top one is the database itself.
+      let below = `${dialect}${BASE}`;
+      stack.forEach((layer, index) => {
+        const id = overlayId(dialect, index, stack.length);
+        out[id] = { ...layer.raw, extends: below };
+        below = id;
+      });
     }
     for (const [dialect, layer] of ow) out[dialect] = layer.raw;
+    return out;
+  }
+
+  /** The id of layer `index` of `count` over built-in `dialect`: the top one is `dialect`. */
+  function overlayId(dialect: string, index: number, count: number): string {
+    return index === count - 1 ? dialect : `${dialect}@l${index}`;
+  }
+
+  /** Every layer of a set by its database id (an overlay's lower layers under their `@l` ids). */
+  function layerIndex(ov: Map<string, Layer[]>, ow: Map<string, Layer>): Map<string, Layer> {
+    const out = new Map<string, Layer>(ow);
+    for (const [dialect, stack] of ov) {
+      stack.forEach((layer, index) => out.set(overlayId(dialect, index, stack.length), layer));
+    }
     return out;
   }
 
@@ -227,7 +270,7 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
     const out: Record<string, CodeDb> = {};
     const merged = resolveCodeDbFiles(sources, report, { memberMerge: userLayer, onMerge, onEntryProblem });
     for (const [dialect, file] of Object.entries(merged)) {
-      if (dialect.endsWith(BASE)) continue;
+      if (dialect.includes('@')) continue;
       try {
         out[dialect] = loadCodeDb(file, (problem) => report(dialect, problem));
       } catch (error) {
@@ -238,8 +281,10 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
   }
 
   /** Is `dialect` one of the user's layers in this set (an overlay or a database of the user's own)? */
-  const userLayerOf = (ov: Map<string, Layer>, ow: Map<string, Layer>) => (dialect: string) =>
-    ov.has(dialect) || ow.has(dialect);
+  const userLayerOf = (ov: Map<string, Layer[]>, ow: Map<string, Layer>) => {
+    const layers = layerIndex(ov, ow);
+    return (dialect: string): boolean => layers.has(dialect);
+  };
 
   function resolveAll(): Record<string, CodeDb> {
     if (resolved === null) {
@@ -304,7 +349,7 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
     let id: string | null = dialect;
     while (id !== null && !seen.has(id)) {
       seen.add(id);
-      out.add(id.endsWith(BASE) ? id.slice(0, -BASE.length) : id);
+      out.add(unlayered(id));
       id = parentOf(sources, id);
     }
     return out;
@@ -396,7 +441,7 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
   ): { dialect: string; layer: Layer; overlay: boolean } | null {
     const stem = f.name.replace(/\.json$/i, '');
     const fail = (path: string, message: string): null => {
-      problems.push({ origin: 'user', file: f.name, profileId: stem, path, message, kind: 'codes' });
+      problems.push({ origin: 'user', file: f.name, profileId: stem, path, message, kind: 'codes', ...inPackage(f.package) });
       return null;
     };
     let raw: unknown;
@@ -451,7 +496,7 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
       return fail(error instanceof CodeDbError ? error.path : '', error instanceof Error ? error.message : String(error));
     }
     for (const p of alone) {
-      problems.push({ origin: 'user', file: f.name, profileId: stem, path: p.path, message: p.message, kind: 'codes' });
+      problems.push({ origin: 'user', file: f.name, profileId: stem, path: p.path, message: p.message, kind: 'codes', ...inPackage(f.package) });
       standalone.add(shape(p.message));
     }
     const kept = new Set(loaded.codes.map((entry) => entry.code));
@@ -478,7 +523,7 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
         return true;
       });
     }
-    return { dialect: stem, layer: { file: f.name, raw: layerRaw, indexOf }, overlay };
+    return { dialect: stem, layer: { file: f.name, raw: layerRaw, indexOf, ...inPackage(f.package) }, overlay };
   }
 
   /**
@@ -518,6 +563,7 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
             message: `${code}: not used under "${variant}", which defines ${code} itself (it differs from "${base}"); your other entries apply there`,
             kind: 'codes',
             severity: 'info',
+            ...inPackage(layer.package),
           });
         });
         overCache.set(`${ownId}\u0000${variant}`, db);
@@ -541,7 +587,7 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
     }
     const sources = currentSources();
     const all = Object.keys(resolveAll()).sort();
-    for (const [dialect, layer] of overlays) {
+    for (const [dialect, stack] of overlays) {
       const ownTypes = typesOf.get(dialect) ?? new Set<string>();
       const reached: string[] = [];
       const otherTypes = new Set<string>();
@@ -553,18 +599,21 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
         for (const type of foreign) otherTypes.add(type);
       }
       if (reached.length === 0) continue;
-      out.push({
-        origin: 'user',
-        file: layer.file,
-        profileId: dialect,
-        path: '',
-        message:
-          `laid over the built-in ${dialect}, this file also reaches ${reached.map((id) => `"${id}"`).join(', ')}, ` +
-          `which ${[...otherTypes].sort().join(' and ')} profiles read; a table for one machine type belongs in a code file ` +
-          `of its own that extends ${dialect}, named by a profile of yours`,
-        kind: 'codes',
-        severity: 'info',
-      });
+      for (const layer of stack) {
+        out.push({
+          origin: 'user',
+          file: layer.file,
+          profileId: dialect,
+          path: '',
+          message:
+            `laid over the built-in ${dialect}, this file also reaches ${reached.map((id) => `"${id}"`).join(', ')}, ` +
+            `which ${[...otherTypes].sort().join(' and ')} profiles read; a table for one machine type belongs in a code file ` +
+            `of its own that extends ${dialect}, named by a profile of yours`,
+          kind: 'codes',
+          severity: 'info',
+          ...inPackage(layer.package),
+        });
+      }
     }
     return out;
   }
@@ -615,32 +664,68 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
       // at the end; a throw on the way keeps the set in force as it was and is reported.
       try {
         const builtinIds = new Set(Object.keys(deps.sources?.() ?? {}));
-        const nextOverlays = new Map<string, Layer>();
+        const nextOverlays = new Map<string, Layer[]>();
         const nextOwn = new Map<string, Layer>();
         const standalone = new Set<string>();
-        for (const f of [...user].sort(byName)) {
+        // The packages' files first (by package, then by name), the user's own after them.
+        for (const f of layerSorted(user)) {
           const read = readUserFile(f, builtinIds, problems, standalone);
           if (read === null) continue;
-          (read.overlay ? nextOverlays : nextOwn).set(read.dialect, read.layer);
+          if (read.overlay) {
+            // An overlay is laid over the built-in package by package, then the user's.
+            nextOverlays.set(read.dialect, [...(nextOverlays.get(read.dialect) ?? []), read.layer]);
+            continue;
+          }
+          const taken = nextOwn.get(read.dialect);
+          if (taken === undefined) {
+            nextOwn.set(read.dialect, read.layer);
+          } else if (taken.package !== undefined && read.layer.package === undefined) {
+            // Your own database with the id of a package's replaces it, with a notice.
+            problems.push({
+              origin: 'user',
+              file: taken.file,
+              profileId: read.dialect,
+              path: 'dialect',
+              message: `replaced by your own code file ${read.layer.file}, which has the same id`,
+              kind: 'codes',
+              severity: 'info',
+              package: taken.package,
+            });
+            nextOwn.set(read.dialect, read.layer);
+          } else {
+            problems.push({
+              origin: 'user',
+              file: read.layer.file,
+              profileId: read.dialect,
+              path: 'dialect',
+              message: `the id is already taken by ${taken.package === undefined ? taken.file : `package ${taken.package}`}`,
+              kind: 'codes',
+              ...inPackage(read.layer.package),
+            });
+          }
         }
 
         // The file a problem of `dialect` belongs to: its own, or the nearest user file on its chain.
         const sources = sourcesOf(nextOverlays, nextOwn);
-        const layerOf = (id: string): Layer | undefined => nextOwn.get(id) ?? nextOverlays.get(id);
-        const fileOf = (dialect: string): { file: string | null; user: boolean } => {
+        const layers = layerIndex(nextOverlays, nextOwn);
+        const layerOf = (id: string): Layer | undefined => layers.get(id);
+        const packageOf = (id: string): string | undefined => layers.get(id)?.package;
+        /** A lower layer of an overlay is reported under its dialect; any other id as it is. */
+        const shownId = (id: string): string => (layers.has(id) ? unlayered(id) : id);
+        const fileOf = (dialect: string): { file: string | null; user: boolean; package?: string } => {
           const seen = new Set<string>();
           let id: string | null = dialect;
           while (id !== null && !seen.has(id)) {
             seen.add(id);
             const layer = layerOf(id);
-            if (layer !== undefined) return { file: layer.file, user: true };
-            id = parentOf(sources, id.endsWith(BASE) ? id.slice(0, -BASE.length) : id);
+            if (layer !== undefined) return { file: layer.file, user: true, ...inPackage(layer.package) };
+            id = parentOf(sources, unlayered(id));
           }
           return { file: null, user: false };
         };
         const reported = new Set<string>();
         const push = (problem: ProfileProblem): void => {
-          const key = `${problem.file}|${problem.profileId}|${problem.path}|${problem.message}`;
+          const key = `${problem.package ?? ''}|${problem.file}|${problem.profileId}|${problem.path}|${problem.message}`;
           if (reported.has(key)) return;
           reported.add(key);
           problems.push(problem);
@@ -651,7 +736,15 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
             const at = fileOf(dialect);
             // A complaint the file's own reading already made (at another index) is not made twice.
             if (standalone.has(shape(p.message))) return;
-            push({ origin: at.user ? 'user' : 'builtin', file: at.file, profileId: dialect, path: p.path, message: p.message, kind: 'codes' });
+            push({
+              origin: at.user ? 'user' : 'builtin',
+              file: at.file,
+              profileId: shownId(dialect),
+              path: p.path,
+              message: p.message,
+              kind: 'codes',
+              ...inPackage(at.package),
+            });
           },
           userLayerOf(nextOverlays, nextOwn),
           // NC-1: every meaning a user entry changes, as a notice in its own file.
@@ -661,11 +754,12 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
             push({
               origin: 'user',
               file: layer.file,
-              profileId: n.dialect,
+              profileId: shownId(n.dialect),
               path: `codes[${layer.indexOf[n.index] ?? n.index}].${n.member}`,
-              message: noticeText(n),
+              message: noticeText(n, packageOf),
               kind: 'codes',
               severity: 'info',
+              ...inPackage(layer.package),
             });
           },
           (dialect, p) => {
@@ -673,10 +767,11 @@ export function createCodeDbService(deps: CodeDbServiceDeps): CodeDbServiceInter
             push({
               origin: 'user',
               file: layer?.file ?? null,
-              profileId: dialect,
+              profileId: shownId(dialect),
               path: layer ? inFile(p.path, layer) : p.path,
               message: p.message,
               kind: 'codes',
+              ...inPackage(layer?.package),
             });
           },
         );

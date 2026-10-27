@@ -48,6 +48,9 @@ pub const KEY_PYTHON: &str = "scripts.python";
 pub const KEY_FOLDERS: &str = "scripts.folders";
 pub const KEY_TIMEOUT: &str = "scripts.timeoutSeconds";
 pub const KEY_SHOW_BUNDLED: &str = "scripts.showBundled";
+/// `packages.disabled`, the switched-off script packages (P4g, §6.9 rule 12); the key lives with
+/// the packages ([`crate::packages::KEY_PACKAGES_DISABLED`]) and is read here with the others.
+pub const KEY_PACKAGES_DISABLED: &str = crate::packages::KEY_PACKAGES_DISABLED;
 
 /// What the scripting backend needs out of `settings.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +67,10 @@ pub struct ScriptSettings {
     /// `scripts.showBundled`. False hides the bundled scripts from the list; the
     /// folder itself is still reported, so the settings dialog can explain why.
     pub show_bundled: bool,
+    /// `packages.disabled`: the folder names of the switched-off packages, as written (a name
+    /// with no folder is kept, the folder may come back). A package listed here has no script
+    /// root and contributes no file (§6.9 rule 12).
+    pub packages_disabled: Vec<String>,
 }
 
 impl Default for ScriptSettings {
@@ -73,6 +80,7 @@ impl Default for ScriptSettings {
             folders: Vec::new(),
             timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
             show_bundled: true,
+            packages_disabled: Vec::new(),
         }
     }
 }
@@ -122,6 +130,17 @@ impl ScriptSettings {
                 .get(KEY_SHOW_BUNDLED)
                 .and_then(Value::as_bool)
                 .unwrap_or(true),
+            packages_disabled: settings
+                .get(KEY_PACKAGES_DISABLED)
+                .and_then(Value::as_array)
+                .map(|names| {
+                    names
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
@@ -213,6 +232,25 @@ mod tests {
                 DEFAULT_TIMEOUT_SECONDS,
                 "{json}"
             );
+        }
+    }
+
+    /// §6.9 rule 12: the switched-off packages are read like the other keys; anything that is
+    /// not a list of names gives none, a name with no folder is kept.
+    #[test]
+    fn reads_the_switched_off_packages() {
+        assert!(read("{}").packages_disabled.is_empty());
+        assert_eq!(
+            read(r#"{ "packages.disabled": ["shop-a", 7, "gone", null, "shop-b"] }"#)
+                .packages_disabled,
+            ["shop-a", "gone", "shop-b"]
+        );
+        for json in [
+            r#"{ "packages.disabled": "shop-a" }"#,
+            r#"{ "packages.disabled": {} }"#,
+            r#"{ "packages.disabled": null }"#,
+        ] {
+            assert!(read(json).packages_disabled.is_empty(), "{json}");
         }
     }
 

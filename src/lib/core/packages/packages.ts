@@ -52,3 +52,50 @@ export function packageOfScriptId(scriptId: string): string | null {
  */
 export const LAYER_ORDER = ['builtin', 'package', 'user'] as const;
 export type Layer = (typeof LAYER_ORDER)[number];
+
+/** Bytewise, so the order is the same on every platform and in every language (as in Rust). */
+export function byteOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** A file of a package or of the user's own folder, as `userConfig` hands it to the registries. */
+export interface LayeredFile {
+  name: string;
+  /** The package folder the file comes from; unset for the user's own file. */
+  package?: string;
+}
+
+/**
+ * The files in the order the registries read them (§6.9 rule 11): every package's files first,
+ * packages by folder name and files by name, then the user's own files by name. A later file
+ * wins where two define one thing; of two with one id the first one loads.
+ */
+export function layerSorted<T extends LayeredFile>(files: readonly T[]): T[] {
+  return [...files].sort((a, b) => {
+    if ((a.package === undefined) !== (b.package === undefined)) return a.package === undefined ? 1 : -1;
+    return byteOrder(a.package ?? '', b.package ?? '') || byteOrder(a.name, b.name);
+  });
+}
+
+/**
+ * The new value of `packages.disabled` after `name` is switched on or off. A name whose folder
+ * is gone stays in the list (the folder may come back); the order is kept.
+ */
+export function withPackageEnabled(disabled: readonly string[], name: string, enabled: boolean): string[] {
+  if (enabled) return disabled.filter((entry) => entry !== name);
+  return disabled.includes(name) ? [...disabled] : [...disabled, name];
+}
+
+/** Whether `name` is switched off by the setting's value. */
+export function isPackageDisabled(disabled: readonly string[], name: string): boolean {
+  return disabled.includes(name);
+}
+
+/**
+ * The name a package is shown under: the `name` of its `package.json`, or the folder name.
+ * `titles` is folder name → display name as `packages_list` answered it.
+ */
+export function packageTitle(titles: ReadonlyMap<string, string>, name: string): string {
+  const title = titles.get(name);
+  return title === undefined || title.trim() === '' ? name : title;
+}
