@@ -103,6 +103,7 @@ Each row names the owning work package and the feature.
 | `encoding.ts` | WP1.6 | encoding and EOL status items and pickers |
 | `externalChange.ts` | WP2.3 | the external-change banner and the poll |
 | `files.ts` | WP1.6 | file commands, close guard, drag and drop, window title |
+| `findInFolder.ts` | P4.28 | `search.findInFolder` (Edit tab, group Search, order 133; no key): the folder dialog, the form, then `folderSearch` (Rust walks the folder and sends each file's bytes); the files are read here with their own profile and the regular-expression guard; hits go to Results, a row opens its file through `folder_grant`; progress and Stop in the status bar (Phase 4, P4f; engine `core/folders/*`) |
 | `help.ts` | WP2.4 | About and the shortcut reference |
 | `layoutPersist.ts` | WP2.3 | restores `ui.layout` and then follows it |
 | `inspector.ts` | P3.2b | the code inspector (left panel): `view.toggleInspector` (Mod+Alt+A), `inspector.editValue` (Phase 3, P3a; the prelude pinned them) |

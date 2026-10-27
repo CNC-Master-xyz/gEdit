@@ -211,6 +211,19 @@
     return report?.docId ?? docs.getActiveId();
   }
 
+  /** P4.28: a row of Find in Folder names a file (`path`) the report knows how to open (`openRow`). */
+  function openerOf(row: Record<string, unknown>): ((row: Record<string, unknown>) => void | Promise<void>) | null {
+    return report?.openRow !== undefined && typeof row.path === 'string' && row.path !== '' ? report.openRow : null;
+  }
+
+  async function openFolderRow(row: Record<string, unknown>): Promise<void> {
+    try {
+      await openerOf(row)?.(row);
+    } catch {
+      // The opener says what went wrong itself (the status line); a click must not throw.
+    }
+  }
+
   function reveal(line: number | null, docId: DocId | null): void {
     if (line === null || docId === null) return;
     editor.reveal(docId, line);
@@ -304,7 +317,21 @@
         {#each rows as row, index (index)}
           {@const line = rowLine(row)}
           {@const docId = documentOf(row.document, row.docId)}
-          {#if line !== null && docId !== null}
+          {#if openerOf(row) !== null}
+            <button
+              type="button"
+              class="row link"
+              data-testid="results-row"
+              data-line={line ?? ''}
+              data-doc-id=""
+              data-path={String(row.path)}
+              data-root={typeof row.root === 'string' ? row.root : ''}
+              title={line === null ? t('findInFolder.openTitle', { file: cellText(row.file) }) : t('results.goToLine', { line })}
+              onclick={() => openFolderRow(row)}
+            >
+              {@render cells(row, report.columns)}
+            </button>
+          {:else if line !== null && docId !== null}
             <button
               type="button"
               class="row link"
