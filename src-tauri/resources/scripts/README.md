@@ -20,6 +20,7 @@ unless an extra folder holds one too (Phase 1 plan §3, AD-13).
 | `_nc_geom.py` | Phase 4 (P4a): the transform rules — the role of each word, how translate, rotate and mirror move it, and why a block is refused |
 | `_nc_run.py` | Phase 4 (P4b prelude): the run the transforms share — the form and context checks, the scope and the lines above a selection, the machine sentence, writing edits into a line, and the plane run of rotate and mirror |
 | `_nc_cycles.py` | Phase 4 (P4b): the drilling cycles as plain moves, read from the expansion schemas of the code database, and the machine's motion data and limits; read by the cycle expansion, the time estimate, the extents (the depths of the holes) and the program checks |
+| `_nc_block.py` | Wave Y (T209, T090): what Scale feed rates, Scale spindle speeds and the Tool list share — the power-on state, the codes a block writes, the parameter and number helpers, and a block read to its end across its continuation lines (Klartext `~`, Okuma `$`), so a code on any of its lines counts for all of them |
 | `tool_list.py` | tools in order of first use, with descriptions and call counts — `output = "report"` |
 | `scale_feed.py` | multiply `F` values by a percentage — `output = "replace"` |
 | `scale_speed.py` | multiply `S` values by a percentage — `output = "replace"` |
@@ -36,10 +37,10 @@ unless an extra folder holds one too (Phase 1 plan §3, AD-13).
 a script**: discovery skips them, because they are library code, not commands. The `_nc_*`
 modules are the internals of `gedit_nc`, which re-exports everything that is public — a
 script imports `gedit_nc` and nothing else, so the split can move without breaking anyone.
-Four helpers sit **above** `gedit_nc` instead of inside it: `_nc_path`, `_nc_geom`, `_nc_run`
-and `_nc_cycles` import `gedit_nc` and are not re-exported by it. The bundled geometry
-scripts, `extents.py`, `expand_cycles.py`, `time_estimate.py` and `program_checks.py` import
-them by name (`import _nc_path`); they are internal, and a
+Five helpers sit **above** `gedit_nc` instead of inside it: `_nc_path`, `_nc_geom`, `_nc_run`,
+`_nc_cycles` and `_nc_block` import `gedit_nc` and are not re-exported by it. The bundled geometry
+scripts, `extents.py`, `expand_cycles.py`, `time_estimate.py`, `program_checks.py`, the two
+scale scripts and the tool list import them by name (`import _nc_path`); they are internal, and a
 script of your own that imports them may break when they change.
 
 ---

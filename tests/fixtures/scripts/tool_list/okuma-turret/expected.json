@@ -65,7 +65,7 @@
       "line": 34,
       "calls": 1,
       "feed": "120 /min",
-      "speed": ""
+      "speed": "SB=2000"
     },
     {
       "tool": "T12",
@@ -74,7 +74,7 @@
       "line": 41,
       "calls": 1,
       "feed": "",
-      "speed": ""
+      "speed": "SB=500"
     }
   ],
   "message": "5 tools",

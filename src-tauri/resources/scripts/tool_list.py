@@ -110,6 +110,22 @@ Two rules keep the answer honest:
   that names the **main** spindle by its number is (`S1=`, `S[1]=` where the profile's
   `addresses.mainSpindle` is 1; M10, the owner's reading of 2026-09-27).
 
+A speed written for **another spindle** (Wave Y, T116) — a driven tool's `SB=`, a spindle
+named by its number (`S3=`, `S[2]=`) — is no speed of the main spindle and never joins the
+main range, but it is the speed the tool cuts with on a driven-tool operation, so the Speed
+column lists it after the main range under its own word (`1200; SB=2000-2500`). The rule is
+the one Scale spindle speeds reads them by: the spindle address extended by a number or by
+one letter and written with `=`, an angle of the profile (`addresses.angular`: `SF=`)
+excepted.
+
+A tool change that names no tool (T115) still owns the feeds and speeds it cuts with: they
+are in no tool's range, and its finding says which they are rather than dropping them.
+
+A block may run over several lines (Klartext `~`, Okuma `$`), and a code on any of them
+counts for the whole block (T090): the `F` on the first line of a block whose `$` line
+writes a thread code is a lead. The walk reads a block to its end before it collects a value
+of it (`_nc_block`).
+
 A run over a **selection** is primed from `input.precedingLines` when the context carries
 them (`gedit_nc.prime_tracker`), so a `G95` or a `G96` that starts above the selection is
 in force here too and its values stay out of the per-minute and rpm ranges. Without the
@@ -126,6 +142,8 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import gedit_nc
+import _nc_block
+from _nc_block import as_dict, power_on_state
 
 #: Between the tool and its description in the summary counts.
 LOOK_ABOVE = 3
@@ -176,11 +194,6 @@ SURFACE_UNIT = {"mm": "m/min", "inch": "ft/min"}
 #: The units a feed range may be in. Inverse time is the reciprocal of a time and not a feed
 #: rate, and an unknown unit is unknown: neither ever joins a range.
 RANGE_UNITS = ("per-minute", "per-rev", "per-tooth")
-
-
-def as_dict(value: Any) -> Dict[str, Any]:
-    """``value`` when it is a dictionary, else an empty one — profiles arrive as JSON."""
-    return value if isinstance(value, dict) else {}
 
 
 class Spec:
@@ -244,6 +257,12 @@ class Spec:
         main = addresses.get("mainSpindle")
         self.main_spindle = main.strip() if isinstance(main, str) and main.strip() != "" else None
         self.feed_speed = params.get("feedSpeed") is not False
+        #: T116: addresses whose value is an angle (`SF=`, a thread's start angle): never a
+        #: speed of another spindle.
+        angular = addresses.get("angular")
+        self.angular = frozenset(
+            str(word).upper() for word in (angular if isinstance(angular, list) else []) if isinstance(word, str)
+        )
         #: The addresses that move the machine: a block with one of them is where a tool cuts
         #: with the feed and speed in force (:class:`Pending`).
         axes = addresses.get("axes")
@@ -309,6 +328,7 @@ class Row:
         "speed_unit",
         "skipped",
         "surface",
+        "by_spindle",
     )
 
     def __init__(self, label: str, number: Optional[str], line: int) -> None:
@@ -337,6 +357,9 @@ class Row:
         self.skipped: Dict[str, List[int]] = {}
         #: M9: (unit text, code) of every surface speed of this tool, in order of first use.
         self.surface: List[Tuple[str, str]] = []
+        #: T116: the speeds written for another spindle (`SB=`, `S3=`, `S[2]=`), by the word
+        #: as the column names it, in order of first use.
+        self.by_spindle: Dict[str, List[Tuple[Decimal, str]]] = {}
 
     def add_offset(self, offset: Optional[str]) -> None:
         if offset is not None and offset not in self.offsets:
@@ -349,6 +372,9 @@ class Row:
 
         ``note`` is the unit text and the code of a surface speed (M9), for its range's tag.
         """
+        if kind == "spindle":
+            self.by_spindle.setdefault(key, []).append(value)
+            return
         found = self.by_mode if kind == "feed" else self.by_speed
         found.setdefault(key, []).append(value)
         self.first_line.setdefault("%s:%s" % (kind, key), line)
@@ -846,103 +872,127 @@ def build(
     #: Values written since the last move; they go to the tool that moves next.
     pending = Pending()
 
-    for i, line in enumerate(lines):
-        tokens, state = gedit_nc.tokenize_line(line, cp, state)
-        # An Okuma `$` line belongs to the block above it.
-        tracker.update(tokens, continued=gedit_nc.continues_block(line, cp))
-        surface.read(tracker.written)
-        mark = marks[i]
-        number_line = line_numbers[i] if line_numbers is not None else base_line + i
+    #: T115: the tool changes that name no tool, each with what it cuts with, and the
+    #: finding it opened, which says what those values are once the walk is over.
+    unnamed_rows: List[Tuple[Row, Dict[str, Any]]] = []
 
-        start = gedit_nc.program_start_of(line, cp)
-        if start is not None:
-            programs += 1
-            if programs > 1:
-                # M13 (NC-4): a program after the first, most often a subprogram behind the
-                # main program's `M30`. It runs with the tool of whatever calls it, which the
-                # file does not say, so the tool of the program above is not its tool: what
-                # it cuts with before its own first tool call is charged to no tool.
-                pending.hand_to(None)
-                current = None
-                last_tool = None
-                last_unload = False
-                last_offset = None
-                called = Row(label=start, number=None, line=number_line)
-                called_rows.append(called)
+    # T090: a block is read to its end before a value of it is collected, because a code on
+    # any of its lines counts for the whole block (`_nc_block`): an Okuma `$` line belongs
+    # to the block above it.
+    reader = _nc_block.BlockReader(cp, state)
+    for block in reader.blocks(lines):
+        flags = _nc_block.BlockFlags(tracker)
+        for block_line in block:
+            i = block_line.index
+            line = block_line.text
+            _nc_block.read_line(tracker, block_line)
+            flags.add(block_line)
+            surface.read(block_line.written)
+            mark = marks[i]
+            number_line = line_numbers[i] if line_numbers is not None else base_line + i
+            start = gedit_nc.program_start_of(line, cp)
+            if start is not None:
+                programs += 1
+                if programs > 1:
+                    # M13 (NC-4): a program after the first, most often a subprogram behind the
+                    # main program's `M30`. It runs with the tool of whatever calls it, which the
+                    # file does not say, so the tool of the program above is not its tool: what
+                    # it cuts with before its own first tool call is charged to no tool.
+                    pending.hand_to(None)
+                    current = None
+                    last_tool = None
+                    last_unload = False
+                    last_offset = None
+                    called = Row(label=start, number=None, line=number_line)
+                    called_rows.append(called)
 
-        if mark is not None:
-            # The tool in the spindle before this line, for `is_speed_only` — a Klartext
-            # `TOOL CALL` that repeats it without an axis is a speed change, not a new call.
-            previous_tool = last_tool
-            previous_unload = last_unload
-            previous_offset = last_offset
-            if mark.tool is not None:
-                last_tool = mark.tool
-                last_unload = mark.unload
-                last_offset = mark.offset
-                tool_words += 1
-                if first_tool_word == 0:
-                    first_tool_word = number_line
+            if mark is not None:
+                # The tool in the spindle before this line, for `is_speed_only` — a Klartext
+                # `TOOL CALL` that repeats it without an axis is a speed change, not a new call.
+                previous_tool = last_tool
+                previous_unload = last_unload
+                previous_offset = last_offset
+                if mark.tool is not None:
+                    last_tool = mark.tool
+                    last_unload = mark.unload
+                    last_offset = mark.offset
+                    tool_words += 1
+                    if first_tool_word == 0:
+                        first_tool_word = number_line
 
-            # A comment line of the header tool list (`(T5  D12 FLAT END MILL)`). The first
-            # one per number wins, and it is registered before the tool change that uses it,
-            # because a post prints the list above the program.
-            if mark.kind in ("comment", "section"):
-                listed = tool_list_entry(mark.description)
-                if listed is not None and listed[0] not in from_list:
-                    from_list[listed[0]] = listed[1]
+                # A comment line of the header tool list (`(T5  D12 FLAT END MILL)`). The first
+                # one per number wins, and it is registered before the tool change that uses it,
+                # because a post prints the list above the program.
+                if mark.kind in ("comment", "section"):
+                    listed = tool_list_entry(mark.description)
+                    if listed is not None and listed[0] not in from_list:
+                        from_list[listed[0]] = listed[1]
 
-            # `T0` preselected, then `M6` alone: the tool change loads the pending `T0`, so
-            # it unloads the spindle and is no tool change, as `M6 T0` on one line is not.
-            # D3-4c ``last-before``: the change loads the `T` written before its line, whatever
-            # the line writes itself (that one is the next tool).
-            if spec.tool_from_before:
-                unloads = previous_tool is not None and previous_unload
-            else:
-                unloads = mark.tool is None and spec.tool_from_last and last_unload
-            if mark.is_tool and not unloads and not is_speed_only(mark, previous_tool, spec):
+                # `T0` preselected, then `M6` alone: the tool change loads the pending `T0`, so
+                # it unloads the spindle and is no tool change, as `M6 T0` on one line is not.
+                # D3-4c ``last-before``: the change loads the `T` written before its line, whatever
+                # the line writes itself (that one is the next tool).
                 if spec.tool_from_before:
-                    tool = previous_tool
+                    unloads = previous_tool is not None and previous_unload
                 else:
-                    tool = mark.tool if mark.tool is not None else (last_tool if spec.tool_from_last else None)
-                if tool is None:
-                    findings.append(
-                        {
+                    unloads = mark.tool is None and spec.tool_from_last and last_unload
+                if mark.is_tool and not unloads and not is_speed_only(mark, previous_tool, spec):
+                    if spec.tool_from_before:
+                        tool = previous_tool
+                    else:
+                        tool = mark.tool if mark.tool is not None else (last_tool if spec.tool_from_last else None)
+                    if tool is None:
+                        finding = {
                             "line": number_line,
                             "severity": "warning",
                             "message": "Tool change without a tool number.",
                         }
-                    )
-                    unnamed += 1
-                    current = None
-                    called = None
-                    pending.hand_to(None)
-                else:
-                    number = tool_number_of(tool, spec)
-                    key = number if number is not None else "name:" + bare_tool(tool, spec)
-                    row = by_key.get(key)
-                    if row is None:
-                        row = Row(label=tool_label(tool, spec), number=number, line=number_line)
-                        by_key[key] = row
-                        rows.append(row)
-                    row.calls += 1
-                    row.add_offset(previous_offset if spec.tool_from_before else mark.offset)
-                    if row.description is None:
-                        row.description = describe_tool(marks, i + 1, number, from_list, spec)
-                    # What was written since the last move was written for this tool.
-                    pending.hand_to(row)
-                    current = row
-                    called = None
+                        findings.append(finding)
+                        unnamed += 1
+                        current = None
+                        # T115: what was written for this tool, and what it cuts with until the
+                        # next tool change, belongs to no tool of the list; it is kept here and
+                        # named in the finding instead of being dropped.
+                        called = Row(label="", number=None, line=number_line)
+                        unnamed_rows.append((called, finding))
+                        pending.hand_to(called)
+                    else:
+                        number = tool_number_of(tool, spec)
+                        key = number if number is not None else "name:" + bare_tool(tool, spec)
+                        row = by_key.get(key)
+                        if row is None:
+                            row = Row(label=tool_label(tool, spec), number=number, line=number_line)
+                            by_key[key] = row
+                            rows.append(row)
+                        row.calls += 1
+                        row.add_offset(previous_offset if spec.tool_from_before else mark.offset)
+                        if row.description is None:
+                            row.description = describe_tool(marks, i + 1, number, from_list, spec)
+                        # What was written since the last move was written for this tool.
+                        pending.hand_to(row)
+                        current = row
+                        called = None
 
         if spec.feed_speed:
-            collect(pending, tokens, tracker, spec, codes, number_line, surface.note())
-            if moves_an_axis(tokens, spec):
-                pending.hand_to(current if current is not None else called)
+            for block_line in block:
+                i = block_line.index
+                number_line = line_numbers[i] if line_numbers is not None else base_line + i
+                collect(pending, block_line.tokens, flags, spec, codes, number_line, surface.note(), flags.tokens)
+                if moves_an_axis(block_line.tokens, spec):
+                    pending.hand_to(current if current is not None else called)
     pending.hand_to(current if current is not None else called)
     for program in called_rows:
         finding = called_finding(program, spec)
         if finding is not None:
             findings.append(finding)
+    for unnamed_row, finding in unnamed_rows:
+        written, count = values_text(unnamed_row, spec)
+        if count:
+            finding["message"] = (
+                "Tool change without a tool number: %s %s to the tool it loads, which the "
+                "list cannot name, so %s in no tool's range."
+                % (written, "belongs" if count == 1 else "belong", "it is" if count == 1 else "they are")
+            )
 
     # Nothing described the tool at its call, but the header tool list did.
     for row in rows:
@@ -980,21 +1030,22 @@ def build(
     return rows, findings, unnamed, tool_words
 
 
-def called_finding(program: Row, spec: Spec) -> Optional[Dict[str, Any]]:
-    """M13 (NC-4): the feeds and speeds a program after the first writes before its first
-    tool call, as one ``info`` finding at its start, or ``None`` when it writes none.
+def values_text(row: Row, spec: Spec) -> Tuple[str, int]:
+    """``2 feeds (F200, F150) and 1 speed (S1200)``: the values a row collected, and how many.
 
-    ``program`` is a :class:`Row` that stands for the program (its label is the program
-    start as written, ``O2``) and collects what no tool of the list cuts with.
+    The speeds of another spindle count among the speeds, under their own word (`SB=2000`).
     """
     parts: List[str] = []
     count = 0
-    for kind, found in (("feed", program.by_mode), ("speed", program.by_speed)):
+    speeds = list(row.by_speed.items()) + [("spindle:" + key, values) for key, values in row.by_spindle.items()]
+    for kind, found in (("feed", list(row.by_mode.items())), ("speed", speeds)):
         written: List[str] = []
         total = 0
-        for key, values in found.items():
+        for key, values in found:
             if kind == "feed":
                 address = key if key in PER_TOOTH_ADDRESSES else spec.feed_address
+            elif key.startswith("spindle:"):
+                address = key[len("spindle:") :]
             else:
                 address = spec.spindle_address
             total += len(values)
@@ -1006,40 +1057,29 @@ def called_finding(program: Row, spec: Spec) -> Optional[Dict[str, Any]]:
             shown = ", ".join(written[:3]) + (" and %d more" % (len(written) - 3) if len(written) > 3 else "")
             parts.append("%d %s (%s)" % (total, kind if total == 1 else kind + "s", shown))
             count += total
-    if not parts:
+    return " and ".join(parts), count
+
+
+def called_finding(program: Row, spec: Spec) -> Optional[Dict[str, Any]]:
+    """M13 (NC-4): the feeds and speeds a program after the first writes before its first
+    tool call, as one ``info`` finding at its start, or ``None`` when it writes none.
+
+    ``program`` is a :class:`Row` that stands for the program (its label is the program
+    start as written, ``O2``) and collects what no tool of the list cuts with.
+    """
+    written, count = values_text(program, spec)
+    if not count:
         return None
     return {
         "line": program.line,
         "severity": "info",
         "message": "%s: %s before any tool call; %s with the tool of the program that calls "
         "it, which the tool list cannot follow, so %s in no tool's range."
-        % (program.label, " and ".join(parts), "it runs" if count == 1 else "they run", "it is" if count == 1 else "they are"),
+        % (program.label, written, "it runs" if count == 1 else "they run", "it is" if count == 1 else "they are"),
     }
 
 
-def power_on_state(tracker: gedit_nc.FeedModeTracker, cp: gedit_nc.CompiledProfile) -> None:
-    """Puts the tracker into the state the control powers on in (plan AD-19 rule 8, AD-31).
-
-    `FeedModeTracker` is Phase 1's API: it is built from a code database alone, so it starts
-    every run in feed per minute and in rpm — which is what a milling control powers on in,
-    and what Phase 1 assumed everywhere. A turning control does not: a Fanuc lathe in G-code
-    system A powers on in `G99`, feed **per revolution**, in system B in `G95`, and the
-    document's machine may say something else again (plan §7.15).
-
-    The **effective** profile carries that state in `modal.initial`, so the run walks those
-    codes through the tracker as the block before the first one. A feed-mode or spindle-mode
-    code in the program then overrides it exactly as it overrides a code on an earlier line,
-    and a dialect that declares no power-on state (Klartext) is untouched.
-    """
-    initial = as_dict(as_dict(cp.profile.get("modal")).get("initial"))
-    codes = [value for value in initial.values() if isinstance(value, str) and value != ""]
-    if not codes:
-        return
-    tokens, _ = gedit_nc.tokenize_line(" ".join(codes), cp, None)
-    tracker.update(tokens)
-
-
-def feed_mode_of(token: gedit_nc.Token, tracker: gedit_nc.FeedModeTracker) -> str:
+def feed_mode_of(token: gedit_nc.Token, tracker: Any) -> str:
     """The mode a feed word is written in: its own address wins over the modal state."""
     if token.address in PER_TOOTH_ADDRESSES:
         return token.address or ""
@@ -1056,15 +1096,19 @@ def unit_of(mode: str, spec: Spec) -> str:
 def collect(
     row: Union[Row, Pending],
     tokens: Sequence[gedit_nc.Token],
-    tracker: gedit_nc.FeedModeTracker,
+    tracker: Any,
     spec: Spec,
     codes: Sequence[Dict[str, Any]],
     line: int,
     note: Optional[Tuple[str, str]] = None,
+    block_tokens: Optional[Sequence[gedit_nc.Token]] = None,
 ) -> None:
-    """Adds this block's feed and speed to ``row`` — or records why they were left out.
+    """Adds this line's feed and speed to ``row`` — or records why they were left out.
 
-    ``note`` is the unit and the code of the surface speed in force (M9, :class:`Surface`).
+    ``tracker`` is what the whole block says about its words (`_nc_block.BlockFlags`, T090;
+    the tracker itself for a block of one line), ``tokens`` the line's own tokens and
+    ``block_tokens`` those of the whole block. ``note`` is the unit and the code of the
+    surface speed in force (M9, :class:`Surface`).
 
     A range only means something inside one unit, so a value measured in another one is
     never silently mixed in. A tool's range is in the unit its **first** value was written
@@ -1098,10 +1142,14 @@ def collect(
     pitch_reason: Optional[str] = None
     if tracker.pitch_feed:
         pitch_reason = lead_elsewhere(tracker, spec) or "pitch"
-    elif tracker.pitch_feed_ambiguous:
+    elif tracker.pitch_feed_ambiguous and _nc_block.plain_owner_of(
+        spec.feed_address, getattr(tracker, "entries", ())
+    ) is None:
+        # T090: a code of the block that is no thread anywhere and declares the feed word as
+        # its own (an Okuma LAP `G85 … F0.3` under a `$ G84` condition change) settles it.
         pitch_reason = "ambiguous"
 
-    limit_code = gedit_nc.speed_limit_of(codes, tokens)
+    limit_code = gedit_nc.speed_limit_of(codes, tokens if block_tokens is None else block_tokens)
     speed_unit = "surface" if tracker.css else "rpm"
 
     for token in tokens:
@@ -1113,9 +1161,22 @@ def collect(
             # not a feed the tool cuts with, so it joins no range.
             continue
         main = gedit_nc.names_main_spindle(token, spec.spindle_address, spec.main_spindle)
+        other = None if main else other_spindle_word(token, spec)
+        if other is not None:
+            # T116: a driven tool's `SB=2000`, a spindle named by its number (`S3=`, `S[2]=`):
+            # not the main spindle's speed, so never in the main range, but the speed this
+            # tool cuts with on another spindle, listed under its own word.
+            value = numeric(token)
+            if value is None:
+                continue
+            if limit_code is not None:
+                row.skip("limit", line)
+            else:
+                row.add("spindle", other, (value, token.value_text or ""), line)
+            continue
         if token.index is not None and not main:
-            # `S[2]=500`, `LIMS[2]=1800` (`syntax.assignmentIndex`): the index names another
-            # spindle, as `S2=` names one in its address, so it is no tool's speed (F1).
+            # `LIMS[2]=1800` (`syntax.assignmentIndex`): a clamp of another spindle is no
+            # tool's speed (F1).
             continue
         value = numeric(token)
         if value is None:
@@ -1145,7 +1206,30 @@ def collect(
                 )
 
 
-def lead_elsewhere(tracker: gedit_nc.FeedModeTracker, spec: Spec) -> Optional[str]:
+def other_spindle_word(token: gedit_nc.Token, spec: Spec) -> Optional[str]:
+    """T116: the word as the Speed column names it when ``token`` is another spindle's speed.
+
+    The rule Scale spindle speeds reads them by: the spindle address extended by a number
+    other than 0 or by one letter and written with `=` (`S3=`, `SB=`), or indexed
+    (`S[2]=`); an angle of the profile (`addresses.angular`: `SF=`) is no speed. ``None``
+    for every other word, the main spindle's (`S1=` where it is the main spindle) included:
+    the caller asks that first.
+    """
+    if token.kind != "word" or not token.address or not _nc_block.assignment_word(token):
+        return None
+    address = token.address.upper()
+    spindle = spec.spindle_address.upper()
+    if token.index is not None:
+        return "%s[%s]=" % (spindle, token.index.strip()) if address == spindle else None
+    if not address.startswith(spindle) or address in spec.angular:
+        return None
+    rest = address[len(spindle) :]
+    if (rest.isdigit() and rest.isascii() and int(rest) != 0) or (len(rest) == 1 and rest.isalpha()):
+        return address + "="
+    return None
+
+
+def lead_elsewhere(tracker: Any, spec: Spec) -> Optional[str]:
     """M13 (NC-13): ``'lead:<code>:<addresses>'`` when the thread code of this block takes its
     lead from words other than the feed word (Sinumerik `G33 Z-30 K1.5 F0.15`: I, J or K),
     else ``None``.
@@ -1469,11 +1553,14 @@ def main() -> int:
                     row.feeds, row.feed_unit,
                     DEFAULT_UNIT_TAG.get(row.feed_unit or "") if row.feed_unit != spec.feed_unit else None,
                 )
-                entry["speed"] = range_text(
+                speed = range_text(
                     row.speeds, row.speed_unit,
                     row.surface_tag() if row.speed_unit == "surface"
                     else DEFAULT_UNIT_TAG.get(row.speed_unit or "") if row.speed_unit != spec.speed_unit else None,
                 )
+                # T116: the speeds of another spindle follow, each under its own word.
+                others = ["%s%s" % (word, range_text(values)) for word, values in row.by_spindle.items()]
+                entry["speed"] = "; ".join(part for part in [speed] + others if part)
             table.append(entry)
 
     if groups is None:

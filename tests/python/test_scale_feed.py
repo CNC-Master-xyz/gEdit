@@ -2081,3 +2081,124 @@ class TestM13ReviewUnreadable(unittest.TestCase):
         self.assertIn("U+2013 EN DASH, not the ASCII minus sign -", payload["findings"][0]["message"])
         self.assertIn("Scaled 1 of 2 feed rates to 90 %; 1 left because the value cannot be read.", payload["message"])
         self.assertNotIn("variable", payload["message"])
+
+
+def run_inline(profile_id, text, params=None, codes=None):
+    """Scale feed over ``text`` on a profile's own defaults (no machine), the envelope back."""
+    effective = helpers.effective_context(profile_id)
+    context = helpers.make_context(params=dict(params or {"percent": 50}))
+    context["profile"] = effective["profile"]
+    context["codes"] = effective["codes"] if codes is None else codes
+    context["machine"] = dict(effective["machine"])
+    context["document"]["profile"] = profile_id
+    context["input"] = {"scope": "document", "startLine": 1, "endLine": text.count("\n") + 1}
+    result = helpers.run_script(SCRIPT, stdin=text, context=context)
+    if not result.ok:
+        raise AssertionError(result.stderr)
+    return result.json()
+
+
+class TestWaveYBlocks(unittest.TestCase):
+    """T090 (Wave Y): a code on a continuation line counts for the whole block.
+
+    An Okuma block runs over the lines that start with `$`; a thread code written there makes
+    the `F` on the first line of the block its lead. Read line by line, that `F` was scaled
+    with no finding: 50 % of a 2 mm lead is a different thread.
+    """
+
+    def test_a_thread_code_on_a_continuation_line_protects_the_lead_above_it(self):
+        payload = run_inline("okuma-osp", "G00 X50 Z5\nG01 X30 Z-20 F2\n$ G33\nG01 X40 F0.2\n")
+        self.assertEqual(payload["text"], "G00 X50 Z5\nG01 X30 Z-20 F2\n$ G33\nG01 X40 F0.1\n")
+        (finding,) = [f for f in payload["findings"] if f["line"] == 2]
+        self.assertEqual(finding["severity"], "warning")
+        self.assertIn("F2 is a thread pitch (G33)", finding["message"])
+        self.assertIn("1 left as a thread pitch", payload["message"])
+
+    def test_a_dwell_on_a_continuation_line_makes_the_f_above_it_a_time(self):
+        payload = run_inline("okuma-osp", "G01 X30 F2\n$ G04\nG01 X40 F0.2\n")
+        self.assertEqual(payload["text"].split("\n")[0], "G01 X30 F2")
+        self.assertIn("1 dwell time left as written", payload["message"])
+
+    def test_a_doubtful_code_on_a_continuation_line_refuses_the_f_above_it(self):
+        # Okuma `G84` taps on a machining centre: an F the block's codes do not explain is
+        # left, wherever in the block the G84 stands.
+        payload = run_inline("okuma-osp", "G00 X0 Z5 F1.25\n$ G84 Z-20\n")
+        self.assertEqual(payload["text"], "G00 X0 Z5 F1.25\n$ G84 Z-20\n")
+        self.assertIn("G84 is a tapping cycle on another kind of machine", payload["findings"][0]["message"])
+
+    def test_a_feed_a_plain_code_of_the_block_declares_is_that_codes_feed(self):
+        # The LAP roughing cycle G85 declares its F the roughing feed; the condition change
+        # G84 of the same block, on its `$` line or on the same line, does not make it a lead.
+        for text in ("G85 NAT01 D4 F0.3\n$ G84 XA=60 DA=2 FA=0.2\n", "G85 NAT01 D4 F0.3 G84 XA=60\n"):
+            with self.subTest(text=text):
+                payload = run_inline("okuma-osp", text, {"percent": 80, "decimals": "2"})
+                self.assertTrue(payload["text"].startswith("G85 NAT01 D4 F0.24"), payload["text"])
+
+
+class TestWaveYAddressesThatAreNoFeed(unittest.TestCase):
+    """T104 (Wave Y): `CTOL=`, `OTOL=` and `FP=` are no feeds, and nothing scales them."""
+
+    TEXT = (
+        "N10 G90 G94\nN20 CTOL=0.05 OTOL=0.1\nN30 G1 X10 F500\nN40 G75 FP=1 Z0\n"
+        "N50 G75 FP=2 X0 Y0\nN60 G1 X20 F300 CTOL=0.02\n"
+    )
+
+    def test_the_tolerances_are_left_alone_and_not_reported(self):
+        for profile_id in ("sinumerik-mill", "sinumerik"):
+            with self.subTest(profile=profile_id):
+                payload = run_inline(profile_id, self.TEXT)
+                lines = payload["text"].split("\n")
+                self.assertEqual(lines[1], "N20 CTOL=0.05 OTOL=0.1")
+                self.assertEqual(lines[5], "N60 G1 X20 F150 CTOL=0.02")
+                self.assertEqual([f for f in payload["findings"] if f["line"] in (2, 6)], [])
+                self.assertTrue(payload["message"].startswith("Scaled 2 feed rates to 50 %"))
+
+    def test_a_fixed_point_number_is_never_scaled(self):
+        for profile_id in ("sinumerik-mill", "sinumerik"):
+            with self.subTest(profile=profile_id):
+                lines = run_inline(profile_id, self.TEXT)["text"].split("\n")
+                self.assertEqual(lines[3:5], ["N40 G75 FP=1 Z0", "N50 G75 FP=2 X0 Y0"])
+
+    def test_a_word_the_database_declares_with_a_unit_that_is_no_feed_is_not_called_one(self):
+        # With `FP` declared a count of G75 (the data item T103), the fixed point is no feed
+        # under an address of its own: left without a word.
+        codes = [dict(entry) for entry in helpers.effective_context("sinumerik-mill")["codes"]]
+        for entry in codes:
+            if entry.get("code") == "G75":
+                entry["params"] = [{"address": "FP", "label": "Fixed point", "unit": "count"}]
+        payload = run_inline("sinumerik-mill", self.TEXT, codes=codes)
+        self.assertEqual(payload["findings"], [])
+        self.assertEqual(payload["message"], "Scaled 2 feed rates to 50 %. No machine: profile defaults assumed.")
+        # A feed of its own the database knows nothing about is still reported.
+        self.assertIn("FRC=", run_inline("sinumerik-mill", "N10 G1 X10 F200 FRC=0.1\n")["message"])
+
+
+class TestWaveYFeedsByUnit(unittest.TestCase):
+    """T210 (Wave Y): what is a feed among a cycle's parameters is the declared unit first."""
+
+    def test_a_count_whose_label_speaks_of_a_feed_is_not_listed_as_one(self):
+        # `_VARI` of CYCLE82 is a count ("… drills the last part of the hole at a feed of
+        # its own"); S_FA and S_FD are the feeds of the call.
+        payload = run_inline(
+            "sinumerik-mill", "N10 G90 G94 G17\nN20 F200\nN30 CYCLE82(10,0,2,-20,,0,0,0,0,11000,5,100,2,50)\n"
+        )
+        rows = [f["message"] for f in payload["findings"] if f["line"] == 3]
+        self.assertEqual(len(rows), 2, rows)
+        self.assertTrue(rows[0].startswith("Argument 12 of CYCLE82 (S_FA,"), rows[0])
+        self.assertTrue(rows[1].startswith("Argument 14 of CYCLE82 (S_FD,"), rows[1])
+        self.assertIn("2 cycle feeds left unchanged", payload["message"])
+
+    def test_the_declared_unit_decides_before_the_label(self):
+        helpers.import_gedit_nc()
+        import scale_feed
+
+        is_feed = scale_feed.param_is_feed
+        label = scale_feed.CALL_FEED_LABEL
+        self.assertTrue(is_feed({"address": "A", "label": "Something", "unit": "feedPerMin"}, label))
+        self.assertFalse(is_feed({"address": "A", "label": "Feed of its own", "unit": "count"}, label))
+        self.assertFalse(is_feed({"address": "A", "label": "Feed", "unit": "length"}, label))
+        # A lead is declared per revolution too: the label tells a lead from a feed.
+        self.assertFalse(is_feed({"address": "K", "label": "Lead along Z", "unit": "feedPerRev"}, label))
+        self.assertTrue(is_feed({"address": "FF1", "label": "Feed for roughing", "unit": "feedPerRev"}, label))
+        # No unit at all: the label, until the data declares one.
+        self.assertTrue(is_feed({"address": "Q206", "label": "Plunging feed"}, scale_feed.FEED_PARAM_LABEL))

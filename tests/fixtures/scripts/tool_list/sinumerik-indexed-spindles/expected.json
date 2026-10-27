@@ -33,7 +33,7 @@
       "line": 6,
       "calls": 1,
       "feed": "0.2-0.25 /rev",
-      "speed": "200 m/min (G96)"
+      "speed": "200 m/min (G96); S[2]=500"
     }
   ],
   "message": "1 tool",

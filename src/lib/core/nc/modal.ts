@@ -342,6 +342,10 @@ export class ModalInterpreter {
   private readonly toolFromLast: boolean;
   /** D3-4c: `toolFrom: 'last-before'`, the tool line loads the `T` written before it. */
   private readonly toolFromBefore: boolean;
+  /** T113, rule 7: `toolCall.tool` names the tool axis (Klartext); `_axis_aware`. */
+  private readonly axisAware: boolean;
+  /** How the program map and the tool list compare two stations (`toolList.collapseOffsetDigits`). */
+  private readonly collapseOffsets: boolean;
   private readonly hasDistance: boolean;
   private readonly hasBareFrames: boolean;
   /** D6-5: a call that reads as no frame at its zero arguments (`frameZero`, `frameCloses`). */
@@ -398,6 +402,10 @@ export class ModalInterpreter {
     this.toolFromBefore = toolFrom === 'last-before';
     // Both read the `T` words of every line, not only those of the tool lines.
     this.toolFromLast = toolFrom === 'same-line-or-last' || this.toolFromBefore;
+    // T113: read off the pattern as written in the profile, as the program map reads it.
+    const toolSource = record(profile.toolCall).tool;
+    this.axisAware = typeof toolSource === 'string' && toolSource.includes('(?<axis>');
+    this.collapseOffsets = record(profile.toolList).collapseOffsetDigits === true;
 
     const codes = Array.isArray(db.codes) ? db.codes : [];
     this.hasDistance = codes.some((e) => e.sets?.distance === 'absolute' || e.sets?.distance === 'incremental');
@@ -1017,6 +1025,7 @@ export class ModalInterpreter {
     // selected before it); its `T` is the next one, an unload.
     const isTool = re.toolTrigger.test(masked) && (this.toolFromBefore || !(re.toolIgnore !== undefined && re.toolIgnore.test(masked)));
     let found: Tool | null = null;
+    let axisNamed = false;
     if (isTool || this.toolFromLast) {
       const match = re.tool.exec(masked);
       // B1: no fallback to the whole match. A `tool` group that took no part in the match is
@@ -1026,6 +1035,8 @@ export class ModalInterpreter {
       if (match !== null && station !== undefined && station.trim() !== '') {
         found = { station: station.trim(), written: match[0].trim(), line };
       }
+      const axis = match?.groups?.axis;
+      axisNamed = typeof axis === 'string' && axis !== '';
     }
     const before = s.lastTool;
     const beforeUnload = s.lastToolUnload;
@@ -1048,12 +1059,41 @@ export class ModalInterpreter {
       s.tool = before === null ? null : { station: before.station, written: before.written, line };
       return;
     }
+    if (this.axisAware && (found === null || (!axisNamed && before !== null && this.sameStation(found.station, before.station)))) {
+      // T113: a speed change, not a tool change (rule 7). `TOOL CALL S5000` names no tool;
+      // `TOOL CALL 4 S5000` with tool 4 loaded and no axis keeps it (only a named axis lets
+      // the control swap in a sister tool).
+      return;
+    }
     s.block.toolChange = true;
     if (found !== null) s.tool = found;
     else if (this.toolFromLast && s.lastTool !== null) {
       // `toolFrom: same-line-or-last`: the station was written on an earlier line.
       s.tool = { station: s.lastTool.station, written: s.lastTool.written, line };
     }
+  }
+
+  /**
+   * `_same_station`: whether two written tools name the same station, as the program map
+   * compares them — numerically for a number (`T01` is `T1`), exactly for a name in quotation
+   * marks or a `QS` parameter; a lathe offset pair collapsed where the tool list says so.
+   */
+  private sameStation(a: string, b: string): boolean {
+    const quotedName = (tool: string): boolean => tool.length >= 2 && tool.startsWith('"') && tool.endsWith('"');
+    const bare = (tool: string): string => {
+      if (quotedName(tool)) return tool.slice(1, -1);
+      if (this.collapseOffsets && DIGITS.test(tool) && tool.length >= 4 && tool.length % 2 === 0) return tool.slice(0, tool.length / 2);
+      return tool;
+    };
+    const numberOf = (tool: string): string | null => {
+      if (quotedName(tool)) return null;
+      const value = bare(tool);
+      return DIGITS.test(value) ? value.replace(/^0+(?=\d)/, '') : null;
+    };
+    const aNumber = numberOf(a);
+    const bNumber = numberOf(b);
+    if (aNumber !== null || bNumber !== null) return aNumber === bNumber;
+    return bare(a) === bare(b);
   }
 
   // -- what is in force -------------------------------------------------------

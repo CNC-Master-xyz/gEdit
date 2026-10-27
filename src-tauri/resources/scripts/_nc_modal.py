@@ -666,7 +666,12 @@ class ModalInterpreter:
     6. ``fNotFeed`` makes the block's feed word a time, not a feed (M8). The block is a
        dwell, so its speed word is not a speed either (Sinumerik ``G4 S2`` waits two
        revolutions);
-    7. a tool line (``toolCall.trigger``, not ``toolCall.ignore``) sets the tool;
+    7. a tool line (``toolCall.trigger``, not ``toolCall.ignore``) sets the tool. On a
+       profile whose ``toolCall.tool`` names the tool axis (an ``axis`` group, Klartext),
+       a tool line that names no tool, or the tool already loaded without an axis
+       (``TOOL CALL 4 S5000`` after ``TOOL CALL 4 Z``), only changes the speed: it is no
+       tool change and the tool keeps the line it was loaded on (T113; the program map and
+       the tool list read it so, syntax-heidenhain §5.1);
     8. :meth:`reset` applies the **effective** profile's power-on state — ``modal.initial``,
        ``modal.units`` and ``modal.diameter`` — each assumed, at line 0, with the source
        ``modal.sources`` gives. Nothing else is assumed: a group stays unknown until it is
@@ -778,6 +783,14 @@ class ModalInterpreter:
         self._tool_from_before = tool_from == "last-before"
         # Both read the `T` words of every line, not only those of the tool lines.
         self._tool_from_last = tool_from == "same-line-or-last" or self._tool_from_before
+        #: T113, rule 7: the tool pattern names the tool axis (Klartext), so a tool line that
+        #: repeats the loaded tool without one only changes the speed. Read off the pattern
+        #: as written in the profile, as the program map and the tool list read it.
+        tool_source = tool_call.get("tool")
+        self._axis_aware = isinstance(tool_source, str) and "(?<axis>" in tool_source
+        list_rules = self._profile.get("toolList")
+        #: How the program map and the tool list compare two stations (``collapseOffsetDigits``).
+        self._collapse_offsets = isinstance(list_rules, dict) and list_rules.get("collapseOffsetDigits") is True
 
         #: A database with no ``sets.distance`` anywhere allows only one reading (rule 8).
         self._has_distance = any(
@@ -1484,6 +1497,7 @@ class ModalInterpreter:
             self._tool_from_before or not (ignore is not None and ignore.search(masked) is not None)
         )
         found: Optional[Dict[str, Any]] = None
+        axis_named = False
         pattern = self._patterns.get("tool")
         if pattern is not None and (is_tool or self._tool_from_last):
             match = pattern.search(masked)
@@ -1493,9 +1507,11 @@ class ModalInterpreter:
                 # read), and the whole match would turn "no tool" into a garbage station, as
                 # it did in the program map and the tool list before. The validator requires
                 # the named group, so `groupdict` only guards a hand-made compiled profile.
-                station = match.groupdict().get("tool")
+                groups = match.groupdict()
+                station = groups.get("tool")
                 if station is not None and station.strip() != "":
                     found = {"station": station.strip(), "written": match.group(0).strip(), "line": line}
+                axis_named = bool(groups.get("axis"))
         before = self._last_tool
         before_unload = self._last_tool_unload
         if found is not None:
@@ -1515,6 +1531,14 @@ class ModalInterpreter:
             self._block["toolChange"] = True
             self._tool = None if before is None else {"station": before["station"], "written": before["written"], "line": line}
             return
+        if self._axis_aware and (
+            found is None
+            or (not axis_named and before is not None and self._same_station(found["station"], before["station"]))
+        ):
+            # T113: a speed change, not a tool change (rule 7). `TOOL CALL S5000` names no tool;
+            # `TOOL CALL 4 S5000` with tool 4 loaded and no axis keeps it (only a named axis
+            # lets the control swap in a sister tool).
+            return
         self._block["toolChange"] = True
         if found is not None:
             self._tool = found
@@ -1526,6 +1550,30 @@ class ModalInterpreter:
                 "written": self._last_tool["written"],
                 "line": line,
             }
+
+    def _same_station(self, a: str, b: str) -> bool:
+        """Whether two written tools name the same station, as the program map compares them.
+
+        Numerically for a number (`T01` is `T1`), exactly for a name in quotation marks or a
+        `QS` parameter; a lathe offset pair is collapsed where the profile's tool list says so.
+        """
+        def number(tool: str) -> Optional[str]:
+            if len(tool) >= 2 and tool.startswith('"') and tool.endswith('"'):
+                return None
+            value = bare(tool)
+            return value.lstrip("0") or "0" if value.isdigit() and value.isascii() else None
+
+        def bare(tool: str) -> str:
+            if len(tool) >= 2 and tool.startswith('"') and tool.endswith('"'):
+                return tool[1:-1]
+            if self._collapse_offsets and tool.isdigit() and tool.isascii() and len(tool) >= 4 and len(tool) % 2 == 0:
+                return tool[: len(tool) // 2]
+            return tool
+
+        a_number, b_number = number(a), number(b)
+        if a_number is not None or b_number is not None:
+            return a_number == b_number
+        return bare(a) == bare(b)
 
     def program_start(self, line: int) -> bool:
         """A program starts on ``line`` (:func:`program_start_of`); answers whether that reset the tool.

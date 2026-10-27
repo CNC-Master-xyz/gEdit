@@ -1610,3 +1610,41 @@ class FingerprintTest(unittest.TestCase):
         self.assertNotEqual(seen[2], seen[3])  # the distance mode
         self.assertNotEqual(seen[3], seen[4])  # a frame
         self.assertNotEqual(seen[4], seen[5])  # the frame closed, a cycle in force
+
+
+class TestSpeedOnlyToolCallT113(unittest.TestCase):
+    """T113 (Wave Y, rule 7): the twin of `modal.test.ts`'s T113 cases, line for line."""
+
+    LINES = [
+        'TOOL CALL 4 Z S3000', 'TOOL CALL 4 S4000', 'TOOL CALL 04 S4500', 'TOOL CALL 4 Z S5000',
+        'TOOL CALL "D8" Z S100', 'TOOL CALL "D8" S200', 'TOOL CALL 12.1 Z', 'TOOL CALL 12 S1',
+    ]
+
+    def walk(self, profile, lines):
+        gedit_nc = helpers.import_gedit_nc()
+        cp = gedit_nc.compile_profile(profile)
+        interp = gedit_nc.ModalInterpreter(cp, helpers.load_codes(profile))
+        state = None
+        out = []
+        for number, line in enumerate(lines, 1):
+            tokens, state = gedit_nc.tokenize_line(line, cp, state)
+            interp.update(tokens, number, gedit_nc.mask_comments(line, cp))
+            out.append(interp.state)
+        return out
+
+    def test_a_tool_call_that_names_the_loaded_tool_and_no_axis_only_changes_the_speed(self):
+        states = self.walk(helpers.load_profile("heidenhain-klartext"), self.LINES)
+        self.assertEqual([s["block"]["toolChange"] for s in states], [True, False, False, True, True, False, True, True])
+        self.assertEqual([(s["tool"] or {}).get("station") for s in states], ["4", "4", "4", "4", '"D8"', '"D8"', "12.1", "12"])
+        self.assertEqual([(s["tool"] or {}).get("line") for s in states], [1, 1, 1, 4, 5, 5, 7, 8])
+
+    def test_on_an_axis_aware_profile_a_tool_line_that_names_no_tool_is_no_tool_change(self):
+        profile = dict(helpers.load_profile("heidenhain-klartext"))
+        profile["toolCall"] = {
+            "trigger": "\\bTOOL\\s+CALL\\b",
+            "tool": "TOOL\\s+CALL\\s+(?<tool>\\d+)?\\s*(?:(?<axis>[XYZ])(?![A-Z0-9_]))?",
+            "toolFrom": "same-line",
+        }
+        states = self.walk(profile, ["1 TOOL CALL 5 Z S1000", "2 TOOL CALL Z S2000", "3 TOOL CALL S2500"])
+        self.assertEqual([s["block"]["toolChange"] for s in states], [True, False, False])
+        self.assertEqual([(s["tool"] or {}).get("line") for s in states], [1, 1, 1])
