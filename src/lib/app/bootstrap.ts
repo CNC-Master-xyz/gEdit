@@ -55,6 +55,8 @@ import { loadConfigOnce, uiState } from '$lib/stores/uiState';
 import { isTauriRuntime } from '$lib/utils/platform';
 import { files } from '$lib/app/fileOps';
 import { userConfig } from '$lib/app/userConfig';
+import { activateLanguage } from '$lib/app/language';
+import { loadUserKeys } from '$lib/app/keys/userKeys';
 import { scripts } from '$lib/app/scripts';
 import { isScriptRunning, runningScript } from '$lib/stores/scripts';
 import type { CommandContext, Disposable } from '$lib/app/types';
@@ -154,6 +156,11 @@ export interface BootstrapDeps {
   commandContext: () => CommandContext;
   /** `settings.load()` (WP2.6); the result is the store's to report, not ours. */
   loadSettings: () => Promise<unknown>;
+  /**
+   * `activateLanguage()` (P4g, P4.37): the message set of `ui.language`, right after the settings
+   * and before anything else is read or shown. Never throws; English stays in use on a failure.
+   */
+  activateLanguage: () => Promise<unknown>;
   /** `uiState.load()` (WP2.3). */
   loadUiState: () => Promise<unknown>;
   /**
@@ -164,6 +171,11 @@ export interface BootstrapDeps {
   loadUserConfig: () => Promise<unknown>;
   /** `machines.load(configLoad)` (P6, §7.15): the same round trip, no second read. */
   loadMachines: () => Promise<unknown>;
+  /**
+   * `loadUserKeys()` (P4g, P4.34): `keybindings.json` into the command registry, after the
+   * machines and before the contributions register. Never throws; the defaults stay on a failure.
+   */
+  loadUserKeys: () => Promise<unknown>;
   /** `channels.start()` (P12, §7.17): right after the machines; never throws. */
   startChannels: () => Disposable;
   loadContributions: () => Promise<Disposable>;
@@ -197,12 +209,21 @@ const EMPTY_CONTEXT: CommandContext = {
  * start even when the config folder is unreadable.
  */
 async function loadPersisted(
-  deps: Pick<BootstrapDeps, 'loadSettings' | 'loadUiState' | 'loadUserConfig' | 'loadMachines'>,
+  deps: Pick<
+    BootstrapDeps,
+    'loadSettings' | 'activateLanguage' | 'loadUiState' | 'loadUserConfig' | 'loadMachines' | 'loadUserKeys'
+  >,
 ): Promise<void> {
   try {
     await deps.loadSettings();
   } catch (err) {
     console.error('settings could not be loaded; using the defaults', err);
+  }
+  try {
+    await deps.activateLanguage();
+  } catch (err) {
+    // Contracted not to throw; English is what is in use if it does.
+    console.error('the interface language could not be set; using English', err);
   }
   try {
     await deps.loadUiState();
@@ -222,6 +243,12 @@ async function loadPersisted(
     // The machine service reports a broken file itself; a rejection here means the
     // round trip failed, and a document then runs on its profile's defaults.
     console.error('the machine configurations could not be loaded', err);
+  }
+  try {
+    await deps.loadUserKeys();
+  } catch (err) {
+    // Contracted not to throw; the default keys are what is in force if it does.
+    console.error('the user key bindings could not be loaded; using the default keys', err);
   }
 }
 
@@ -301,6 +328,7 @@ export const startApp: () => Promise<Disposable> = createStartApp({
   setContextProvider,
   commandContext,
   loadSettings: () => settings.load(),
+  activateLanguage,
   loadUiState: () => uiState.load(),
   loadUserConfig: () => userConfig.load(),
   loadMachines: async () => {
@@ -309,6 +337,7 @@ export const startApp: () => Promise<Disposable> = createStartApp({
     if (!isTauriRuntime()) return;
     machines.load(await loadConfigOnce());
   },
+  loadUserKeys,
   startChannels: () => channels.start(),
   loadContributions,
   installDispatcher,

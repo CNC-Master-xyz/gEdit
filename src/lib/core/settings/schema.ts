@@ -106,6 +106,19 @@ export interface Settings {
   /** 1-3600. */
   'scripts.timeoutSeconds': number;
   'scripts.showBundled': boolean;
+  /**
+   * P4g (plan §6.9 rules 37–42, Q4-18): the interface language, a tag such as `en` or `de-CH`
+   * (`isLocaleTag`). A tag with no message set that ships, and any other value, shows English.
+   * Takes effect at the next start. The dialog offers it only when a second language ships
+   * (`offersLanguageChoice`), so it is `dialog: false` until P4.37 builds that.
+   */
+  'ui.language': string;
+  /**
+   * P4g (AD-56, plan §6.9 rule 12): the script packages that are switched off, by folder name.
+   * Rust reads this key straight from the file, like `scripts.*`. Edited on the Packages page,
+   * never in the dialog's forms.
+   */
+  'packages.disabled': string[];
 }
 
 /** `Object.freeze` without widening the value's type, so `DEFAULTS` stays a `Settings`. */
@@ -154,6 +167,8 @@ export const DEFAULTS: Settings = freeze({
   'scripts.folders': freeze<string[]>([]),
   'scripts.timeoutSeconds': 60,
   'scripts.showBundled': true,
+  'ui.language': 'en',
+  'packages.disabled': freeze<string[]>([]),
 } satisfies Settings);
 
 /** The pages of the settings dialog, in the order they are shown (WP2.7). */
@@ -267,4 +282,9 @@ export const SETTING_FIELDS: SettingFieldMeta[] = [
   meta('scripts.folders', 'scripts', { type: 'folder' }),
   meta('scripts.timeoutSeconds', 'scripts', { type: 'integer', min: 1, max: 3600 }),
   meta('scripts.showBundled', 'scripts', { type: 'bool' }),
+
+  // P4g: neither is a form row yet. The language row joins the Appearance page when a second
+  // language ships (P4.37, `offersLanguageChoice`); the package list has a page of its own.
+  meta('ui.language', 'appearance', { type: 'choice', choices: [] }, { dialog: false }),
+  meta('packages.disabled', 'scripts', { type: 'text' }, { dialog: false }),
 ];

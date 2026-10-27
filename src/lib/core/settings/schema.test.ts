@@ -36,11 +36,11 @@ describe('settings schema', () => {
     }
   });
 
-  it('gives every choice field its options, except the profile list', () => {
+  it('gives every choice field its options, except the lists known only at run time: the profiles and the languages that ship', () => {
     const empty = SETTING_FIELDS.filter(
       (f) => f.field.type === 'choice' && (f.field.choices ?? []).length === 0,
     );
-    expect(empty.map((f) => f.key)).toEqual(['files.defaultProfile']);
+    expect(empty.map((f) => f.key)).toEqual(['files.defaultProfile', 'ui.language']);
   });
 
   it('freezes the defaults, arrays included', () => {
@@ -92,6 +92,8 @@ describe('settings schema', () => {
   });
 
   it('keeps every key out of the dialog only on purpose', () => {
-    expect(SETTING_FIELDS.filter((f) => !f.dialog).map((f) => f.key)).toEqual(['editor.rulers']);
+    // P4g: the language joins the Appearance page when a second language ships (P4.37), and the
+    // switched-off packages are edited on the Packages page (plan §6.9 rules 12 and 37).
+    expect(SETTING_FIELDS.filter((f) => !f.dialog).map((f) => f.key)).toEqual(['editor.rulers', 'ui.language', 'packages.disabled']);
   });
 });

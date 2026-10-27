@@ -16,7 +16,11 @@ import { render } from 'svelte/server';
 import { describe, expect, it } from 'vitest';
 import SettingsDialog, {
   CATEGORY_ORDER,
+  CONFIGURATION_TAB,
+  KEYBOARD_TAB,
   MACHINES_TAB,
+  PACKAGES_TAB,
+  PAGE_TABS,
   PROFILES_TAB,
   tabsOf,
   LIST_KEYS,
@@ -110,11 +114,21 @@ describe('i18n of SETTING_FIELDS', () => {
   });
 });
 
-describe('the tabs (M13)', () => {
-  it('ends with Machines and then Profiles, the two pages that are not settings', () => {
+describe('the tabs (M13, P4g)', () => {
+  it('ends with the five pages that are not settings: Machines, Profiles, Keyboard, Packages, Configuration', () => {
     const tabs = tabsOf(pagesOf());
-    expect(tabs.slice(-2)).toEqual([MACHINES_TAB, PROFILES_TAB]);
-    expect(tabs.slice(0, -2)).toEqual(pagesOf().map((page) => page.category));
+    expect(tabs.slice(-5)).toEqual([MACHINES_TAB, PROFILES_TAB, KEYBOARD_TAB, PACKAGES_TAB, CONFIGURATION_TAB]);
+    expect(tabs.slice(0, -5)).toEqual(pagesOf().map((page) => page.category));
+    expect([...PAGE_TABS]).toEqual(tabs.slice(-5));
+  });
+
+  it('has a heading for each of the P4g tabs, and a placeholder page the work packages fill', () => {
+    for (const tab of [KEYBOARD_TAB, PACKAGES_TAB, CONFIGURATION_TAB]) {
+      expect(hasKey(`settings.categories.${tab}`), tab).toBe(true);
+      const html = render(SettingsDialog, { props: { close: () => {}, initialTab: tab } }).body;
+      expect(html, tab).toContain(`data-testid="settings-${tab}"`);
+      expect(html, tab).toContain(`data-category="${tab}"`);
+    }
   });
 
   it('has a heading for the Profiles tab', () => {

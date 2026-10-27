@@ -145,7 +145,7 @@ pub fn validate_name(name: &str) -> Option<&'static str> {
 }
 
 /// A refused name, as the commands answer it.
-fn check_name(name: &str) -> Result<(), String> {
+pub(crate) fn check_name(name: &str) -> Result<(), String> {
     match validate_name(name) {
         None => Ok(()),
         Some(reason) => Err(format!("{name:?} is not a user file name: {reason}")),
@@ -157,7 +157,7 @@ fn check_name(name: &str) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 /// A short reason for an I/O error; never a path, never the OS wording.
-fn why(err: &io::Error) -> &'static str {
+pub(crate) fn why(err: &io::Error) -> &'static str {
     match err.kind() {
         io::ErrorKind::NotFound => "not found",
         io::ErrorKind::PermissionDenied => "permission denied",
@@ -167,7 +167,7 @@ fn why(err: &io::Error) -> &'static str {
 }
 
 /// The reason `meta` (of `symlink_metadata`) is not a plain file, or `None` when it is one.
-fn not_regular(meta: &Metadata) -> Option<&'static str> {
+pub(crate) fn not_regular(meta: &Metadata) -> Option<&'static str> {
     if meta.file_type().is_symlink() || is_reparse_point(meta) {
         return Some("a link, not followed");
     }
@@ -216,13 +216,20 @@ fn open_no_follow(path: &Path) -> io::Result<File> {
 }
 
 /// The bytes of the plain file `path`, of at most [`MAX_BYTES`]; never follows a link.
-fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
+pub(crate) fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
+    read_regular_max(path, MAX_BYTES, "larger than 1 MiB")
+}
+
+/// [`read_regular`] with its own cap: a plain file of at most `max` bytes, never following a
+/// link, refused with `too_large` when it is bigger (P4g: the configuration zip reads its archive
+/// through this, with the cap of `configzip::MAX_ARCHIVE_BYTES`).
+pub(crate) fn read_regular_max(path: &Path, max: u64, too_large: &str) -> Result<Vec<u8>, String> {
     let before = fs::symlink_metadata(path).map_err(|err| why(&err).to_string())?;
     if let Some(reason) = not_regular(&before) {
         return Err(reason.into());
     }
-    if before.len() > MAX_BYTES {
-        return Err("larger than 1 MiB".into());
+    if before.len() > max {
+        return Err(too_large.into());
     }
     let file = open_no_follow(path).map_err(|err| why(&err).to_string())?;
     let after = file.metadata().map_err(|err| why(&err).to_string())?;
@@ -231,22 +238,22 @@ fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
     }
     let mut bytes = Vec::new();
     // One byte more than the cap, so a file that grew after the stat is still refused.
-    file.take(MAX_BYTES + 1)
+    file.take(max + 1)
         .read_to_end(&mut bytes)
         .map_err(|err| why(&err).to_string())?;
-    if bytes.len() as u64 > MAX_BYTES {
-        return Err("larger than 1 MiB".into());
+    if bytes.len() as u64 > max {
+        return Err(too_large.into());
     }
     Ok(bytes)
 }
 
 /// The text of a plain file: [`read_regular`] and UTF-8.
-fn read_text(path: &Path) -> Result<String, String> {
+pub(crate) fn read_text(path: &Path) -> Result<String, String> {
     String::from_utf8(read_regular(path)?).map_err(|_| "not UTF-8 text".to_string())
 }
 
 /// `bytes` have to be one JSON object (the root of a profile or a code file).
-fn check_object(bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn check_object(bytes: &[u8]) -> Result<(), String> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err("larger than 1 MiB".into());
     }

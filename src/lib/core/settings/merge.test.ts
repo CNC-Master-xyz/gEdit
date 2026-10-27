@@ -198,3 +198,38 @@ describe('diffFromDefaults', () => {
     expect(second.warnings).toEqual([]);
   });
 });
+
+// P4g (plan §6.9 rules 12 and 37): the two keys the prelude added.
+describe('ui.language and packages.disabled', () => {
+  it('default to English and to no switched-off package', () => {
+    expect(DEFAULTS['ui.language']).toBe('en');
+    expect(DEFAULTS['packages.disabled']).toEqual([]);
+    expect(mergeSettings({}).values['ui.language']).toBe('en');
+  });
+
+  it('take a language tag, also one with no message set (it shows English where it is used)', () => {
+    for (const tag of ['de', 'de-CH', 'zh-Hant', 'fil']) {
+      const result = mergeSettings({ 'ui.language': tag });
+      expect(result.values['ui.language'], tag).toBe(tag);
+      expect(result.warnings, tag).toEqual([]);
+    }
+  });
+
+  it('drop what is not a language tag with a warning that says what is expected', () => {
+    for (const bad of ['', 'English', 'de_CH', 'DE', 'de-CH-1996', 5, null, ['de']]) {
+      const result = mergeSettings({ 'ui.language': bad });
+      expect(result.values['ui.language'], String(bad)).toBe('en');
+      expect(result.warnings.join(' '), String(bad)).toContain('expected a language code such as en or de-CH');
+    }
+  });
+
+  it('take a list of package folder names whole or not at all, and write it back', () => {
+    const result = mergeSettings({ 'packages.disabled': ['shop-a', 'old'] });
+    expect(result.values['packages.disabled']).toEqual(['shop-a', 'old']);
+    expect(diffFromDefaults(result.values, result.unknown)).toEqual({ 'packages.disabled': ['shop-a', 'old'] });
+    const bad = mergeSettings({ 'packages.disabled': ['shop-a', ''] });
+    expect(bad.values['packages.disabled']).toEqual([]);
+    expect(bad.warnings).toHaveLength(1);
+    expect(mergeSettings({ 'packages.disabled': 'shop-a' }).values['packages.disabled']).toEqual([]);
+  });
+});

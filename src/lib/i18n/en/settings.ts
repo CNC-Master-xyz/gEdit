@@ -32,6 +32,10 @@ export default {
     machines: 'Machines',
     /** M13 (P13; WP13.3 builds the page): your own profiles and code files. */
     profiles: 'Profiles',
+    /** P4g (plan §6.9): the pages of the keys, the script packages and the configuration zip. */
+    keyboard: 'Keyboard',
+    packages: 'Packages',
+    configuration: 'Configuration',
   },
   saved: 'Settings saved',
   saveFailed: 'The settings could not be saved',
@@ -196,6 +200,20 @@ export default {
     showBundled: {
       label: 'Show the scripts that ship with gEdit',
       help: 'Turn this off to see only your own scripts.',
+    },
+  },
+
+  /** P4g (plan §6.9): the interface language and the switched-off packages. Neither is a form row yet. */
+  ui: {
+    language: {
+      label: 'Language',
+      help: 'The language of the menus and messages. The change applies the next time gEdit starts. A text that is missing in the chosen language is shown in English.',
+    },
+  },
+  packages: {
+    disabled: {
+      label: 'Switched-off packages',
+      help: 'The packages whose scripts, profiles and code files are not used. Change this on the Packages page.',
     },
   },
 } as const satisfies Messages;

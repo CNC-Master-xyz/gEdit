@@ -76,9 +76,13 @@ scenario('m2-settings', { timeout: 300, files: { [`${CONFIG}/settings.json`]: BR
   // M13 (WP13.3, an intentional change, plan "Intentional behavior changes in M13") adds a
   // seventh, **Profiles** (your own profiles and code files, AD-29), after Machines: it is
   // not a settings page either, so the five stay the first five.
+  // P4g (the prelude, an intentional change, plan §6.9 rule 44) adds three more behind them, none
+  // a settings page either: Keyboard, Packages and Configuration (keys, script packages and the
+  // configuration zip act on their own files).
   h.check(
-    'the five pages of §7.7 are there in order, with the M6 Machines tab and the M13 Profiles tab behind them',
-    JSON.stringify(categories) === JSON.stringify(['appearance', 'editor', 'assistance', 'files', 'scripts', 'machines', 'profiles']),
+    'the five pages of §7.7 are there in order, with the Machines and Profiles tabs and the P4g Keyboard, Packages and Configuration tabs behind them',
+    JSON.stringify(categories) ===
+      JSON.stringify(['appearance', 'editor', 'assistance', 'files', 'scripts', 'machines', 'profiles', 'keyboard', 'packages', 'configuration']),
     categories,
   )
   h.check('Appearance is open first', h.q('settings-page')?.dataset.category === 'appearance')

@@ -47,9 +47,11 @@ function harness(over: Partial<BootstrapDeps> = {}): Harness {
     setContextProvider: () => log.push('setContextProvider'),
     commandContext: () => CONTEXT,
     loadSettings: async () => log.push('loadSettings'),
+    activateLanguage: async () => log.push('activateLanguage'),
     loadUiState: async () => log.push('loadUiState'),
     loadUserConfig: async () => log.push('loadUserConfig'),
     loadMachines: async () => log.push('loadMachines'),
+    loadUserKeys: async () => log.push('loadUserKeys'),
     startChannels: () => step('startChannels'),
     loadContributions: async () => step('loadContributions'),
     installDispatcher: () => step('installDispatcher'),
@@ -80,9 +82,11 @@ describe('startApp', () => {
     expect(h.log).toEqual([
       'setContextProvider',
       'loadSettings',
+      'activateLanguage',
       'loadUiState',
       'loadUserConfig',
       'loadMachines',
+      'loadUserKeys',
       'startChannels',
       'loadContributions',
       'installDispatcher',
@@ -202,10 +206,12 @@ describe('startApp', () => {
       loadUiState: () => Promise.reject(new Error('EACCES state.json')),
       loadUserConfig: () => Promise.reject(new Error('EACCES profiles')),
       loadMachines: () => Promise.reject(new Error('EACCES machines.json')),
+      activateLanguage: () => Promise.reject(new Error('no message set')),
+      loadUserKeys: () => Promise.reject(new Error('EACCES keybindings.json')),
     });
     await createStartApp(h.deps)();
     expect(h.log).toContain('loadContributions');
-    expect(error).toHaveBeenCalledTimes(4);
+    expect(error).toHaveBeenCalledTimes(6);
     error.mockRestore();
   });
 

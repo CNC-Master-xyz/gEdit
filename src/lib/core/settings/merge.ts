@@ -17,6 +17,7 @@
 // Warnings are English detail text (AD-14): the store shows them under a translated
 // summary.
 
+import { isLocaleTag } from '$lib/i18n/locale';
 import { DEFAULTS, SETTING_FIELDS, type Settings } from './schema';
 
 export interface MergeResult {
@@ -42,6 +43,8 @@ interface Rule {
   choices?: readonly unknown[];
   /** A string setting whose empty value would have no meaning. */
   nonEmpty?: boolean;
+  /** A string setting that has to be a language tag (`ui.language`, P4g). */
+  localeTag?: boolean;
 }
 
 /**
@@ -51,6 +54,7 @@ interface Rule {
 const LIST_KIND: Partial<Record<keyof Settings, Kind>> = {
   'editor.rulers': 'integers',
   'scripts.folders': 'strings',
+  'packages.disabled': 'strings',
 };
 
 function ruleFor(key: keyof Settings): Rule {
@@ -68,6 +72,9 @@ function ruleFor(key: keyof Settings): Rule {
   const choices = field?.type === 'choice' ? (field.choices ?? []).map((c) => c.value) : [];
   return {
     kind: 'string',
+    // The choices of `ui.language` are the message sets that ship, known at run time; the file
+    // is held to the shape of a tag, and an unknown tag falls back to English where it is used.
+    ...(key === 'ui.language' ? { localeTag: true } : {}),
     ...(choices.length > 0 ? { choices } : {}),
     // `scripts.python` is deliberately not `required`: empty means "find one" (§7.7).
     ...(field?.required === true ? { nonEmpty: true } : {}),
@@ -91,6 +98,7 @@ function expected(rule: Rule): string {
     case 'strings':
       return 'expected a list of non-empty strings';
     default:
+      if (rule.localeTag) return 'expected a language code such as en or de-CH';
       if (rule.choices) return `expected one of ${rule.choices.map(String).join(', ')}`;
       return rule.nonEmpty ? 'expected a non-empty string' : 'expected a string';
   }
@@ -128,6 +136,7 @@ function accept(raw: unknown, rule: Rule): unknown | undefined {
     default:
       if (typeof raw !== 'string') return undefined;
       if (rule.nonEmpty && raw.length === 0) return undefined;
+      if (rule.localeTag && !isLocaleTag(raw)) return undefined;
       if (rule.choices && !rule.choices.includes(raw)) return undefined;
       return raw;
   }

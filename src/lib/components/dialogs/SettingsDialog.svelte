@@ -77,12 +77,38 @@
    */
   export const PROFILES_TAB: 'profiles' = 'profiles';
 
-  /** A tab of the dialog: a settings category, or the Machines or Profiles page. */
-  export type DialogTab = SettingCategory | typeof MACHINES_TAB | typeof PROFILES_TAB;
+  /**
+   * The Keyboard, Packages and Configuration pages (P4g, plan §6.9). Like Machines and Profiles
+   * they are not settings categories: each edits a file or a folder of its own (`keybindings.json`,
+   * `<config>/packages`, the configuration zip), acts at once, and has no Save of this dialog's.
+   * The prelude wired the tabs and their placeholder pages; P4.34, P4.35 and P4.36 fill the pages
+   * and P4.37 owns this file from here.
+   */
+  export const KEYBOARD_TAB: 'keyboard' = 'keyboard';
+  export const PACKAGES_TAB: 'packages' = 'packages';
+  export const CONFIGURATION_TAB: 'configuration' = 'configuration';
 
-  /** The tabs, in order: the schema pages, then Machines, then Profiles. */
+  /** A tab of the dialog: a settings category, or one of the pages that are not settings. */
+  export type DialogTab =
+    | SettingCategory
+    | typeof MACHINES_TAB
+    | typeof PROFILES_TAB
+    | typeof KEYBOARD_TAB
+    | typeof PACKAGES_TAB
+    | typeof CONFIGURATION_TAB;
+
+  /** The pages that act on their own: nothing of theirs is saved, reset or asked about by the dialog's buttons. */
+  export const PAGE_TABS: readonly DialogTab[] = [
+    MACHINES_TAB,
+    PROFILES_TAB,
+    KEYBOARD_TAB,
+    PACKAGES_TAB,
+    CONFIGURATION_TAB,
+  ];
+
+  /** The tabs, in order: the schema pages, then Machines, Profiles, Keyboard, Packages and Configuration. */
   export function tabsOf(pages: readonly SettingsPage[]): DialogTab[] {
-    return [...pages.map((page) => page.category), MACHINES_TAB, PROFILES_TAB];
+    return [...pages.map((page) => page.category), ...PAGE_TABS];
   }
 
   /**
@@ -270,6 +296,9 @@
   import Modal from '$lib/components/common/Modal.svelte';
   import MachinesPage, { type MachinesModel } from '$lib/components/dialogs/MachinesPage.svelte';
   import ProfilesPage from '$lib/components/dialogs/ProfilesPage.svelte';
+  import KeyboardPage from '$lib/components/dialogs/KeyboardPage.svelte';
+  import PackagesPage from '$lib/components/dialogs/PackagesPage.svelte';
+  import ConfigurationPage from '$lib/components/dialogs/ConfigurationPage.svelte';
   import FormRenderer from '$lib/components/forms/FormRenderer.svelte';
   import { dialogs } from '$lib/app/dialogs';
   import { files } from '$lib/app/fileOps';
@@ -319,6 +348,12 @@
         return t('settings.categories.machines');
       case PROFILES_TAB:
         return t('settings.categories.profiles');
+      case KEYBOARD_TAB:
+        return t('settings.categories.keyboard');
+      case PACKAGES_TAB:
+        return t('settings.categories.packages');
+      case CONFIGURATION_TAB:
+        return t('settings.categories.configuration');
       default:
         return t('settings.categories.scripts');
     }
@@ -585,7 +620,7 @@
       type="button"
       class="footer-action"
       data-testid="settings-reset"
-      disabled={readOnly || busy || active === MACHINES_TAB || active === PROFILES_TAB}
+      disabled={readOnly || busy || PAGE_TABS.includes(active)}
       onclick={() => void resetCategory()}
     >
       {t('settings.reset')}
@@ -659,6 +694,12 @@
           <MachinesPage model={machinesModel} />
         {:else if active === PROFILES_TAB}
           <ProfilesPage />
+        {:else if active === KEYBOARD_TAB}
+          <KeyboardPage />
+        {:else if active === PACKAGES_TAB}
+          <PackagesPage />
+        {:else if active === CONFIGURATION_TAB}
+          <ConfigurationPage />
         {:else}
           <FormRenderer
             fields={activeSpecs}

@@ -18,6 +18,9 @@
 //! - [`python`] — finding the user's Python interpreter
 //! - [`scripts`] — the v2 scripting backend: discovery, the TOML header and the runner
 //! - [`userfiles`] — the user's own profiles and code files (M13)
+//! - [`keybindings`] — `keybindings.json`: the user's key overrides (P4g, AD-55)
+//! - [`packages`] — script packages under `<config>/packages` (P4g, AD-56)
+//! - [`configzip`] — the configuration zip: export, and import with a preview (P4g)
 //!
 //! Window geometry is not ours: `tauri-plugin-window-state` saves and restores it
 //! into `.window-state.json` next to `settings.json` in the config folder. Its
@@ -33,10 +36,13 @@ mod atomic;
 mod backup;
 mod channels;
 mod config;
+mod configzip;
 mod files;
+mod keybindings;
 mod machines;
 #[cfg(target_os = "macos")]
 mod menu;
+mod packages;
 mod paths;
 mod python;
 mod quit;
@@ -124,6 +130,13 @@ pub fn run() {
             quit::quit_guard_set_dirty,
             backup::files_backup,
             channels::channel_siblings,
+            keybindings::keybindings_load,
+            keybindings::keybindings_save,
+            packages::packages_list,
+            packages::package_files_list,
+            configzip::config_export,
+            configzip::config_import_preview,
+            configzip::config_import_apply,
             userfiles::user_files_list,
             userfiles::user_file_create,
             userfiles::user_file_path,
