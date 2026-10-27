@@ -203,3 +203,85 @@ describe('isEnabled and run', () => {
     expect(show).toHaveBeenCalledWith(expect.any(String), { error: true, detail: 'nope' });
   });
 });
+
+describe('the user’s keys (P4g, §6.9 rule 5)', () => {
+  const save = () => command({ id: 'file.save', keys: 'Mod+S' });
+
+  it('get and list answer with the keys in force; defaultKeys keeps the declared ones', () => {
+    commands.register([save(), command({ id: 'file.open', keys: { mac: 'Mod+O', other: 'Ctrl+O' } }), command({ id: 'misc' })]);
+    commands.setKeyOverrides({ misc: 'Mod+Shift+M', 'file.open': { other: 'Ctrl+Alt+O' } });
+    expect(commands.get('misc')?.keys).toEqual('Mod+Shift+M');
+    expect(commands.get('file.open')?.keys).toEqual({ mac: 'Mod+O', other: 'Ctrl+Alt+O' });
+    expect(commands.list().map((d) => d.keys)).toEqual(['Mod+S', { mac: 'Mod+O', other: 'Ctrl+Alt+O' }, 'Mod+Shift+M']);
+    expect(commands.defaultKeys('misc')).toBeUndefined();
+    expect(commands.defaultKeys('file.open')).toEqual({ mac: 'Mod+O', other: 'Ctrl+O' });
+    expect(commands.defaultKeys('nope')).toBeUndefined();
+  });
+
+  it('a command the user did not touch is handed out as it was registered', () => {
+    const def = save();
+    commands.register(def);
+    commands.setKeyOverrides({ other: 'Mod+K' });
+    expect(commands.get('file.save')).toBe(def);
+  });
+
+  it('the user’s key wins over a default and the displaced command shows none; nothing is logged', () => {
+    commands.register([save(), command({ id: 'misc' })]);
+    commands.setKeyOverrides({ misc: 'Mod+S' });
+    expect(commands.get('misc')?.keys).toBe('Mod+S');
+    expect(commands.get('file.save')?.keys).toBeUndefined();
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it('two user keys on one key leave neither of them active', () => {
+    commands.register([command({ id: 'a' }), command({ id: 'b' })]);
+    commands.setKeyOverrides({ a: 'Mod+K', b: 'mod+k' });
+    expect(commands.get('a')?.keys).toBeUndefined();
+    expect(commands.get('b')?.keys).toBeUndefined();
+  });
+
+  it('a script command registered later gets its key at register time, and loses it when it goes', () => {
+    commands.setKeyOverrides({ 'script.run:user:a.py': 'Mod+Shift+F9' });
+    const off = commands.register(command({ id: 'script.run:user:a.py' }));
+    expect(commands.get('script.run:user:a.py')?.keys).toBe('Mod+Shift+F9');
+    off();
+    expect(commands.get('script.run:user:a.py')).toBeUndefined();
+    commands.register(command({ id: 'script.run:user:a.py' }));
+    expect(commands.get('script.run:user:a.py')?.keys).toBe('Mod+Shift+F9');
+  });
+
+  it('a later registration that takes a default key from a user key does not take it back', () => {
+    commands.register(command({ id: 'a' }));
+    commands.setKeyOverrides({ a: 'Mod+K' });
+    commands.register(command({ id: 'late', keys: 'Mod+K' }));
+    expect(commands.get('a')?.keys).toBe('Mod+K');
+    expect(commands.get('late')?.keys).toBeUndefined();
+  });
+
+  it('an empty set puts the declared keys back and bumps changed', () => {
+    commands.register([save(), command({ id: 'misc' })]);
+    commands.setKeyOverrides({ misc: 'Mod+S' });
+    let bumps = 0;
+    const off = commands.changed.subscribe(() => (bumps += 1));
+    bumps = 0;
+    commands.setKeyOverrides({});
+    off();
+    expect(bumps).toBe(1);
+    expect(commands.get('file.save')?.keys).toBe('Mod+S');
+    expect(commands.get('misc')?.keys).toBeUndefined();
+  });
+
+  it('a duplicate default still logs a conflict (the console error stays for declared keys)', () => {
+    commands.register(save());
+    commands.register(command({ id: 'other', keys: 'Mod+S' }));
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('key conflict'));
+  });
+
+  it('run still works on a command whose key changed', async () => {
+    const run = vi.fn();
+    commands.register(command({ id: 'misc', run }));
+    commands.setKeyOverrides({ misc: 'Mod+K' });
+    await expect(commands.run('misc')).resolves.toBe(true);
+    expect(run).toHaveBeenCalledOnce();
+  });
+});
