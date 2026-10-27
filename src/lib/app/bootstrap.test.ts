@@ -99,6 +99,31 @@ describe('startApp', () => {
     expect(h.log.slice(-2)).toEqual(['installMonacoBridge', 'ready=true']);
   });
 
+  // P4.37 (§6.9 rule 39): the first messages are already in the right language, so the set is awaited
+  // before the user files are read and before the commands, ribbon and panels are registered.
+  it('waits for the language set before anything else is read or registered', async () => {
+    let finish!: () => void;
+    const slow = new Promise<void>((resolve) => (finish = resolve));
+    const h = harness({
+      activateLanguage: async () => {
+        h.log.push('activateLanguage start');
+        await slow;
+        h.log.push('activateLanguage done');
+      },
+    });
+    const started = createStartApp(h.deps)();
+    await vi.waitFor(() => expect(h.log).toContain('activateLanguage start'));
+    // Nothing after the language has run while the set is still loading.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(h.log).toEqual(['setContextProvider', 'loadSettings', 'activateLanguage start']);
+    finish();
+    await started;
+    const at = (name: string): number => h.log.indexOf(name);
+    expect(at('activateLanguage done')).toBeGreaterThan(-1);
+    expect(at('activateLanguage done')).toBeLessThan(at('loadUiState'));
+    expect(at('activateLanguage done')).toBeLessThan(at('loadContributions'));
+  });
+
   it('does not wait for Monaco before it returns', async () => {
     const h = harness();
     // The editor only attaches once the shell has mounted, so awaiting Monaco first

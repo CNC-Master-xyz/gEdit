@@ -8,7 +8,7 @@
 // namespace files as `en/` and a row in `LOCALES` below. With one row the language setting is
 // not offered, and `ui.language` falls back to English for any tag.
 
-import type { Messages } from './types';
+import type { Messages, Translator } from './types';
 
 /** One interface language that ships. `name` is the language's own name ("Deutsch"). */
 export interface LocaleInfo {
@@ -69,11 +69,174 @@ export interface LocaleSet {
   namespaces: Readonly<Record<string, Messages>>;
 }
 
+/** Loaders of namespace files by path, as `import.meta.glob` makes them (lazy). */
+export type LocaleLoaders = Readonly<Record<string, () => Promise<unknown>>>;
+
 /**
- * Loads the message set of `tag` (not English, which ships in the main bundle). `null` when there
- * is none or it cannot be loaded; the caller then stays on English and says so once. P4.37. The
- * stub finds nothing, because no translation ships.
+ * The namespace files of every folder `src/lib/i18n/<tag>/` except `en/`, not loaded yet. Bundled as
+ * separate chunks, so a build with English alone carries no second set (and this is empty now).
  */
-export async function loadLocale(_tag: string): Promise<LocaleSet | null> {
-  return null;
+const shippedLoaders: LocaleLoaders = import.meta.glob(['./*/*.ts', '!./en/*.ts', '!./*/*.test.ts']);
+
+function isMessages(value: unknown): value is Messages {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Loads the message set of `tag` (not English, which ships in the main bundle): every namespace file
+ * of the folder `<tag>/`, loaded at once. `null` when there is none, when `tag` is English or no tag,
+ * or when any file cannot be loaded or does not hold messages, so a set is used whole or not at all;
+ * the caller then stays on English and says so once. Never throws. `loaders` is for tests, which hand
+ * it a set that does not ship.
+ */
+export async function loadLocale(tag: string, loaders: LocaleLoaders = shippedLoaders): Promise<LocaleSet | null> {
+  if (!isLocaleTag(tag) || tag.toLowerCase() === DEFAULT_LOCALE) return null;
+  const folder = new RegExp(`(?:^|/)${tag.replace(/[^A-Za-z0-9-]/g, '')}/([A-Za-z][A-Za-z0-9]*)\\.ts$`);
+  const files = Object.entries(loaders).flatMap(([path, load]) => {
+    const name = folder.exec(path)?.[1];
+    return name === undefined ? [] : [{ name, load }];
+  });
+  if (files.length === 0) return null;
+  try {
+    const modules = await Promise.all(files.map((file) => file.load()));
+    const namespaces: Record<string, Messages> = {};
+    for (const [index, module] of modules.entries()) {
+      const messages = (module as { default?: unknown } | null)?.default;
+      if (!isMessages(messages)) return null;
+      namespaces[files[index].name] = messages;
+    }
+    return { tag, namespaces };
+  } catch {
+    return null;
+  }
+}
+
+// --- the translator that reads the loaded set ----------------------------------------------------
+
+let installed: Translator | null = null;
+
+/**
+ * Makes `translator` the one `t()` and `hasKey()` of `i18n/index.ts` use, or `null` for English
+ * alone. Called once at startup by `activateLanguage` (§6.9 rule 39); the language does not change
+ * while the app runs (rule 40). `i18n/index.ts` asks `installedTranslator()` on every call.
+ */
+export function installTranslator(translator: Translator | null): void {
+  installed = translator;
+}
+
+/** The installed translator, or `null` while English alone is in use. */
+export function installedTranslator(): Translator | null {
+  return installed;
+}
+
+/** A translator that answers from `primary` when it has the key and from `fallback` otherwise. */
+export function layerTranslators(primary: Translator, fallback: Translator): Translator {
+  return {
+    t: (key, params) => (primary.hasKey(key) ? primary.t(key, params) : fallback.t(key, params)),
+    hasKey: (key) => primary.hasKey(key) || fallback.hasKey(key),
+  };
+}
+
+const warned = new Set<string>();
+const LOOKS_LIKE_KEY = /^[A-Za-z][\w-]*(?:\.[\w-]+)+$/;
+
+/**
+ * What the translator does with a key that no message set has (§6.9 rule 39): in a development
+ * build, one warning per key. Only a text shaped like a key (`namespace.name`) is reported; anything
+ * else is data shown as it is, such as a template's label used as a command title. Shared by the
+ * English translator of `i18n/index.ts` and the one `activateLanguage` layers over the loaded set.
+ */
+export function reportMissingKey(key: string): void {
+  if (import.meta.env.DEV && LOOKS_LIKE_KEY.test(key) && !warned.has(key)) {
+    warned.add(key);
+    console.warn(`i18n: no message for "${key}"`);
+  }
+}
+
+/** Forgets which keys were reported (tests). */
+export function resetMissingKeyReports(): void {
+  warned.clear();
+}
+
+// --- the checks that hold a set to English (locale.test.ts; §6.9 rule 38) ------------------------
+
+const PLURAL_FORM = /^(.+)_(zero|one|two|few|many|other)$/;
+const PLACEHOLDER = /\{(\w+)\}/g;
+
+/** Every message of `namespaces` by its key, `<namespace>.<path>`. */
+export function flattenMessages(namespaces: Readonly<Record<string, Messages>>): Map<string, string> {
+  const table = new Map<string, string>();
+  const walk = (prefix: string, messages: Messages): void => {
+    for (const [name, value] of Object.entries(messages)) {
+      if (typeof value === 'string') table.set(`${prefix}.${name}`, value);
+      else if (isMessages(value)) walk(`${prefix}.${name}`, value);
+    }
+  };
+  for (const [ns, messages] of Object.entries(namespaces)) walk(ns, messages);
+  return table;
+}
+
+/** The `{name}` placeholders of a message, sorted, once each. */
+export function placeholdersOf(message: string): string[] {
+  return [...new Set([...message.matchAll(PLACEHOLDER)].map((m) => m[1]))].sort();
+}
+
+/** The plural categories a language needs (`en`: one, other; `pl`: one, few, many, other). */
+export function pluralCategories(tag: string): string[] {
+  try {
+    return new Intl.PluralRules(tag).resolvedOptions().pluralCategories;
+  } catch {
+    return ['one', 'other'];
+  }
+}
+
+export interface LocaleReport {
+  /** Mistakes: a key English does not have, other placeholders, a plural form missing. Must be empty. */
+  problems: string[];
+  /** Messages of English (a plural group counts once) that the set does not have yet. Not a failure. */
+  missing: number;
+  /** Messages of English, counted the same way. */
+  total: number;
+}
+
+/**
+ * Holds `set` to `english` (§6.9 rule 38): every key of the set exists in English, with the same
+ * placeholders, and every plural group has the forms its language needs. A set that lacks keys is
+ * reported as a count, not as a failure: it shows English for those. A plural form English does not
+ * have (`few`) is held to English's `other`; `{count}` may be left out of a form other than `other`
+ * (`one`: "one file").
+ */
+export function checkLocaleSet(
+  english: Readonly<Record<string, Messages>>,
+  set: LocaleSet,
+): LocaleReport {
+  const en = flattenMessages(english);
+  const own = flattenMessages(set.namespaces);
+  const problems: string[] = [];
+  const groups = new Map<string, Set<string>>();
+  for (const [key, message] of own) {
+    const form = PLURAL_FORM.exec(key);
+    const counterpart = en.get(key) ?? (form ? en.get(`${form[1]}_other`) : undefined);
+    if (counterpart === undefined) {
+      problems.push(`${key}: no such message in English`);
+      continue;
+    }
+    if (form) groups.set(form[1], (groups.get(form[1]) ?? new Set()).add(form[2]));
+    const want = placeholdersOf(counterpart);
+    const got = placeholdersOf(message);
+    const leftOutCount = form !== null && form[2] !== 'other' && want.join() === [...got, 'count'].sort().join();
+    if (want.join() !== got.join() && !leftOutCount) {
+      problems.push(`${key}: placeholders {${got.join(', ')}} differ from English {${want.join(', ')}}`);
+    }
+  }
+  const needed = pluralCategories(set.tag);
+  for (const [base, forms] of groups) {
+    for (const category of needed) {
+      if (!forms.has(category)) problems.push(`${base}: plural form _${category} is missing for ${set.tag}`);
+    }
+  }
+  const units = new Set([...en.keys()].map((key) => PLURAL_FORM.exec(key)?.[1] ?? key));
+  const covered = (unit: string): boolean =>
+    own.has(unit) || [...own.keys()].some((key) => PLURAL_FORM.exec(key)?.[1] === unit);
+  return { problems, missing: [...units].filter((unit) => !covered(unit)).length, total: units.size };
 }

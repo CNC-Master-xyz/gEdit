@@ -35,6 +35,10 @@ import SettingsDialog, {
   mayChangeTab,
   mayLeave,
   settingsModal,
+  controlOfRow,
+  languageChoices,
+  savedMessage,
+  searchEntriesOf,
   type SpecDeps,
 } from './SettingsDialog.svelte';
 import { validateFields } from '$lib/core/forms/validate';
@@ -45,7 +49,9 @@ import {
   type Settings,
 } from '$lib/core/settings/schema';
 import { hasKey, t } from '$lib/i18n';
+import { offersLanguageChoice } from '$lib/i18n/locale';
 import type { FieldChoice } from '$lib/core/forms/types';
+import { searchSettings } from '$lib/core/settings/search';
 
 /** The two profiles M1 knows; M3 replaces the registry, not the shape. */
 const PROFILE_CHOICES: FieldChoice[] = [
@@ -473,5 +479,170 @@ describe('leaving with something typed', () => {
     for (const key of ['title', 'valuesMessage', 'draftMessage', 'bothMessage', 'ok']) {
       expect(hasKey(`settings.leave.${key}`), key).toBe(true);
     }
+  });
+});
+
+// P4.37 (§6.9 rules 40, 41, 43). The keyboard and focus behaviour of the box needs a DOM and is
+// the runtime scenario's; what the box searches, what a hit leads to and the language row are here.
+describe('the settings search (rule 43)', () => {
+  const tabLabel = (tab: string): string => t(`settings.categories.${tab}`);
+  const entries = searchEntriesOf(pagesOf(), deps, tabLabel);
+  const hitIds = (query: string, list = entries): string[] => searchSettings(query, list).map((h) => h.entry.id);
+
+  it('has a heading entry for every tab, then a row entry for every row that is in the dialog', () => {
+    const pages = entries.filter((e) => e.kind === 'page');
+    expect(pages.map((e) => e.id)).toEqual(tabsOf(pagesOf()));
+    expect(pages.map((e) => e.label)).toContain('Keyboard');
+    expect(pages.map((e) => e.label)).toContain('Configuration');
+    const rows = entries.filter((e) => e.kind === 'setting');
+    expect(rows.map((e) => e.id)).toEqual(pagesOf().flatMap((p) => p.metas.map((m) => m.key)));
+    expect(entries.slice(0, pages.length)).toEqual(pages);
+  });
+
+  it('offers a setting whose row is not in the dialog nowhere', () => {
+    expect(entries.map((e) => e.id)).not.toContain('editor.rulers');
+    expect(entries.map((e) => e.id)).not.toContain('packages.disabled');
+    expect(hitIds('rulers')).toEqual([]);
+    // The language row is in only when a second language ships.
+    expect(entries.some((e) => e.id === 'ui.language')).toBe(offersLanguageChoice());
+  });
+
+  it('gives each row its translated label and help, and the page it is on', () => {
+    const row = entries.find((e) => e.id === 'editor.tabWidth');
+    expect(row).toEqual({
+      id: 'editor.tabWidth',
+      kind: 'setting',
+      tab: 'editor',
+      label: t('settings.editor.tabWidth.label'),
+      help: t('settings.editor.tabWidth.help'),
+    });
+  });
+
+  it('finds a setting by its label, its help text or its key, and a page by its heading', () => {
+    expect(hitIds('tab width')[0]).toBe('editor.tabWidth');
+    expect(hitIds('previous version never gone')).toContain('files.backup');
+    expect(hitIds('assist.motionColors')[0]).toBe('assist.motionColors');
+    expect(searchSettings('keyboard', entries)[0]).toMatchObject({ entry: { id: 'keyboard', kind: 'page', tab: 'keyboard' } });
+    expect(hitIds('packages')[0]).toBe('packages');
+    expect(hitIds('machines')[0]).toBe('machines');
+    expect(hitIds('profiles')[0]).toBe('profiles');
+    expect(hitIds('')).toEqual([]);
+  });
+
+  it('finds a list row (the script folders) like any other', () => {
+    expect(hitIds('script folder')).toContain('scripts.folders');
+  });
+
+  it('follows the language in use: the texts it is given are the ones searched', () => {
+    const german: SpecDeps = { ...deps, translate: (key) => `de:${key}` };
+    const translated = searchEntriesOf(pagesOf(), german, (tab) => `Seite ${tab}`);
+    expect(hitIds('seite keyboard', translated)).toEqual(['keyboard']);
+    expect(hitIds('de:settings.editor.tabWidth.label', translated)).toEqual(['editor.tabWidth']);
+    // The English words are no longer in the labels; the key is, so a programmer who knows the key still finds it.
+    expect(hitIds('Tab width', translated)).toContain('editor.tabWidth');
+  });
+
+  it('finds a hit’s control: the first input, select or button of the row (data-field)', () => {
+    const control = { id: 'control' } as unknown as HTMLElement;
+    const row = { querySelector: (selector: string) => (selector.includes('input') ? control : null) };
+    const seen: string[] = [];
+    const page = {
+      querySelector: (selector: string) => {
+        seen.push(selector);
+        return selector === '[data-field="editor.tabWidth"]' ? row : null;
+      },
+    } as unknown as ParentNode;
+    expect(controlOfRow(page, 'editor.tabWidth')).toBe(control);
+    expect(controlOfRow(page, 'editor.minimap')).toBeNull();
+    expect(seen).toEqual(['[data-field="editor.tabWidth"]', '[data-field="editor.minimap"]']);
+    // A row without a control of those kinds is itself the target.
+    const bare = { querySelector: () => null };
+    const pageBare = { querySelector: () => bare } as unknown as ParentNode;
+    expect(controlOfRow(pageBare, 'x')).toBe(bare);
+  });
+
+  it('renders the box before the pages, with its test id, and no result list while it is empty', () => {
+    const html = render(SettingsDialog, { props: { close: () => {} } }).body;
+    expect(html).toContain('data-testid="settings-search"');
+    expect(html).toContain('role="searchbox"');
+    expect(html.indexOf('data-testid="settings-search"')).toBeLessThan(html.indexOf('data-testid="settings-category"'));
+    expect(html).not.toContain('data-testid="settings-search-hit"');
+    expect(html).not.toContain('data-testid="settings-search-none"');
+  });
+
+  it('wires Escape to clear the box before it reaches the dialog, and Enter to take the best hit, not to Save', () => {
+    const source = readFileSync(fileURLToPath(new URL('./SettingsDialog.svelte', import.meta.url)), 'utf8');
+    const handler = source.slice(source.indexOf('function onSearchKey'), source.indexOf('function onHitKey'));
+    expect(handler).toMatch(/e\.key === 'Escape' && searching/);
+    expect(handler).toContain('e.stopPropagation()');
+    expect(handler).toContain('void chooseHit(hits[0])');
+    // Escape with an empty box is not handled: it closes the dialog as before.
+    expect(handler).not.toMatch(/Escape'\s*\)/);
+    expect(source).toContain('onkeydown={onSearchKey}');
+    expect(source).toContain('data-testid="settings-search-hit"');
+    expect(source).toMatch(/data-id=\{hit\.entry\.id\}/);
+    expect(source).toMatch(/data-tab=\{hit\.entry\.tab\}/);
+  });
+
+  it('has the texts of the box', () => {
+    for (const key of ['label', 'placeholder', 'clear', 'hitsLabel', 'none', 'page', 'inPage', 'found_one', 'found_other']) {
+      expect(hasKey(`settings.search.${key}`), key).toBe(true);
+    }
+  });
+});
+
+describe('the language row (rules 37, 40, 41)', () => {
+  const english = { tag: 'en', name: 'English' };
+  const deutsch = { tag: 'de', name: 'Deutsch' };
+
+  it('is not offered while English alone ships', () => {
+    const row = SETTING_FIELDS.find((m) => m.key === 'ui.language') as SettingFieldMeta;
+    expect(row.dialog).toBe(false);
+    expect(pagesOf().flatMap((p) => p.metas).map((m) => m.key)).not.toContain('ui.language');
+    expect(Object.keys(snapshotValues(DEFAULTS))).not.toContain('ui.language');
+    const html = render(SettingsDialog, { props: { close: () => {} } }).body;
+    expect(html).not.toContain('data-field="ui.language"');
+  });
+
+  it('is a choice among the languages that ship, by their own names, once a second one does', () => {
+    const row = { ...(SETTING_FIELDS.find((m) => m.key === 'ui.language') as SettingFieldMeta), dialog: true };
+    const withLanguages: SpecDeps = { ...deps, choicesFor: (key) => (key === 'ui.language' ? languageChoices('en', [english, deutsch], t) : undefined) };
+    const spec = specOf(row, withLanguages);
+    expect(spec.label).toBe(t('settings.ui.language.label'));
+    expect(spec.help).toBe(t('settings.ui.language.help'));
+    expect(spec.choices).toEqual([
+      { label: 'English', value: 'en' },
+      { label: 'Deutsch', value: 'de' },
+    ]);
+    expect(validateFields([spec], { 'ui.language': 'de' })).toEqual({});
+    const pages = pagesOf([row]);
+    expect(pages.map((p) => p.category)).toEqual(['appearance']);
+    expect(snapshotValues(DEFAULTS, [row])).toEqual({ 'ui.language': 'en' });
+    expect(changedValues({ 'ui.language': 'de' }, DEFAULTS, [row])).toEqual({ 'ui.language': 'de' });
+  });
+
+  it('keeps a stored value that is not offered as one more choice, so opening the dialog changes nothing', () => {
+    const choices = languageChoices('de-CH', [english, deutsch], t);
+    expect(choices.map((c) => c.value)).toEqual(['en', 'de', 'de-CH']);
+    expect(choices[2].label).toBe('de-CH (shown as Deutsch)');
+    expect(languageChoices('fr', [english, deutsch], t)[2].label).toBe('fr (shown as English)');
+    expect(languageChoices('en', [english, deutsch], t)).toHaveLength(2);
+    expect(languageChoices(undefined, [english], t)).toEqual([{ label: 'English', value: 'en' }]);
+  });
+
+  it('says on Save that the change applies at the next start, and only when the language changed', () => {
+    expect(savedMessage({ 'ui.language': 'de' }, t)).toBe('Settings saved. The change applies the next time gEdit starts.');
+    expect(savedMessage({ 'editor.tabWidth': 2 }, t)).toBe(t('settings.saved'));
+    expect(savedMessage({}, t)).toBe(t('settings.saved'));
+    // The dialog uses it, and builds nothing that switches the language while the app runs (rule 40).
+    const source = readFileSync(fileURLToPath(new URL('./SettingsDialog.svelte', import.meta.url)), 'utf8');
+    expect(source).toContain('status.show(savedMessage(patch, t))');
+  });
+
+  it('has its texts', () => {
+    for (const key of ['settings.languageNextStart', 'settings.languageLoadFailed', 'settings.languageOther', 'settings.ui.language.label', 'settings.ui.language.help']) {
+      expect(hasKey(key), key).toBe(true);
+    }
+    expect(t('settings.ui.language.help')).toContain('applies the next time gEdit starts');
   });
 });
