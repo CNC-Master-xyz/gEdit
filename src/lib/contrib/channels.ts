@@ -35,7 +35,7 @@ import { asIcon } from '$lib/app/icons';
 import { dialogs } from '$lib/app/dialogs';
 import { files } from '$lib/app/fileOps';
 import { modals } from '$lib/app/modals';
-import { computeJumpLines } from '$lib/app/outlineService';
+import { computeFlow, computeJumpLines } from '$lib/app/outlineService';
 import { channelFileName, extensionOf, stemOf } from '$lib/core/channels/fileNames';
 import { channelRefs, channelsAt } from '$lib/core/channels/resolve';
 import { setOfLines } from '$lib/core/channels/scope';
@@ -957,6 +957,11 @@ export default {
   keybindingRemovals: [{ keys: 'Mod+Alt+P', command: 'togglePreserveCase' }],
   activate(): Disposable {
     channels.useJumpLines((id, cp, channelOf) => computeJumpLines(editor.getLines(id, 1, editor.getLineCount(id)), cp, channelOf));
-    return () => channels.useJumpLines(null);
+    // P4.32 (section 6.8.7): the check follows the jumps it can prove, per channel.
+    channels.useFlow((id, cp, channelOf) => computeFlow(editor.getLines(id, 1, editor.getLineCount(id)), cp, channelOf));
+    return () => {
+      channels.useJumpLines(null);
+      channels.useFlow(null);
+    };
   },
 } satisfies Contribution;

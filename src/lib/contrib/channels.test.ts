@@ -10,13 +10,17 @@ import { hasKey } from '$lib/i18n';
 /** The machine's channel block `channels.params` answers (`markName`, M13 review NC-10). */
 let machineParams: ChannelParams | null = null;
 
+const wired: Record<string, unknown> = {};
 vi.mock('$lib/stores/channels', () => ({
-  channels: { ruleLabel: (_id: string, ruleId: string) => (ruleId === 'stops' ? 'Stops and ends' : ''), params: () => machineParams },
+  channels: {
+    useJumpLines: (fn: unknown) => { wired.jump = fn; },
+    useFlow: (fn: unknown) => { wired.flow = fn; },
+    ruleLabel: (_id: string, ruleId: string) => (ruleId === 'stops' ? 'Stops and ends' : ''), params: () => machineParams },
 }));
 vi.mock('$lib/app/dialogs', () => ({ dialogs: {} }));
 vi.mock('$lib/app/fileOps', () => ({ files: {} }));
 vi.mock('$lib/app/modals', () => ({ modals: {} }));
-vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}) }));
+vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}), computeFlow: () => ({}) }));
 vi.mock('$lib/app/status', () => ({ status: { show: () => {} } }));
 vi.mock('$lib/monaco/editorService', () => ({ editor: {} }));
 vi.mock('$lib/stores/documents', () => ({ docs: { getActiveId: () => 'd1', get: () => ({ title: 'x.nc' }) } }));
@@ -41,6 +45,15 @@ describe('the contribution', () => {
       expect(hasKey(c.title), c.title).toBe(true);
       expect(c.category).toBe('channels.category');
     }
+  });
+
+  it('hands the check its jump lines and its flow (P4.32), and takes both back', () => {
+    const stop = contribution.activate();
+    expect(typeof wired.jump).toBe('function');
+    expect(typeof wired.flow).toBe('function');
+    stop();
+    expect(wired.jump).toBeNull();
+    expect(wired.flow).toBeNull();
   });
 
   it('frees Mod+Alt+P from the editor\'s toggle-preserve-case', () => {

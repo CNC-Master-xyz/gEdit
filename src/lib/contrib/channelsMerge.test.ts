@@ -14,7 +14,7 @@ vi.mock('$lib/stores/channels', () => ({ channels: {} }));
 vi.mock('$lib/app/dialogs', () => ({ dialogs: {} }));
 vi.mock('$lib/app/fileOps', () => ({ files: {} }));
 vi.mock('$lib/app/modals', () => ({ modals: {} }));
-vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}) }));
+vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}), computeFlow: () => ({}) }));
 vi.mock('$lib/app/status', () => ({ status: { show: () => {} } }));
 vi.mock('$lib/monaco/editorService', () => ({ editor: {} }));
 vi.mock('$lib/stores/documents', () => ({ docs: { getActiveId: () => 'c1', get: () => undefined, activate: () => {} } }));
