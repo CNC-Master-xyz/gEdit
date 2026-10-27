@@ -36,11 +36,11 @@ The plan also had `keybindings.json` (user shortcut overrides) and `packages/` (
 ## Settings dialog
 `P1 · S · Core` (basic page) · `P2 · M · Core` (full dialog)
 
-**Status:** see the bullets: the basic page and a paged dialog shipped; the search box and per-field reset were not built.
+**Status:** see the bullets: the basic page and a paged dialog shipped; the search box and a reset for a single field were not built; each page has a reset for its whole category.
 
 - **P1 (shipped):** a dialog for the most needed options: theme, font, font size, tab width, Python interpreter, script folders, recent-files length. There is also "Open settings file" for everything else.
 - **P2 (shipped as pages, without a search box):** a category list on the left and the form on the right, seven pages (Appearance, Editor, Assistance, Files, Scripts, Machines, Profiles). The settings are validated when `settings.json` is read, in code; a JSON Schema and a search box were not built (Phase 4 table of the roadmap).
-- Changes apply when the user presses Save. Cancel discards them. Each category has "Reset to defaults" (with confirmation). A single field can be reset from its context menu.
+- Changes apply when the user presses Save. Cancel discards them. Each category has "Reset category" (with confirmation); it puts every setting of that page back to its default and writes `settings.json` at once, whether or not the rest is saved. A single field cannot be reset on its own: the form has no per-field reset and no context menu for it (not built).
 - The profile list is a page of the same dialog (Profiles, M13), and so is the machine list (Machines, M6); both are records or files of their own, not settings ([dialect-profiles.md](dialect-profiles.md#profile-editor)). Changes apply on Save and Cancel discards them.
 
 ## Settings reference

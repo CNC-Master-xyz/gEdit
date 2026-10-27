@@ -95,7 +95,7 @@ Copy the current difference block from left to right or right to left (shortcuts
 
 **Status:** shipped in M11 as a unified diff in a new tab (raw or review text); the two-column listing and a file export were not built.
 
-Save a unified diff (raw or normalized) or a simple two-column listing as a text file, or open it in a new tab. Use: change record for program revisions and approvals.
+Open a unified diff (raw, or normalized as the review shows it) in a new untitled tab, from which the user can save it as a text file. A two-column listing and a direct file export are not built; the command is "Export Differences…". Use: change record for program revisions and approvals.
 
 ### Compare colors
 `P2 · S · Core`
