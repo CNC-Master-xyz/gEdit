@@ -1,0 +1,65 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Siemens two channels: channel 1 jumps with GOTOF SKIP1 over its WAITM(2,1,2); channel 2 waits on mark 3 before mark 2. The jump lines do not read a jump to a label (computeJumpLines takes no label target), so the written order was out of order. Followed, channel 1 never runs mark 2: channel 2 waits for it for ever, reported as missing.",
+  "rule": "F1 F2",
+  "profile": "sinumerik",
+  "preset": "sinumerik-2channel",
+  "program": {
+    "1": [
+      "%_N_FLOWA1_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "NN100: WAITM(1,1,2)",
+      "GOTOF SKIP1",
+      "NN200: WAITM(2,1,2)",
+      "SKIP1: G0 X100",
+      "NN300: WAITM(3,1,2)",
+      "M30"
+    ],
+    "2": [
+      "%_N_FLOWA2_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "NN100: WAITM(1,1,2)",
+      "NN300: WAITM(3,1,2)",
+      "NN200: WAITM(2,1,2)",
+      "M30"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [
+          {
+            "line": 4,
+            "target": 6
+          }
+        ],
+        "loops": [],
+        "opaque": []
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "out-of-order",
+        "channel": "1",
+        "line": 5,
+        "mark": "2",
+        "other": "2",
+        "otherLine": 5
+      }
+    ],
+    "after": [
+      {
+        "kind": "missing",
+        "channel": "2",
+        "line": 5,
+        "mark": "2",
+        "other": "1"
+      }
+    ]
+  }
+}

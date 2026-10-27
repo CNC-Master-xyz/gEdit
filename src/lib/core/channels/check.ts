@@ -61,12 +61,23 @@
 //   D2-5    the warnings `shares-block` (a `samePartners` wait whose block holds other words)
 //           and `mark-out-of-range` (a plain-number mark outside the rule's `markValues`).
 //
+// P4.32 (plan section 6.8.7, rules F1 to F5): with `o.flow` for a channel, the check compares the
+// marks in the order the channel EXECUTES them (`executedSequence`, flow.ts): a mark a followed
+// forward jump skips does not run, a mark in a counted loop runs once per pass, and the channel's
+// `opaque` lines take the place of its jump lines (a pair spanned by one stays "not judged", a mark
+// with one before and after it is not counted). The findings still name the written lines; a mark
+// that runs several times gives a finding of a kind once. Without `o.flow` for a channel nothing
+// changes. The `ordered` rule leaves the step from one pass of a loop into the next not judged
+// (`order-not-checked`, the loop's end is a backward jump), and the meeting walk (D2-4 a) is not
+// judged in a channel with a loop.
+//
 // Two ids are the same when their text is the same or, when both are digits after the same
 // letters, when the values are (`M0101` = `M101`, `0101` = `101`). Findings quote the ids as
 // written. A pair is only compared when both channels are keys of `perChannel`: a channel the
 // caller could not read (its file is not open) is left out, never reported as missing.
 
 import { asksSamePartners, markPrefixOf } from './marks';
+import { executedSequence, type FlowSequence } from './flow';
 import { budgetClock } from './resolve';
 import {
   CHANNEL_CAPS,
@@ -90,9 +101,10 @@ export interface CheckSyncOptions extends ChannelBudget {
    *  nothing (the bounds are exclusive). */
   jumpLines?: Readonly<Record<string, number[]>>;
   /**
-   * Phase 4 (P4f prelude, P4.32): per channel, the jumps and counted loops the check may follow
-   * instead of giving up (plan section 6.8, rules F1 to F5). Absent: only `jumpLines` is used, as
-   * before, and nothing changes. Not read until P4.32 writes the rule.
+   * Phase 4 (P4.32): per channel, the jumps and counted loops the check follows instead of giving
+   * up (plan section 6.8.7, rules F1 to F5; `computeFlow`). A channel with an entry is read in its
+   * executed order, and its `jumpLines` are not read (the flow's `opaque` lines replace them). A
+   * channel without one is read by `jumpLines`, as before.
    */
   flow?: Readonly<Record<string, ChannelFlow>>;
   /** Per channel, the `Located.document` its findings carry (F58); absent = no `document`. */
@@ -116,6 +128,8 @@ const NUMBER_LITERAL = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 interface Item {
   hit: SyncHit;
   channel: string;
+  /** Where the mark runs (P4.32): its line, or its position in the executed sequence (flow.ts). */
+  pos: number;
   /** Comparison key of the id. */
   key: string;
   /** Declared partners other than the own channel, one bit per declared index (≤ 32 channels). */
@@ -275,6 +289,34 @@ export function checkSyncMarksReport(
       [...new Set(lines.filter((n) => Number.isFinite(n)))].sort((a, b) => a - b),
     );
   }
+  // P4.32: the channels read in their executed order; their opaque positions replace the jump lines.
+  const sequences = new Map<string, FlowSequence>();
+  for (const [ch, flow] of Object.entries(o.flow ?? {})) {
+    if (ch === '' || flow === undefined || flow === null || !Object.prototype.hasOwnProperty.call(perChannel, ch)) continue;
+    const seq = executedSequence(perChannel[ch] ?? [], flow);
+    sequences.set(ch, seq);
+    jumps.set(ch, seq.opaque);
+  }
+  /** Per channel with a flow: each executed mark's positions. */
+  const runsOf = new Map<string, Map<SyncHit, number[]>>();
+  /** `channel` + tab + line of the marks that run more than once: their findings are given once. */
+  const repeated = new Set<string>();
+  for (const [ch, seq] of sequences) {
+    const runs = new Map<SyncHit, number[]>();
+    for (const step of seq.steps) {
+      const list = runs.get(step.hit);
+      if (list) {
+        list.push(step.pos);
+        repeated.add(`${ch}\t${step.hit.line}`);
+      } else runs.set(step.hit, [step.pos]);
+    }
+    runsOf.set(ch, runs);
+  }
+  /** The `ordered` rule's breaks: the jump lines, and the step into each repeated pass of a loop. */
+  const orderBreaks = (ch: string): number[] | undefined => {
+    const repeats = sequences.get(ch)?.repeats ?? [];
+    return repeats.length === 0 ? jumps.get(ch) : [...(jumps.get(ch) ?? []), ...repeats].sort((a, b) => a - b);
+  };
 
   const findings: SyncFinding[] = [];
   const late = budgetClock(o);
@@ -283,7 +325,13 @@ export function checkSyncMarksReport(
     if ((++ticks & 255) === 0 && late()) throw new Deadline();
   };
 
+  const given = new Set<string>();
   const add = (f: Omit<SyncFinding, 'document'>): void => {
+    if (repeated.has(`${f.channel}\t${f.line}`)) {
+      const key = [f.kind, f.ruleId, f.channel, f.line, f.other ?? '', f.otherLine ?? '', f.mark].join('\u0001');
+      if (given.has(key)) return;
+      given.add(key);
+    }
     const document = o.documents?.[f.channel];
     findings.push(document === undefined ? f : { ...f, document });
   };
@@ -318,11 +366,15 @@ export function checkSyncMarksReport(
       });
     }
     for (const channel of present) {
+      const runs = runsOf.get(channel);
       for (const hit of perChannel[channel] ?? []) {
         tick();
         const rule = rules.get(hit.ruleId);
         if (!rule) continue;
+        // P4.32: a mark a followed jump skips does not run (its own findings of step 0 stay).
+        const positions = runs === undefined ? [hit.line] : (runs.get(hit) ?? []);
         if (hit.blocking === false) {
+          if (positions.length === 0) continue;
           if (rule.answers && rule.semantics === 'rendezvous') {
             let keys = answered.get(channel);
             if (!keys) answered.set(channel, (keys = new Set()));
@@ -340,6 +392,7 @@ export function checkSyncMarksReport(
         const item: Item = {
           hit,
           channel,
+          pos: hit.line,
           key: rule.semantics === 'count' ? '' : markKey(hit.mark),
           names,
           flagged: false,
@@ -371,10 +424,11 @@ export function checkSyncMarksReport(
         if (!perCh) byRule.set(rule.id, (perCh = new Map()));
         let items = perCh.get(channel);
         if (!items) perCh.set(channel, (items = []));
-        items.push(item);
+        // One item per run; the copies share the hit and the flags of step 0.
+        for (const pos of positions) items.push(pos === item.pos ? item : { ...item, pos });
       }
     }
-    for (const items of [...byRule.values()].flatMap((m) => [...m.values()])) items.sort((a, b) => a.hit.line - b.hit.line);
+    for (const items of [...byRule.values()].flatMap((m) => [...m.values()])) items.sort((a, b) => a.pos - b.pos);
 
     // D2-4 (c): a `withCodes` code at a mark a partner lacks.
     for (const [ruleId, perCh] of byRule) {
@@ -603,10 +657,11 @@ export function checkSyncMarksReport(
    */
   function checkMeeting(other: RuleInfo, a: string, b: string, perCh: Map<string, Item[]>, counted: Map<string, Item[]> | undefined): void {
     if ((jumps.get(a)?.length ?? 0) > 0 || (jumps.get(b)?.length ?? 0) > 0) return;
+    if ((sequences.get(a)?.repeats.length ?? 0) > 0 || (sequences.get(b)?.repeats.length ?? 0) > 0) return;
     const events = (ch: string, otherCh: string): Item[] =>
       [...(perCh.get(ch) ?? []), ...(counted?.get(ch) ?? [])]
         .filter((it) => (it.names & bit(otherCh)) !== 0 && (it.hit.ruleId === other.id || orderValue(it.hit.mark) !== null))
-        .sort((x, y) => x.hit.line - y.hit.line);
+        .sort((x, y) => x.pos - y.pos);
     const ea = events(a, b);
     const eb = events(b, a);
     // A count difference is `count-mismatch` already; the walk would be out of step after it.
@@ -661,7 +716,7 @@ export function checkSyncMarksReport(
    *  mark's own line (`N10 M901` ... `GOTO10`) counts as before. */
   function looped(it: Item): boolean {
     const lines = jumps.get(it.channel);
-    return lines !== undefined && lines.length > 1 && lines[0] !== lines[lines.length - 1] && lines[0] <= it.hit.line && lines[lines.length - 1] >= it.hit.line;
+    return lines !== undefined && lines.length > 1 && lines[0] !== lines[lines.length - 1] && lines[0] <= it.pos && lines[lines.length - 1] >= it.pos;
   }
 
   function checkCount(rule: RuleInfo, a: string, b: string, la: Item[], lb: Item[]): void {
@@ -715,7 +770,7 @@ export function checkSyncMarksReport(
   }
 
   function checkOrdered(rule: RuleInfo, channel: string, items: Item[]): void {
-    const lines = jumps.get(channel);
+    const lines = orderBreaks(channel);
     let previous: Item | null = null;
     for (const it of items) {
       tick();
@@ -724,7 +779,7 @@ export function checkSyncMarksReport(
       if (previous !== null) {
         const pv = orderValue(previous.hit.mark)!;
         if (pv.letters === v.letters && v.value < pv.value) {
-          const excused = between(lines, previous.hit.line, it.hit.line);
+          const excused = between(lines, previous.pos, it.pos);
           add({
             kind: excused ? 'order-not-checked' : 'not-increasing',
             mark: it.hit.mark,
@@ -875,10 +930,10 @@ export function checkSyncMarksReport(
     const jA = jumps.get(a);
     const jB = jumps.get(b);
     const separated = (x: number, y: number): boolean => {
-      const ax = la[paired[x]].hit.line;
-      const ay = la[paired[y]].hit.line;
-      const bx = lb[partnerOfA[paired[x]]].hit.line;
-      const by = lb[partnerOfA[paired[y]]].hit.line;
+      const ax = la[paired[x]].pos;
+      const ay = la[paired[y]].pos;
+      const bx = lb[partnerOfA[paired[x]]].pos;
+      const by = lb[partnerOfA[paired[y]]].pos;
       return between(jA, ax, ay) || between(jB, bx, by);
     };
     let real: { at: number; crossed: number } | null = null;

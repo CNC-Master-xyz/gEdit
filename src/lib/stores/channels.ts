@@ -47,7 +47,7 @@ import { findMarks, guardChannelPatterns, macroCallCodes, maskForMarks, resolveD
 import { documentChannel, fileChannel, listingPattern, siblingNames, siblingsFromListing, type ListedSiblings } from '$lib/core/channels/siblings';
 import { jobListNames, MAX_JOB_LINES, readJobList, startsLikeJobList, type JobList } from '$lib/core/channels/jobList';
 import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE } from '$lib/core/channels/types';
-import type { ChannelBudget, ChannelMember, ChannelParams, ChannelProblem, ChannelRef, ChannelSet, SyncFinding, SyncHit } from '$lib/core/channels/types';
+import type { ChannelBudget, ChannelFlow, ChannelMember, ChannelParams, ChannelProblem, ChannelRef, ChannelSet, SyncFinding, SyncHit } from '$lib/core/channels/types';
 import { channelBlock, type ChannelBlock } from '$lib/core/machines/validate';
 import { appGuardRunner } from '$lib/core/regexGuard/app';
 import { GUARD_BUDGET_MS } from '$lib/core/regexGuard/guard';
@@ -84,6 +84,8 @@ export interface EffectiveView {
 
 /** Lines the written order may not be carried across, per channel (WP12.5 computes them, see `outlineService`). */
 export type JumpLinesProvider = (docId: DocId, cp: CompiledProfile, channelOf: (line: number) => string | readonly string[]) => Record<string, number[]>;
+/** P4.32: what the check may follow per channel (`computeFlow`, plan section 6.8.7). */
+export type FlowProvider = (docId: DocId, cp: CompiledProfile, channelOf: (line: number) => string | readonly string[]) => Record<string, ChannelFlow>;
 
 export interface ChannelServiceDeps {
   docs: Pick<DocumentStore, 'get' | 'all' | 'list'>;
@@ -125,6 +127,8 @@ export type ChannelServiceInternals = ChannelService & {
   assigned(id: DocId): string | null;
   /** WP12.5's `contrib/channels.ts` hands the check its jump-line provider. */
   useJumpLines(fn: JumpLinesProvider | null): void;
+  /** P4.32: `contrib/channels.ts` hands the check its flow provider (`computeFlow`); without one the check reads the jump lines only. */
+  useFlow(fn: FlowProvider | null): void;
 };
 
 interface Base {
@@ -233,6 +237,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
   let stops: Disposable[] = [];
   let installed = false;
   let jumpProvider: JumpLinesProvider | null = null;
+  let flowProvider: FlowProvider | null = null;
 
   const same = (a: string, b: string): boolean => (deps.caseInsensitive ? a.toLowerCase() === b.toLowerCase() : a === b);
   const bump = (): void => revision.update((n) => n + 1);
@@ -976,6 +981,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
       const set = entry.set;
       const perChannel: Record<string, SyncHit[]> = {};
       const jumpLines: Record<string, number[]> = {};
+      const flow: Record<string, ChannelFlow> = {};
       const checked: string[] = [];
       const otherMachines = empty.otherMachines;
       const documents: Record<string, string> = {};
@@ -1004,6 +1010,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
         }
         // A line of a shared section is in each of its channels' lists.
         if (jumpProvider !== null) Object.assign(jumpLines, jumpProvider(id, cp, sectionOwners(own.sections)));
+        if (flowProvider !== null) Object.assign(flow, flowProvider(id, cp, sectionOwners(own.sections)));
       } else {
         for (const m of set.members) {
           if (m.kind !== 'file' || m.docId === null) continue;
@@ -1021,6 +1028,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
             const found = jumpProvider(m.docId, cp, () => ch)[ch];
             if (found) jumpLines[ch] = found;
           }
+          if (flowProvider !== null) flow[ch] = flowProvider(m.docId, cp, () => ch)[ch] ?? { jumps: [], loops: [], opaque: [] };
           if (m.docId !== id) {
             const view = deps.effective(m.docId);
             if ((view?.machineId ?? null) !== initiating) otherMachines.push({ channel: ch, docId: m.docId, machineName: view?.machineName ?? null });
@@ -1028,7 +1036,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
         }
       }
       const notChecked = channelRefs(p).filter((r) => !checked.includes(r.id));
-      const report = checkSyncMarksReport(perChannel, p, { jumpLines, documents, deadline: deps.now() + CHANNEL_CAPS.checkMs, now: deps.now });
+      const report = checkSyncMarksReport(perChannel, p, { jumpLines, ...(flowProvider !== null ? { flow } : {}), documents, deadline: deps.now() + CHANNEL_CAPS.checkMs, now: deps.now });
       return { findings: report.findings, truncated: report.truncated || own.dropped > 0 || siblingsLate, checked, notChecked, otherMachines, longLines };
     },
 
@@ -1051,6 +1059,10 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
 
     useJumpLines(fn: JumpLinesProvider | null): void {
       jumpProvider = fn;
+    },
+
+    useFlow(fn: FlowProvider | null): void {
+      flowProvider = fn;
     },
   };
 }
