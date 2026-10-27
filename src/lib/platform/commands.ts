@@ -776,11 +776,13 @@ export async function folderSearch(
 ): Promise<FolderSummary> {
   const channel = new Channel<ArrayBuffer | FolderEvent>();
   let waiting: Extract<FolderEvent, { kind: 'file' }> | null = null;
+  let delivered = 0;
   channel.onmessage = (message) => {
     if (message instanceof ArrayBuffer) {
       if (waiting === null) return;
       const meta = waiting;
       waiting = null;
+      delivered += 1;
       onFile({ index: meta.index, path: meta.path, rel: meta.rel, bytes: meta.bytes, mtimeMs: meta.mtimeMs, data: new Uint8Array(message) });
     } else if (message.kind === 'file') {
       waiting = message;
@@ -788,8 +790,18 @@ export async function folderSearch(
       onProgress?.(message.entriesSeen, message.filesRead);
     }
   };
-  return invoke<FolderSummary>('folder_search', { req, onEvent: channel });
+  const summary = await invoke<FolderSummary>('folder_search', { req, onEvent: channel });
+  // The channel's messages and the command's answer travel separately, so the last files can arrive
+  // after the summary. A caller must not see the summary first: wait (bounded) until every file the
+  // summary counts has been handed over.
+  const expected = summary.filesSent ?? 0;
+  const until = Date.now() + FOLDER_DRAIN_MS;
+  while (delivered < expected && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 5));
+  return summary;
 }
+
+/** How long `folderSearch` waits for files still on their way after the summary arrived. */
+const FOLDER_DRAIN_MS = 10_000;
 
 /** Stops the search `id`; answers whether one with that id was running. */
 export function folderSearchCancel(id: string): Promise<boolean> {

@@ -267,6 +267,8 @@ const ABANDON_GRACE: Duration = Duration::from_millis(250);
 const POLL: Duration = Duration::from_millis(20);
 /// The size of one read. The cancel flag and the deadline are looked at between reads.
 const READ_CHUNK: usize = 64 * 1024;
+/// How long `folder_grant` may look at the file system before it gives up.
+const GRANT_BUDGET: Duration = Duration::from_secs(3);
 /// `folder_siblings` stops reading a folder after this many entries.
 const MAX_SIBLING_ENTRIES: usize = 50_000;
 
@@ -614,6 +616,9 @@ pub struct Search {
     cancel: AtomicBool,
     ended: AtomicBool,
     abandoned: AtomicBool,
+    /// Held while a message is sent and while a search is given up on, so a walker that was left
+    /// behind cannot send once more after the command has answered.
+    send_lock: Mutex<()>,
     summary: Mutex<FolderSummary>,
 }
 
@@ -623,6 +628,7 @@ impl Search {
             cancel: AtomicBool::new(false),
             ended: AtomicBool::new(false),
             abandoned: AtomicBool::new(false),
+            send_lock: Mutex::new(()),
             summary: Mutex::new(FolderSummary::default()),
         }
     }
@@ -697,7 +703,10 @@ impl SearchRegistry {
     /// thread counts until it ends. Under the lock, so a thread that ends just now is not counted.
     fn abandon(&self, search: &Arc<Search>) {
         let mut inner = self.lock();
-        search.cancel.store(true, Ordering::Relaxed);
+        {
+            let _sending = search.send_lock.lock().unwrap_or_else(|e| e.into_inner());
+            search.cancel.store(true, Ordering::Relaxed);
+        }
         if !search.ended.load(Ordering::Relaxed) && !search.abandoned.swap(true, Ordering::Relaxed)
         {
             inner.abandoned += 1;
@@ -829,6 +838,7 @@ impl<T: Sink + ?Sized> Sink for &mut T {
 /// The IPC channel of one search: a `File` message as JSON, then its bytes as one raw message.
 struct ChannelSink {
     channel: Channel<InvokeResponseBody>,
+    search: Arc<Search>,
 }
 
 impl Sink for ChannelSink {
@@ -836,6 +846,14 @@ impl Sink for ChannelSink {
         let Ok(json) = serde_json::to_string(&event) else {
             return false;
         };
+        let _sending = self
+            .search
+            .send_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if self.search.cancelled() {
+            return false;
+        }
         self.channel.send(InvokeResponseBody::Json(json)).is_ok()
             && self.channel.send(InvokeResponseBody::Raw(data)).is_ok()
     }
@@ -845,8 +863,15 @@ impl Sink for ChannelSink {
             entries_seen,
             files_read,
         };
-        serde_json::to_string(&event)
-            .is_ok_and(|json| self.channel.send(InvokeResponseBody::Json(json)).is_ok())
+        let Ok(json) = serde_json::to_string(&event) else {
+            return false;
+        };
+        let _sending = self
+            .search
+            .send_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        !self.search.cancelled() && self.channel.send(InvokeResponseBody::Json(json)).is_ok()
     }
 }
 
@@ -947,6 +972,20 @@ impl<S: Sink> Walker<'_, S> {
         self.stop.is_some()
     }
 
+    /// Counts `n` entries looked at in one go. Never counts past the limit; passing it ends the
+    /// search (`entries`) and answers `false`.
+    fn add_entries(&mut self, n: usize) -> bool {
+        let seen = self.search.summary().entries_seen as usize;
+        let room = self.limits.entries.saturating_sub(seen);
+        let take = u32::try_from(n.min(room)).unwrap_or(u32::MAX);
+        self.count(|s| s.entries_seen += take);
+        if n > room {
+            self.stop = Some(FolderStop::Entries);
+            return false;
+        }
+        true
+    }
+
     fn walk_dir(&mut self, dir: &Path, rel: &str, depth: usize) {
         if self.halted() {
             return;
@@ -975,21 +1014,15 @@ impl<S: Sink> Walker<'_, S> {
         }
         if too_many {
             // The whole folder is skipped and counted; what was looked at counts as looked at.
-            let looked = u32::try_from(looked).unwrap_or(u32::MAX);
-            self.count(|s| {
-                s.entries_seen = s.entries_seen.saturating_add(looked);
-                s.skipped.big_folders += 1;
-            });
-            if self.search.summary().entries_seen as usize > self.limits.entries {
-                self.stop = Some(FolderStop::Entries);
-            }
+            self.count(|s| s.skipped.big_folders += 1);
+            self.add_entries(looked);
             return;
         }
         if unreadable > 0 {
-            self.count(|s| {
-                s.entries_seen += unreadable;
-                s.skipped.unreadable += unreadable;
-            });
+            self.count(|s| s.skipped.unreadable += unreadable);
+            if !self.add_entries(unreadable as usize) {
+                return;
+            }
         }
         sort_names(&mut entries);
         for (name, entry) in entries {
@@ -1175,18 +1208,29 @@ impl<S: Sink> Walker<'_, S> {
                 .limits
                 .total_bytes
                 .saturating_sub(self.search.summary().bytes_read);
-            if room == 0 {
-                self.stop = Some(FolderStop::Bytes);
-                return Outcome::Stopped;
-            }
-            let want = self
-                .chunk
-                .len()
-                .min(usize::try_from(room).unwrap_or(usize::MAX));
-            let read = match reader.read(&mut self.chunk[..want]) {
-                Ok(n) => n,
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => return Outcome::Unreadable,
+            let read = if room == 0 {
+                // The limit is reached exactly: a file that ends here still fits, one with a
+                // byte more does not.
+                let mut next = [0u8; 1];
+                match reader.read(&mut next) {
+                    Ok(0) => 0,
+                    Ok(_) => {
+                        self.stop = Some(FolderStop::Bytes);
+                        return Outcome::Stopped;
+                    }
+                    Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(_) => return Outcome::Unreadable,
+                }
+            } else {
+                let want = self
+                    .chunk
+                    .len()
+                    .min(usize::try_from(room).unwrap_or(usize::MAX));
+                match reader.read(&mut self.chunk[..want]) {
+                    Ok(n) => n,
+                    Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(_) => return Outcome::Unreadable,
+                }
             };
             data.extend_from_slice(&self.chunk[..read]);
             self.count(|s| s.bytes_read += read as u64);
@@ -1308,7 +1352,38 @@ fn list_folder(folder: &Path, pattern: &[char], max_names: usize, max_entries: u
     }
 }
 
+/// Where the folder of the document really is.
+#[derive(Clone)]
+enum Folder {
+    Real(PathBuf),
+    /// Not there (or the document is a folder): answered like a path that is not allowed.
+    Refused,
+    Unavailable,
+}
+
+/// The folder of the document, resolved: its parent as the file system resolves it, and the
+/// document's own name below it. A document that is a folder is refused (its parent is not the
+/// folder the scope was asked about); one that is gone is not (its folder may still be there).
+fn resolve_folder(parent: &Path, name: &std::ffi::OsStr) -> (Folder, Option<PathBuf>) {
+    let real = match fs::canonicalize(parent) {
+        Ok(real) => paths::plain(&real).into_owned(),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return (Folder::Refused, None),
+        Err(_) => return (Folder::Unavailable, None),
+    };
+    let target = real.join(name);
+    match fs::metadata(&target) {
+        Ok(meta) if meta.is_dir() => (Folder::Refused, None),
+        Ok(_) => (Folder::Real(real), Some(target)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => (Folder::Real(real), Some(target)),
+        Err(_) => (Folder::Unavailable, None),
+    }
+}
+
 /// The body of `folder_siblings` with the scope predicate and the time budget injected.
+///
+/// The scope is asked about the document as written, and again about the document below its
+/// folder as the file system resolves it (the written spelling may go through a link, and a
+/// document that is not there is only checked by its text the first time).
 pub fn siblings_of(
     path: &str,
     pattern: &str,
@@ -1321,11 +1396,33 @@ pub fn siblings_of(
     if !is_allowed(document) {
         return Err(E_NOT_ALLOWED);
     }
-    let folder = match document.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+    let (parent, name) = match (document.parent(), document.file_name()) {
+        (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+            (parent.to_path_buf(), name.to_owned())
+        }
         _ => return Err(E_NOT_ALLOWED),
     };
-    let key = folder.to_string_lossy().into_owned();
+    let unavailable = || {
+        Ok(FolderSiblings {
+            unavailable: true,
+            ..FolderSiblings::default()
+        })
+    };
+    let key = parent.to_string_lossy().into_owned();
+    let resolved = files::run_bounded(vec![key.clone()], budget, move |_| {
+        resolve_folder(&parent, &name)
+    })
+    .into_iter()
+    .next()
+    .flatten();
+    let (folder, target) = match resolved {
+        Some((Folder::Real(folder), Some(target))) => (folder, target),
+        Some((Folder::Refused, _)) => return Err(E_NOT_ALLOWED),
+        _ => return unavailable(),
+    };
+    if !is_allowed(&target) {
+        return Err(E_NOT_ALLOWED);
+    }
     let listed = files::run_bounded(vec![key], budget, move |_| {
         list_folder(&folder, &pattern, MAX_SIBLING_NAMES, MAX_SIBLING_ENTRIES)
     })
@@ -1340,10 +1437,7 @@ pub fn siblings_of(
         }),
         // A folder that is not there answers like a path that is not allowed.
         Some(Listing::Absent) => Err(E_NOT_ALLOWED),
-        Some(Listing::Unavailable) | None => Ok(FolderSiblings {
-            unavailable: true,
-            ..FolderSiblings::default()
-        }),
+        Some(Listing::Unavailable) | None => unavailable(),
     }
 }
 
@@ -1370,14 +1464,22 @@ pub fn grant_target(
     if steps.is_empty() {
         return Err(E_NOT_IN_FOLDER);
     }
-    let mut target = resolved;
+    let mut target = resolved.clone();
     for (at, step) in steps.iter().enumerate() {
         let Component::Normal(name) = step else {
             return Err(E_NOT_IN_FOLDER);
         };
+        // A hidden file or folder is not something the walk shows, so it is not opened from a row.
+        if name.to_str().is_none_or(|n| n.starts_with('.')) {
+            return Err(E_NOT_IN_FOLDER);
+        }
         target.push(name);
         let meta = fs::symlink_metadata(&target).map_err(|_| E_NOT_IN_FOLDER)?;
-        if is_reparse(attributes_of(&meta)) || meta.file_type().is_symlink() {
+        let attributes = attributes_of(&meta);
+        if is_reparse(attributes)
+            || is_hidden_attributes(attributes)
+            || meta.file_type().is_symlink()
+        {
             return Err(E_NOT_IN_FOLDER);
         }
         let last = at + 1 == steps.len();
@@ -1390,10 +1492,16 @@ pub fn grant_target(
             return Err(E_NOT_IN_FOLDER);
         }
     }
-    if state::is_state_file(&target, state_file) {
+    // The second look, as the walk takes after it opens a file: what is granted is the file's
+    // own resolved path, below the resolved root, and a plain file. A name swapped for a link
+    // since the steps above is caught here (the one race left is the instant after this).
+    let real = fs::canonicalize(&target).map_err(|_| E_NOT_IN_FOLDER)?;
+    let real = paths::plain(&real).into_owned();
+    let plain_file = fs::symlink_metadata(&real).is_ok_and(|meta| meta.is_file());
+    if !real.starts_with(&resolved) || !plain_file || state::is_state_file(&real, state_file) {
         return Err(E_NOT_IN_FOLDER);
     }
-    Ok(target)
+    Ok(real)
 }
 
 // --- the commands --------------------------------------------------------------------------------
@@ -1424,7 +1532,10 @@ pub async fn folder_search(
                 &checked,
                 &walk_limits,
                 search,
-                ChannelSink { channel: on_event },
+                ChannelSink {
+                    channel: on_event,
+                    search: Arc::clone(search),
+                },
             ))
         })
     })
@@ -1480,13 +1591,25 @@ pub async fn folder_grant(app: AppHandle, root: String, path: String) -> Result<
         .map_err(|_| E_FAILED.to_string())?
         .state_file();
     tauri::async_runtime::spawn_blocking(move || {
-        let target = grant_target(&root, &path, &|p| scope.is_allowed(p), &state_file)?;
-        state::grant_file(&app, &target);
-        Ok(())
+        // On a bounded thread: a share that does not answer must not hold the row click for ever.
+        let key = path.clone();
+        let checked = files::run_bounded(vec![key], GRANT_BUDGET, move |_| {
+            grant_target(&root, &path, &|p| scope.is_allowed(p), &state_file)
+        })
+        .into_iter()
+        .next()
+        .flatten();
+        match checked {
+            Some(Ok(target)) => {
+                state::grant_file(&app, &target);
+                Ok(())
+            }
+            Some(Err(reason)) => Err(reason.to_string()),
+            None => Err(E_FAILED.to_string()),
+        }
     })
     .await
     .map_err(|_| E_FAILED.to_string())?
-    .map_err(|reason: &str| reason.to_string())
 }
 
 #[cfg(test)]
@@ -2522,7 +2645,7 @@ mod tests {
 
     /// The whole path: a real walk under `supervise`, cancelled from outside, answers `cancelled`.
     #[test]
-    fn a_real_walk_cancelled_from_outside_ends_with_cancelled() {
+    fn a_real_walk_under_supervise_runs_to_the_end() {
         let dir = scratch("supervised");
         for n in 0..3 {
             put(&dir.join(format!("f{n}.nc")), b"G0\n");
@@ -2563,7 +2686,10 @@ mod tests {
             sink_log.lock().unwrap().push(body);
             Ok(())
         });
-        let mut sink = ChannelSink { channel };
+        let mut sink = ChannelSink {
+            channel,
+            search: Arc::new(Search::new()),
+        };
         let event = FolderEvent::File {
             index: 0,
             path: "/nc/a.nc".into(),
@@ -3062,8 +3188,220 @@ mod tests {
             );
         }
         assert!(lib.contains(".manage(folders::SearchRegistry::default())"));
-        // Each command asks the registry or the scope before it does anything.
+        // Each command that takes a path asks the scope, in its own body.
         let code = code();
-        assert!(code.contains("scope.is_allowed(path)"));
+        for command in ["folder_search", "folder_siblings", "folder_grant"] {
+            let start = code
+                .find(&format!("pub async fn {command}("))
+                .expect("the command");
+            let body = &code[start..];
+            let end = body.find("#[tauri::command]").unwrap_or(body.len());
+            assert!(
+                body[..end].contains("scope.is_allowed("),
+                "{command} does not ask the scope"
+            );
+        }
+    }
+
+    /// A walker that was given up on (stuck in a read, cancelled, answered) sends nothing when
+    /// it wakes: not the file it held, and not the bytes after it.
+    #[test]
+    fn a_walker_left_behind_sends_nothing_when_it_wakes() {
+        struct Gated {
+            entered: Arc<AtomicBool>,
+            gate: Arc<(Mutex<bool>, Condvar)>,
+            inner: ChannelSink,
+        }
+        impl Sink for Gated {
+            fn file(&mut self, event: FolderEvent, data: Vec<u8>) -> bool {
+                self.entered.store(true, Ordering::Relaxed);
+                let (lock, cv) = &*self.gate;
+                let mut open = lock.lock().unwrap();
+                while !*open {
+                    open = cv.wait(open).unwrap();
+                }
+                drop(open);
+                self.inner.file(event, data)
+            }
+            fn progress(&mut self, entries_seen: u32, files_read: u32) -> bool {
+                self.inner.progress(entries_seen, files_read)
+            }
+        }
+        let dir = scratch("left-behind");
+        for n in 0..3 {
+            put(&dir.join(format!("f{n}.nc")), b"G0\n");
+        }
+        let log: Arc<Mutex<Vec<InvokeResponseBody>>> = Arc::default();
+        let log_in = Arc::clone(&log);
+        let channel = Channel::<InvokeResponseBody>::new(move |body| {
+            log_in.lock().unwrap().push(body);
+            Ok(())
+        });
+        let registry = SearchRegistry::default();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let entered = Arc::new(AtomicBool::new(false));
+        let req = request(serde_json::json!({}));
+        let supervised = {
+            let (registry, gate, entered, root) = (
+                registry.clone(),
+                Arc::clone(&gate),
+                Arc::clone(&entered),
+                dir.clone(),
+            );
+            std::thread::spawn(move || {
+                supervise(&registry, "s-1", &Limits::default(), move |search| {
+                    let inner = ChannelSink {
+                        channel,
+                        search: Arc::clone(search),
+                    };
+                    let sink = Gated {
+                        entered,
+                        gate,
+                        inner,
+                    };
+                    Ok(walk(&root, &req, &Limits::default(), search, sink))
+                })
+            })
+        };
+        wait_until("the walker holds a file", || {
+            entered.load(Ordering::Relaxed)
+        });
+        assert!(registry.cancel("s-1"));
+        let summary = supervised.join().unwrap().unwrap();
+        assert_eq!(summary.stopped_by, Some(FolderStop::Cancelled));
+        open_gate(&gate);
+        wait_until("the walker ends", || registry.abandoned_count() == 0);
+        assert!(
+            log.lock().unwrap().is_empty(),
+            "a message went out after the answer"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Every limit is inclusive: N is allowed, N + 1 stops.
+    #[test]
+    fn a_search_that_meets_a_limit_exactly_is_not_stopped() {
+        let dir = scratch("exact");
+        for n in 0..3 {
+            put(&dir.join(format!("f{n}.nc")), &[b'a'; 8]);
+        }
+        let exact = Limits {
+            entries: 3,
+            files: 3,
+            dir_entries: 3,
+            total_bytes: 24,
+            sent_bytes: 24,
+            ..Limits::default()
+        };
+        let (summary, sink) = run_with(&dir, &request(serde_json::json!({})), &exact);
+        assert_eq!(summary.stopped_by, None);
+        assert_eq!(summary.skipped.big_folders, 0);
+        assert_eq!(sink.files.len(), 3);
+        assert_eq!(summary.bytes_read, 24);
+        // One more of each, and each stops.
+        for tighter in [
+            Limits {
+                entries: 2,
+                ..exact.clone()
+            },
+            Limits {
+                files: 2,
+                ..exact.clone()
+            },
+            Limits {
+                total_bytes: 23,
+                ..exact.clone()
+            },
+            Limits {
+                sent_bytes: 23,
+                ..exact.clone()
+            },
+        ] {
+            let (summary, sink) = run_with(&dir, &request(serde_json::json!({})), &tighter);
+            assert!(summary.stopped_by.is_some());
+            assert!(sink.files.len() < 3);
+        }
+        let narrow = Limits {
+            dir_entries: 2,
+            ..exact
+        };
+        let (summary, _) = run_with(&dir, &request(serde_json::json!({})), &narrow);
+        assert_eq!(summary.skipped.big_folders, 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Entries counted in one go (a folder that is skipped whole) never pass the limit.
+    #[test]
+    fn a_skipped_folder_does_not_push_the_entry_count_past_the_limit() {
+        let dir = scratch("bulk-entries");
+        for n in 0..5 {
+            put(&dir.join("big").join(format!("f{n}.nc")), b"G0\n");
+        }
+        let limits = Limits {
+            entries: 3,
+            dir_entries: 4,
+            ..Limits::default()
+        };
+        let (summary, _) = run_with(&dir, &request(serde_json::json!({})), &limits);
+        assert_eq!(summary.stopped_by, Some(FolderStop::Entries));
+        assert_eq!(summary.entries_seen, 3);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn siblings_of_a_folder_or_through_a_link_are_not_listed() {
+        let dir = scratch("siblings-resolved");
+        let outside = scratch("siblings-resolved-outside");
+        put(&outside.join("PART_SECRET.nc"), b"G0\n");
+        let granted = dir.join("granted");
+        put(&granted.join("PART_ONE.nc"), b"G0\n");
+        put(&dir.join("PART_PARENT.nc"), b"G0\n");
+        let inside = |p: &Path| p.starts_with(&granted);
+        // The document is the granted folder itself: its parent is not what the scope allowed.
+        let folder = siblings_of(granted.to_str().unwrap(), "PART*", BUDGET, &inside);
+        assert_eq!(folder.unwrap_err(), E_NOT_ALLOWED);
+        // A document that does not exist, below a link that leaves the granted folder.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, granted.join("lnk")).unwrap();
+            let missing = granted.join("lnk").join("new.nc");
+            let through = siblings_of(missing.to_str().unwrap(), "PART*", BUDGET, &inside);
+            assert_eq!(through.unwrap_err(), E_NOT_ALLOWED);
+        }
+        // The ordinary case still works.
+        let own = granted.join("PART_ONE.nc");
+        let listed = siblings_of(own.to_str().unwrap(), "PART*", BUDGET, &inside).unwrap();
+        assert_eq!(listed.names, ["PART_ONE.nc"]);
+        // A document that is gone is still a document of its folder.
+        let gone = granted.join("PART_GONE.nc");
+        let listed = siblings_of(gone.to_str().unwrap(), "PART*", BUDGET, &inside).unwrap();
+        assert_eq!(listed.names, ["PART_ONE.nc"]);
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn a_hidden_file_or_a_pipe_is_not_granted() {
+        let dir = scratch("grant-hidden");
+        let root = dir.join("root");
+        put(&root.join(".hidden.nc"), b"G0\n");
+        put(&root.join(".git").join("a.nc"), b"G0\n");
+        put(&root.join("shown.nc"), b"G0\n");
+        let state_file = dir.join("data").join("state.json");
+        for hidden in [root.join(".hidden.nc"), root.join(".git").join("a.nc")] {
+            assert_eq!(grant(&root, &hidden, &state_file), Err(E_NOT_IN_FOLDER));
+        }
+        assert!(grant(&root, &root.join("shown.nc"), &state_file).is_ok());
+        #[cfg(unix)]
+        {
+            let fifo = std::ffi::CString::new(root.join("pipe.nc").to_str().unwrap()).unwrap();
+            // SAFETY: a valid NUL-terminated path; mkfifo creates a file and touches no memory.
+            assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+            assert_eq!(
+                grant(&root, &root.join("pipe.nc"), &state_file),
+                Err(E_NOT_IN_FOLDER)
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 }
