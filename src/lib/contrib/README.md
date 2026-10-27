@@ -115,6 +115,7 @@ Each row names the owning work package and the feature.
 | `ncCleanup.ts` | WP4.3 | NC tab "Cleanup": spaces, empty lines, comments, case |
 | `ncNumbering.ts` | WP4.2 | NC tab "Numbering": `nc.renumber`, `nc.removeBlockNumbers` |
 | `renumberOthers.ts` | P4.20b | NC tab "Numbering": `nc.updateOtherReferences` (Update References in Other Documents…; no key; enabled while a list from the last Renumber Blocks is pending): rewrites the references into the renumbered program that other open documents of the dialect still hold, one confirmation, each document its own undo step, all or nothing (Phase 4, P4d; the prelude pinned it; service `app/renumberOthers.ts`, rules `core/transforms/otherReferences.ts`, P4.20a) |
+| `openRequests.ts` | P4.29 | the files the system asks gEdit to open (a double-click or Open With; a second start of gEdit on Windows and Linux): listens for `gedit-open-requests`, asks `open_requests_ready` once after the listener is registered, opens the paths with `files.open` after crash recovery has decided and behind any open dialog, and says in one status line what was skipped; no command, no key (Phase 4, P4f; the checks and the grant are `src-tauri/src/open_requests.rs`, plan section 6.8.2 S7) |
 | `palette.ts` | WP1.1 | `view.commandPalette` (F1) |
 | `profileSelect.ts` | WP1.6 | dialect profile status item and picker |
 | `programMap.ts` | WP1.5 | program map (left panel) |
