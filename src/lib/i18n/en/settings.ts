@@ -82,6 +82,10 @@ export default {
       help: 'A list of font families; the first one installed on this computer is used.',
     },
     editorFontSize: { label: 'Editor font size', help: 'In pixels, from 8 to 32.' },
+    roleColors: {
+      label: 'Code colours',
+      help: 'Your own colour for each kind of word, set under Code colours on this page.',
+    },
   },
 
   editor: {

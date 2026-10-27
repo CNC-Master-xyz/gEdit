@@ -21,6 +21,7 @@
 // text (§7.5), because script and profile labels are data.
 
 import type { FieldSpec } from '$lib/core/forms/types';
+import type { ProfileColors } from '$lib/core/profiles/types';
 
 /** The `$version` this build writes. A file with a higher version is read, never written. */
 export const SETTINGS_VERSION = 1;
@@ -35,6 +36,13 @@ export interface Settings {
   'appearance.editorFontFamily': string;
   /** 8-32. */
   'appearance.editorFontSize': number;
+  /**
+   * P4h (§6.10 rule 6): the user's own colour per role and theme, over the built-in palette
+   * and under a profile's own colours. Every colour is `#rrggbb` with a contrast of at least
+   * 4.5:1 against the editor background of its theme; one that is not is reported and not
+   * used. Edited in Settings, Appearance ("Code colours"), not by the form renderer.
+   */
+  'appearance.roleColors': ProfileColors;
   /** 1-16. */
   'editor.tabWidth': number;
   'editor.insertSpaces': boolean;
@@ -123,6 +131,7 @@ export const DEFAULTS: Settings = freeze({
   'appearance.theme': 'system',
   'appearance.editorFontFamily': "Menlo, Consolas, 'DejaVu Sans Mono', monospace",
   'appearance.editorFontSize': 14,
+  'appearance.roleColors': freeze<ProfileColors>({}),
   'editor.tabWidth': 4,
   'editor.insertSpaces': true,
   'editor.renderWhitespace': 'none',
@@ -217,6 +226,9 @@ export const SETTING_FIELDS: SettingFieldMeta[] = [
   // edit and the dialog cannot disagree (G8 M2).
   meta('appearance.editorFontFamily', 'appearance', { type: 'text', required: true }),
   meta('appearance.editorFontSize', 'appearance', { type: 'integer', min: 8, max: 32 }),
+  // A palette is not a form field either: the role colour editor (`RoleColorRows.svelte`)
+  // draws it under the theme choice, so the form renderer never sees it (P4.41).
+  meta('appearance.roleColors', 'appearance', { type: 'text' }, { dialog: false }),
 
   // Editor
   meta('editor.tabWidth', 'editor', { type: 'integer', min: 1, max: 16 }),

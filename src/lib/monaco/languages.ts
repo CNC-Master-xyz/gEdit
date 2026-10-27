@@ -24,8 +24,9 @@
 import { THEME_IDS, generateGrammar, generateThemes } from '$lib/core/grammar';
 import { codes } from '$lib/stores/codes';
 import { profiles } from '$lib/stores/profiles';
+import { settings } from '$lib/stores/settings';
 import type { CodeDb } from '$lib/core/codes/types';
-import type { Profile } from '$lib/core/profiles/types';
+import type { Profile, ProfileColors } from '$lib/core/profiles/types';
 import type { Monaco } from '$lib/monaco/setup';
 
 /** What the registration needs to know, so a test can hand over its own profiles. */
@@ -34,6 +35,8 @@ export interface LanguageSources {
   list(): Profile[];
   /** The code database of one profile; an empty one is fine. */
   codeDb(profileId: string): CodeDb;
+  /** The user's role colours (`appearance.roleColors`, §6.10 rule 6); none when left out. */
+  roleColors?(): ProfileColors;
 }
 
 /** `ILanguageConfiguration`, typed here so the builder stays testable without Monaco. */
@@ -181,9 +184,13 @@ export function unionCodeDb(dbs: readonly CodeDb[]): CodeDb {
   return { dialect: first.dialect, version: first.version, addresses, codes };
 }
 
-/** Defines `gedit-dark` and `gedit-light`, so `monaco/theme.ts` can name them. */
-export function defineThemes(monaco: Monaco, list: Profile[]): void {
-  const themes = generateThemes(list);
+/**
+ * Defines `gedit-dark` and `gedit-light`, so `monaco/theme.ts` can name them. `user` is the
+ * user's role colours; defining a theme again under the same id makes Monaco repaint the open
+ * editors with it.
+ */
+export function defineThemes(monaco: Monaco, list: Profile[], user?: ProfileColors): void {
+  const themes = generateThemes(list, user);
   monaco.editor.defineTheme(THEME_IDS.dark, themes.dark as Parameters<typeof monaco.editor.defineTheme>[1]);
   monaco.editor.defineTheme(THEME_IDS.light, themes.light as Parameters<typeof monaco.editor.defineTheme>[1]);
 }
@@ -275,19 +282,57 @@ export function registerLanguages(monaco: Monaco, sources: LanguageSources): voi
       console.error(`The dialect ${p.id} could not be registered`, error);
     }
   }
-  // The first call defines the themes even for an empty list, as before.
-  if (changed || !themesDefined.has(monaco)) {
-    defineThemes(monaco, list);
-    themesDefined.add(monaco);
-  }
+  // The first call defines the themes even for an empty list, as before; a later one defines
+  // them again when a language changed or the user's role colours did.
+  refreshThemes(monaco, sources, list, changed);
 }
 
-const themesDefined = new WeakSet<Monaco>();
+/**
+ * Defines the two themes when they are not defined yet, when `force` says a language changed,
+ * or when the user's role colours (the saved ones, or the draft of the colour editor) differ
+ * from those the themes were last defined with. Cheap when nothing changed.
+ */
+function refreshThemes(monaco: Monaco, sources: LanguageSources, list: Profile[], force: boolean): void {
+  const user = previewColors ?? sources.roleColors?.() ?? {};
+  const signature = JSON.stringify(user);
+  if (force || themesDefined.get(monaco) !== signature) {
+    defineThemes(monaco, list, user);
+    themesDefined.set(monaco, signature);
+  }
+  lastRegistration = { monaco, sources };
+}
+
+/** Per Monaco instance, the user's role colours its themes were last defined with (as JSON). */
+const themesDefined = new WeakMap<Monaco, string>();
+
+/** The Monaco instance and sources of the last registration, so a preview can define the themes again. */
+let lastRegistration: { monaco: Monaco; sources: LanguageSources } | null = null;
+
+/** The palette the role colour editor is showing, while it is open; null otherwise. */
+let previewColors: ProfileColors | null = null;
+
+/**
+ * Live preview of the role colour editor (§6.10 rule 6): defines the two themes again with
+ * `palette` in the place of the saved role colours, so the open editor shows the draft. `null`
+ * puts the saved colours back (Cancel; Save has written them to the setting by then). Does
+ * nothing before Monaco is up: the editor is not open to show anything, and the first
+ * registration reads the saved colours.
+ */
+export function previewRoleColors(palette: ProfileColors | null): void {
+  previewColors = palette;
+  if (lastRegistration === null) return;
+  try {
+    refreshThemes(lastRegistration.monaco, lastRegistration.sources, lastRegistration.sources.list(), false);
+  } catch (error) {
+    console.error('The role colours could not be shown', error);
+  }
+}
 
 /** The profiles as Monaco should know them now, from the registries. */
 const registrySources: LanguageSources = {
   list: () => profiles.list().map((info) => profiles.profile(info.id)),
   codeDb: (profileId) => unionCodeDb(variantDialects(profiles.profile(profileId)).map((id) => codes.byId(id))),
+  roleColors: () => settings.get('appearance.roleColors'),
 };
 
 /**
@@ -304,7 +349,7 @@ export function registerAll(monaco: Monaco): () => void {
     console.error('The dialects could not be registered', error);
   }
   let first = true;
-  return profiles.revision.subscribe(() => {
+  const stopProfiles = profiles.revision.subscribe(() => {
     // `subscribe` calls back at once with the current value; the registration above covered it.
     if (first) {
       first = false;
@@ -317,4 +362,25 @@ export function registerAll(monaco: Monaco): () => void {
       console.error('The dialects could not be registered again after a reload', error);
     }
   });
+  // The themes are generated again when the user's role colours change (a save in Settings, a
+  // reload of settings.json); registering unchanged languages again is a cheap no-op.
+  let firstSetting = true;
+  let colors = settings.get('appearance.roleColors');
+  const stopSettings = settings.values.subscribe((values) => {
+    if (firstSetting) {
+      firstSetting = false;
+      return;
+    }
+    if (values['appearance.roleColors'] === colors) return;
+    colors = values['appearance.roleColors'];
+    try {
+      refreshThemes(monaco, registrySources, registrySources.list(), false);
+    } catch (error) {
+      console.error('The role colours could not be applied', error);
+    }
+  });
+  return () => {
+    stopProfiles();
+    stopSettings();
+  };
 }
