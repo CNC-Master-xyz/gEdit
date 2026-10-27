@@ -103,6 +103,13 @@ describe('the single running instance', () => {
     expect(cargo.match(/tauri-plugin-single-instance/g)?.length).toBe(1);
   });
 
+  it('the first process meets its own arguments once, when the app is ready, through the same checks', () => {
+    const open = read('src-tauri/src/open_requests.rs');
+    expect(lib).toContain('if matches!(event, RunEvent::Ready) {\n        open_requests::started_with(app);');
+    expect(lib.split('open_requests::started_with(').length - 1).toBe(1);
+    expect(open).toContain('second_instance(app, args, cwd);');
+  });
+
   it('the macOS door is the Opened event, the others the plugin callback', () => {
     expect(lib).toContain('RunEvent::Opened { urls }');
     expect(open).toContain('#[cfg(any(windows, target_os = "linux"))]\npub fn second_instance');
@@ -135,5 +142,51 @@ describe('the folder commands', () => {
 
   it('use no network, no process and no new crate', () => {
     for (const forbidden of ['std::process', 'std::net', 'reqwest', 'tokio::net']) expect(folders).not.toContain(forbidden);
+  });
+});
+
+describe('the files the system opens (S7)', () => {
+  // The code above the test module: what the reviewer reads.
+  const source = read('src-tauri/src/open_requests.rs');
+  const code = source.slice(0, source.indexOf('#[cfg(test)]\nmod tests'));
+
+  it('hands over the arguments after the executable, to the blocking pool, never on the plugin thread', () => {
+    expect(code).toContain('handle(&app, args.get(1..).unwrap_or_default(), Some(&cwd), 0)');
+    expect(code).toContain('tauri::async_runtime::spawn_blocking(move || handle(&app, &texts, None, refused))');
+  });
+
+  it('grants a file only through state::grant_file, after the checks, and nowhere else', () => {
+    expect(code.split('state::grant_file(').length - 1).toBe(1);
+    expect(code.indexOf('check_arguments(args')).toBeLessThan(code.indexOf('state::grant_file('));
+    expect(code).not.toMatch(/allow_directory|allow_file|fs_scope/);
+  });
+
+  it('sends the webview only the paths and the number refused, in one place', () => {
+    expect(code.split('app.emit(').length - 1).toBe(1);
+    expect(code).toContain('app.emit(EVENT, Payload { paths, refused })');
+    expect(code).toMatch(/struct Payload \{\n {4}paths: Vec<String>,\n {4}refused: u32,\n\}/);
+  });
+
+  it('uses no process, no network, no environment and no working folder of its own', () => {
+    for (const forbidden of ['std::process', 'std::net', 'reqwest', 'set_current_dir', 'env::var_os', 'env::vars']) expect(code).not.toContain(forbidden);
+    // The environment is read for the session bus lookup (through the injected `var`) and the
+    // process's own arguments and folder, which a file manager sets when it starts gEdit with a file.
+    expect(code.match(/std::env::\w+/g)).toEqual(['std::env::var', 'std::env::args_os', 'std::env::current_dir']);
+  });
+
+  it('keeps the limits of the plan', () => {
+    expect(code).toContain('pub const MAX_PATHS: usize = 32;');
+    expect(code).toContain('pub const MAX_ARG_CHARS: usize = 4096;');
+    expect(code).toContain('pub const MAX_PENDING: usize = 64;');
+    // An option is refused, not interpreted.
+    expect(code).toContain("arg.starts_with('-')");
+  });
+
+  it('is received by one contribution that listens before it asks, and the event name is the plan\'s', () => {
+    const contrib = read('src/lib/contrib/openRequests.ts');
+    expect(contrib.indexOf('await deps.listen(')).toBeGreaterThan(0);
+    expect(contrib.indexOf('await deps.listen(')).toBeLessThan(contrib.indexOf('await deps.ready()'));
+    expect(read('src/lib/platform/commands.ts')).toContain("OPEN_REQUESTS_EVENT = 'gedit-open-requests'");
+    expect(code).toContain('pub const EVENT: &str = "gedit-open-requests";');
   });
 });

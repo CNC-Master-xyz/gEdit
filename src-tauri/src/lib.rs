@@ -96,6 +96,12 @@ fn on_run_event(app: &AppHandle, event: RunEvent) {
     if let RunEvent::Opened { urls } = &event {
         open_requests::opened(app, urls);
     }
+    // Windows and Linux: the file the first process was started with (the plugin hears of the
+    // later ones). Queued until the window is ready.
+    #[cfg(any(windows, target_os = "linux"))]
+    if matches!(event, RunEvent::Ready) {
+        open_requests::started_with(app);
+    }
     if matches!(event, RunEvent::Exit) {
         scripts::kill_all(app);
     }
