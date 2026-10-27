@@ -1151,6 +1151,10 @@
           "min": 1
         }
       ],
+      "requires": [
+        "P"
+      ],
+      "review": "pending",
       "wordsAreData": true
     },
     {
@@ -1172,6 +1176,10 @@
           "min": 1
         }
       ],
+      "requires": [
+        "P"
+      ],
+      "review": "pending",
       "wordsAreData": true
     },
     {

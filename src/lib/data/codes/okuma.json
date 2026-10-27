@@ -247,6 +247,24 @@
       ]
     },
     {
+      "code": "G24",
+      "group": "nonmodal",
+      "axisWords": "machine",
+      "sets": { "motion": "rapid" },
+      "review": "pending",
+      "label": "Move to the tool-change home position, axes one by one",
+      "description": "Moves the turret to the tool-change home position set in the machine's parameters, in machine coordinates and not in the program's, at rapid with each axis on its own (no straight line). An option; one of the home position commands with G20, G21 and G25."
+    },
+    {
+      "code": "G25",
+      "group": "nonmodal",
+      "axisWords": "machine",
+      "sets": { "motion": "rapid" },
+      "review": "pending",
+      "label": "Move to the joint position, axes one by one",
+      "description": "Moves to the joint position set in the machine's parameters, in machine coordinates and not in the program's, at rapid with each axis on its own (no straight line). An option; one of the home position commands with G20, G21 and G24."
+    },
+    {
       "code": "G31",
       "group": "motion",
       "modal": true,
@@ -1200,6 +1218,13 @@
       "review": "pending",
       "label": "Turret C",
       "description": "On a machine with three turrets, the blocks that follow are for turret C. Not on every control: on the OSP-P200 G312 and G313 are contour codes for the side face, and the 2014 OSP-P300 list also has G314 for turret D."
+    },
+    {
+      "code": "G314",
+      "group": "turret",
+      "review": "pending",
+      "label": "Turret D",
+      "description": "On a machine with four turrets, the blocks that follow are for turret D. An option of the OSP-P300; not on every control."
     },
     {
       "code": "M0",

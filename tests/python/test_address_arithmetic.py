@@ -1287,6 +1287,11 @@ LENGTHS_ALONG = {
         "CYCL DEF 254": {"Q219": "plane", "Q375": "plane"},
         "CYCL DEF 256": {"Q218": "plane", "Q424": "plane", "Q219": "plane", "Q425": "plane", "Q220": "plane"},
         "CYCL DEF 257": {"Q223": "plane", "Q222": "plane"},
+        # Wave Y (T093-T095): the pattern sizes, face milling and the rounding of cycle 20.
+        "CYCL DEF 220": {"Q244": "plane"},
+        "CYCL DEF 221": {"Q237": "plane", "Q238": "plane"},
+        "CYCL DEF 233": {"Q218": "plane", "Q219": "plane", "Q220": "plane"},
+        "CYCL DEF 20": {"Q8": "plane"},
     },
     "sinumerik": {
         "CYCLE61": {"_LENG": "plane", "_WID": "plane"},

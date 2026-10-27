@@ -305,9 +305,11 @@
     {
       "code": "RND",
       "group": "motion",
+      "sets": { "motion": "feed" },
+      "blockFeed": true,
       "review": "pending",
       "label": "Corner rounding",
-      "description": "Rounds the corner between the previous and the next contour element. A feed in this block applies to the rounding only.",
+      "description": "Rounds the corner between the previous and the next contour element with an arc that joins both smoothly. A feed in this block applies to the rounding only: the next block runs at the feed in force before it.",
       "params": [
         {
           "address": "R",
@@ -326,9 +328,11 @@
     {
       "code": "CHF",
       "group": "motion",
+      "sets": { "motion": "feed" },
+      "blockFeed": true,
       "review": "pending",
       "label": "Chamfer",
-      "description": "Cuts a chamfer of the given length between two straight elements. It cannot be the first block of a contour, and a feed in this block applies to the chamfer only.",
+      "description": "Cuts a chamfer of the given length between two straight elements. It cannot be the first block of a contour, and a feed in this block applies to the chamfer only: the next block runs at the feed in force before it.",
       "params": [
         {
           "address": "CHF",
@@ -2403,12 +2407,428 @@
       ]
     },
     {
+      "code": "CYCL DEF 220",
+      "group": "cycle",
+      "sets": { "cycle": "call" },
+      "review": "pending",
+      "label": "Point pattern on a circle",
+      "description": "Runs the cycle defined last at points spaced on a full or partial circle. It acts where it is defined and calls that cycle by itself, so no CYCL CALL follows it. Its safety clearance, surface and second clearance replace those of the machining cycle, also for the calls after it, until a cycle writes them again. The centre is a position of its own, so gEdit does not shift or turn such a pattern.",
+      "params": [
+        {
+          "address": "Q216",
+          "label": "Centre on the main axis of the plane, as an absolute position",
+          "required": true,
+          "position": "other"
+        },
+        {
+          "address": "Q217",
+          "label": "Centre on the second axis of the plane, as an absolute position",
+          "required": true,
+          "position": "other"
+        },
+        {
+          "address": "Q244",
+          "label": "Diameter of the pitch circle",
+          "required": true,
+          "min": 0,
+          "position": "none",
+          "lengthAlong": "plane"
+        },
+        {
+          "address": "Q245",
+          "label": "Start angle: from the main axis of the plane to the first point",
+          "required": true,
+          "unit": "angle",
+          "position": "none"
+        },
+        {
+          "address": "Q246",
+          "label": "End angle: from the main axis of the plane to the last point (not for a full circle)",
+          "required": true,
+          "unit": "angle",
+          "position": "none"
+        },
+        {
+          "address": "Q247",
+          "label": "Angle step between two points, 0 worked out from the start and end angles; its sign sets the direction",
+          "required": true,
+          "unit": "angle",
+          "position": "none"
+        },
+        {
+          "address": "Q241",
+          "label": "Number of points on the circle",
+          "required": true,
+          "min": 1,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q200",
+          "label": "Safety clearance above the surface",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q203",
+          "label": "Workpiece surface in the tool axis",
+          "required": true,
+          "position": "tool-axis"
+        },
+        {
+          "address": "Q204",
+          "label": "Second clearance for the moves between points",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q301",
+          "label": "Moves between the points: 0 at the safety clearance, 1 at the second clearance",
+          "required": true,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q365",
+          "label": "How the tool moves between the points: 0 on a straight line, 1 on the pitch circle",
+          "required": true,
+          "unit": "count",
+          "position": "none"
+        }
+      ]
+    },
+    {
+      "code": "CYCL DEF 221",
+      "group": "cycle",
+      "sets": { "cycle": "call" },
+      "review": "pending",
+      "label": "Point pattern on lines",
+      "description": "Runs the cycle defined last at the points of a grid of rows and columns, row by row back and forth. It acts where it is defined and calls that cycle by itself, so no CYCL CALL follows it. Its safety clearance, surface, second clearance and turn replace those of the machining cycle, also for the calls after it, until a cycle writes them again. The start point is a position of its own, so gEdit does not shift or turn such a pattern.",
+      "params": [
+        {
+          "address": "Q225",
+          "label": "Start point on the main axis of the plane, as an absolute position",
+          "required": true,
+          "position": "other"
+        },
+        {
+          "address": "Q226",
+          "label": "Start point on the second axis of the plane, as an absolute position",
+          "required": true,
+          "position": "other"
+        },
+        {
+          "address": "Q237",
+          "label": "Spacing of the points along a row",
+          "required": true,
+          "position": "none",
+          "lengthAlong": "plane"
+        },
+        {
+          "address": "Q238",
+          "label": "Spacing of the rows",
+          "required": true,
+          "position": "none",
+          "lengthAlong": "plane"
+        },
+        {
+          "address": "Q242",
+          "label": "Number of points in a row",
+          "required": true,
+          "min": 1,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q243",
+          "label": "Number of rows",
+          "required": true,
+          "min": 1,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q224",
+          "label": "Angle the whole pattern is turned by, about the start point",
+          "required": true,
+          "unit": "angle",
+          "position": "none"
+        },
+        {
+          "address": "Q200",
+          "label": "Safety clearance above the surface",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q203",
+          "label": "Workpiece surface in the tool axis",
+          "required": true,
+          "position": "tool-axis"
+        },
+        {
+          "address": "Q204",
+          "label": "Second clearance for the moves between points",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q301",
+          "label": "Moves between the points: 0 at the safety clearance, 1 at the second clearance",
+          "required": true,
+          "unit": "count",
+          "position": "none"
+        }
+      ]
+    },
+    {
+      "code": "CYCL DEF 233",
+      "group": "cycle",
+      "sets": { "cycle": "define" },
+      "review": "pending",
+      "label": "Face milling",
+      "description": "Mills a face flat in several infeeds, from the start level Q227 down to the end level Q386, with the strategy Q389 and up to three side walls that limit it. When the cycle is called, the tool stands at the face's centre or one of its corners, as Q367 says; the cycle positions itself in the tool axis.",
+      "params": [
+        {
+          "address": "Q215",
+          "label": "Machining scope: 0 roughing and finishing, 1 roughing only, 2 finishing only",
+          "required": true,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q389",
+          "label": "Strategy: 0 and 1 back and forth, 2 and 3 line by line, 4 a spiral from the outside in",
+          "required": true,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q350",
+          "label": "Milling direction: 1 along the main axis of the plane, 2 along the second axis",
+          "required": true,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q218",
+          "label": "First side length, along the main axis of the plane; its sign sets the direction",
+          "required": true,
+          "position": "none",
+          "lengthAlong": "plane"
+        },
+        {
+          "address": "Q219",
+          "label": "Second side length, along the second axis of the plane; its sign sets the direction of the first step",
+          "required": true,
+          "position": "none",
+          "lengthAlong": "plane"
+        },
+        {
+          "address": "Q227",
+          "label": "Start level in the tool axis: the surface the infeeds are counted from, as an absolute position",
+          "required": true,
+          "position": "tool-axis"
+        },
+        {
+          "address": "Q386",
+          "label": "End level in the tool axis the face is milled down to, as an absolute position",
+          "required": true,
+          "position": "tool-axis"
+        },
+        {
+          "address": "Q369",
+          "label": "Finishing allowance on the floor",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q202",
+          "label": "Largest infeed depth per cut",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q370",
+          "label": "Path overlap: the largest side step, as a factor of the tool radius",
+          "required": true,
+          "position": "none"
+        },
+        {
+          "address": "Q207",
+          "label": "Milling feed",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q385",
+          "label": "Finishing feed",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q253",
+          "label": "Feed for prepositioning and for moving to the next line",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q357",
+          "label": "Safety clearance at the side, in the plane",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q200",
+          "label": "Safety clearance above the surface",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q204",
+          "label": "Second clearance for retracting",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q347",
+          "label": "First side wall: 0 none, -1 or +1 on the main axis of the plane, -2 or +2 on the second axis",
+          "required": true,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q348",
+          "label": "Second side wall, written like Q347",
+          "required": true,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q349",
+          "label": "Third side wall, written like Q347",
+          "required": true,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "Q220",
+          "label": "Corner radius at the side walls",
+          "required": true,
+          "min": 0,
+          "position": "none",
+          "lengthAlong": "plane"
+        },
+        {
+          "address": "Q368",
+          "label": "Finishing allowance on the side",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q338",
+          "label": "Infeed for finishing in the tool axis, 0 in one cut",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q367",
+          "label": "Where the tool stands when the cycle is called: -1 the face starts where it is, 0 the centre, 1 the lower left corner, 2 the lower right, 3 the upper right, 4 the upper left",
+          "required": true,
+          "position": "none",
+          "inPlane": "side"
+        }
+      ]
+    },
+    {
       "code": "CYCL DEF 14",
       "group": "cycle",
       "sets": {},
       "review": "pending",
       "label": "Contour",
       "description": "Lists, in sub-block 14.1, the labels of up to 12 subprograms whose contours are laid over each other into one contour for the SL cycles that follow (21 to 25). It acts from its definition on and is never called."
+    },
+    {
+      "code": "CYCL DEF 20",
+      "group": "cycle",
+      "sets": {},
+      "usedBy": ["CYCL DEF 21", "CYCL DEF 22", "CYCL DEF 23", "CYCL DEF 24"],
+      "review": "pending",
+      "label": "Contour data (SL)",
+      "description": "Gives the SL cycles 21 to 24 their depth, allowances, surface, clearances and direction. It acts from its definition on and is never called: the cycles 21 to 24 that follow use its values until cycle 20 is defined again. Q5 and Q7 are absolute positions on the tool axis.",
+      "params": [
+        {
+          "address": "Q1",
+          "label": "Milling depth, measured from the surface; its sign sets the working direction",
+          "required": true,
+          "position": "none"
+        },
+        {
+          "address": "Q2",
+          "label": "Path overlap: this factor times the tool radius is the side step",
+          "required": true,
+          "position": "none"
+        },
+        {
+          "address": "Q3",
+          "label": "Finishing allowance on the side",
+          "required": true,
+          "position": "none"
+        },
+        {
+          "address": "Q4",
+          "label": "Finishing allowance on the floor",
+          "required": true,
+          "position": "none"
+        },
+        {
+          "address": "Q5",
+          "label": "Workpiece surface in the tool axis, as an absolute position",
+          "required": true,
+          "position": "tool-axis"
+        },
+        {
+          "address": "Q6",
+          "label": "Safety clearance between the tool face and the surface",
+          "required": true,
+          "min": 0,
+          "position": "none"
+        },
+        {
+          "address": "Q7",
+          "label": "Clearance height in the tool axis, as an absolute position, for moves in between and the retract at the end",
+          "required": true,
+          "position": "tool-axis"
+        },
+        {
+          "address": "Q8",
+          "label": "Rounding radius of the tool centre path at inside corners",
+          "required": true,
+          "min": 0,
+          "position": "none",
+          "lengthAlong": "plane"
+        },
+        {
+          "address": "Q9",
+          "label": "Direction for pockets: -1 conventional, +1 climb",
+          "required": true,
+          "position": "none"
+        }
+      ]
     },
     {
       "code": "CYCL DEF 21",
@@ -2433,8 +2853,15 @@
         },
         {
           "address": "Q13",
-          "label": "Clearing-out tool the points are drilled for: its number (QS13 for its name), 0 the tool in the spindle",
+          "label": "Clearing-out tool the points are drilled for: its number, 0 the tool in the spindle",
           "required": true,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "QS13",
+          "label": "Clearing-out tool the points are drilled for, by its name: written instead of Q13",
+          "unit": "count",
           "position": "none"
         }
       ]
@@ -2469,8 +2896,15 @@
         },
         {
           "address": "Q18",
-          "label": "Tool that roughed before: its number (QS18 for its name), 0 none",
+          "label": "Tool that roughed before: its number, 0 none",
           "required": true,
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "QS18",
+          "label": "Tool that roughed before, by its name: written instead of Q18",
+          "unit": "count",
           "position": "none"
         },
         {
@@ -2631,7 +3065,14 @@
         },
         {
           "address": "Q18",
-          "label": "Tool that roughed before: its number (QS18 for its name), 0 none",
+          "label": "Tool that roughed before: its number, 0 none",
+          "unit": "count",
+          "position": "none"
+        },
+        {
+          "address": "QS18",
+          "label": "Tool that roughed before, by its name: written instead of Q18",
+          "unit": "count",
           "position": "none"
         },
         {

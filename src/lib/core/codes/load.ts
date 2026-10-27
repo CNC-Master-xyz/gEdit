@@ -567,6 +567,10 @@ function readEntry(
   if (flag(raw.alone, `${path}.alone`, report)) entry.alone = true;
   const requires = readWords(raw.requires, `${path}.requires`, report);
   if (requires) entry.requires = requires;
+  // Wave Y (T093): the cycles that read a DEF-active cycle's values (Klartext cycle 20 for the
+  // SL cycles 21 to 24); address arithmetic reads it from the loaded database.
+  const usedBy = readWords(raw.usedBy, `${path}.usedBy`, report);
+  if (usedBy) entry.usedBy = usedBy;
   // B1 (A6): the words behind a code that are its own (Klartext `M128 F800`); the scripts read
   // them from the loaded database, so a member the loader dropped would be one they never see.
   const ownWords = readWords(raw.ownWords, `${path}.ownWords`, report);

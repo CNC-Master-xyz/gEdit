@@ -2231,6 +2231,16 @@ def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any) -> None:
         if others:
             add("cycle-position", "%s (%s)" % (entry.get("code"), ", ".join(others)))
     for entry in block.entries:
+        # T093 (Wave Y, BL-NC-data): a DEF-active cycle with positions (Klartext cycle 20
+        # CONTOUR DATA: Q5 and Q7 on the tool axis). Its parameters stand on the lines below
+        # its head, which this walk reads without the cycle (no definition owns them), so it is
+        # refused, as it was while the database lacked it. Moving Q5 and Q7 with the path is
+        # left to the transforms' own batch.
+        if entry.get("group") == "cycle" and not _sets(entry).get("cycle"):
+            held = [str(p.get("address")) for p in _params(entry) if gedit_nc.position_of(p) in ("tool-axis", "other")]
+            if held:
+                add("cycle-position", "%s (%s)" % (entry.get("code"), ", ".join(held)))
+    for entry in block.entries:
         # A code that is nothing but positions of its own (Klartext `PATTERN DEF`, plan §7 #301).
         params = _params(entry)
         if params and entry not in block.judged and entry not in block.call_entries and all(gedit_nc.position_of(p) == "other" for p in params):

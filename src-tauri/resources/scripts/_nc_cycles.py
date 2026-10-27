@@ -1180,6 +1180,13 @@ class _Block:
             lines = {address: defined[1] for address in written}
             call = calls[0] if calls else None
             call_code = str(call[1].get("code")) if call is not None else (self.interp.modal_call or None)
+            if call is not None and _positions_elsewhere(call[1]):
+                # Wave Y (T094, BL-NC-data): a call that runs the cycle at points of its own that
+                # are not axis words (Klartext pattern cycles 220 and 221: a centre or a start
+                # point and a count). Written out where the tool stands, the other points would
+                # be lost.
+                self.refuse("call-form", str(call[1].get("code")))
+                return []
             if call is not None and _cycle_positions(call[1]):
                 named = [a for a in _cycle_positions(call[1])]
                 if not any(_upper(t.address) in named for t in self.tokens if t.kind == "word"):
@@ -1739,6 +1746,13 @@ class _Block:
 def _cycle_positions(entry: Dict[str, Any]) -> List[str]:
     """The axis-named positions of a call (`CYCL CALL POS X Y Z`, `position: 'other'`)."""
     return [_upper(p["address"]) for p in _params(entry) if gedit_nc.position_of(p) == "other" and _upper(p["address"]) in _PLANE_AXES + (_TOOL_AXIS,)]
+
+
+def _positions_elsewhere(entry: Any) -> List[str]:
+    """Wave Y (T094): the positions of a call that are not axis words (`position: 'other'` on a
+    parameter such as the centre `Q216` of Klartext cycle 220): the call runs the cycle at points
+    of its own, which no plain move written here can stand for."""
+    return [_upper(p["address"]) for p in _params(entry) if gedit_nc.position_of(p) == "other" and _upper(p["address"]) not in _PLANE_AXES + (_TOOL_AXIS,)]
 
 
 def _unknown_reason(kind: Optional[str]) -> str:
