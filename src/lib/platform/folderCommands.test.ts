@@ -112,6 +112,22 @@ describe('the limits', () => {
     expect(FOLDER_LIMITS[key]).toBe(rustConst(folders, rustName));
   });
 
+  it('the Rust side defines and registers the four commands the wrappers invoke, with the registry as state', () => {
+    const lib = read('../../../src-tauri/src/lib.rs');
+    for (const name of ['folder_search', 'folder_search_cancel', 'folder_siblings', 'folder_grant']) {
+      expect(folders).toMatch(new RegExp(`pub (async )?fn ${name}\\(`));
+      expect(lib).toContain(`folders::${name},`);
+    }
+    expect(lib).toContain('.manage(folders::SearchRegistry::default())');
+  });
+
+  it('every member of the summary and of the skipped counts is on the Rust wire type', () => {
+    const summary = ['entriesSeen', 'filesRead', 'filesSent', 'bytesRead', 'skipped', 'stoppedBy', 'tooLargeNames'];
+    const skipped = ['binary', 'tooLarge', 'unreadable', 'links', 'hidden', 'tooDeep', 'bigFolders'];
+    const snake = (name: string): string => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+    for (const member of [...summary, ...skipped]) expect(folders).toContain(`pub ${snake(member)}:`);
+  });
+
   it('the event name is the Rust one', () => {
     expect(open).toContain(`pub const EVENT: &str = "${OPEN_REQUESTS_EVENT}";`);
   });

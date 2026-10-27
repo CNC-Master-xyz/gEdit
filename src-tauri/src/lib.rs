@@ -134,6 +134,8 @@ pub fn run() {
         .manage(quit::QuitGuard::default())
         // Files the system asked us to open before the webview could take them (AD-54).
         .manage(open_requests::OpenRequests::default())
+        // The one running folder search and the stuck ones (AD-53, section 6.8 S4).
+        .manage(folders::SearchRegistry::default())
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
             files::files_stat,
