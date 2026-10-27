@@ -29,10 +29,10 @@ const hit = (line: number, mark: string, channel: string, ruleId = 'w', partners
 const ref = (id: string, index: number) => ({ id, name: `Channel ${id}`, index });
 
 describe('the contribution', () => {
-  it('declares the nine pinned commands with their keys', () => {
+  it('declares the ten pinned commands with their keys', () => {
     const cmds = Object.fromEntries((contribution.commands ?? []).map((c) => [c.id, c]));
     expect(Object.keys(cmds).sort()).toEqual(
-      ['channels.assign', 'channels.checkSync', 'channels.gotoPartner', 'channels.mergeBack', 'channels.nextSyncPoint', 'channels.prevSyncPoint', 'channels.select', 'channels.splitToDocuments', 'channels.testOnDocument'],
+      ['channels.assign', 'channels.checkSync', 'channels.gotoPartner', 'channels.mergeBack', 'channels.nextSyncPoint', 'channels.prevSyncPoint', 'channels.saveChannelFiles', 'channels.select', 'channels.splitToDocuments', 'channels.testOnDocument'],
     );
     expect(cmds['channels.nextSyncPoint'].keys).toBe('Alt+F7');
     expect(cmds['channels.prevSyncPoint'].keys).toBe('Shift+Alt+F7');
@@ -55,6 +55,7 @@ describe('the contribution', () => {
       'channels.gotoPartner': 'nc/channels.group',
       'channels.splitToDocuments': 'nc/channels.group',
       'channels.mergeBack': 'nc/channels.group',
+      'channels.saveChannelFiles': 'nc/channels.group',
       'channels.checkSync': 'tools/channels.toolsGroup',
     });
   });

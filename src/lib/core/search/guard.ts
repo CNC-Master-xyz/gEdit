@@ -14,13 +14,12 @@
 // This file is the only part of the search code that knows the worker; `index.ts` only exports `patternOf`.
 
 import type { Msg } from '$lib/app/types';
-import type { CodeDb } from '$lib/core/codes/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import { GUARD_BUDGET_MS, guardJob } from '$lib/core/regexGuard/guard';
 import { isLiteralPattern } from '$lib/core/regexGuard/job';
 import type { GuardRunner } from '$lib/core/regexGuard/runner';
-import { findInLines, patternOf, replaceInLines } from './index';
-import type { SearchHit, SearchQuery } from './types';
+import { findInLines, linesInRanges, patternOf, replaceInLines } from './index';
+import type { SearchHit, SearchOptions, SearchQuery } from './types';
 
 /** Why a guarded search or replace did not run: a message for the status bar. */
 export type GuardedRefusal = { refused: Msg };
@@ -57,15 +56,15 @@ export async function guardQuery(
   return { key: 'search.errorRegexSlow', params: { seconds: Math.max(1, Math.round(verdict.budgetMs / 1000)) } };
 }
 
-/** `findInLines`, after the guard. */
+/** `findInLines`, after the guard. With `ranges` (channel scope, P4.31) the guard reads the lines the search will read. */
 export async function findInLinesGuarded(
   runner: GuardRunner | null,
   lines: string[],
   cp: CompiledProfile,
   q: SearchQuery,
-  o?: { max?: number; codes?: CodeDb; budgetMs?: number },
+  o?: SearchOptions & { budgetMs?: number },
 ): Promise<{ hits: SearchHit[]; truncated: boolean } | GuardedRefusal> {
-  const refused = await guardQuery(runner, lines, q, o);
+  const refused = await guardQuery(runner, o?.ranges === undefined || !needsGuard(q) ? lines : linesInRanges(lines, o.ranges), q, o);
   if (refused !== null) return { refused };
   return findInLines(lines, cp, q, o);
 }
