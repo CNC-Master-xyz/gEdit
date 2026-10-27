@@ -679,8 +679,10 @@ export function scriptSourcePath(scriptId: string): Promise<string> {
 
 // ---------------------------------------------------------------------------
 // P4f: folders and files from the system (src-tauri/src/{folders,open_requests}.rs; plan
-// section 6.8, AD-53, AD-54). Written by the P4f prelude; the Rust side is a stub until P4.27 and
-// P4.29. The limits below are the Rust constants (a test holds them equal to the plan).
+// section 6.8, AD-53, AD-54). Written by the P4f prelude; the folder commands are built (P4.27), the
+// open requests follow with P4.29. The limits below are the Rust constants (a test holds them equal
+// to the plan). Every refusal is a fixed English sentence from a closed list in `folders.rs`: show it
+// as it is, and never build a decision on its text.
 // ---------------------------------------------------------------------------
 
 /** The limits of `folder_search` and `folder_siblings` (`src-tauri/src/folders.rs`). */
@@ -763,7 +765,9 @@ export interface FolderFile {
  * Walks `req.root` and calls `onFile` for every file that passed the checks, in order. The
  * promise ends with the summary; `onProgress` is told every 250 ms. A `file` JSON message and the
  * raw message after it are paired here, so a caller never sees half a file. Rejects when the
- * request is refused (the root is not allowed, a limit of the request, a search is running).
+ * request is refused (the root is not allowed, a limit of the request, a search is running). A search
+ * that is cancelled answers at once with `stoppedBy: 'cancelled'`, even when the walk is stuck on a
+ * share that does not answer; `folderSearchCancel` is how a caller stops one.
  */
 export async function folderSearch(
   req: FolderSearchRequest,
@@ -772,11 +776,13 @@ export async function folderSearch(
 ): Promise<FolderSummary> {
   const channel = new Channel<ArrayBuffer | FolderEvent>();
   let waiting: Extract<FolderEvent, { kind: 'file' }> | null = null;
+  let delivered = 0;
   channel.onmessage = (message) => {
     if (message instanceof ArrayBuffer) {
       if (waiting === null) return;
       const meta = waiting;
       waiting = null;
+      delivered += 1;
       onFile({ index: meta.index, path: meta.path, rel: meta.rel, bytes: meta.bytes, mtimeMs: meta.mtimeMs, data: new Uint8Array(message) });
     } else if (message.kind === 'file') {
       waiting = message;
@@ -784,8 +790,18 @@ export async function folderSearch(
       onProgress?.(message.entriesSeen, message.filesRead);
     }
   };
-  return invoke<FolderSummary>('folder_search', { req, onEvent: channel });
+  const summary = await invoke<FolderSummary>('folder_search', { req, onEvent: channel });
+  // The channel's messages and the command's answer travel separately, so the last files can arrive
+  // after the summary. A caller must not see the summary first: wait (bounded) until every file the
+  // summary counts has been handed over.
+  const expected = summary.filesSent ?? 0;
+  const until = Date.now() + FOLDER_DRAIN_MS;
+  while (delivered < expected && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 5));
+  return summary;
 }
+
+/** How long `folderSearch` waits for files still on their way after the summary arrived. */
+const FOLDER_DRAIN_MS = 10_000;
 
 /** Stops the search `id`; answers whether one with that id was running. */
 export function folderSearchCancel(id: string): Promise<boolean> {

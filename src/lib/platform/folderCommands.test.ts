@@ -65,6 +65,26 @@ describe('the folder commands', () => {
     expect(progress).toEqual([[4, 1]]);
   });
 
+  it('does not end before the files the summary counts have arrived', async () => {
+    let finish: (summary: unknown) => void = () => {};
+    invoke.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const files: string[] = [];
+    const done = vi.fn();
+    const search = folderSearch(
+      { id: 's-1', root: '/nc', recursive: false, namePatterns: [], modifiedAfter: null, modifiedBefore: null, contains: null },
+      (f) => files.push(f.rel),
+    ).then(done);
+    const channel = invoke.mock.calls[0][1].onEvent as FakeChannel<unknown>;
+    // The answer comes first, the file after it.
+    finish({ filesSent: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(done).not.toHaveBeenCalled();
+    channel.onmessage?.({ kind: 'file', index: 0, path: '/nc/a.nc', rel: 'a.nc', bytes: 3, mtimeMs: 1 });
+    channel.onmessage?.(new TextEncoder().encode('G0\n').buffer as ArrayBuffer);
+    await search;
+    expect(files).toEqual(['a.nc']);
+  });
+
   it('cancel, siblings, grant and the open requests use the names and arguments of the Rust side', async () => {
     invoke.mockResolvedValue(true);
     await folderSearchCancel('s-1');
@@ -110,6 +130,22 @@ describe('the limits', () => {
 
   it.each(pairs)('%s is the Rust constant %s', (key, rustName) => {
     expect(FOLDER_LIMITS[key]).toBe(rustConst(folders, rustName));
+  });
+
+  it('the Rust side defines and registers the four commands the wrappers invoke, with the registry as state', () => {
+    const lib = read('../../../src-tauri/src/lib.rs');
+    for (const name of ['folder_search', 'folder_search_cancel', 'folder_siblings', 'folder_grant']) {
+      expect(folders).toMatch(new RegExp(`pub (async )?fn ${name}\\(`));
+      expect(lib).toContain(`folders::${name},`);
+    }
+    expect(lib).toContain('.manage(folders::SearchRegistry::default())');
+  });
+
+  it('every member of the summary and of the skipped counts is on the Rust wire type', () => {
+    const summary = ['entriesSeen', 'filesRead', 'filesSent', 'bytesRead', 'skipped', 'stoppedBy', 'tooLargeNames'];
+    const skipped = ['binary', 'tooLarge', 'unreadable', 'links', 'hidden', 'tooDeep', 'bigFolders'];
+    const snake = (name: string): string => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+    for (const member of [...summary, ...skipped]) expect(folders).toContain(`pub ${snake(member)}:`);
   });
 
   it('the event name is the Rust one', () => {
