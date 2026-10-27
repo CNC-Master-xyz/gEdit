@@ -629,6 +629,18 @@ describe('a file that could not be read', () => {
   });
 });
 
+describe('a default machine that is not text', () => {
+  it('is listed among the problems of the file (owner decision (b), 2026-10-27)', () => {
+    const h = harness({ file: { ...sample('valid'), defaults: { 'fanuc-lathe': 7 } } });
+    expect(h.machines.problems().map((problem) => problem.path)).toContain('defaults.fanuc-lathe');
+  });
+
+  it('is not listed once the file has text there', () => {
+    const h = harness({ file: sample('valid') });
+    expect(h.machines.problems().map((problem) => problem.path).filter((path) => path.startsWith('defaults'))).toEqual([]);
+  });
+});
+
 describe('a record the profile does not understand', () => {
   it('is kept, listed with its problem, and never selectable', () => {
     const h = harness({ file: sample('invalid-record') });

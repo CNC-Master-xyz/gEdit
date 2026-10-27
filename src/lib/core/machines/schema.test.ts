@@ -5,152 +5,23 @@
 // code database or a compiled pattern (VALIDATOR_ONLY).
 //
 // The code's verdict on a file is what the Machines page lists: a file that cannot be used, a
-// newer `$version`, a record that is not understood, a record its profile refuses, and a broken
-// channel, motion or limits block (those cost the block, not the record, but they are listed).
+// newer `$version`, a record that is not understood, a record its profile refuses, a default
+// machine that is not text, and a broken channel, motion or limits block (those cost the block,
+// not the record, but they are listed).
 
 import { readdirSync, readFileSync } from 'node:fs';
-import Ajv2020 from 'ajv/dist/2020';
 import { describe, expect, it } from 'vitest';
 import machinesSchema from '../../../../schemas/machines.schema.json';
+import { ALLOWED_KEYWORDS, type Json, memberPaths, type Schema, schemaPaths, schemasAt, subschemas, testValidator } from '../../../../tests/unit/helpers/jsonSchema';
 import { BUILTIN_PROFILE_JSON } from '$lib/data/profiles';
 import { validateProfile } from '$lib/core/profiles/validate';
 import { codes } from '$lib/stores/codes';
 import type { Profile } from '$lib/core/profiles/types';
 import { applyMachine, effectiveMachine } from './effective';
-import { parseMachinesFile, positionOf } from './file';
+import { defaultProblems, parseMachinesFile, positionOf } from './file';
 import { limitsBlock, motionBlock } from './motion';
 import { MACHINES_VERSION, type MachineConfig, type MachineProblem } from './types';
 import { channelBlock, validateMachine } from './validate';
-
-type Json = Record<string, unknown>;
-type Schema = Record<string, unknown>;
-
-// ---------------------------------------------------------------------------
-// The test validator and the schema walkers (rule 3, rule 4, rule 5)
-// ---------------------------------------------------------------------------
-
-/** Rule 3: the keywords a gEdit schema may use. */
-const ALLOWED_KEYWORDS = new Set([
-  '$schema', '$id', '$ref', '$defs', '$comment', 'title', 'description', 'type', 'properties', 'required',
-  'additionalProperties', 'patternProperties', 'propertyNames', 'items', 'minItems', 'maxItems', 'uniqueItems',
-  'enum', 'const', 'pattern', 'minLength', 'maxLength', 'minimum', 'maximum', 'exclusiveMinimum', 'minProperties',
-  'maxProperties', 'allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else', 'default', 'examples',
-  'x-gedit-order', 'x-gedit-kind', 'x-gedit-advanced', 'x-gedit-stub',
-]);
-
-/** The validator of the tests only (Q4h-1): never shipped, the hand-written checks stay the gate. */
-function testValidator(): Ajv2020 {
-  const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false, strictTypes: false });
-  for (const keyword of ['x-gedit-order', 'x-gedit-kind', 'x-gedit-advanced', 'x-gedit-stub']) ajv.addKeyword(keyword);
-  return ajv;
-}
-
-const SCHEMA_MAPS = ['properties', 'patternProperties', '$defs'];
-const SCHEMA_ONE = ['items', 'additionalProperties', 'propertyNames', 'not', 'if', 'then', 'else'];
-const SCHEMA_LIST = ['allOf', 'anyOf', 'oneOf'];
-
-/** Every schema object below `schema`, the root included. */
-function subschemas(schema: unknown, out: Schema[] = []): Schema[] {
-  if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) return out;
-  const s = schema as Schema;
-  out.push(s);
-  for (const key of SCHEMA_MAPS) for (const sub of Object.values((s[key] as Json | undefined) ?? {})) subschemas(sub, out);
-  for (const key of SCHEMA_ONE) subschemas(s[key], out);
-  for (const key of SCHEMA_LIST) for (const sub of (s[key] as unknown[] | undefined) ?? []) subschemas(sub, out);
-  return out;
-}
-
-/** Resolves a `#/…` pointer inside `root`. */
-function deref(root: Schema, ref: string): Schema {
-  expect(ref.startsWith('#/'), ref).toBe(true);
-  let at: unknown = root;
-  for (const part of ref.slice(2).split('/')) at = (at as Json)[part.replace(/~1/g, '/').replace(/~0/g, '~')];
-  expect(at, ref).toBeTypeOf('object');
-  return at as Schema;
-}
-
-/** `s` with every schema it applies along with it: `$ref`, `allOf`/`anyOf`/`oneOf`, `then`/`else` (never `not` or `if`). */
-function expand(root: Schema, s: Schema, out: Schema[] = []): Schema[] {
-  if (out.includes(s)) return out;
-  out.push(s);
-  if (typeof s.$ref === 'string') expand(root, deref(root, s.$ref), out);
-  for (const key of SCHEMA_LIST) for (const sub of (s[key] as Schema[] | undefined) ?? []) expand(root, sub, out);
-  for (const key of ['then', 'else']) if (typeof s[key] === 'object' && s[key] !== null) expand(root, s[key] as Schema, out);
-  return out;
-}
-
-/** The schemas that describe the member at `path` (`'[]'` for an array item), or none. */
-function schemasAt(root: Schema, path: readonly string[]): Schema[] {
-  let at = expand(root, root);
-  for (const segment of path) {
-    const next: Schema[] = [];
-    for (const s of at) {
-      if (segment === '[]') {
-        if (typeof s.items === 'object' && s.items !== null) next.push(s.items as Schema);
-        continue;
-      }
-      const props = s.properties as Record<string, Schema> | undefined;
-      if (props !== undefined && Object.hasOwn(props, segment)) {
-        next.push(props[segment]);
-        continue;
-      }
-      let matched = false;
-      for (const [pattern, sub] of Object.entries((s.patternProperties as Record<string, Schema> | undefined) ?? {})) {
-        if (new RegExp(pattern, 'u').test(segment)) {
-          next.push(sub);
-          matched = true;
-        }
-      }
-      if (!matched && typeof s.additionalProperties === 'object' && s.additionalProperties !== null) next.push(s.additionalProperties as Schema);
-    }
-    at = next.flatMap((s) => expand(root, s));
-    if (at.length === 0) return [];
-  }
-  return at;
-}
-
-/** Every member path of a JSON value, arrays as `[]`. */
-function memberPaths(value: unknown, prefix: string[] = [], out = new Map<string, string[]>()): Map<string, string[]> {
-  if (Array.isArray(value)) {
-    for (const item of value) memberPaths(item, [...prefix, '[]'], out);
-  } else if (typeof value === 'object' && value !== null) {
-    for (const [key, item] of Object.entries(value)) {
-      const path = [...prefix, key];
-      out.set(path.join('.'), path);
-      memberPaths(item, path, out);
-    }
-  }
-  return out;
-}
-
-/** Every member path the schema itself names (properties, items, additionalProperties as `*`). */
-function schemaPaths(
-  root: Schema,
-  s: Schema,
-  prefix: string[] = [],
-  out = new Map<string, string[]>(),
-  seen = new Map<string, Set<Schema>>(),
-): Map<string, string[]> {
-  const key = prefix.join('.');
-  const visited = seen.get(key) ?? new Set<Schema>();
-  if (visited.has(s) || prefix.length > 16) return out;
-  visited.add(s);
-  seen.set(key, visited);
-  for (const x of expand(root, s)) {
-    for (const [name, sub] of Object.entries((x.properties as Record<string, Schema> | undefined) ?? {})) {
-      const path = [...prefix, name];
-      out.set(path.join('.'), path);
-      schemaPaths(root, sub, path, out, seen);
-    }
-    if (typeof x.items === 'object' && x.items !== null) schemaPaths(root, x.items as Schema, [...prefix, '[]'], out, seen);
-    if (typeof x.additionalProperties === 'object' && x.additionalProperties !== null) {
-      const path = [...prefix, '*'];
-      out.set(path.join('.'), path);
-      schemaPaths(root, x.additionalProperties as Schema, path, out, seen);
-    }
-  }
-  return out;
-}
 
 const ajv = testValidator();
 const validate = ajv.compile(machinesSchema);
@@ -201,6 +72,7 @@ function codeProblems(raw: unknown): MachineProblem[] {
   const out: MachineProblem[] = [];
   if (parsed.version > MACHINES_VERSION) out.push({ machineId: null, path: '$version', message: 'a newer file' });
   for (const entry of parsed.invalid) out.push(...entry.problems);
+  out.push(...defaultProblems(parsed.defaults));
   parsed.machines.forEach((m: MachineConfig, i) => {
     const path = `machines[${positionOf(m) ?? i}]`;
     const profile = profileOf(m.profile);
@@ -283,6 +155,8 @@ const CASES: Case[] = [
   // The file
   { name: 'a file that is a list', rule: 'schema', patch: (f) => void (f.machines = 'none') },
   { name: 'defaults that are not an object', rule: 'schema', patch: (f) => void (f.defaults = ['lathe-full']) },
+  { name: 'a default machine that is a number', rule: 'schema', patch: (f) => void (f.defaults = { 'fanuc-lathe': 5 }) },
+  { name: 'a default machine that is a list', rule: 'schema', patch: (f) => void (f.defaults = { 'fanuc-lathe': ['lathe-full'] }) },
   { name: 'a newer file version', rule: 'schema', patch: (f) => void (f.$version = 2) },
   { name: 'more than 100 machines', rule: 'schema', patch: (f) => void (f.machines = many(101, (i) => ({ id: `m${i}`, name: `M ${i}`, profile: 'fanuc-gcode' }))) },
   // readMachine

@@ -127,6 +127,14 @@ describe('the tabs (M13)', () => {
     expect(html).toContain('data-category="profiles"');
     expect(html).not.toContain('data-testid="settings-machines"');
   });
+
+  it('shows the code colours (P4.41) on the Appearance page and on no other', () => {
+    const appearance = render(SettingsDialog, { props: { close: () => {}, initialTab: 'appearance' } }).body;
+    expect(appearance).toContain('data-testid="role-colors"');
+    expect(appearance).toContain('data-testid="role-color-row"');
+    const editor = render(SettingsDialog, { props: { close: () => {}, initialTab: 'editor' } }).body;
+    expect(editor).not.toContain('data-testid="role-colors"');
+  });
 });
 
 describe('pagesOf', () => {

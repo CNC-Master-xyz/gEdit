@@ -35,6 +35,23 @@ use crate::paths::{self, AppDirs};
 /// `src/lib/core/machines/types.ts`.
 pub const MACHINES_VERSION: u32 = 1;
 
+/// Where the schema of the machines file lives on the web (plan §6.10 rule 1, Q4h-2): the
+/// public repository, so an editor such as VS Code finds it from the `$schema` line. Must
+/// match `MACHINES_SCHEMA_URL` in `src/lib/core/machines/file.ts` and the `$id` of
+/// `schemas/machines.schema.json` (a test below holds all three together). Nothing reads
+/// the line: it is a member the file keeps like any other.
+pub const MACHINES_SCHEMA_URL: &str =
+    "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/machines.schema.json";
+
+/// The members of a new, empty machines file: the `$schema` line, no machines, no defaults.
+fn empty_file() -> serde_json::Map<String, Value> {
+    let mut empty = serde_json::Map::new();
+    empty.insert("$schema".to_owned(), Value::from(MACHINES_SCHEMA_URL));
+    empty.insert("machines".to_owned(), Value::Array(Vec::new()));
+    empty.insert("defaults".to_owned(), Value::Object(serde_json::Map::new()));
+    empty
+}
+
 /// Reads the file the way `config_load` does, so a caller can check what is on disk
 /// before replacing it.
 fn read(dirs: &AppDirs) -> JsonFile {
@@ -64,13 +81,10 @@ pub fn save(dirs: &AppDirs, machines: Value) -> Result<(), String> {
 /// there is kept beside it, whatever it held. Answers the backup's file name, or
 /// `None` when there was no file to keep.
 pub fn replace(dirs: &AppDirs) -> Result<Option<String>, String> {
-    let mut empty = serde_json::Map::new();
-    empty.insert("machines".to_owned(), Value::Array(Vec::new()));
-    empty.insert("defaults".to_owned(), Value::Object(serde_json::Map::new()));
     replace_json_object_versioned(
         &dirs.machines_file(),
         paths::MACHINES_FILE_NAME,
-        empty,
+        empty_file(),
         MACHINES_VERSION,
     )
 }
@@ -84,13 +98,10 @@ pub fn replace(dirs: &AppDirs) -> Result<Option<String>, String> {
 pub fn ensure_file(dirs: &AppDirs) -> Result<std::path::PathBuf, String> {
     let path = dirs.machines_file();
     if !path.exists() {
-        let mut empty = serde_json::Map::new();
-        empty.insert("machines".to_owned(), Value::Array(Vec::new()));
-        empty.insert("defaults".to_owned(), Value::Object(serde_json::Map::new()));
         save_json_object_versioned(
             &path,
             paths::MACHINES_FILE_NAME,
-            empty,
+            empty_file(),
             &JsonFile::default(),
             MACHINES_VERSION,
         )?;
@@ -342,7 +353,12 @@ mod tests {
         assert!(backup.contains("not a list"), "{backup}");
         assert_eq!(
             on_disk(&dirs),
-            serde_json::json!({ "$version": 1, "machines": [], "defaults": {} })
+            serde_json::json!({
+                "$schema": MACHINES_SCHEMA_URL,
+                "$version": 1,
+                "machines": [],
+                "defaults": {}
+            })
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -393,6 +409,7 @@ mod tests {
         let (root, dirs) = scratch("replace-none");
         assert_eq!(replace(&dirs).unwrap(), None);
         assert_eq!(on_disk(&dirs)["machines"], serde_json::json!([]));
+        assert_eq!(on_disk(&dirs)["$schema"], Value::from(MACHINES_SCHEMA_URL));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -487,12 +504,42 @@ mod tests {
         assert_eq!(path, dirs.machines_file());
         assert_eq!(
             on_disk(&dirs),
-            serde_json::json!({ "$version": 1, "machines": [], "defaults": {} })
+            serde_json::json!({
+                "$schema": MACHINES_SCHEMA_URL,
+                "$version": 1,
+                "machines": [],
+                "defaults": {}
+            })
         );
 
         save(&dirs, one_machine()).unwrap();
         ensure_file(&dirs).unwrap();
         assert_eq!(on_disk(&dirs)["machines"][0]["id"], Value::from("lathe-2"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The `$schema` line of a new file points at the schema the repository holds: the
+    /// same address as the `$id` of `schemas/machines.schema.json` and as the one the
+    /// TypeScript side writes (`MACHINES_SCHEMA_URL`).
+    #[test]
+    fn the_schema_line_is_the_id_of_the_schema() {
+        let schema = include_str!("../../schemas/machines.schema.json");
+        let schema: Value = serde_json::from_str(schema).unwrap();
+        assert_eq!(schema["$id"], Value::from(MACHINES_SCHEMA_URL));
+        let ts = include_str!("../../src/lib/core/machines/file.ts");
+        assert!(ts.contains(&format!("'{MACHINES_SCHEMA_URL}'")));
+    }
+
+    /// A replaced file starts with the `$schema` line, and a file the user already has is
+    /// never given one by `ensure_file`.
+    #[test]
+    fn replace_writes_the_schema_line_and_ensure_file_leaves_a_file_alone() {
+        let (root, dirs) = scratch("schema-line");
+        fs::write(dirs.machines_file(), "{\"machines\": [], \"defaults\": {}}").unwrap();
+        ensure_file(&dirs).unwrap();
+        assert!(on_disk(&dirs).get("$schema").is_none());
+        replace(&dirs).unwrap();
+        assert_eq!(on_disk(&dirs)["$schema"], Value::from(MACHINES_SCHEMA_URL));
         let _ = fs::remove_dir_all(&root);
     }
 

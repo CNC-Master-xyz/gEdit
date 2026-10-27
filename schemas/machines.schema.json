@@ -31,7 +31,8 @@
       "type": "object",
       "additionalProperties": {
         "title": "Default machine",
-        "description": "The id of the machine, as written in its \"id\"."
+        "description": "The id of the machine, as written in its \"id\", written as text.",
+        "type": "string"
       }
     }
   },

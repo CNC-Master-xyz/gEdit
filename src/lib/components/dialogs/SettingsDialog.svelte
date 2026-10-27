@@ -276,10 +276,13 @@
   import { status } from '$lib/app/status';
   import { validateFields } from '$lib/core/forms/validate';
   import { settingsOpenFile } from '$lib/platform/commands';
+  import RoleColorRows from '$lib/components/dialogs/RoleColorRows.svelte';
+  import { effectiveTheme } from '$lib/app/theme';
   import { profiles } from '$lib/stores/profiles';
   import { settings } from '$lib/stores/settings';
   import { hasKey, t } from '$lib/i18n';
   import type { Msg } from '$lib/app/types';
+  import type { ProfileColors } from '$lib/core/profiles/types';
 
   interface Props {
     /** Supplied by ModalHost. Resolves `settings.open`; the value is unused. */
@@ -361,6 +364,11 @@
       initialTab !== undefined && tabs.includes(initialTab) ? initialTab : (pages[0]?.category ?? 'appearance'),
     ),
   );
+  // The code colours (P4.41) are a palette, not a form field: the dialog keeps the pending
+  // palette here, `RoleColorRows` edits it and shows it live in the open editor.
+  let colors = $state<ProfileColors>(untrack(() => structuredClone(get(settings.values)['appearance.roleColors'])));
+  let colorsValid = $state(true);
+  const colorsChanged = (): boolean => JSON.stringify(colors) !== JSON.stringify(get(settings.values)['appearance.roleColors']);
   let tablist = $state<HTMLElement | undefined>(undefined);
   let busy = $state(false);
 
@@ -370,7 +378,7 @@
   /** What closing now would lose. The machine form lives in the page, which is only mounted on its tab. */
   function leaveState(): LeaveState {
     return {
-      values: !readOnly && Object.keys(changedValues(current, get(settings.values))).length > 0,
+      values: !readOnly && (Object.keys(changedValues(current, get(settings.values))).length > 0 || colorsChanged()),
       draft: machinesModel.hasDraft(),
     };
   }
@@ -386,7 +394,7 @@
   });
 
   const errors = $derived(validateFields(everySpec, current));
-  const blocked = $derived(Object.keys(errors).length > 0);
+  const blocked = $derived(Object.keys(errors).length > 0 || !colorsValid);
 
   /** Pages that hold a field the user has to fix before anything can be saved. */
   const invalid = $derived(
@@ -547,7 +555,8 @@
     // Save writes the settings and closes; a machine form that is still open would go with
     // it, so that is asked about first (the values are what the user is saving).
     if (!(await askToLeave({ values: false, draft: machinesModel.hasDraft() }))) return;
-    const patch = changedValues(current, get(settings.values));
+    const patch: Partial<Settings> = changedValues(current, get(settings.values));
+    if (colorsChanged()) patch['appearance.roleColors'] = $state.snapshot(colors);
     if (Object.keys(patch).length === 0) {
       close();
       return;
@@ -666,6 +675,15 @@
             errors={errorsFor(activeSpecs)}
             onChange={set}
           />
+          {#if active === 'appearance'}
+            <RoleColorRows
+              {colors}
+              firstMode={$effectiveTheme}
+              preview
+              onchange={(next) => (colors = next)}
+              onvalid={(valid) => (colorsValid = valid)}
+            />
+          {/if}
         {/if}
 
         {#each activeLists as spec (spec.id)}

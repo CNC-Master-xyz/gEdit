@@ -1806,7 +1806,14 @@
                   "value": {
                     "title": "Number reading",
                     "description": "How numbers are read with this choice: the reading and the increments per kind of number.",
-                    "$ref": "machines.schema.json#/$defs/numberInput"
+                    "allOf": [
+                      {
+                        "$ref": "machines.schema.json#/$defs/numberInput"
+                      },
+                      {
+                        "$ref": "#/$defs/presetNumberInput"
+                      }
+                    ]
                   },
                   "source": {
                     "title": "Source",
@@ -2187,6 +2194,52 @@
               "required": [
                 "letters"
               ]
+            }
+          }
+        }
+      }
+    },
+    "presetNumberInput": {
+      "$comment": "Laid over machines.schema.json#/$defs/numberInput for a profile's preset: the validator holds a preset's increments to 1 or a power of ten below it, which a machine's own number input need not be.",
+      "type": "object",
+      "properties": {
+        "incrementMm": {
+          "title": "Increment in mm",
+          "description": "The smallest step of a length in a metric program, in mm, as 1 or a power of ten below it, for example \"0.001\".",
+          "$ref": "#/$defs/increment"
+        },
+        "incrementInch": {
+          "title": "Increment in inch",
+          "description": "The same for an inch program, in inch, as 1 or a power of ten below it, for example \"0.0001\".",
+          "$ref": "#/$defs/increment"
+        },
+        "incrementDeg": {
+          "title": "Increment in degrees",
+          "description": "The smallest step of an angle, in degrees, as 1 or a power of ten below it.",
+          "$ref": "#/$defs/increment"
+        },
+        "incrementSec": {
+          "title": "Increment in seconds",
+          "description": "The smallest step of a dwell time, in seconds, as 1 or a power of ten below it.",
+          "$ref": "#/$defs/increment"
+        },
+        "classes": {
+          "title": "Other kinds of number",
+          "description": "Where the control reads a kind of number differently from lengths. The increment of each is 1 or a power of ten below it.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "increment": {
+                "title": "Increment",
+                "description": "The increment of this kind of number, as 1 or a power of ten below it, for example \"0.001\".",
+                "$ref": "#/$defs/increment"
+              },
+              "incrementInch": {
+                "title": "Increment in inch programs",
+                "description": "The increment in an inch program, as 1 or a power of ten below it.",
+                "$ref": "#/$defs/increment"
+              }
             }
           }
         }

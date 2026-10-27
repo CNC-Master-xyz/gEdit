@@ -10,16 +10,14 @@
 //   - refused by the code ⇒ refused by the schema, or the case names its rule in VALIDATOR_ONLY, a
 //     rule JSON Schema cannot say, with the sentence why.
 //
-// The test validator is ajv 8 (draft 2020-12; a dev dependency, Q4h-1). The two definitions this
-// schema shares with `machines.schema.json` (`numberInput`, `channelParams`) are P4.39b's; until
-// that file has them, the test puts an open stand-in in their place and leaves out the broken cases
-// that need them (`needsMachineDefs`), so the agreement on a preset's value starts the day P4.39b's
-// definitions are merged.
+// The test validator is ajv 8 (draft 2020-12; a dev dependency, Q4h-1), set up in
+// `tests/unit/helpers/jsonSchema.ts`. The two definitions this schema shares with
+// `machines.schema.json` (`numberInput`, `channelParams`) are the real ones of that file.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020';
+import type { ValidateFunction } from 'ajv/dist/2020';
 import profileSchema from '../../../../schemas/profile.schema.json';
 import machinesSchema from '../../../../schemas/machines.schema.json';
 import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
@@ -66,6 +64,7 @@ import type {
   VariantDecl,
 } from './types';
 import { FIXTURES_DIR } from '../../../../tests/unit/helpers/fixtures';
+import { ALLOWED_KEYWORDS, testValidator } from '../../../../tests/unit/helpers/jsonSchema';
 
 type Json = Record<string, unknown>;
 type SchemaNode = Record<string, unknown>;
@@ -79,36 +78,12 @@ const DEFS = SCHEMA.$defs as Record<string, SchemaNode>;
 // The test validator
 // ---------------------------------------------------------------------------------------------
 
-/** Our four annotations (rule 3); ajv's strict mode refuses any other unknown keyword. */
-const GEDIT_KEYWORDS = ['x-gedit-order', 'x-gedit-kind', 'x-gedit-advanced', 'x-gedit-stub'] as const;
-
-/** The keywords the three schemas may use (rule 3). */
-const ALLOWED_KEYWORDS = new Set<string>([
-  '$schema', '$id', '$ref', '$defs', '$comment', 'title', 'description', 'type', 'properties', 'required',
-  'additionalProperties', 'patternProperties', 'propertyNames', 'items', 'minItems', 'maxItems', 'uniqueItems',
-  'enum', 'const', 'pattern', 'minLength', 'maxLength', 'minimum', 'maximum', 'exclusiveMinimum',
-  'minProperties', 'maxProperties', 'allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else', 'default',
-  'examples', ...GEDIT_KEYWORDS,
-]);
-
 /** The definitions of `machines.schema.json` this schema refers to (rule 1). */
 const SHARED_DEFS = ['numberInput', 'channelParams'] as const;
 
-/** `machines.schema.json`, with an open stand-in for a shared definition P4.39b has not written yet. */
-function machinesForRefs(): { schema: SchemaNode; standIns: string[] } {
-  const schema = clone(machinesSchema) as unknown as SchemaNode;
-  const defs = (isRecord(schema.$defs) ? schema.$defs : (schema.$defs = {})) as Record<string, unknown>;
-  const standIns = SHARED_DEFS.filter((name) => !isRecord(defs[name]));
-  for (const name of standIns) defs[name] = { type: 'object' };
-  return { schema, standIns };
-}
-
-const MACHINES = machinesForRefs();
-
 function compileProfileSchema(): ValidateFunction {
-  const ajv = new Ajv2020({ allErrors: true, strict: true, strictTypes: false, strictRequired: false });
-  ajv.addVocabulary([...GEDIT_KEYWORDS]);
-  ajv.addSchema(MACHINES.schema);
+  const ajv = testValidator();
+  ajv.addSchema(machinesSchema);
   return ajv.compile(SCHEMA);
 }
 
@@ -220,8 +195,6 @@ interface BrokenCase {
   base: () => Json;
   patch: (p: Json) => void;
   vo?: ValidatorOnly;
-  /** The case is about a value under one of the shared definitions of `machines.schema.json`. */
-  needsMachineDefs?: true;
 }
 
 const mill = (): Json => completeFrom('fanuc-gcode');
@@ -445,7 +418,17 @@ const BROKEN: BrokenCase[] = [
   { name: 'a number input id twice', base: lathe, patch: (p) => (presets(p)[2].id = presets(p)[1].id as string), vo: 'unique-by-member' },
   { name: 'digitCheck "no"', base: mill, patch: (p) => (presets(p)[0].digitCheck = 'no') },
   { name: 'a decimal point setting the default number input contradicts', base: lathe, patch: (p) => (syntaxOf(p).decimalPointSignificant = true), vo: 'decimal-point-vs-preset' },
-  { name: 'a number reading "scaled"', base: mill, patch: (p) => (obj(presets(p)[0], 'value').mode = 'scaled'), needsMachineDefs: true },
+  { name: 'a number reading "scaled"', base: mill, patch: (p) => (obj(presets(p)[0], 'value').mode = 'scaled') },
+  // A profile's preset is stricter than a machine's own number input (the `allOf` overlay): an increment is 1 or a power of ten below it.
+  { name: 'a preset length increment of 0.002', base: mill, patch: (p) => (obj(presets(p)[0], 'value').incrementMm = '0.002') },
+  { name: 'a preset inch increment of 0.5', base: mill, patch: (p) => (obj(presets(p)[0], 'value').incrementInch = '0.5') },
+  { name: 'a preset angle increment of 5', base: mill, patch: (p) => (obj(presets(p)[0], 'value').incrementDeg = '5') },
+  { name: 'a preset dwell increment of 0.25', base: mill, patch: (p) => (obj(presets(p)[0], 'value').incrementSec = '0.25') },
+  {
+    name: 'a preset feed class increment of 0.002',
+    base: mill,
+    patch: (p) => (obj(presets(p)[0], 'value').classes = { feedPerMin: { mode: 'increment', increment: '0.002' } }),
+  },
   { name: 'a feeds-without-a-point default that sets steps', base: mill, patch: (p) => (obj(numberInput(p), 'pointlessFeeds').default = 'per-rev'), vo: 'default-is-a-choice' },
   {
     name: 'a feeds-without-a-point step for dwell',
@@ -837,7 +820,6 @@ describe('schemas/profile.schema.json (P4.39a)', () => {
 
   it('agrees with the validator on every broken case: refused by both, or a validator-only rule (rule 2)', () => {
     for (const c of BROKEN) {
-      if (c.needsMachineDefs && MACHINES.standIns.length > 0) continue;
       const file = c.base();
       c.patch(file);
       const raw = c.name === 'not an object' ? [] : file;
@@ -936,13 +918,11 @@ describe('schemas/profile.schema.json (P4.39a)', () => {
         expect(deref(node.$ref), pointer).not.toBeNull();
       }
     }
-    // Once P4.39b's definitions are in, every built-in preset is held to them by the agreement above.
-    if (MACHINES.standIns.length === 0) {
-      for (const entry of RESOLVED_BUILTINS) {
-        const file = clone(entry.profile);
-        delete file.extends;
-        expect(schemaProblems(file), entry.profile.id as string).toEqual([]);
-      }
+    // Every built-in preset is held to the shared definitions.
+    for (const entry of RESOLVED_BUILTINS) {
+      const file = clone(entry.profile);
+      delete file.extends;
+      expect(schemaProblems(file), entry.profile.id as string).toEqual([]);
     }
   });
 

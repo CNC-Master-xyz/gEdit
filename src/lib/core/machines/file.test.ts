@@ -8,7 +8,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { emptyMachinesFile, keepPosition, parseMachinesFile, serializeMachinesFile } from './file';
+import machinesSchema from '../../../../schemas/machines.schema.json';
+import { MACHINES_SCHEMA_URL, defaultProblems, emptyMachinesFile, keepPosition, parseMachinesFile, serializeMachinesFile } from './file';
 import { MACHINES_VERSION } from './types';
 import { MAX_MACHINES, channelBlock } from './validate';
 import type { MachineConfig } from './types';
@@ -168,8 +169,45 @@ describe('writing', () => {
     expect((written.machines as MachineConfig[]).map((m) => m.name)).toEqual(['Lathe two', 'Mill 1']);
   });
 
-  it('writes an empty file as an empty list and no defaults', () => {
-    expect(serializeMachinesFile(emptyMachinesFile())).toEqual({ machines: [], defaults: {} });
+  it('writes an empty file as an empty list and no defaults, under the $schema line (Q4h-2)', () => {
+    const written = serializeMachinesFile(emptyMachinesFile());
+    expect(written).toEqual({ $schema: MACHINES_SCHEMA_URL, machines: [], defaults: {} });
+    expect(Object.keys(written)[0]).toBe('$schema');
+  });
+
+  it('points the $schema line at the schema of the file', () => {
+    expect(MACHINES_SCHEMA_URL).toBe(machinesSchema.$id);
+  });
+
+  it('never adds the $schema line to a file that is read, and keeps the one that is there', () => {
+    const plain = sample('valid');
+    expect(serializeMachinesFile(parseMachinesFile(plain))).not.toHaveProperty('$schema');
+    const own = { $schema: 'https://example.com/other.json', ...plain };
+    expect(serializeMachinesFile(parseMachinesFile(own))).toHaveProperty('$schema', 'https://example.com/other.json');
+  });
+});
+
+describe('a default machine that is not text (owner decision (b), 2026-10-27)', () => {
+  it('is reported by its path, once for each such entry', () => {
+    const problems = defaultProblems({ 'fanuc-lathe': 5, 'okuma-osp': 'mill-1', 'fanuc-gcode': { id: 'x' }, siemens: null });
+    expect(problems.map((p) => p.path)).toEqual(['defaults.fanuc-lathe', 'defaults.fanuc-gcode', 'defaults.siemens']);
+    for (const p of problems) {
+      expect(p.machineId).toBeNull();
+      expect(p.message).toContain('written as text');
+    }
+  });
+
+  it('is quiet about text, even text that names no machine (a rename is recoverable)', () => {
+    expect(defaultProblems({})).toEqual([]);
+    expect(defaultProblems(parseMachinesFile(sample('invalid-record')).defaults)).toEqual([]);
+  });
+
+  it('is kept in the file as written, and listed', () => {
+    const raw = { machines: [], defaults: { 'fanuc-lathe': 5 } };
+    const file = parseMachinesFile(raw);
+    expect(file.error).toBeNull();
+    expect(serializeMachinesFile(file).defaults).toEqual({ 'fanuc-lathe': 5 });
+    expect(defaultProblems(file.defaults).map((p) => p.path)).toEqual(['defaults.fanuc-lathe']);
   });
 });
 

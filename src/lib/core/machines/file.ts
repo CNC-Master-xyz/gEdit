@@ -39,16 +39,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** An empty, usable file: what a fresh install and "Replace with an empty file" both mean. */
+/**
+ * Where the schema of the machines file lives on the web (Phase 4 plan §6.10 rule 1; the owner's
+ * answer Q4h-2): the public repository, so an editor such as VS Code finds it from the `$schema`
+ * line of the file. gEdit itself never reads that line; it is kept like any member this build does
+ * not know. The same address as the `$id` of `schemas/machines.schema.json`.
+ */
+export const MACHINES_SCHEMA_URL = 'https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/machines.schema.json';
+
+/**
+ * An empty, usable file: what a fresh install and "Replace with an empty file" both mean. It
+ * carries the `$schema` line (Q4h-2), so the next save writes it at the top of the new file.
+ */
 export function emptyMachinesFile(): ParsedMachinesFile {
   return {
     version: MACHINES_VERSION,
     machines: [],
     defaults: {},
     invalid: [],
-    unknown: {},
+    unknown: { $schema: MACHINES_SCHEMA_URL },
     error: null,
   };
+}
+
+/**
+ * What is wrong with the `defaults` of a file: a default machine is the id of a machine, written
+ * as text (owner decision (b) of 2026-10-27). An entry of another kind is kept in the file, as it
+ * was written, and never used; the Machines page lists it so it is not lost without a word.
+ * An entry that names no machine is a different case and stays quiet (a rename is recoverable).
+ */
+export function defaultProblems(defaults: Readonly<Record<string, unknown>>): MachineProblem[] {
+  const out: MachineProblem[] = [];
+  for (const [profileId, wanted] of Object.entries(defaults)) {
+    if (typeof wanted === 'string') continue;
+    out.push({
+      machineId: null,
+      path: `defaults.${profileId}`,
+      message: 'a default machine is the id of a machine, written as text, for example "lathe-2"; this one is not used',
+    });
+  }
+  return out;
 }
 
 /** A file that could not be used at all: no machine is active and no write is allowed. */
