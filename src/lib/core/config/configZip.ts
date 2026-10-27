@@ -90,3 +90,71 @@ export function selectionCounts(preview: ConfigImportPreview, selected: readonly
   }
   return { write, same };
 }
+
+// --- P4.36: wording what Rust found ---------------------------------------------------------
+
+/**
+ * Every reason `configzip.rs` gives for leaving one entry of a zip out of an import (the preview's
+ * `ignored` rows, `"<path>: <reason>"`). The entry costs only itself; the rest is imported. A test
+ * holds this list to the ids in the Rust source and to a message each.
+ */
+export const IGNORED_REASONS = [
+  'outside-layout',
+  'name-not-allowed',
+  'reserved-name',
+  'not-json-object',
+  'not-text',
+  'bad-content',
+  'too-many-keys',
+  'merged-too-big',
+  'newer-file',
+  'link-on-the-way',
+  'target-link',
+  'not-a-file',
+  'not-a-folder',
+  'unreadable',
+  'too-big-on-disk',
+] as const;
+export type IgnoredReason = (typeof IGNORED_REASONS)[number];
+
+function camel(id: string): string {
+  return id.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+/** One `ignored` row of the preview split into the entry and the reason; a reason this build does not know stays as Rust wrote it. */
+export function parseIgnored(line: string): { path: string; reason: string; key: string | null } {
+  const at = line.lastIndexOf(': ');
+  const path = at < 0 ? line : line.slice(0, at);
+  const reason = at < 0 ? '' : line.slice(at + 2);
+  const known = (IGNORED_REASONS as readonly string[]).includes(reason);
+  return { path, reason, key: known ? `configuration.ignored.${camel(reason)}` : null };
+}
+
+/** The name the save dialog proposes: `gedit-configuration-2026-10-27.zip` (local date). */
+export function exportFileName(date: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `gedit-configuration-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}.zip`;
+}
+
+/** The selectable groups: the ones with a change. A group whose files are all the same has nothing to import. */
+export function selectableGroups(preview: ConfigImportPreview): ConfigImportGroup[] {
+  return preview.groups.filter(hasChanges);
+}
+
+/**
+ * Whether Import may be pressed: the preview is not refused, something ticked would be written,
+ * and when a ticked group holds code the user ticked "I trust this file" (Rust checks it again).
+ */
+export function canImport(preview: ConfigImportPreview, selected: readonly string[], trusted: boolean): boolean {
+  if (!preview.ok) return false;
+  if (selectionCounts(preview, selected).write === 0) return false;
+  return trusted || !selectionNeedsTrust(preview, selected);
+}
+
+/** Adds or removes `id` from the selection, keeping the preview's order. */
+export function toggleGroup(preview: ConfigImportPreview, selected: readonly string[], id: string, on: boolean): string[] {
+  const set = new Set(selected);
+  if (on) set.add(id);
+  else set.delete(id);
+  return preview.groups.map((group) => group.id).filter((groupId) => set.has(groupId));
+}
