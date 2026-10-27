@@ -40,6 +40,8 @@ export const CF = {
   fileName: 'fileName',
   fileNameFor: 'fileNameFor',
   marker: 'marker',
+  /** P4.30b (T055): the file name of the first channel. */
+  firstFileName: 'firstFileName',
   label: 'label',
   codes: 'codes',
   semantics: 'semantics',
@@ -137,6 +139,7 @@ export function channelFields(
     text(CF.fileName, t('machines.channels.advanced.fileName'), t('machines.channels.advanced.fileNameHelp')),
     text(CF.fileNameFor, t('machines.channels.advanced.fileNameFor'), t('machines.channels.advanced.fileNameForHelp', TEMPLATE_WORDS)),
     text(CF.marker, t('machines.channels.advanced.marker', n), t('machines.channels.advanced.markerHelp')),
+    text(CF.firstFileName, t('channelFiles.field.label', n), t('channelFiles.field.help')),
   ];
 
   const rule: FieldSpec[] = [
@@ -249,7 +252,7 @@ export function layoutFieldsFor(p: ChannelParams | undefined, o?: ChannelFieldOp
 export function layoutAdvancedFor(p: ChannelParams | undefined, o?: ChannelFieldOptions): FieldSpec[] {
   const { layoutAdvanced } = channelFields(p, o);
   if (p?.layout === 'single-file') return only(layoutAdvanced, [CF.sectionStart, CF.sectionEnd, CF.sectionSeparator]);
-  if (p?.layout === 'multi-file') return only(layoutAdvanced, [CF.fileName, CF.fileNameFor, CF.marker]);
+  if (p?.layout === 'multi-file') return only(layoutAdvanced, [CF.fileName, CF.fileNameFor, CF.marker, CF.firstFileName]);
   return [];
 }
 
@@ -305,15 +308,16 @@ export function layoutToValues(p: ChannelParams | undefined): Record<string, unk
     [CF.fileName]: p?.fileName ?? '',
     [CF.fileNameFor]: p?.fileNameFor ?? '',
     [CF.marker]: p?.marker ?? '',
+    [CF.firstFileName]: p?.firstFileName ?? '',
   };
 }
 
 const PATTERN_MEMBERS = {
   'single-file': ['sectionStart', 'sectionEnd', 'sectionSeparator'],
-  'multi-file': ['fileName', 'fileNameFor', 'marker'],
+  'multi-file': ['fileName', 'fileNameFor', 'marker', 'firstFileName'],
 } as const;
 
-const OPTIONAL_TEXT = ['sectionEnd', 'sectionSeparator', 'fileName', 'fileNameFor', 'marker'] as const;
+const OPTIONAL_TEXT = ['sectionEnd', 'sectionSeparator', 'fileName', 'fileNameFor', 'marker', 'firstFileName'] as const;
 
 /**
  * The block after one edit of the layout fields, or `undefined` for "No channels" (the

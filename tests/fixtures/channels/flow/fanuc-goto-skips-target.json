@@ -1,0 +1,72 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Fanuc two-path: GOTO 60 in path 1 would skip N40, and N40 is the target of IF[#1EQ1]GOTO40 further down. A skipped line that another jump lands on makes the span opaque: nothing is followed and the result is the one of the jump lines (M902 and M903 stand on the opaque lines themselves, which separate nothing, so their swap is out of order in both readings).",
+  "rule": "F2 F4",
+  "profile": "fanuc-lathe",
+  "preset": "fanuc-2path",
+  "program": {
+    "1": [
+      "%",
+      "O3004 (PATH 1)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0101",
+      "N20 M901 P3",
+      "GOTO 60",
+      "N40 M902 P3",
+      "N50 G0 X50.",
+      "N60 M903 P3",
+      "IF[#1EQ1]GOTO40",
+      "N70 M30",
+      "%"
+    ],
+    "2": [
+      "%",
+      "O3004 (PATH 2)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0202",
+      "N20 M901 P3",
+      "N30 M903 P3",
+      "N40 M902 P3",
+      "N50 M30",
+      "%"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [],
+        "loops": [],
+        "opaque": [
+          7,
+          9,
+          10
+        ]
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "out-of-order",
+        "channel": "1",
+        "line": 7,
+        "mark": "M902",
+        "other": "2",
+        "otherLine": 7
+      }
+    ],
+    "after": [
+      {
+        "kind": "out-of-order",
+        "channel": "1",
+        "line": 7,
+        "mark": "M902",
+        "other": "2",
+        "otherLine": 7
+      }
+    ]
+  }
+}

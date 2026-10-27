@@ -71,7 +71,8 @@ export function testChannelRules(
   const report: TesterReport = {
     layout: resolved.layout,
     self: resolved.self,
-    by: resolved.by === 'assigned' ? null : resolved.by,
+    // The tester reads no job list (P4.30b), so `jobList` never answers here.
+    by: resolved.by === 'assigned' || resolved.by === 'jobList' ? null : resolved.by,
     sections: resolved.sections.map((s) => ({
       channel: s.channel,
       ranges: s.ranges,

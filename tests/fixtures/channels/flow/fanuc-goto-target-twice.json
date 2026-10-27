@@ -1,0 +1,71 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Fanuc two-path: GOTO 50 with two blocks N50 in path 1. The target is not exactly one line, so the jump is not followed; both N50 lines are opaque and the order of M902 and M903 stays not judged.",
+  "rule": "F1 F4",
+  "profile": "fanuc-lathe",
+  "preset": "fanuc-2path",
+  "program": {
+    "1": [
+      "%",
+      "O3003 (PATH 1)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0101",
+      "N20 M901 P3",
+      "GOTO 50",
+      "N30 M902 P3",
+      "N50 G0 X50.",
+      "N50 G1 Z-10. F0.2",
+      "N60 M903 P3",
+      "N70 M30",
+      "%"
+    ],
+    "2": [
+      "%",
+      "O3003 (PATH 2)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0202",
+      "N20 M901 P3",
+      "N30 M903 P3",
+      "N40 M902 P3",
+      "N50 M30",
+      "%"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [],
+        "loops": [],
+        "opaque": [
+          8,
+          9
+        ]
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "order-not-checked",
+        "channel": "1",
+        "line": 7,
+        "mark": "M902",
+        "other": "2",
+        "otherLine": 7
+      }
+    ],
+    "after": [
+      {
+        "kind": "order-not-checked",
+        "channel": "1",
+        "line": 7,
+        "mark": "M902",
+        "other": "2",
+        "otherLine": 7
+      }
+    ]
+  }
+}

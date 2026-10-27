@@ -1,0 +1,72 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Siemens two channels: channel 1 waits on mark 1 in a loop closed by IF R1<3 GOTOB LOOP1; channel 2 writes mark 1 three times. The jump lines did not read the label, so the written counts were a mismatch; with the flow the conditional backward jump is opaque around the wait and the count is not checked.",
+  "rule": "F3 F4",
+  "profile": "sinumerik",
+  "preset": "sinumerik-2channel",
+  "program": {
+    "1": [
+      "%_N_FLOWE1_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "R1=0",
+      "LOOP1: G1 X50 F0.2",
+      "NN100: WAITM(1,1,2)",
+      "R1=R1+1",
+      "IF R1<3 GOTOB LOOP1",
+      "M30"
+    ],
+    "2": [
+      "%_N_FLOWE2_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "NN100: WAITM(1,1,2)",
+      "NN110: WAITM(1,1,2)",
+      "NN120: WAITM(1,1,2)",
+      "M30"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [],
+        "loops": [],
+        "opaque": [
+          4,
+          7
+        ]
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "count-mismatch",
+        "channel": "2",
+        "line": 4,
+        "mark": "1",
+        "other": "1",
+        "otherLine": 5,
+        "counts": {
+          "channel": 3,
+          "other": 1
+        }
+      }
+    ],
+    "after": [
+      {
+        "kind": "count-not-checked",
+        "channel": "2",
+        "line": 4,
+        "mark": "1",
+        "other": "1",
+        "otherLine": 5,
+        "counts": {
+          "channel": 3,
+          "other": 1
+        }
+      }
+    ]
+  }
+}

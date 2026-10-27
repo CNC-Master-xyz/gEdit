@@ -1,0 +1,102 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Fanuc two-path: path 1 ends with GOTO 20, an unconditional backward jump (an endless loop); path 2 writes M901 and M902 twice. A backward GOTO is never a counted loop: the counts stay not checked.",
+  "rule": "F3 F4",
+  "profile": "fanuc-lathe",
+  "preset": "fanuc-2path",
+  "program": {
+    "1": [
+      "%",
+      "O3005 (PATH 1)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0101",
+      "N20 M901 P3",
+      "N30 G1 Z-10. F0.2",
+      "N40 M902 P3",
+      "GOTO 20",
+      "N50 M30",
+      "%"
+    ],
+    "2": [
+      "%",
+      "O3005 (PATH 2)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0202",
+      "N20 M901 P3",
+      "N30 M902 P3",
+      "N40 M901 P3",
+      "N50 M902 P3",
+      "N60 M30",
+      "%"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [],
+        "loops": [],
+        "opaque": [
+          5,
+          8
+        ]
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "count-not-checked",
+        "channel": "2",
+        "line": 7,
+        "mark": "M901",
+        "other": "1",
+        "otherLine": 5,
+        "counts": {
+          "channel": 2,
+          "other": 1
+        }
+      },
+      {
+        "kind": "count-not-checked",
+        "channel": "2",
+        "line": 8,
+        "mark": "M902",
+        "other": "1",
+        "otherLine": 7,
+        "counts": {
+          "channel": 2,
+          "other": 1
+        }
+      }
+    ],
+    "after": [
+      {
+        "kind": "count-not-checked",
+        "channel": "2",
+        "line": 7,
+        "mark": "M901",
+        "other": "1",
+        "otherLine": 5,
+        "counts": {
+          "channel": 2,
+          "other": 1
+        }
+      },
+      {
+        "kind": "count-not-checked",
+        "channel": "2",
+        "line": 8,
+        "mark": "M902",
+        "other": "1",
+        "otherLine": 7,
+        "counts": {
+          "channel": 2,
+          "other": 1
+        }
+      }
+    ]
+  }
+}

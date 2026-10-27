@@ -61,7 +61,8 @@ import { profiles as appProfiles } from '$lib/stores/profiles';
 import { channels as appChannels } from '$lib/stores/channels';
 import { STOPS_AND_ENDS_RULE } from '$lib/core/channels/types';
 import { shownMark } from '$lib/core/channels/marks';
-import type { ChannelParams, ChannelSet, SyncRule } from '$lib/core/channels/types';
+import type { ChannelFlow, ChannelParams, ChannelSet, SyncRule } from '$lib/core/channels/types';
+import { FLOW_MAX_COUNT } from '$lib/core/channels/flow';
 import { labelsOf, referenceAddresses, referencesOn, blockKeyOf, comparesByText, maskedOf } from '$lib/core/transforms/references';
 import type { BlockKey } from '$lib/core/transforms/references';
 import { tokenizeLine } from '$lib/core/nc/tokenizer';
@@ -424,6 +425,273 @@ export function computeJumpLines(
     }
   }
   return finish();
+}
+
+// ---------------------------------------------------------------------------------------
+// P4.32 (plan section 6.8.7, rules F1 to F5): what the wait-code check may follow
+// ---------------------------------------------------------------------------------------
+
+/** The unconditional jump keywords (Fanuc and Okuma `GOTO`, Sinumerik `GOTO`, `GOTOF`, `GOTOB`, `GOTOC`). */
+const GOTO_FAMILY = /^GOTO[FBC]?$/;
+/** A block number or main block number in front of a check-structure line. */
+const HEAD = String.raw`^\s*(?:(?:N|:)\d+\s+)?`;
+/** Sinumerik `FOR R1=1 TO 3` alone in its block, both bounds plain whole numbers. */
+const FOR_LINE = new RegExp(`${HEAD}FOR\\s+[A-Z_][A-Z0-9_]*\\s*=\\s*(\\d{1,9})\\s+TO\\s+(\\d{1,9})\\s*$`, 'i');
+const ENDFOR_LINE = new RegExp(`${HEAD}ENDFOR\\s*$`, 'i');
+/** Sinumerik `REPEAT LABEL P=n` alone in its block (the repetition of the lines from the label to here). */
+const REPEAT_LABEL = new RegExp(`${HEAD}REPEAT\\s+([A-Z_][A-Z0-9_]*)(?:\\s+P\\s*=\\s*(\\d{1,9}))?\\s*$`, 'i');
+/** Any Sinumerik program section repetition with labels (`REPEAT A`, `REPEAT A B P=2`, `REPEATB A`). */
+const REPEAT_ANY = new RegExp(`${HEAD}(REPEATB?)\\s+([A-Z_][A-Z0-9_]*)(?:\\s+([A-Z_][A-Z0-9_]*))?`, 'i');
+
+/** One channel's lines as `computeFlow` reads them. */
+interface FlowScan {
+  numbers: Map<string, number[]>;
+  names: Map<string, number[]>;
+  /** Lines with a loop keyword (`isLoopLine`), plus `REPEATB` lines. */
+  loopLines: Set<number>;
+  gotos: { line: number; keyword: string; key: BlockKey | null; name: string | null; bare: boolean }[];
+  /** The other references (`M99 P`, `M98 Q`, the Okuma `IF … N`), read as `computeJumpLines` reads them. */
+  refs: { line: number; key: BlockKey | null; name: string | null }[];
+  fors: { line: number; from: number; to: number; bare: boolean }[];
+  endfors: { line: number; bare: boolean }[];
+  repeats: { line: number; start: string; end: string | null; times: number | null; single: boolean }[];
+}
+
+/**
+ * What the wait-code check may follow in each channel (plan section 6.8.7): the unconditional
+ * forward jumps whose target is exactly one line of the same channel, the counted loops with a
+ * literal count, and the lines it must not carry the written order across (`opaque`). Every
+ * channel that holds a line gets an entry.
+ *
+ * - F1: a `GOTO`, `GOTOF` or `GOTOC` alone in its block (a block number or label in front is
+ *   allowed) with one target line in the channel, after the jump, is followed. `IF … GOTO`, a
+ *   `CASE`, a skippable block (`/`), `GOTOB`, a computed target, no target or two, and a target in
+ *   another channel are opaque.
+ * - F2: a followed jump's skipped lines hold no loop line and no target of any other jump.
+ * - F3: a counted loop is a `FOR v=a TO b` / `ENDFOR` pair with whole-number bounds, `a < b`
+ *   (`count = b - a + 1`), and a `REPEAT LABEL P=n` whose label is written once before it (`count =
+ *   n + 1`: the lines run once on the way and are repeated `n` times; no `P` is `n = 1`). Its
+ *   lines hold no other loop, jump or target, and nothing else jumps to its first or last line.
+ *   `WHILE`, `DO`, `LOOP`, `REPEAT … UNTIL`, `REPEATB` and the other `REPEAT` forms are opaque.
+ * - What is not followed is opaque the way `computeJumpLines` reads it: the target lines, and the
+ *   jump's own line when it goes backward (or nowhere known); the loop lines; the labels a
+ *   repetition names.
+ */
+export function computeFlow(
+  lines: readonly string[],
+  cp: CompiledProfile,
+  channelOf: (line: number) => string | readonly string[],
+): Record<string, ChannelFlow> {
+  const scans = new Map<string, FlowScan>();
+  const scanOf = (channel: string): FlowScan => {
+    let s = scans.get(channel);
+    if (!s) {
+      s = { numbers: new Map(), names: new Map(), loopLines: new Set(), gotos: [], refs: [], fors: [], endfors: [], repeats: [] };
+      scans.set(channel, s);
+    }
+    return s;
+  };
+  const push = (map: Map<string, number[]>, k: string, line: number): void => {
+    const list = map.get(k);
+    if (list) list.push(line);
+    else map.set(k, [line]);
+  };
+  const addresses = referenceAddresses(cp);
+  const byText = comparesByText(cp);
+  const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const n = i + 1;
+    const tokens = tokenizeLine(line, cp).tokens;
+    const owner = channelOf(n);
+    const channelsHere = typeof owner === 'string' ? [owner] : owner.length === 0 ? [''] : owner;
+    const masked = maskedOf(line, tokens);
+    const loopLine = isLoopLine(tokens);
+    const keywords = tokens.filter((t) => t.kind === 'keyword' && t.address !== undefined).map((t) => (t.address as string).toUpperCase());
+    // The head of the block: a label there defines it (`LAB:`, the Okuma `NLAB1`); one behind a jump names a target.
+    let headLabel: string | null = null;
+    let headToken: (typeof tokens)[number] | undefined;
+    for (const tok of tokens) {
+      if (tok.kind === 'label' && tok.address !== undefined) {
+        headLabel = tok.address.toUpperCase();
+        headToken = tok;
+        break;
+      }
+      if (tok.kind !== 'whitespace' && tok.kind !== 'blockNumber' && tok.kind !== 'skip') break;
+    }
+    // The unconditional jumps of this line, with their targets.
+    const gotos: FlowScan['gotos'] = [];
+    const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'comment');
+    for (let k = 0; k < tokens.length; k++) {
+      const tok = tokens[k];
+      if (tok.kind !== 'keyword' || tok.address === undefined || !GOTO_FAMILY.test(tok.address.toUpperCase())) continue;
+      let key: BlockKey | null = null;
+      let name: string | null = null;
+      let target: (typeof tokens)[number] | undefined;
+      if (tok.valueText !== undefined && tok.valueText !== '') key = blockKeyOf(tok.valueText, byText);
+      else {
+        target = tokens[k + 1]?.kind === 'whitespace' ? tokens[k + 2] : tokens[k + 1];
+        if (target !== undefined && target.kind === 'word' && target.valueText !== undefined && (target.address === undefined || target.address.toUpperCase() === 'N')) key = blockKeyOf(target.valueText, byText);
+        else if (target !== undefined && target.kind === 'label' && target.address !== undefined) name = target.address.toUpperCase();
+        else if (target !== undefined && target.kind === 'unknown' && IDENT.test(target.text)) name = target.text.toUpperCase();
+      }
+      // Alone in its block: a block number, a label that defines this line, the keyword and its target.
+      const rest = significant.filter((t) => t !== tok && t !== target && t !== headToken && t.kind !== 'blockNumber');
+      gotos.push({ line: n, keyword: tok.address.toUpperCase(), key, name, bare: rest.length === 0 });
+    }
+    if (gotos.length > 1) for (const g of gotos) g.bare = false;
+    // The other references (computeJumpLines' reading), on a line without a jump keyword.
+    const refs: FlowScan['refs'] = [];
+    if (gotos.length === 0 && cp.re.references.length > 0) {
+      for (const w of referencesOn(tokens, line, cp, addresses)) if (w.key !== null) refs.push({ line: n, key: w.key, name: null });
+      // A named target behind a reference trigger (the Okuma `IF [V1 EQ 1] NLAB2`).
+      if (cp.re.references.some((r) => r.trigger.test(masked))) {
+        for (const tok of tokens) if (tok.kind === 'label' && tok.address !== undefined && tok.address.toUpperCase() !== headLabel) refs.push({ line: n, key: null, name: tok.address.toUpperCase() });
+      }
+    }
+    const repeat = keywords.includes('REPEAT') || keywords.includes('REPEATB') ? REPEAT_ANY.exec(masked) : null;
+    for (const channel of channelsHere) {
+      const s = scanOf(channel);
+      if (loopLine) s.loopLines.add(n);
+      for (const tok of tokens) {
+        if (tok.kind === 'blockNumber' && tok.valueText !== undefined) {
+          const key = blockKeyOf(tok.valueText, byText);
+          if (key !== null) push(s.numbers, String(key), n);
+        }
+      }
+      if (headLabel !== null) push(s.names, headLabel, n);
+      s.gotos.push(...gotos);
+      s.refs.push(...refs);
+      if (keywords.includes('FOR')) {
+        const m = FOR_LINE.exec(masked);
+        s.fors.push(m ? { line: n, from: Number(m[1]), to: Number(m[2]), bare: true } : { line: n, from: 0, to: 0, bare: false });
+      }
+      if (keywords.includes('ENDFOR')) s.endfors.push({ line: n, bare: ENDFOR_LINE.test(masked) });
+      if (repeat !== null) {
+        const single = repeat[1].toUpperCase() === 'REPEAT' ? REPEAT_LABEL.exec(masked) : null;
+        if (repeat[1].toUpperCase() === 'REPEATB') s.loopLines.add(n);
+        s.repeats.push({
+          line: n,
+          start: repeat[2].toUpperCase(),
+          end: repeat[3] !== undefined && !/^P$/i.test(repeat[3]) ? repeat[3].toUpperCase() : null,
+          times: single ? (single[2] === undefined ? 1 : Number(single[2])) : null,
+          single: single !== null,
+        });
+      }
+    }
+  }
+
+  const out: Record<string, ChannelFlow> = {};
+  for (const [channel, s] of scans) out[channel] = flowOf(s);
+  return out;
+}
+
+/** Sorted, and any of them strictly between `lo` and `hi`. */
+function anyBetween(sorted: readonly number[], lo: number, hi: number): boolean {
+  let left = 0;
+  let right = sorted.length;
+  while (left < right) {
+    const mid = (left + right) >> 1;
+    if (sorted[mid] <= lo) left = mid + 1;
+    else right = mid;
+  }
+  return left < sorted.length && sorted[left] < hi;
+}
+
+/** One channel's `ChannelFlow` from its scan (the rules of `computeFlow`). */
+function flowOf(s: FlowScan): ChannelFlow {
+  const targetsOf = (key: BlockKey | null, name: string | null): number[] =>
+    (key !== null ? s.numbers.get(String(key)) : name !== null ? s.names.get(name) : undefined) ?? [];
+  /** Every line something jumps to, with the lines that jump there. */
+  const targeted = new Map<number, Set<number>>();
+  const aim = (target: number, from: number): void => {
+    const set = targeted.get(target);
+    if (set) set.add(from);
+    else targeted.set(target, new Set([from]));
+  };
+  const gotos = s.gotos.map((g) => ({ ...g, targets: targetsOf(g.key, g.name) }));
+  const refs = s.refs.map((r) => ({ ...r, targets: targetsOf(r.key, r.name) }));
+  const repeats = s.repeats.map((r) => ({ ...r, starts: s.names.get(r.start) ?? [], ends: r.end !== null ? (s.names.get(r.end) ?? []) : [] }));
+  for (const g of gotos) for (const t of g.targets) aim(t, g.line);
+  for (const r of refs) for (const t of r.targets) aim(t, r.line);
+  for (const r of repeats) for (const t of [...r.starts, ...r.ends]) aim(t, r.line);
+
+  const sortedNums = (values: Iterable<number>): number[] => [...new Set(values)].sort((a, b) => a - b);
+  const loopLines = sortedNums(s.loopLines);
+  const targetLines = sortedNums(targeted.keys());
+  const jumpLines = sortedNums([...gotos.map((g) => g.line), ...refs.map((r) => r.line), ...repeats.map((r) => r.line)]);
+  const quiet = (start: number, end: number): boolean => !anyBetween(loopLines, start, end) && !anyBetween(targetLines, start, end) && !anyBetween(jumpLines, start, end);
+
+  const opaque = new Set<number>();
+  const jumps: ChannelFlow['jumps'] = [];
+  const loops: ChannelFlow['loops'] = [];
+
+  for (const g of gotos) {
+    const one = g.targets.length === 1 ? g.targets[0] : null;
+    if (g.bare && g.keyword !== 'GOTOB' && one !== null && one > g.line && !anyBetween(loopLines, g.line, one) && !anyBetween(targetLines, g.line, one)) {
+      jumps.push({ line: g.line, target: one });
+      continue;
+    }
+    for (const t of g.targets) opaque.add(t);
+    if (g.targets.length === 0 || g.keyword === 'GOTOB' || g.targets.some((t) => t <= g.line)) opaque.add(g.line);
+  }
+  for (const r of refs) {
+    for (const t of r.targets) {
+      opaque.add(t);
+      if (t <= r.line) opaque.add(r.line);
+    }
+  }
+
+  // FOR / ENDFOR, matched innermost first.
+  const followedLoopLines = new Set<number>();
+  const marks = [...s.fors.map((f) => ({ line: f.line, open: f })), ...s.endfors.map((e) => ({ line: e.line, close: e }))].sort((a, b) => a.line - b.line);
+  const stack: FlowScan['fors'] = [];
+  for (const m of marks) {
+    if ('open' in m && m.open) {
+      stack.push(m.open);
+      continue;
+    }
+    const f = stack.pop();
+    const e = 'close' in m ? m.close : undefined;
+    if (f === undefined || e === undefined) continue;
+    const count = f.to - f.from + 1;
+    if (f.bare && e.bare && f.from < f.to && count <= FLOW_MAX_COUNT && quiet(f.line, e.line) && !targeted.has(f.line) && !targeted.has(e.line)) {
+      loops.push({ start: f.line, end: e.line, count });
+      followedLoopLines.add(f.line).add(e.line);
+    }
+  }
+  // REPEAT LABEL P=n: the lines from the label to the REPEAT line.
+  for (const r of repeats) {
+    const start = r.starts.length === 1 ? r.starts[0] : null;
+    const endLabels = s.names.get('ENDLABEL') ?? [];
+    const others = start === null ? undefined : targeted.get(start);
+    if (
+      r.single &&
+      r.times !== null &&
+      r.times >= 1 &&
+      r.times + 1 <= FLOW_MAX_COUNT &&
+      start !== null &&
+      start < r.line &&
+      !anyBetween(endLabels, start - 1, r.line) &&
+      quiet(start, r.line) &&
+      others !== undefined &&
+      others.size === 1 &&
+      !s.loopLines.has(start) &&
+      !jumpLines.includes(start) &&
+      !targeted.has(r.line)
+    ) {
+      loops.push({ start, end: r.line, count: r.times + 1 });
+      followedLoopLines.add(r.line);
+      continue;
+    }
+    opaque.add(r.line);
+    for (const t of [...r.starts, ...r.ends]) opaque.add(t);
+  }
+  for (const line of loopLines) if (!followedLoopLines.has(line)) opaque.add(line);
+
+  loops.sort((a, b) => a.start - b.start);
+  return { jumps, loops, opaque: [...opaque].sort((a, b) => a - b) };
 }
 
 /** The service, plus the hooks that are not part of the §7.3 contract. */
