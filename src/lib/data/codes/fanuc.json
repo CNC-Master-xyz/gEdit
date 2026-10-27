@@ -914,6 +914,8 @@
       "wordsAreData": true,
       "call": true,
       "alone": true,
+      "requires": ["P"],
+      "review": "pending",
       "label": "Macro call",
       "description": "Runs the macro program P once. The other words of the block are its arguments, handed over as local variables, not moves, feeds or speeds of this program.",
       "params": [
@@ -926,6 +928,8 @@
       "group": "macro",
       "modal": true,
       "wordsAreData": true,
+      "requires": ["P"],
+      "review": "pending",
       "label": "Modal macro call",
       "description": "Runs the macro program P after every following move until G67. The other words of this block are its arguments, not moves, feeds or speeds of this program.",
       "params": [

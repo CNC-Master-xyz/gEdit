@@ -1153,17 +1153,19 @@ class TestDefinedCycle(ModalTestCase):
             # SL cycles 21-25 and the pocket, slot and stud cycles 251-254, 256, 257.
             ["CYCL DEF 200", "CYCL DEF 201", "CYCL DEF 202", "CYCL DEF 203", "CYCL DEF 205", "CYCL DEF 206",
              "CYCL DEF 207", "CYCL DEF 208", "CYCL DEF 209", "CYCL DEF 21", "CYCL DEF 22", "CYCL DEF 23",
-             "CYCL DEF 24", "CYCL DEF 240", "CYCL DEF 25", "CYCL DEF 251", "CYCL DEF 252", "CYCL DEF 253",
+             "CYCL DEF 233", "CYCL DEF 24", "CYCL DEF 240", "CYCL DEF 25", "CYCL DEF 251", "CYCL DEF 252", "CYCL DEF 253",
              "CYCL DEF 254", "CYCL DEF 256", "CYCL DEF 257", "CYCL DEF 262"],
         )
+        # Wave Y (T094): the pattern cycles 220 and 221 call the cycle defined last themselves.
         self.assertEqual(sorted(code for code, value in cycle.items() if value == "call"),
-                         ["CYCL CALL", "CYCL CALL PAT", "CYCL CALL POS", "M99"])
+                         ["CYCL CALL", "CYCL CALL PAT", "CYCL CALL POS", "CYCL DEF 220", "CYCL DEF 221", "M99"])
         self.assertEqual([code for code, value in cycle.items() if value == "call-modal"], ["M89"])
         # Owner decision of 2026-10-08 (M9-4): on the owner's controls M89 is the modal cycle
         # call, so the entry is no longer marked for verification.
         self.assertIsNone(codes["M89"].get("verify"), "M89 is the modal cycle call (the owner, 2026-10-08)")
         # B1 (a7s): cycle 14 CONTOUR acts where it is defined (TNC 640 cycle manual 10/2017, §7.2).
-        for code in ("CYCL DEF", "CYCL DEF 7", "CYCL DEF 9", "CYCL DEF 14", "CYCL DEF 19", "CYCL DEF 32", "CYCL DEF 247"):
+        # Wave Y (T093): cycle 20 CONTOUR DATA too (TNC 640 cycle manual 2019, §9.4).
+        for code in ("CYCL DEF", "CYCL DEF 7", "CYCL DEF 9", "CYCL DEF 14", "CYCL DEF 19", "CYCL DEF 20", "CYCL DEF 32", "CYCL DEF 247"):
             with self.subTest(code=code):
                 self.assertIsNone(cycle[code])
         self.assertNotIn("start", cycle.values())

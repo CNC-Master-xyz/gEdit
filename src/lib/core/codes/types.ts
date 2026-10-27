@@ -703,6 +703,13 @@ export interface CodeEntry {
   /** M10 (WP10.2). The block of this code has to write at least one of these addresses or keywords (Klartext `PLANE …` one of `MOVE`, `TURN`, `STAY`). */
   requires?: string[];
   /**
+   * Wave Y (T093). On a DEF-active cycle with parameters (a `cycle` entry with no `sets.cycle`,
+   * Klartext cycle 20 CONTOUR DATA): the codes of the cycles that read its values when they are
+   * called (`CYCL DEF 21` to `CYCL DEF 24`). Address arithmetic moves such a cycle and the
+   * definitions and calls of those cycles together or not at all (`address_arithmetic.used_by`).
+   */
+  usedBy?: string[];
+  /**
    * B1 (A6, owner decision of 2026-10-10). Addresses this code takes as words of its own when they
    * stand **behind** it in its block: the words written there belong to the code, not to the
    * path. Klartext `M128 F800` is the feed of the compensating moves, `PLANE … MOVE … F2000`

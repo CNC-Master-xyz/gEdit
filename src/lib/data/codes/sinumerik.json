@@ -429,8 +429,12 @@
       "axisWords": "machine",
       "sets": { "motion": "rapid" },
       "conflicts": ["radiusComp", "tcp"],
+      "review": "pending",
       "label": "Approach a fixed machine point",
-      "description": "Moves the axes written with it, each on its own and at rapid traverse, to the fixed point FP= names (1 to 4; none or 0 is 1), a position set in machine data and reached in machine coordinates. The values of the axis words are not positions, which is why posts write 0. Milling posts use it to retract before a tool change; it is not allowed while radius compensation or a transformation is on."
+      "description": "Moves the axes written with it, each on its own and at rapid traverse, to the fixed point FP= names (1 to 4; none or 0 is 1), a position set in machine data and reached in machine coordinates. The values of the axis words are not positions, which is why posts write 0. Milling posts use it to retract before a tool change; it is not allowed while radius compensation or a transformation is on.",
+      "params": [
+        { "address": "FP", "label": "Number of the fixed point, set in machine data: 1 to 4; left out or 0 is fixed point 1", "min": 0, "max": 4, "unit": "count" }
+      ]
     },
     {
       "code": "G500",

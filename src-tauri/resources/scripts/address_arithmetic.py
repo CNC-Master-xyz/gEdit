@@ -756,6 +756,21 @@ def code_of(entry: Optional[Dict[str, Any]], fallback: str = "the cycle") -> str
     return code if isinstance(code, str) and code != "" else fallback
 
 
+def is_def_active(entry: Optional[Dict[str, Any]]) -> bool:
+    """T093 (Wave Y): a DEF-active cycle whose parameters the run judges. A cycle entry (`group:
+    'cycle'`) with parameters and no `sets.cycle`: it acts where it is defined and is never
+    called (Klartext cycle 20 CONTOUR DATA). Cycle 14, which has no parameters, stays out."""
+    return isinstance(entry, dict) and entry.get("group") == "cycle" and not sets_of(entry).get("cycle") and bool(params_of(entry))
+
+
+def used_by(entry: Optional[Dict[str, Any]]) -> List[str]:
+    """T093: the cycles that read a DEF-active cycle's values when they are called
+    (`CodeEntry.usedBy`, upper case): the values of cycle 20 are the depth, surface and
+    clearances of the SL cycles 21 to 24."""
+    found = entry.get("usedBy") if isinstance(entry, dict) else None
+    return [str(code).upper() for code in found if isinstance(code, str) and code] if isinstance(found, list) else []
+
+
 # ---------------------------------------------------------------------------
 # One block
 # ---------------------------------------------------------------------------
@@ -896,8 +911,13 @@ class Group:
     ``kind`` says how the cycle runs: ``'modal'`` (a word that stays in force until it is
     cancelled, Fanuc `G81`), ``'single'`` (a one-shot word, a lathe `G71`), ``'call'`` (a call,
     `CYCLE81(…)`, repeated after every position behind `MCALL`), ``'define'`` (a definition
-    and its calls, Klartext), ``'undefined'`` (a call with no reviewed definition) and
-    ``'macro'`` (a modal macro call, `G66`).
+    and its calls, Klartext), ``'undefined'`` (a call with no reviewed definition),
+    ``'macro'`` (a modal macro call, `G66`) and ``'active'`` (T093: a DEF-active cycle whose
+    values other cycles read, Klartext cycle 20).
+
+    ``linked`` (T093): the groups moved together with this one or not at all, both ways: a
+    DEF-active cycle and the definitions that read its values (cycle 20 and the SL cycles 21
+    to 24, with their calls).
     """
 
     def __init__(self, kind: str, entry: Optional[Dict[str, Any]], line: int) -> None:
@@ -905,6 +925,12 @@ class Group:
         self.entry = entry
         self.line = line
         self.members: List[Block] = []
+        self.linked: List["Group"] = []
+
+    def link(self, other: "Group") -> None:
+        if other is not self and other not in self.linked:
+            self.linked.append(other)
+            other.linked.append(self)
 
 
 def joined_code(entry_of: Any, name: str, number: Optional[str]) -> Optional[str]:
@@ -1055,6 +1081,8 @@ class Run:
         # The cycles in force.
         self.iso_group: Optional[Group] = None
         self.defined: Optional[Group] = None
+        #: T093: the DEF-active cycle in force for each cycle that reads it (`usedBy`), by code.
+        self.served: Dict[str, Group] = {}
         self.modal_call = False
         self.mcall: Optional[Group] = None
         self.macro: Optional[Group] = None
@@ -1365,6 +1393,20 @@ class Run:
         if self.macro is not None and positions:
             return self.macro
 
+        # T093: a DEF-active cycle whose values other cycles read (Klartext cycle 20). Its
+        # tool-axis positions move with the run; the definitions that read it, and their calls,
+        # are moved with it or not at all.
+        active_defs = [e for e, _, _ in entries if is_def_active(e)]
+        if active_defs:
+            entry = active_defs[-1]
+            group = self.new_group("active", entry, block.number)
+            for code in used_by(entry):
+                self.served[code] = group
+            defined = self.defined
+            if defined is not None and code_of(defined.entry, "").upper() in used_by(entry):
+                group.link(defined)
+            return group
+
         cycles = [(e, k) for e, k, _ in entries if sets_of(e).get("cycle") in ("start", "define", "call", "call-modal")]
 
         # A definition, known or not, replaces the one before it and ends a modal call.
@@ -1372,6 +1414,9 @@ class Run:
         if defines or block.generic_cycle is not None:
             self.defined = self.new_group("define", defines[-1] if defines else None, block.number)
             self.modal_call = False
+            served = self.served.get(code_of(self.defined.entry, "").upper())
+            if served is not None:
+                self.defined.link(served)
             return self.defined
         calls = [e for e, _ in cycles if sets_of(e).get("cycle") in ("call", "call-modal")]
         if calls:
@@ -2491,7 +2536,7 @@ class Run:
                     literal = gedit_nc.parse_number(arg_text)
                     args.append(Arg("argument %d" % position, arg_text, literal, line, span, None, "call", position))
             return args
-        if group.kind == "define":
+        if group.kind in ("define", "active"):
             # The definition writes its values; a call of it writes positions, not arguments.
             if any(e is entry for e, _, _ in block.entries):
                 return list(block.q_args)
@@ -2793,10 +2838,31 @@ class Run:
             )
             block.clear()
 
+    def linked_groups(self) -> List[List[Group]]:
+        """T093: the groups in pieces that move together, each in program order: a group alone,
+        or a DEF-active cycle with the definitions that read it (`Group.linked`)."""
+        seen: set = set()
+        pieces: List[List[Group]] = []
+        for group in self.groups:
+            if id(group) in seen:
+                continue
+            seen.add(id(group))
+            piece = [group]
+            stack = [group]
+            while stack:
+                for other in stack.pop().linked:
+                    if id(other) not in seen:
+                        seen.add(id(other))
+                        piece.append(other)
+                        stack.append(other)
+            pieces.append(piece)
+        return pieces
+
     def settle_groups(self) -> bool:
         changed = False
-        for group in self.groups:
-            members = group.members
+        for piece in self.linked_groups():
+            group = piece[0]
+            members = group.members if len(piece) == 1 else sorted((m for g in piece for m in g.members), key=lambda m: m.number)
             if not members:
                 continue
             first = next((m for m in members if m.refusal is not None), None)
@@ -2806,6 +2872,8 @@ class Run:
             if first is None and outside is None:
                 continue
             what = {"pole": "the same contour around the pole", "pass": "the same series of passes"}.get(group.kind, "the same cycle")
+            if len(piece) > 1:
+                what = "the same cycle and the contour data it uses"
             for member in members:
                 if member.refusal is None:
                     changed = changed or bool(member.edits)

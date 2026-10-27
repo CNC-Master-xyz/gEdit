@@ -145,9 +145,18 @@ describe('what the roles decide (the reasons are in the G10 table, plan §8.7)',
     // added the pocket, slot and stud cycles 251–254, 256 and 257 (TNC 640 cycle manual
     // 10/2017, ch. 5) and the SL cycles 21–25 (ch. 7): cycle 25 names its surface Q5 and its
     // clearance height Q7 (both absolute); 21–24 take theirs from cycle 20, which stays out.
+    // Wave Y: the pattern calls 220 and 221 (T094), the face milling cycle 233 (Q227 start,
+    // Q386 end level; T095) and the DEF-active cycle 20 (Q5 surface, Q7 clearance height;
+    // T093), TNC 640 cycle manual 2019, §6.9, §8.2-8.3, §9.4.
     const cycles = ['200', '201', '202', '203', '205', '206', '207', '208', '209', '240', '262', '251', '252', '253', '254', '256', '257'];
     expect(withRole('heidenhain', 'tool-axis')).toEqual([
       ...cycles.map((n) => `CYCL DEF ${n} Q203`),
+      'CYCL DEF 220 Q203',
+      'CYCL DEF 221 Q203',
+      'CYCL DEF 233 Q227',
+      'CYCL DEF 233 Q386',
+      'CYCL DEF 20 Q5',
+      'CYCL DEF 20 Q7',
       'CYCL DEF 25 Q5',
       'CYCL DEF 25 Q7',
     ]);

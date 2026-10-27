@@ -615,7 +615,8 @@ describe('B1: the lathe codes added from the manuals', () => {
   });
 
   it('reads G313 as the third turret, beside G13 and G14', () => {
-    expect(codesWith((e) => e.group === 'turret')).toEqual(['G13', 'G14', 'G313']);
+    // Wave Y (T102): G314, turret D (OSP-P300 G-code list, 2014).
+    expect(codesWith((e) => e.group === 'turret')).toEqual(['G13', 'G14', 'G313', 'G314']);
     expect(entry('G313').label).toBe('Turret C');
   });
 
@@ -632,7 +633,8 @@ describe('B1: the lathe codes added from the manuals', () => {
       // v1.2 NC fix round (NCF-A follow-up): the thread passes and the L-radius arcs (lengthAlong).
       // Manual-check fix D5-1: the change points of G84 as coordinates.
       // NC-5: the turret wait M100 refused under nose radius compensation.
-      'G2', 'G3', 'G20', 'G21', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'GOTO', 'IF', 'M85', 'M100',
+      // Wave Y (T101, T102): G24, G25 and G314.
+      'G2', 'G3', 'G20', 'G21', 'G24', 'G25', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'G314', 'GOTO', 'IF', 'M85', 'M100',
     ]);
     for (const e of ENTRIES.filter((row) => reviewOf(row) !== undefined)) expect(reviewOf(e), e.code).toBe('pending');
   });

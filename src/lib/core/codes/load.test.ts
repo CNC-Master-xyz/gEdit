@@ -258,9 +258,11 @@ describe('built-in code databases', () => {
       // B1 fix NC (NC-08): ABST is a word of the 19.1 sub-block too; the manual's own
       // contour-formula example writes cycles 22 and 23 without Q208.
       'CYCL DEF 19': ['F', 'ABST'],
-      'CYCL DEF 22': ['Q208', 'Q401', 'Q404'],
+      // Wave Y (T096): the tool names QS13 and QS18 are written instead of Q13 and Q18.
+      'CYCL DEF 21': ['QS13'],
+      'CYCL DEF 22': ['QS18', 'Q208', 'Q401', 'Q404'],
       'CYCL DEF 23': ['Q208'],
-      'CYCL DEF 25': ['Q18', 'Q446', 'Q447', 'Q448'],
+      'CYCL DEF 25': ['Q18', 'QS18', 'Q446', 'Q447', 'Q448'],
       'CYCL DEF 251': ['Q439'],
       'CYCL DEF 252': ['Q439'],
       'CYCL DEF 253': ['Q439'],
@@ -719,7 +721,8 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
     expect(marked('fanuc')).toEqual([
       'G2', 'G3', 'G4', 'G5.4', 'G6.2', 'G10', 'G29', 'G30.1', 'G41', 'G42', 'G41.2', 'G41.3', 'G41.4', 'G41.5', 'G41.6', 'G42.2', 'G42.4', 'G42.5', 'G42.6', 'G43.1', 'G43.4', 'G43.5', 'G52', 'G53.1',
       // The manual-check round (D6-2, D6-3, 2026-10-25): G53.6, and tilt and TCP together.
-      'G53.6', 'G68.2', 'G68.3', 'G68.4',
+      // Wave Y (T107): the macro calls G65 and G66 need P.
+      'G53.6', 'G65', 'G66', 'G68.2', 'G68.3', 'G68.4',
       'G73', 'G81', 'G82', 'G83', 'G85', 'G86', 'G89', 'G92.1', 'G98', 'G99',
       // P4a fix B1 (§7 #312): the flow codes.
       'GOTO', 'DO', 'END',
@@ -737,12 +740,15 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
     // P4a fix B1 (§7 #312, #316): the chamfer and corner round, and the jumps.
     // v1.2 NC fix round (NCF-A follow-up): the thread passes and the L-radius arcs (lengthAlong).
     // Manual-check review round (NC-5): the turret wait M100.
-    expect(marked('okuma')).toEqual(['G2', 'G3', 'G20', 'G21', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'M85', 'M100', 'GOTO', 'IF']);
+    // Wave Y (T101, T102): G24, G25 and G314.
+    expect(marked('okuma')).toEqual(['G2', 'G3', 'G20', 'G21', 'G24', 'G25', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'G314', 'M85', 'M100', 'GOTO', 'IF']);
     // The Sinumerik and Klartext codes (package A7-S); SLOT2, CYCLE72, ADIS and ADISPOS were
     // added from the manuals afterwards (owner decision 2026-10-12) and carry the same mark,
     // as does CYCLE62, whose description now names CYCLE72 next to the turning cycles.
     expect(marked('sinumerik')).toEqual([
       'G2', 'G3', 'CIP', 'G4', 'G601', 'G602', 'G603', 'G643', 'G644', 'G645', 'G41', 'G42',
+      // Wave Y (T103): the fixed point number FP= of G75.
+      'G75',
       // v1.2.0 manual-check fix round (D5-9): diameter programming off while a cycle runs.
       'DIAMCYCOF',
       // v1.2.0 (NCR-9b): the drilling cycles' depth twins (DP and DPR, FDEP and FDPR).
@@ -769,7 +775,8 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
       // v1.2 NC fix round (NCF-A follow-up): the bore and thread milling diameters, the centring diameter.
       // P4b fix batch 3 (NC-6): CYCL CALL POS, whose feed counts for its own block only.
       'CYCL DEF 26', 'PATTERN DEF', 'CYCL CALL POS', 'CYCL DEF 200', 'CYCL DEF 201', 'CYCL DEF 208', 'CYCL DEF 240', 'CYCL DEF 262', 'CYCL DEF 251', 'CYCL DEF 252', 'CYCL DEF 253', 'CYCL DEF 254', 'CYCL DEF 256',
-      'CYCL DEF 257', 'CYCL DEF 14', 'CYCL DEF 21', 'CYCL DEF 22', 'CYCL DEF 23', 'CYCL DEF 24', 'CYCL DEF 25',
+      // Wave Y (T093-T095): the pattern calls 220 and 221, face milling 233 and the contour data of cycle 20.
+      'CYCL DEF 257', 'CYCL DEF 220', 'CYCL DEF 221', 'CYCL DEF 233', 'CYCL DEF 14', 'CYCL DEF 20', 'CYCL DEF 21', 'CYCL DEF 22', 'CYCL DEF 23', 'CYCL DEF 24', 'CYCL DEF 25',
       'PLANE SPATIAL', 'PLANE PROJECTED', 'PLANE EULER', 'PLANE VECTOR', 'PLANE POINTS', 'PLANE RELATIV',
       'PLANE AXIAL', 'PLANE RESET', 'TRANS DATUM', 'M128', 'M140', 'MOVE', 'TURN',
       // v1.2.0 manual-check fix round (D6-8): the words that choose between the two rotary solutions.
@@ -1211,7 +1218,8 @@ describe('P4b follow-ups (v1.2.0)', () => {
     }
     for (const raw of Object.values(BUILTIN_CODE_DB_JSON)) {
       const db = load(raw).db;
-      expect(db.codes.filter((e) => e.blockFeed === true).map((e) => e.code), db.dialect).toEqual(db.dialect === 'heidenhain' ? ['CYCL CALL POS'] : []);
+      // Wave Y (T163): RND and CHF, whose feed applies to the rounding or the chamfer only.
+      expect(db.codes.filter((e) => e.blockFeed === true).map((e) => e.code), db.dialect).toEqual(db.dialect === 'heidenhain' ? ['RND', 'CHF', 'CYCL CALL POS'] : []);
     }
   });
 });
