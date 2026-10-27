@@ -72,6 +72,7 @@ import {
   CHANNEL_CAPS,
   STOPS_AND_ENDS_RULE,
   type ChannelBudget,
+  type ChannelFlow,
   type ChannelParams,
   type SyncFinding,
   type SyncFindingKind,
@@ -88,6 +89,12 @@ export interface CheckSyncOptions extends ChannelBudget {
    *  written on a line is not one, and a jump line equal to a mark's own line separates
    *  nothing (the bounds are exclusive). */
   jumpLines?: Readonly<Record<string, number[]>>;
+  /**
+   * Phase 4 (P4f prelude, P4.32): per channel, the jumps and counted loops the check may follow
+   * instead of giving up (plan section 6.8, rules F1 to F5). Absent: only `jumpLines` is used, as
+   * before, and nothing changes. Not read until P4.32 writes the rule.
+   */
+  flow?: Readonly<Record<string, ChannelFlow>>;
   /** Per channel, the `Located.document` its findings carry (F58); absent = no `document`. */
   documents?: Readonly<Record<string, string>>;
 }

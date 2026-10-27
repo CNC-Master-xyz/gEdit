@@ -54,3 +54,12 @@ windows-sys = { version = "0.61", features = [
 # nothing else in the backend talks to Objective-C, and G8 checks that.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+
+# One running gEdit on Windows and Linux (AD-54, P4f): a second start hands its file paths to
+# the first and ends. Not on macOS, where the system keeps one instance of a bundled app and
+# sends the files as `RunEvent::Opened`; the plugin's macOS door is a socket in /tmp that any
+# local user can write to (plan section 6.8). `~2.4.5`, not `2`: 2.5.x needs tauri 2.12 and
+# this build is on 2.11 (a tauri update is its own change); 2.4.x is the newest line that
+# resolves against the locked tauri. Licence: Apache-2.0 OR MIT, checked 2026-10-27.
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "~2.4.5"

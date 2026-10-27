@@ -135,7 +135,7 @@ export interface ScriptContextV2 {
   machine: {
     id: string | null;
     name: string | null;
-    choice: 'document' | 'default' | 'none';
+    choice: 'document' | 'folder' | 'default' | 'none';
     params: MachineParams;
     source: EffectiveMachine['source'];
     /**

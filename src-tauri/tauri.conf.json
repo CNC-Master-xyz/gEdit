@@ -46,6 +46,14 @@
     "resources": {
       "resources/scripts/": "scripts/"
     },
+    "fileAssociations": [
+      {
+        "ext": ["nc", "tap", "cnc", "eia", "ncc", "ptp", "min", "ssb", "mpf", "spf"],
+        "name": "NC program",
+        "description": "NC program",
+        "role": "Editor"
+      }
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

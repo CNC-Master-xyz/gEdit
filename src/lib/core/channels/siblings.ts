@@ -187,3 +187,41 @@ export function documentChannel(
   }
   return { channel: byName?.channel ?? null, by: byName ? 'fileName' : null, stem, problems };
 }
+
+// ---------------------------------------------------------------------------------------
+// Phase 4 (P4f prelude; plan section 6.8): the sibling lookup from a folder listing. **Stubs**,
+// implemented by P4.30b. `siblingNames` above derives names and asks whether they exist; the
+// two functions below cover what it cannot derive (an alias in the file name, a path-1 file
+// without the channel marker, T055) by looking at the names `folder_siblings` lists.
+//
+//  L1. `listingPattern` is the glob `folder_siblings` is asked with: the document's stem and
+//      `*` (`PART*`), never `*` alone (the command refuses a glob with fewer than two literal
+//      characters). null when the document is no channel file, or its stem is shorter than that.
+//  L2. `siblingsFromListing` reads each listed name with `fileChannel` (and `firstFileName`) and
+//      keeps those with the same stem (case-insensitive) and another channel than the document's
+//      own. One name per channel: a channel with two names is `ambiguous` and gets none (refuse
+//      rather than guess), a declared channel with none is `missing`.
+//  L3. The result is a hint for the file dialog and the status message, as `channel_siblings`
+//      is today: nothing is opened without the user picking it (standing rule 14).
+// ---------------------------------------------------------------------------------------
+
+export interface ListedSiblings {
+  found: { channel: ChannelRef; name: string }[];
+  ambiguous: { channel: ChannelRef; names: string[] }[];
+  missing: ChannelRef[];
+}
+
+/** L1. */
+export function listingPattern(_baseName: string, _p: ChannelParams): string | null {
+  throw new Error('not built yet (P4.30b)');
+}
+
+/** L2. */
+export function siblingsFromListing(
+  _baseName: string,
+  _listing: readonly string[],
+  _p: ChannelParams,
+  _self?: string,
+): ListedSiblings | null {
+  throw new Error('not built yet (P4.30b)');
+}

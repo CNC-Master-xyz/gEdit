@@ -18,6 +18,9 @@
 //! - [`python`] — finding the user's Python interpreter
 //! - [`scripts`] — the v2 scripting backend: discovery, the TOML header and the runner
 //! - [`userfiles`] — the user's own profiles and code files (M13)
+//! - [`folders`] — the folder commands: search, sibling names, one file's grant (P4f, AD-53)
+//! - [`open_requests`] — files the operating system asks gEdit to open, and the single
+//!   running instance (P4f, AD-54)
 //!
 //! Window geometry is not ours: `tauri-plugin-window-state` saves and restores it
 //! into `.window-state.json` next to `settings.json` in the config folder. Its
@@ -34,9 +37,11 @@ mod backup;
 mod channels;
 mod config;
 mod files;
+mod folders;
 mod machines;
 #[cfg(target_os = "macos")]
 mod menu;
+mod open_requests;
 mod paths;
 mod python;
 mod quit;
@@ -85,6 +90,12 @@ fn setup_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 /// snapshots are for. They are cleared from `files.onWillQuit`, after the user's own
 /// quit decision (AD-21).
 fn on_run_event(app: &AppHandle, event: RunEvent) {
+    // macOS: a double-click in the Finder arrives here, also before the window has a page
+    // (`open_requests` queues it). `RunEvent::Opened` exists on macOS and iOS only.
+    #[cfg(target_os = "macos")]
+    if let RunEvent::Opened { urls } = &event {
+        open_requests::opened(app, urls);
+    }
     if matches!(event, RunEvent::Exit) {
         scripts::kill_all(app);
     }
@@ -98,7 +109,16 @@ fn window_state_flags() -> StateFlags {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // One running gEdit (AD-54): a second start hands its file paths to the first and ends.
+    // Windows and Linux only, and registered first, before any plugin or window exists.
+    #[cfg(any(windows, target_os = "linux"))]
+    let builder = if open_requests::single_instance_possible() {
+        builder.plugin(open_requests::single_instance_plugin())
+    } else {
+        builder
+    };
+    let builder = builder
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -112,6 +132,8 @@ pub fn run() {
         // Whether any document has unsaved changes, for the macOS termination hook
         // (AD-20): the delegate answers from this flag, never by asking the webview.
         .manage(quit::QuitGuard::default())
+        // Files the system asked us to open before the webview could take them (AD-54).
+        .manage(open_requests::OpenRequests::default())
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
             files::files_stat,
@@ -124,6 +146,11 @@ pub fn run() {
             quit::quit_guard_set_dirty,
             backup::files_backup,
             channels::channel_siblings,
+            folders::folder_search,
+            folders::folder_search_cancel,
+            folders::folder_siblings,
+            folders::folder_grant,
+            open_requests::open_requests_ready,
             userfiles::user_files_list,
             userfiles::user_file_create,
             userfiles::user_file_path,
