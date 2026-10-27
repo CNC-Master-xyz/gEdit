@@ -67,6 +67,7 @@ import { modals } from '$lib/app/modals';
 import { commands, notifyContextChanged } from '$lib/app/registry/commands';
 import { scripts } from '$lib/app/scripts';
 import { status } from '$lib/app/status';
+import { packageOfRoot } from '$lib/core/packages/packages';
 import { scriptsForProfile, scriptLabel } from '$lib/core/scripting/filter';
 import { lastScriptId } from '$lib/stores/scripts';
 import { settings } from '$lib/stores/settings';
@@ -298,9 +299,14 @@ async function openSource(scriptId?: string): Promise<void> {
   const label = labelOf(wanted);
 
   if (entry && !entry.editable) {
+    // A package script is not edited in place either (Q4g-3); the question says what it is.
+    const pkg = packageOfRoot(entry.root);
     const copy = await dialogs.confirm({
-      title: t('scripts.openBundledTitle'),
-      message: t('scripts.openBundledMessage', { script: label }),
+      title: pkg === null ? t('scripts.openBundledTitle') : t('scripts.openPackageTitle'),
+      message:
+        pkg === null
+          ? t('scripts.openBundledMessage', { script: label })
+          : t('scripts.openPackageMessage', { script: label, package: pkg }),
       ok: t('scripts.copyButton'),
       cancel: t('common.cancel'),
       kind: 'info',

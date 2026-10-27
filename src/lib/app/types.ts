@@ -17,6 +17,7 @@
 
 import type { Component } from 'svelte';
 import type { Readable } from 'svelte/store';
+import type { UserKeyService } from '$lib/app/keys/userKeys';
 import type { PrintService } from '$lib/app/print';
 import type { ChannelMember, ChannelRef, ChannelSet, SyncFinding } from '$lib/core/channels/types';
 import type { CodeDb, CodeEntry, CodeLookup } from '$lib/core/codes/types';
@@ -41,6 +42,7 @@ import type { MachineType } from '$lib/core/profiles/types';
 import type {
   ConfigLoad,
   ConfigPaths,
+  PackageList,
   PythonStatus,
   RecentEntry,
   ScriptEntry,
@@ -1663,6 +1665,10 @@ export interface AppContext {
   channelPanes: ChannelPaneService;
   // Phase 4, P4c (P4.15; the prelude wires the stub, plan §6.5 rule 10)
   print: PrintService;
+  // Phase 4, P4g (§6.9 rule 46: the harness reaches both through `h.app.ctx`)
+  userKeys: UserKeyService;
+  /** The script packages of the last load with their manifests; null until the first load has asked (`userConfig.packages`). */
+  packages: Readable<PackageList | null>;
 }
 
 /**

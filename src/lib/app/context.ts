@@ -29,6 +29,7 @@ import { session } from '$lib/app/session';
 import { status } from '$lib/app/status';
 import { templates } from '$lib/app/templateService';
 import { transforms } from '$lib/app/transforms';
+import { userKeys } from '$lib/app/keys/userKeys';
 import { userConfig } from '$lib/app/userConfig';
 import { bookmarks } from '$lib/monaco/bookmarks';
 import { channelPanes } from '$lib/monaco/channelPanes';
@@ -82,4 +83,6 @@ export const ctx: AppContext = {
   templates,
   channelPanes,
   print,
+  userKeys,
+  packages: userConfig.packages,
 };

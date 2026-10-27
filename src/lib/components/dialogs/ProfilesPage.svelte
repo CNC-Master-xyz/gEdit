@@ -78,7 +78,11 @@
   const folderKind = (kind: ProfileRow['kind']): UserFileKind => (kind === 'profile' ? 'profiles' : 'codes');
 
   function problemText(problem: ProfileProblem, t: Translate): string {
-    return problem.path === '' ? problem.message : t('userConfig.page.problem', { path: problem.path, message: problem.message });
+    const text = problem.path === '' ? problem.message : t('userConfig.page.problem', { path: problem.path, message: problem.message });
+    // A package's problem is told with its package (it is listed among the loose ones, never on a row).
+    return problem.package === undefined
+      ? text
+      : `${t('packagesPage.problemFile', { package: problem.package, file: problem.file ?? '' })}: ${text}`;
   }
 
   const isNote = (problem: ProfileProblem): boolean => problem.severity === 'info';
@@ -133,7 +137,7 @@
         file: entry.name,
         ...linesOf(
           entry.error,
-          problems.filter((p) => p.origin === 'user' && p.kind === 'profiles' && p.file === entry.name),
+          problems.filter((p) => p.origin === 'user' && p.package === undefined && p.kind === 'profiles' && p.file === entry.name),
           t,
         ),
         loaded: info !== undefined,
@@ -151,7 +155,7 @@
         file: entry.name,
         ...linesOf(
           entry.error,
-          problems.filter((p) => p.origin === 'user' && p.kind === 'codes' && (p.file === null ? p.profileId === stem : p.file === entry.name)),
+          problems.filter((p) => p.origin === 'user' && p.package === undefined && p.kind === 'codes' && (p.file === null ? p.profileId === stem : p.file === entry.name)),
           t,
         ),
         loaded: entry.error === null,
@@ -189,6 +193,8 @@
     const codeNames = names('codes');
     const stems = new Set([...codeNames].map((name) => name.replace(/\.json$/, '')));
     const shown = (p: ProfileProblem): boolean => {
+      // A package's file is not a row of this list, even where the user has a file of the same name.
+      if (p.package !== undefined) return false;
       if (p.kind === 'profiles') return p.file !== null && profileNames.has(p.file);
       if (p.kind === 'codes') return p.file === null ? p.profileId !== null && stems.has(p.profileId) : codeNames.has(p.file);
       return false;

@@ -278,6 +278,8 @@ mod tests {
             .filter(|name| name != "scripts")
             // M13: `ensure` makes the two folders of the user's own files beside it.
             .filter(|name| name != paths::PROFILES_DIR_NAME && name != paths::CODES_DIR_NAME)
+            // P4.35: the folder for script packages is made the same way.
+            .filter(|name| name != paths::PACKAGES_DIR_NAME)
             .collect();
         assert!(strays.is_empty(), "left behind: {strays:?}");
         let _ = fs::remove_dir_all(&root);

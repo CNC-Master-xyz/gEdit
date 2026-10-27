@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTranslator, hasKey, namespaces, t } from './index';
+import { installTranslator, layerTranslators } from './locale';
 
 const sample = {
   demo: {
@@ -100,5 +101,29 @@ describe('the development warning for a missing message', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe('the installed translator (P4.37, plan §6.9 rule 39)', () => {
+  afterEach(() => installTranslator(null));
+  const german = createTranslator({ common: { cancel: 'Abbrechen' } }, 'de');
+
+  it('is English until a set is installed', () => {
+    expect(t('common.cancel')).toBe('Cancel');
+    expect(hasKey('common.cancel')).toBe(true);
+  });
+
+  it('answers t() and hasKey() from the installed set first and English for the rest', () => {
+    installTranslator(layerTranslators(german, createTranslator(namespaces, 'en')));
+    expect(t('common.cancel')).toBe('Abbrechen');
+    expect(t('common.close')).toBe('Close');
+    expect(hasKey('common.close')).toBe(true);
+    expect(hasKey('common.nonesuch')).toBe(false);
+  });
+
+  it('is English alone again when the set is removed', () => {
+    installTranslator(german);
+    installTranslator(null);
+    expect(t('common.cancel')).toBe('Cancel');
   });
 });

@@ -60,6 +60,9 @@ const P4E_SERVICES = ['channelPanes'] as const;
 /** What P4c adds (Phase 4 plan §6.5 rule 10; the prelude wires the stub, P4.15 implements it). */
 const P4C_SERVICES = ['print'] as const;
 
+/** What P4g adds (Phase 4 plan §6.9 rule 46: the harness reaches them through `h.app.ctx`). */
+const P4G_SERVICES = ['userKeys', 'packages'] as const;
+
 const SERVICES = [
   ...M1_SERVICES,
   ...M2_SERVICES,
@@ -74,10 +77,11 @@ const SERVICES = [
   ...P3B_SERVICES,
   ...P4E_SERVICES,
   ...P4C_SERVICES,
+  ...P4G_SERVICES,
 ];
 
 describe('app context', () => {
-  it('exposes every M1 to M7, M12, M13, P3a, P3b, P4e and P4c service', () => {
+  it('exposes every M1 to M7, M12, M13, P3a, P3b, P4e, P4c and P4g service', () => {
     expect(Object.keys(ctx).sort()).toEqual([...SERVICES].sort());
   });
 

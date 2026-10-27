@@ -713,7 +713,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Q4-29: a package is copied in and never linked. A package folder that is a link is listed
+    /// Q4g-4: a package is copied in and never linked. A package folder that is a link is listed
     /// with an error and nothing of it loads, whatever it points at.
     #[cfg(unix)]
     #[test]

@@ -141,6 +141,11 @@ const PINNED: { id: string; keys?: Keys; title: string; owner: string; pending?:
   { id: 'profile.testOnDocument', title: 'userConfig.testOnDocument', owner: 'userConfig.ts' },
   { id: 'machines.import', title: 'machines.import', owner: 'userConfig.ts' },
   { id: 'machines.export', title: 'machines.export', owner: 'userConfig.ts' },
+  // Phase 4, P4g, P4.36 (plan §6.9 rule 45; `contrib/configuration.ts`): Export and Import of the whole
+  // configuration as one zip, palette category `configuration.category` and the buttons of
+  // Settings ▸ Configuration. No key: both are rare and an import changes many files.
+  { id: 'config.export', title: 'configuration.exportTitle', owner: 'configuration.ts' },
+  { id: 'config.import', title: 'configuration.importTitle', owner: 'configuration.ts' },
   // M13, WP13.4 (P13; registered by WP13.4, `contrib/typing.ts`): Home tab, group
   // `typing.group`, after the Edit group; no default key (a toggle that silently changes what
   // every keystroke does should not be one key press away).
@@ -254,6 +259,7 @@ const PINNED_CATEGORIES = [
   'ranges.category',
   'insertFile.category',
   'print.category',
+  'configuration.category',
 ];
 
 const asDefs = (rows: { id: string; keys?: Keys }[]): CommandDef[] =>

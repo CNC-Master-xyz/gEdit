@@ -270,6 +270,21 @@ describe('rowsOf', () => {
     expect(rows[0].problems).toEqual([]);
   });
 
+  it('does not show the problem of a package file on a row of your own file of the same name (P4g)', () => {
+    const fromPackage: ProfileProblem = { origin: 'user', package: 'shop-a', file: 'x.json', profileId: 'x', path: 'id', message: 'bad', kind: 'profiles' };
+    const fromCodes: ProfileProblem = { origin: 'user', package: 'shop-a', file: 'x.json', profileId: 'x', path: 'codes[0]', message: 'worse', kind: 'codes' };
+    const own: ProfileProblem = { origin: 'user', file: 'x.json', profileId: 'x', path: 'id', message: 'mine', kind: 'profiles' };
+    const files: UserFileEntry[] = [{ kind: 'profiles', name: 'x.json', error: null }, { kind: 'codes', name: 'x.json', error: null }];
+    const rows = rowsOf([], files, [fromPackage, fromCodes, own], t);
+    expect(rows[0].problems).toEqual(['id: mine']);
+    expect(rows[1].problems).toEqual([]);
+    // They are told among the loose ones, with their package.
+    expect(looseProblems(files, [fromPackage, fromCodes, own], t)).toEqual([
+      'package shop-a: x.json: id: bad',
+      'package shop-a: x.json: codes[0]: worse',
+    ]);
+  });
+
   it('leaves out a built-in problem', () => {
     const rows = rowsOf([], [{ kind: 'profiles', name: 'x.json', error: null }], [{ origin: 'builtin', file: 'x.json', profileId: 'x', path: '', message: 'm' }], t);
     expect(rows[0].problems).toEqual([]);
