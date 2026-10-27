@@ -1,0 +1,48 @@
+// The code colours: the role colour editor of Settings and the profile form (P4h, P4.41,
+// plan §6.10 rule 6). One namespace per feature (plan AD-14); the name is this file's name.
+
+import type { Messages } from '../types';
+
+export default {
+  codeColors: {
+    title: 'Code colours',
+    help: 'The colour of each kind of word in the editor. The change shows in the open editor at once; Save keeps it, Cancel puts the old colours back.',
+    profileHelp: 'Colours for this profile only. A role you leave alone keeps the colour of your code colours, or the standard colour.',
+    roleHeading: 'Kind of word',
+    dark: 'Dark theme',
+    light: 'Light theme',
+    inForce: 'in use now',
+    reset: 'Reset',
+    resetLabel: 'Reset {role} on the {theme} background',
+    resetHelp: 'Back to the colour from the level below',
+    colorLabel: '{role}, {theme} theme, colour',
+    textLabel: '{role}, {theme} theme, colour as #rrggbb',
+    ratio: '{ratio} to 1',
+    layerBuiltin: 'standard',
+    layerUser: 'yours',
+    layerProfile: 'this profile',
+    notAColor: 'Write the colour as #rrggbb, for example #d7a64a.',
+    tooFaint: 'Too faint to read on the {theme} background: {ratio} to 1, at least {min} to 1 is needed.',
+    cannotSave: 'A colour that is too faint to read cannot be saved. Change it or reset it.',
+    roles: {
+      blockNumber: 'Block numbers (N)',
+      skip: 'Block skip (/)',
+      gcode: 'G codes',
+      mcode: 'M codes',
+      axis: 'Axis words (X, Y, Z …)',
+      arcCenter: 'Arc centres (I, J, K)',
+      feed: 'Feed (F)',
+      spindle: 'Spindle speed (S)',
+      tool: 'Tool (T)',
+      variable: 'Variables',
+      keyword: 'Keywords and functions',
+      comment: 'Comments',
+      section: 'Section headings',
+      programMarker: 'Program start, end and name',
+      number: 'Other numbers',
+      string: 'Text in quotes',
+      operator: 'Operators',
+      invalid: 'Unknown or invalid words',
+    },
+  },
+} as const satisfies Messages;

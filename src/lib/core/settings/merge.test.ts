@@ -198,3 +198,67 @@ describe('diffFromDefaults', () => {
     expect(second.warnings).toEqual([]);
   });
 });
+
+// P4h (P4.41, plan §6.10 rule 6): the user's role colours, `appearance.roleColors`.
+describe('appearance.roleColors', () => {
+  const KEY = 'appearance.roleColors';
+
+  it('is empty by default and a good palette is taken as it is', () => {
+    expect(DEFAULTS[KEY]).toEqual({});
+    const good = { dark: { feed: '#ffcc00' }, light: { feed: '#7a3d00', gcode: '#003a8c' } };
+    const result = mergeSettings({ [KEY]: good });
+    expect(result.values[KEY]).toEqual(good);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('keeps the other colours and reports the one that is too faint, with its place in the file', () => {
+    const result = mergeSettings({ [KEY]: { dark: { feed: '#ffcc00', gcode: '#202020' }, light: { feed: '#f0f0a0' } } });
+    expect(result.values[KEY]).toEqual({ dark: { feed: '#ffcc00' } });
+    expect(result.warnings).toHaveLength(2);
+    expect(result.warnings[0]).toContain('"appearance.roleColors.dark.gcode"');
+    expect(result.warnings[0]).toContain('contrast');
+    expect(result.warnings[0]).toContain('not used');
+    expect(result.warnings[1]).toContain('"appearance.roleColors.light.feed"');
+  });
+
+  it('reports a colour that is not #rrggbb and a role that does not exist, and does not use them', () => {
+    const result = mergeSettings({ [KEY]: { dark: { feed: 'red', nonsense: '#ffcc00', gcode: '#ffcc00' } } });
+    expect(result.values[KEY]).toEqual({ dark: { gcode: '#ffcc00' } });
+    expect(result.warnings.map((w) => w.split(':')[0])).toEqual(['"appearance.roleColors.dark.feed"', '"appearance.roleColors.dark.nonsense"']);
+  });
+
+  it('drops a palette that is not an object, with the generic warning, and keeps the default', () => {
+    for (const bad of ['dark', 7, [], null]) {
+      const result = mergeSettings({ [KEY]: bad });
+      expect(result.values[KEY]).toEqual({});
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain('appearance.roleColors');
+    }
+  });
+
+  it('does not touch DEFAULTS, and a bad palette does not stop the other settings', () => {
+    const result = mergeSettings({ [KEY]: { dark: { feed: '#ffcc00' } }, 'editor.tabWidth': 2 });
+    expect(DEFAULTS[KEY]).toEqual({});
+    expect(Object.isFrozen(DEFAULTS[KEY])).toBe(true);
+    expect(result.values['editor.tabWidth']).toBe(2);
+  });
+
+  it('writes only a palette that differs from the empty one, with the usable colours only', () => {
+    const base = mergeSettings({}).values;
+    expect(diffFromDefaults(base)).toEqual({});
+    expect(diffFromDefaults({ ...base, [KEY]: { dark: {}, light: {} } })).toEqual({});
+    const set = mergeSettings({ [KEY]: { light: { feed: '#7a3d00' }, dark: { feed: '#ffcc00' } } }).values;
+    const written = diffFromDefaults(set);
+    expect(written).toEqual({ [KEY]: { dark: { feed: '#ffcc00' }, light: { feed: '#7a3d00' } } });
+    // the written palette is a copy: changing it cannot reach the store's value
+    (written[KEY] as { dark: { feed: string } }).dark.feed = '#000000';
+    expect(set[KEY].dark?.feed).toBe('#ffcc00');
+  });
+
+  it('round-trips through the file', () => {
+    const first = mergeSettings({ [KEY]: { dark: { feed: '#ffcc00' } } }).values;
+    const second = mergeSettings(diffFromDefaults(first));
+    expect(second.values[KEY]).toEqual(first[KEY]);
+    expect(second.warnings).toEqual([]);
+  });
+});
