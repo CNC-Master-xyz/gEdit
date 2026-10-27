@@ -19,6 +19,13 @@
   `Modal` frame (which is where `data-testid="modal"` comes from) and it is never mounted
   directly.
 
+  P4.37 (plan §6.9 rules 40, 41, 43): the search box above the pages, and the language row. The
+  box is `searchSettings` over `searchEntriesOf` (every row that is in the dialog, and the
+  heading of every page); choosing a hit opens its page and focuses the control. The language row
+  is on the Appearance page only when a second language ships (`ui.language` has `dialog:
+  offersLanguageChoice()` in the schema); its choices are `languageChoices`, and Save says that
+  the change applies at the next start.
+
   Save writes a patch of the values that actually changed; the store turns that into a
   file holding only the non-default values. "Reset category" is the store's `reset()` and
   therefore hits the file immediately, which the confirmation says.
@@ -32,6 +39,8 @@
     type Settings,
   } from '$lib/core/settings/schema';
   import type { FieldChoice, FieldSpec } from '$lib/core/forms/types';
+  import type { SearchEntry } from '$lib/core/settings/search';
+  import { resolveLocale, type LocaleInfo } from '$lib/i18n/locale';
   import type { ModalOptions, Translate } from '$lib/app/types';
 
   /** The pages, in the order §7.7 lists them. */
@@ -288,10 +297,73 @@
     }
     return patch as Partial<Settings>;
   }
+
+  // --- P4.37: the search box and the language row (delimited; the rest of the module is older) ---
+
+  /**
+   * What the search box looks through (§6.9 rule 43): the heading of every tab first, then every
+   * row that is in the dialog, in table order, with its label and help text resolved through `deps`
+   * (so the box follows the language in use). A row that is not in the dialog (`dialog: false`) is
+   * not offered. `tabLabel` names a tab.
+   */
+  export function searchEntriesOf(
+    pages: readonly SettingsPage[],
+    deps: SpecDeps,
+    tabLabel: (tab: DialogTab) => string,
+  ): SearchEntry[] {
+    const entries: SearchEntry[] = tabsOf(pages).map((tab) => ({
+      id: tab,
+      kind: 'page',
+      tab,
+      label: tabLabel(tab),
+      help: '',
+    }));
+    for (const page of pages) {
+      for (const meta of page.metas) {
+        if (!meta.dialog) continue;
+        const spec = specOf(meta, deps);
+        entries.push({ id: meta.key, kind: 'setting', tab: page.category, label: spec.label, help: spec.help ?? '' });
+      }
+    }
+    return entries;
+  }
+
+  /**
+   * The choices of `ui.language`: the languages that ship, by their own names. A value that is not
+   * one of them (`de-CH` when only `de` ships, or a language that was removed) is kept as one more
+   * choice that says what is shown instead, so opening the dialog never changes the setting.
+   */
+  export function languageChoices(
+    current: unknown,
+    locales: readonly LocaleInfo[],
+    translate: Translate,
+  ): FieldChoice[] {
+    const choices: FieldChoice[] = locales.map((locale) => ({ label: locale.name, value: locale.tag }));
+    if (typeof current === 'string' && !locales.some((locale) => locale.tag === current)) {
+      const shown = resolveLocale(current, locales.map((locale) => locale.tag));
+      const name = locales.find((locale) => locale.tag === shown)?.name ?? shown;
+      choices.push({ label: translate('settings.languageOther', { tag: current, shown: name }), value: current });
+    }
+    return choices;
+  }
+
+  /** What the status bar says after a save: that the language applies at the next start, or just "saved" (rule 40). */
+  export function savedMessage(patch: Partial<Settings>, translate: Translate): string {
+    return Object.prototype.hasOwnProperty.call(patch, 'ui.language')
+      ? `${translate('settings.saved')}. ${translate('settings.languageNextStart')}`
+      : translate('settings.saved');
+  }
+
+  /** The control a search hit leads to: the first thing to type into or press inside the row `id` on `page`. */
+  export function controlOfRow(page: ParentNode, id: string): HTMLElement | null {
+    const row = page.querySelector<HTMLElement>(`[data-field="${id}"]`);
+    if (row === null) return null;
+    return row.querySelector<HTMLElement>('input:not([type="hidden"]), select, textarea, button') ?? row;
+  }
 </script>
 
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { get } from 'svelte/store';
   import Modal from '$lib/components/common/Modal.svelte';
   import MachinesPage, { type MachinesModel } from '$lib/components/dialogs/MachinesPage.svelte';
@@ -304,6 +376,8 @@
   import { files } from '$lib/app/fileOps';
   import { status } from '$lib/app/status';
   import { validateFields } from '$lib/core/forms/validate';
+  import { searchSettings, type SearchHit } from '$lib/core/settings/search';
+  import { availableLocales } from '$lib/i18n/locale';
   import { settingsOpenFile } from '$lib/platform/commands';
   import { profiles } from '$lib/stores/profiles';
   import { settings } from '$lib/stores/settings';
@@ -366,7 +440,9 @@
     choicesFor: (key) =>
       key === 'files.defaultProfile'
         ? profiles.list().map((info) => ({ label: info.name, value: info.id }))
-        : undefined,
+        : key === 'ui.language'
+          ? languageChoices(get(settings.values)['ui.language'], availableLocales(), t)
+          : undefined,
   };
 
   /** Every page's `FieldSpec`s, built once: the schema and the profiles do not change here. */
@@ -494,6 +570,71 @@
     void selectCategory(tabs[next]);
   }
 
+  // --- the search box (P4.37, §6.9 rule 43) ---------------------------------
+
+  /** What the box searches: built once, in the language in use (it does not change while the app runs). */
+  const searchEntries = searchEntriesOf(pages, specDeps, categoryLabel);
+  let query = $state('');
+  let searchInput = $state<HTMLInputElement | undefined>(undefined);
+  let pageElement = $state<HTMLElement | undefined>(undefined);
+  let hitList = $state<HTMLElement | undefined>(undefined);
+  const hits = $derived(searchSettings(query, searchEntries));
+  const searching = $derived(query.trim() !== '');
+
+  function clearSearch(): void {
+    query = '';
+    searchInput?.focus();
+  }
+
+  /** Opens the page of a hit and puts the focus on its control (a page hit leaves it on the page's tab). */
+  async function chooseHit(hit: SearchHit): Promise<void> {
+    const tab = hit.entry.tab as DialogTab;
+    await selectCategory(tab);
+    // A question about an unfinished machine form can be answered "stay": then the hit is not followed.
+    if (active !== tab) return;
+    query = '';
+    if (hit.entry.kind !== 'setting') return;
+    await tick();
+    const control = pageElement === undefined ? null : controlOfRow(pageElement, hit.entry.id);
+    control?.scrollIntoView?.({ block: 'nearest' });
+    control?.focus();
+  }
+
+  function hitButtons(): HTMLElement[] {
+    return hitList === undefined ? [] : [...hitList.querySelectorAll<HTMLElement>('[data-testid="settings-search-hit"]')];
+  }
+
+  /** Enter takes the best hit, and must not reach the dialog, where it would mean Save. Escape clears the box before it closes the dialog. */
+  function onSearchKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape' && searching) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearSearch();
+    } else if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (hits.length > 0) void chooseHit(hits[0]);
+    } else if (e.key === 'ArrowDown' && hits.length > 0) {
+      e.preventDefault();
+      hitButtons()[0]?.focus();
+    }
+  }
+
+  function onHitKey(e: KeyboardEvent, index: number): void {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      clearSearch();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      const buttons = hitButtons();
+      const next = index + (e.key === 'ArrowDown' ? 1 : -1);
+      if (next < 0) searchInput?.focus();
+      else buttons[Math.min(next, buttons.length - 1)]?.focus();
+    }
+  }
+
   // --- the list control (scripts.folders) -----------------------------------
 
   function listOf(id: string): string[] {
@@ -602,7 +743,7 @@
     // form never corrects a value behind the user's back (G8 M2). The fields that could
     // reach this are `required` in `SETTING_FIELDS`, so Save is normally blocked first;
     // this is the second line, for a patch no control produced.
-    if (settings.lastWriteWarnings().length === 0) status.show(t('settings.saved'));
+    if (settings.lastWriteWarnings().length === 0) status.show(savedMessage(patch, t));
     close();
   }
 </script>
@@ -653,6 +794,67 @@
       </p>
     {/if}
 
+    <div class="search">
+      <div class="search-box">
+        <input
+          type="text"
+          class="search-input"
+          data-testid="settings-search"
+          role="searchbox"
+          placeholder={t('settings.search.placeholder')}
+          aria-label={t('settings.search.label')}
+          aria-controls="settings-search-hits"
+          autocomplete="off"
+          spellcheck="false"
+          bind:this={searchInput}
+          bind:value={query}
+          onkeydown={onSearchKey}
+        />
+        {#if searching}
+          <button
+            type="button"
+            class="search-clear"
+            data-testid="settings-search-clear"
+            aria-label={t('settings.search.clear')}
+            onclick={clearSearch}
+          >
+            ×
+          </button>
+        {/if}
+      </div>
+      <div id="settings-search-hits" bind:this={hitList}>
+        {#if searching}
+          {#if hits.length === 0}
+            <p class="search-none" data-testid="settings-search-none">{t('settings.search.none')}</p>
+          {:else}
+            <p class="sr-only" aria-live="polite">{t('settings.search.found', { count: hits.length })}</p>
+            <ul class="hits" aria-label={t('settings.search.hitsLabel')}>
+              {#each hits as hit, index (hit.entry.kind + hit.entry.id)}
+                <li>
+                  <button
+                    type="button"
+                    class="hit"
+                    data-testid="settings-search-hit"
+                    data-id={hit.entry.id}
+                    data-tab={hit.entry.tab}
+                    onclick={() => void chooseHit(hit)}
+                    onkeydown={(e) => onHitKey(e, index)}
+                  >
+                    <span class="hit-label">{hit.entry.label}</span>
+                    <span class="hit-where">
+                      {hit.entry.kind === 'page'
+                        ? t('settings.search.page')
+                        : t('settings.search.inPage', { page: categoryLabel(hit.entry.tab as DialogTab) })}
+                    </span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
+      </div>
+    </div>
+
     <div class="panes">
       <div
         class="tabs"
@@ -689,6 +891,7 @@
         aria-labelledby="settings-tab-{active}"
         data-testid="settings-page"
         data-category={active}
+        bind:this={pageElement}
       >
         {#if active === MACHINES_TAB}
           <MachinesPage model={machinesModel} />
@@ -775,6 +978,105 @@
     background: var(--bg-app);
     color: var(--danger-text);
     font-size: 12px;
+  }
+
+  .search {
+    margin: 0 0 10px;
+  }
+
+  .search-box {
+    position: relative;
+  }
+
+  .search-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 24px 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-app);
+    color: var(--text-main);
+    font: inherit;
+    font-size: 13px;
+  }
+
+  .search-clear {
+    position: absolute;
+    top: 50%;
+    right: 3px;
+    width: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 14px;
+    line-height: 18px;
+    transform: translateY(-50%);
+    cursor: pointer;
+  }
+
+  .search-clear:hover {
+    background: var(--surface-hover);
+  }
+
+  .search-none {
+    margin: 6px 0 0;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .hits {
+    display: flex;
+    flex-direction: column;
+    max-height: 190px;
+    margin: 4px 0 0;
+    padding: 2px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-ribbon);
+    list-style: none;
+    overflow-y: auto;
+  }
+
+  .hit {
+    display: flex;
+    width: 100%;
+    gap: 10px;
+    justify-content: space-between;
+    padding: 3px 8px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-main);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .hit:hover,
+  .hit:focus-visible {
+    background: var(--surface-hover);
+  }
+
+  .hit-where {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .panes {

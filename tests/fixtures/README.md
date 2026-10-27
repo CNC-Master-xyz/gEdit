@@ -360,6 +360,14 @@ The multi-channel programs (Fanuc multi-path, Okuma two turrets, Sinumerik two c
 
 `p4e/channels/twin-sections.nc` (two channels in one file) and `p4e/channels/threepath.NC1` to `.NC3` (one file per path) with the owner's wait codes `M901P12` and `M910P123`, read by the runtime scenario `p4-channels`; see [`p4e/README.md`](p4e/README.md). Like `channels/` they are not under `nc/` (builder wait codes), and no unit test walks them.
 
+## `i18n/`: test message sets (P4.37)
+
+Made-up message sets for `src/lib/i18n/locale.test.ts` and `src/lib/app/language.test.ts`: `de` and `de-CH`
+(partial German sets that follow English), `pl` (every kind of mistake the set checks report, and the
+Polish plural forms), `broken` (a file that holds no messages). They are **never shipped**: nothing
+imports them but those tests, which hand them to `loadLocale` as loaders. A language ships only with a
+folder `src/lib/i18n/<tag>/` and a row in `LOCALES` (plan §6.9 rule 38); none does in v1.2.0.
+
 ## Expectations and golden files
 
 Not NC programs: tables that say what a module must answer. The sample lines in them are

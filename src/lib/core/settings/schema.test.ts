@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULTS, SETTINGS_VERSION, SETTING_FIELDS, type Settings } from './schema';
 import { mergeSettings } from './merge';
+import { LOCALES, offersLanguageChoice } from '$lib/i18n/locale';
 import { validateFields } from '$lib/core/forms/validate';
 import type { FieldSpec } from '$lib/core/forms/types';
 
@@ -94,6 +95,13 @@ describe('settings schema', () => {
   it('keeps every key out of the dialog only on purpose', () => {
     // P4g: the language joins the Appearance page when a second language ships (P4.37), and the
     // switched-off packages are edited on the Packages page (plan §6.9 rules 12 and 37).
-    expect(SETTING_FIELDS.filter((f) => !f.dialog).map((f) => f.key)).toEqual(['editor.rulers', 'ui.language', 'packages.disabled']);
+    expect(SETTING_FIELDS.filter((f) => !f.dialog).map((f) => f.key)).toEqual(['editor.rulers', ...(offersLanguageChoice() ? [] : ['ui.language']), 'packages.disabled']);
+  });
+
+  it('shows the language row exactly when a second language ships (§6.9 rule 41)', () => {
+    const row = SETTING_FIELDS.find((f) => f.key === 'ui.language');
+    expect(row?.category).toBe('appearance');
+    expect(row?.dialog).toBe(offersLanguageChoice());
+    expect(row?.dialog).toBe(LOCALES.length > 1);
   });
 });
