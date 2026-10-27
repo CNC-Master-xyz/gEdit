@@ -5,6 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   LAYER_ORDER,
+  byteOrder,
+  isPackageDisabled,
+  layerSorted,
+  packageTitle,
+  withPackageEnabled,
   MAX_PACKAGES,
   PACKAGES_DISABLED_KEY,
   PACKAGE_ROOT_PREFIX,
@@ -56,13 +61,105 @@ describe('the constants Rust shares', () => {
   });
 });
 
-describe('P4.35', () => {
-  it.todo('Rust: packages_list lists the folders by name, a link and a bad name with an error, the 33rd as a problem');
-  it.todo('Rust: a package’s profile and code files are read under the user-file limits (64 files, 1 MiB, UTF-8, no link followed)');
-  it.todo('Rust: the total read over all packages stops at 32 MiB and lists the rest unread with the cap error');
-  it.todo('Rust: a disabled package is listed with enabled false and contributes no script root and no file');
-  it.todo('Rust: discovery lists the package roots between bundled and user; a user script shadows a package script of the same name');
-  it.todo('Rust: a package script is not editable, script_source_path refuses it, script_copy_to_user copies it');
-  it.todo('app: userConfig lays package files under the user’s files; a user profile with a package profile’s id replaces it with a notice');
-  it.todo('app: switching a package off and rescanning removes its scripts, profiles and codes without a restart');
+describe('the order the registries read the files in', () => {
+  it('puts every package\'s files first, packages by folder name and files by name, the user\'s own last', () => {
+    const files = [
+      { name: 'mine.json' },
+      { name: 'z.json', package: 'shop-b' },
+      { name: 'a.json', package: 'shop-b' },
+      { name: 'b.json', package: 'shop-a' },
+      { name: 'a.json' },
+    ];
+    expect(layerSorted(files).map((f) => `${f.package ?? ''}/${f.name}`)).toEqual([
+      'shop-a/b.json',
+      'shop-b/a.json',
+      'shop-b/z.json',
+      '/a.json',
+      '/mine.json',
+    ]);
+    // The input is not touched.
+    expect(files[0].name).toBe('mine.json');
+  });
+
+  it('is bytewise, as Rust is', () => {
+    expect(byteOrder('B', 'a')).toBe(-1);
+    expect(byteOrder('a', 'a')).toBe(0);
+    expect(layerSorted([{ name: 'a' }, { name: 'B' }]).map((f) => f.name)).toEqual(['B', 'a']);
+  });
+});
+
+describe('switching a package on and off', () => {
+  it('adds the name when it is switched off and removes it when it is switched on', () => {
+    expect(withPackageEnabled([], 'shop-a', false)).toEqual(['shop-a']);
+    expect(withPackageEnabled(['shop-a'], 'shop-a', false)).toEqual(['shop-a']);
+    expect(withPackageEnabled(['shop-a', 'shop-b'], 'shop-a', true)).toEqual(['shop-b']);
+    expect(withPackageEnabled(['shop-b'], 'shop-a', true)).toEqual(['shop-b']);
+  });
+
+  it('keeps a name whose folder is gone, and the order, and does not touch its input', () => {
+    const before = ['gone', 'shop-b'];
+    expect(withPackageEnabled(before, 'shop-a', false)).toEqual(['gone', 'shop-b', 'shop-a']);
+    expect(withPackageEnabled(before, 'shop-b', true)).toEqual(['gone']);
+    expect(before).toEqual(['gone', 'shop-b']);
+  });
+
+  it('asks whether a package is off', () => {
+    expect(isPackageDisabled(['shop-a'], 'shop-a')).toBe(true);
+    expect(isPackageDisabled(['shop-a'], 'shop-b')).toBe(false);
+  });
+
+  it('shows the display name, or the folder name when there is none', () => {
+    const titles = new Map([['shop-a', 'Shop A'], ['shop-b', '  ']]);
+    expect(packageTitle(titles, 'shop-a')).toBe('Shop A');
+    expect(packageTitle(titles, 'shop-b')).toBe('shop-b');
+    expect(packageTitle(titles, 'shop-c')).toBe('shop-c');
+  });
+});
+
+// The rows of the P4.35 contract that Rust answers are tests in `src-tauri/src/packages.rs`,
+// `scripts/discovery.rs`, `scripts/settings.rs` and `userfiles.rs`; this keeps the list visible
+// from the webview side, so a renamed or removed test is noticed.
+describe('the Rust side has a test for each rule', () => {
+  const DISCOVERY = readFileSync(
+    fileURLToPath(new URL('../../../../src-tauri/src/scripts/discovery.rs', import.meta.url)),
+    'utf8',
+  );
+  const SETTINGS = readFileSync(
+    fileURLToPath(new URL('../../../../src-tauri/src/scripts/settings.rs', import.meta.url)),
+    'utf8',
+  );
+
+  it('packages.rs: the walks, the links, the 33rd folder, the caps and the switch', () => {
+    for (const name of [
+      'packages_list_by_name_with_manifest_and_counts',
+      'a_folder_that_is_not_a_package_name_is_listed_with_the_reason_and_not_read',
+      'the_33rd_folder_is_a_problem_and_not_read',
+      'a_package_folder_that_is_a_link_is_listed_with_an_error_and_not_followed',
+      'a_link_inside_a_package_is_not_followed',
+      'files_are_listed_packages_by_name_then_files_by_name_and_failures_are_kept',
+      'a_file_over_one_mebibyte_and_the_65th_file_are_refused_as_for_the_users_own',
+      'the_cap_over_all_packages_is_32_mebibytes_and_a_file_past_it_is_listed_unread',
+      'a_switched_off_package_is_listed_and_contributes_nothing',
+    ]) {
+      expect(RUST, name).toContain(`fn ${name}()`);
+    }
+  });
+
+  it('discovery.rs: the roots, the shadowing, the copy, the links and the cap', () => {
+    for (const name of [
+      'package_roots_sit_between_bundled_and_user_by_name_and_are_not_editable',
+      'user_scripts_beat_a_package_and_a_later_package_beats_an_earlier_one',
+      'a_package_script_resolves_but_is_not_editable_and_the_copy_shadows_it',
+      'a_disabled_package_has_no_root',
+      'a_link_inside_a_package_is_neither_listed_nor_resolved',
+      'a_package_scripts_folder_that_is_a_link_gets_no_root_and_does_not_resolve',
+      'the_headers_of_all_packages_together_are_read_under_the_cap',
+    ]) {
+      expect(DISCOVERY, name).toContain(`fn ${name}()`);
+    }
+  });
+
+  it('settings.rs: packages.disabled is read with the other keys', () => {
+    expect(SETTINGS).toContain('fn reads_the_switched_off_packages()');
+  });
 });

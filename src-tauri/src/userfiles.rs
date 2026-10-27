@@ -177,6 +177,13 @@ pub(crate) fn not_regular(meta: &Metadata) -> Option<&'static str> {
     None
 }
 
+/// Whether `meta` (of `symlink_metadata`) is a link of any kind: a symlink, or on Windows any
+/// reparse point. A package folder and everything in it is read with this (P4g: nothing in a
+/// package is followed).
+pub(crate) fn is_link(meta: &Metadata) -> bool {
+    meta.file_type().is_symlink() || is_reparse_point(meta)
+}
+
 /// Windows: any reparse point (symlink, junction, mount point, cloud placeholder) is not
 /// a plain file. Elsewhere there is no such thing.
 #[cfg(windows)]
@@ -281,6 +288,19 @@ fn listed_name(name: &str) -> bool {
 ///
 /// A folder that does not exist lists as empty; one that cannot be read is `Err`.
 pub fn list_in(folder: &Path) -> Result<Vec<UserFile>, String> {
+    let mut unlimited = u64::MAX;
+    list_in_budget(folder, &mut unlimited, "")
+}
+
+/// [`list_in`] for the package reader (P4g, §6.9 rule 9): the same names, the same caps per
+/// folder and per file, and one more cap over several folders. `budget` is what may still be read
+/// in all; a file that would pass it is listed unread with `over_budget` as its error, and what
+/// is read is taken off it. A file that fails the per-file rules costs nothing.
+pub(crate) fn list_in_budget(
+    folder: &Path,
+    budget: &mut u64,
+    over_budget: &str,
+) -> Result<Vec<UserFile>, String> {
     let entries = match fs::read_dir(folder) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -314,12 +334,30 @@ pub fn list_in(folder: &Path) -> Result<Vec<UserFile>, String> {
             });
             continue;
         }
-        let file = match read_text(&folder.join(&name)) {
-            Ok(text) => UserFile {
+        let path = folder.join(&name);
+        // A plain file the budget cannot hold is not read. A link, a folder or a file past the
+        // per-file cap is left to the reader below, which refuses it with its own reason.
+        let size = fs::symlink_metadata(&path)
+            .ok()
+            .filter(|meta| not_regular(meta).is_none() && meta.len() <= MAX_BYTES)
+            .map(|meta| meta.len());
+        if size.is_some_and(|size| size > *budget) {
+            listed.push(UserFile {
                 name,
-                text: Some(text),
-                error: None,
-            },
+                text: None,
+                error: Some(over_budget.to_string()),
+            });
+            continue;
+        }
+        let file = match read_text(&path) {
+            Ok(text) => {
+                *budget = budget.saturating_sub(text.len() as u64);
+                UserFile {
+                    name,
+                    text: Some(text),
+                    error: None,
+                }
+            }
             Err(error) => UserFile {
                 name,
                 text: None,

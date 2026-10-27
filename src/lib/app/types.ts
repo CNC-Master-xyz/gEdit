@@ -857,6 +857,11 @@ export interface UserFileText {
   /** The file name inside its folder (`lathe-shop.json`). */
   name: string;
   text: string;
+  /**
+   * P4g (§6.9 rule 11): the folder name of the script package the file comes from; unset for the
+   * user's own file. The packages' files are handed over first, the user's own after them.
+   */
+  package?: string;
 }
 
 // ---------------------------------------------------------------------------

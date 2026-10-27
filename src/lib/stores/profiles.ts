@@ -28,6 +28,7 @@ import { resolveProfiles } from '$lib/core/profiles/resolve';
 import { validateProfile } from '$lib/core/profiles/validate';
 import { modalGroupsOf } from '$lib/core/codes/resolve';
 import { applyMachine } from '$lib/core/machines/effective';
+import { layerSorted } from '$lib/core/packages/packages';
 import { codes as appCodes } from '$lib/stores/codes';
 import { settings } from '$lib/stores/settings';
 import { isMacPlatform } from '$lib/utils/platform';
@@ -239,6 +240,30 @@ function codeFilesNow(): Readonly<Record<string, unknown>> {
   }
 }
 
+/** The profile id a raw file declares, or null. */
+function profileIdOf(raw: unknown): string | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const id = (raw as { id?: unknown }).id;
+  return typeof id === 'string' && id !== '' ? id : null;
+}
+
+/** `package` for a problem of a package's file, nothing for the user's own. */
+function inPackage(name: string | undefined): { package?: string } {
+  return name === undefined ? {} : { package: name };
+}
+
+/** "package shop-a: " for the console line of a package's file, nothing for the user's own. */
+function packageWhere(f: { package?: string }): string {
+  return f.package === undefined ? '' : `package ${f.package}: `;
+}
+
+/** A problem of a package file (named `<package>/<file>` during the load) with the package split off. */
+function unkeyed(problem: ProfileProblem): ProfileProblem {
+  const at = problem.file === null ? -1 : problem.file.indexOf('/');
+  if (problem.file === null || at < 0) return problem;
+  return { ...problem, file: problem.file.slice(at + 1), package: problem.file.slice(0, at) };
+}
+
 export function createProfileRegistry(deps: ProfileRegistryDeps): ProfileRegistry {
   const onProblem = deps.onProblem ?? ((message: string) => console.warn(message));
   const builtin: readonly ProfileSource[] =
@@ -436,7 +461,9 @@ export function createProfileRegistry(deps: ProfileRegistryDeps): ProfileRegistr
     reload(user: UserFileText[]): ProfileProblem[] {
       const sources: ProfileSource[] = [...builtin];
       const bad: ProfileProblem[] = [];
-      for (const f of [...user].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      /** P4g (§6.9 rule 11): the files of the packages come first, the user's own after them. */
+      const parsed: { f: UserFileText; raw: unknown }[] = [];
+      for (const f of layerSorted(user)) {
         let raw: unknown;
         try {
           raw = JSON.parse(f.text);
@@ -444,11 +471,37 @@ export function createProfileRegistry(deps: ProfileRegistryDeps): ProfileRegistr
           const message = f.text.charCodeAt(0) === 0xfeff
             ? 'the file starts with a byte order mark; save it as UTF-8 without one'
             : `not valid JSON: ${error instanceof Error ? error.message : String(error)}`;
-          onProblem(`${f.name} was not loaded: ${message}`);
-          bad.push({ origin: 'user', file: f.name, profileId: null, path: '', message, kind: 'profiles' });
+          onProblem(`${packageWhere(f)}${f.name} was not loaded: ${message}`);
+          bad.push({ origin: 'user', file: f.name, profileId: null, path: '', message, kind: 'profiles', ...inPackage(f.package) });
           continue;
         }
-        sources.push({ raw, origin: 'user', file: f.name });
+        parsed.push({ f, raw });
+      }
+      // A profile of your own with the id of a package profile replaces it, with a notice.
+      const own = new Map<string, string>();
+      for (const { f, raw } of parsed) {
+        const id = profileIdOf(raw);
+        if (f.package === undefined && id !== null && !own.has(id)) own.set(id, f.name);
+      }
+      for (const { f, raw } of parsed) {
+        const id = profileIdOf(raw);
+        const replacedBy = f.package !== undefined && id !== null ? own.get(id) : undefined;
+        if (f.package !== undefined && replacedBy !== undefined) {
+          bad.push({
+            origin: 'user',
+            file: f.name,
+            profileId: id,
+            path: 'id',
+            message: `replaced by your own profile in ${replacedBy}, which has the same id`,
+            kind: 'profiles',
+            severity: 'info',
+            package: f.package,
+          });
+          continue;
+        }
+        // Inside this load a package file is told apart from your own by its folder in the name;
+        // a user file name has no `/`, so the two never collide.
+        sources.push({ raw, origin: 'user', file: f.package === undefined ? f.name : `${f.package}/${f.name}` });
       }
       let loaded: { entries: Entry[]; problems: ProfileProblem[] };
       try {
@@ -459,7 +512,7 @@ export function createProfileRegistry(deps: ProfileRegistryDeps): ProfileRegistr
         onProblem(`the profiles could not be reloaded: ${message}`);
         return [{ origin: 'user', file: null, profileId: null, path: '', message, kind: 'profiles' }];
       }
-      loaded.problems = [...bad, ...loaded.problems];
+      loaded.problems = [...bad, ...loaded.problems.map(unkeyed)];
       install(loaded);
       all.set(infos);
       revision.set(get(revision) + 1);
