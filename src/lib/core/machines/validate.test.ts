@@ -230,6 +230,18 @@ describe('the stored number input', () => {
     );
   });
 
+  it('takes an inch increment only on a class that follows the units (P4.39b, the agreement with the schema)', () => {
+    for (const cls of ['length', 'feedPerMin', 'feedPerRev']) {
+      expect(numberInput({ mode: 'increment', incrementMm: '0.001', classes: { [cls]: { incrementInch: '0.0001' } } }), cls).toEqual([]);
+    }
+    for (const cls of ['angle', 'dwell']) {
+      const problems = numberInput({ mode: 'increment', incrementMm: '0.001', classes: { [cls]: { incrementInch: '0.0001' } } });
+      expect(problems, cls).toEqual([
+        `machines[0].params.numberInput.classes.${cls}.incrementInch: the ${cls} class does not change with the units, so it has no inch increment`,
+      ]);
+    }
+  });
+
   it('refuses a number input on a profile that does not read numbers by a setting', () => {
     const m = machine({ profile: 'heidenhain-klartext', params: { numberInput: { mode: 'calculator', incrementMm: '1' } } });
     // Klartext has no `machineParams` at all, so the record is refused one step earlier.
@@ -467,6 +479,10 @@ describe('M12 (WP12.3): validateChannels', () => {
     expect(rel(checkCh(rule({ id: 'stops-and-ends' })))).toEqual(['syncMarks[0].id']);
     expect(rel(checkCh(rule({ semantics: 'sometimes' })))).toEqual(['syncMarks[0].semantics']);
     expect(rel(checkCh(rule({ blocking: 'yes' })))).toEqual(['syncMarks[0].blocking']);
+    // P4.39b (the agreement with the schema): the channel check reads these as `=== true`.
+    expect(rel(checkCh(rule({ answers: 'yes' })))).toEqual(['syncMarks[0].answers']);
+    expect(rel(checkCh(rule({ samePartners: 1 })))).toEqual(['syncMarks[0].samePartners']);
+    expect(checkCh(rule({ answers: false, samePartners: true }))).toEqual([]);
     expect(rel(checkCh(rule({ label: undefined })))).toEqual(['syncMarks[0].label']);
     for (const semantics of ['rendezvous', 'count', 'ordered']) expect(checkCh(rule({ semantics }))).toEqual([]);
     expect(rel(checkCh({ ...good(), syncMarks: Array.from({ length: 33 }, (_, i) => ({ ...(good().syncMarks as Block[])[0], id: `r${i}` })) }))).toEqual(['syncMarks']);

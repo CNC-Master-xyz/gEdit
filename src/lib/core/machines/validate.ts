@@ -51,6 +51,9 @@ const READINGS: readonly NumberReading[] = ['increment', 'calculator', 'scale'];
 /** The classes a `NumberInput.classes` entry may name. */
 const CLASSES: readonly NumberClass[] = ['length', 'angle', 'feedPerMin', 'feedPerRev', 'dwell'];
 
+/** The classes that follow the program's units, so the only ones with an inch increment. */
+const UNIT_CLASSES: readonly NumberClass[] = ['length', 'feedPerMin', 'feedPerRev'];
+
 /**
  * Decimal text, the way an increment is stored: digits, optionally a point and more
  * digits. No exponent, no sign, no spaces — the value goes into `Decimal` arithmetic in
@@ -409,6 +412,12 @@ export function numberInputProblems(raw: unknown, id: string | null, path: strin
         problems.push(problem(id, `${where}.${member}`, 'an increment is decimal text above zero, e.g. "0.001"'));
       }
     }
+    // P4.39b (§6.10 rule 2): `incrementInch` only on a class that follows the program's units
+    // (the contract of `NumberInput.classes`, and the profile's rule for its presets). On an
+    // angle or a dwell it was read by nothing, so a machine that set it was misunderstood.
+    if (value.incrementInch !== undefined && !UNIT_CLASSES.includes(name as NumberClass)) {
+      problems.push(problem(id, `${where}.incrementInch`, `the ${name} class does not change with the units, so it has no inch increment`));
+    }
   }
   return problems;
 }
@@ -758,6 +767,12 @@ function ruleProblems(
     add(`${at}.semantics`, `what ${label} checks is one of ${SEMANTICS.join(', ')}`);
   }
   if (rule.blocking !== undefined && typeof rule.blocking !== 'boolean') add(`${at}.blocking`, `"blocking" of ${label} is on or off`);
+  // P4.39b (§6.10 rule 2, the agreement with the schema): the channel check reads these two
+  // as `=== true`, so a "yes" was quietly off. Refused like `blocking`.
+  if (rule.answers !== undefined && typeof rule.answers !== 'boolean') add(`${at}.answers`, `"answers" of ${label} is on or off`);
+  if (rule.samePartners !== undefined && typeof rule.samePartners !== 'boolean') {
+    add(`${at}.samePartners`, `"samePartners" of ${label} is on or off`);
+  }
   // Manual check D2-4, D2-5: the members the channel check reads since then.
   if (rule.markSeparator !== undefined && (typeof rule.markSeparator !== 'string' || rule.markSeparator === '')) {
     add(`${at}.markSeparator`, `${label}: the separator between marks is text, for example ","`);

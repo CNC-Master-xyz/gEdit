@@ -2,8 +2,2348 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/codes.schema.json",
   "title": "gEdit code database",
-  "description": "A code database file of gEdit (G and M codes, cycles, templates). Written by hand from src/lib/core/codes/types.ts and src/lib/core/templates/types.ts and held to loadCodeDb and loadTemplates by src/lib/core/codes/schema.test.ts (plan \u00a76.10). Prelude skeleton: P4.39b fills it.",
+  "description": "A code database file of gEdit (one file in the codes folder of the settings folder): what the G and M codes, cycles and addresses of one control mean, and its templates. A file named like a built-in database is laid over it; a file with a new name extends another database. gEdit itself checks every entry; this description lets another editor point out typing mistakes while you edit the file by hand.",
   "type": "object",
-  "x-gedit-stub": "P4.39b",
-  "$defs": {}
+  "required": [
+    "dialect"
+  ],
+  "properties": {
+    "$schema": {
+      "title": "Schema",
+      "description": "The address of this description, so that an editor can check the file while you type. gEdit does not read it.",
+      "type": "string"
+    },
+    "dialect": {
+      "title": "Database id",
+      "description": "The id of the database, the same as the file name without .json, for example \"fanuc-lathe\". Profiles name it in their \"codes\".",
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "version": {
+      "title": "Format version",
+      "description": "The version of the file format; write 1.",
+      "type": "number",
+      "default": 1
+    },
+    "extends": {
+      "title": "Extends",
+      "description": "For a file with a new name: the id of the database it adds to, for example \"fanuc-lathe\". A file named like a built-in database has none.",
+      "type": "string",
+      "minLength": 1
+    },
+    "remove": {
+      "title": "Codes to remove",
+      "description": "Codes of the extended database this one does not have, as written there, for example [\"G81\"].",
+      "type": "array",
+      "items": {
+        "title": "Code",
+        "description": "One code to remove.",
+        "type": "string",
+        "pattern": "\\S"
+      }
+    },
+    "addresses": {
+      "title": "Addresses",
+      "description": "What each address means, by its letter, for example { \"X\": { \"label\": \"X axis\" } }.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "\\S"
+      },
+      "additionalProperties": {
+        "title": "Address",
+        "description": "One address: its label and an optional description.",
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "label": {
+            "title": "Label",
+            "description": "What the address is, in a few words.",
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": {
+            "title": "Description",
+            "description": "A sentence shown in hover.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "codes": {
+      "title": "Codes",
+      "description": "The codes of the database. In a file laid over another database, an entry for a code it already has changes only what it writes.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    },
+    "templates": {
+      "title": "Templates",
+      "description": "The templates of the database, at most 200. One with the id of a template below replaces it.",
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/template"
+      }
+    }
+  },
+  "$defs": {
+    "flag": {
+      "title": "On or off",
+      "description": "true, or false (the same as leaving it out).",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "entry": {
+      "title": "Code",
+      "description": "One G or M code, address keyword or cycle: what it is called, what it means, its words and what it switches. In a file laid over another code database, an entry for a code that one already has changes only the members it writes.",
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "title": "Code",
+          "description": "The code as written, for example \"G1\", \"M8\", \"G54.1\" or \"CYCL DEF 200\". Leading zeros do not matter: G01 is G1.",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "label": {
+          "title": "Label",
+          "description": "What the code is, in a few words, for example \"Linear move\". Needed for a code the database below does not have.",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "description": {
+          "title": "Description",
+          "description": "A sentence or two shown in hover, in your own words.",
+          "type": "string"
+        },
+        "aliases": {
+          "title": "Other spellings",
+          "description": "Other codes that mean the same, for example [\"G01\"] beside G1 when they differ in more than leading zeros.",
+          "type": "array",
+          "items": {
+            "title": "Spelling",
+            "description": "One other spelling.",
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "group": {
+          "title": "Group",
+          "description": "The code's group, for example \"motion\", \"plane\", \"feedmode\" or \"coolant\". Codes of one modal group replace each other.",
+          "type": "string"
+        },
+        "modal": {
+          "$ref": "#/$defs/flag",
+          "title": "Modal",
+          "description": "true when the code stays active until another code of its group replaces it."
+        },
+        "blocks": {
+          "title": "Written in two blocks",
+          "description": "2 for a cycle written in two blocks with the same code (G71 U… R… then G71 P… Q…).",
+          "enum": [
+            2
+          ]
+        },
+        "pitchFeed": {
+          "$ref": "#/$defs/flag",
+          "title": "Feed is a thread pitch",
+          "description": "true when the feed word of the block is a thread lead, so scaling feeds leaves the block alone."
+        },
+        "pitchFeedAmbiguous": {
+          "$ref": "#/$defs/flag",
+          "title": "Maybe a thread",
+          "description": "true when the same number is a threading cycle on another kind of machine or in another G-code system, so feed scaling refuses the block."
+        },
+        "tappingElsewhere": {
+          "$ref": "#/$defs/flag",
+          "title": "Maybe a tap",
+          "description": "With \"pitchFeedAmbiguous\": the other reading is a tap, so speed scaling leaves the block's speed as written."
+        },
+        "fNotFeed": {
+          "$ref": "#/$defs/flag",
+          "title": "F is a time",
+          "description": "true when the F word of the block is a dwell time, not a feed."
+        },
+        "tapping": {
+          "$ref": "#/$defs/flag",
+          "title": "Taps a thread",
+          "description": "true for a tapping cycle or mode: its speed and feed are tied by the pitch and are not scaled."
+        },
+        "wordsAreData": {
+          "$ref": "#/$defs/flag",
+          "title": "Words are data",
+          "description": "true when every word of the block is an argument or a value, not a feed, speed or position (G65, G10)."
+        },
+        "axisWords": {
+          "title": "Axis words are",
+          "description": "\"data\" when the axis words are values (G92, G52, G68), \"machine\" when they are positions in machine coordinates or a reference point (G53, G28).",
+          "enum": [
+            "data",
+            "machine"
+          ]
+        },
+        "frame": {
+          "title": "Frame",
+          "description": "\"open\" when the code opens a coordinate frame of its own (a tilt, a rotation, a shift), \"close\" when it closes the open frames of its group.",
+          "enum": [
+            "open",
+            "close"
+          ]
+        },
+        "frameWithoutValues": {
+          "title": "Without values",
+          "description": "\"close\" when the code written without any value closes the frames of its group (CYCLE800(), TRANS alone).",
+          "enum": [
+            "close"
+          ]
+        },
+        "frameZeroWords": {
+          "title": "Words whose zero closes",
+          "description": "The angle words that read as no tilt when all of them are zero, for example [\"A\", \"B\", \"C\"].",
+          "type": "array",
+          "items": {
+            "title": "Word",
+            "description": "An address or a keyword, for example F.",
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "frameEmptyCloses": {
+          "title": "Sub-block that closes when empty",
+          "description": "With \"frameZeroWords\": the sub-block number whose block closes the frames when it writes none of those words, for example \"1\" for CYCL DEF 19.1.",
+          "type": "string",
+          "pattern": "^\\s*\\d+\\s*$"
+        },
+        "frameIdentity": {
+          "title": "Value that means no frame",
+          "description": "With \"frameZeroWords\": the value at which those words read as no frame, for example \"1\" for a scaling factor. Left out: 0.",
+          "type": "string",
+          "pattern": "^\\s*[+-]?\\d+(?:\\.\\d+)?\\s*$"
+        },
+        "flow": {
+          "title": "Program flow",
+          "description": "What the code does to the order the blocks run in: a \"jump\", a \"label\", a \"branch\", \"else\", \"branch-end\", a \"loop\", \"loop-end\" or \"repeat\".",
+          "enum": [
+            "jump",
+            "label",
+            "branch",
+            "else",
+            "branch-end",
+            "loop",
+            "loop-end",
+            "repeat"
+          ]
+        },
+        "blank": {
+          "$ref": "#/$defs/flag",
+          "title": "Workpiece blank",
+          "description": "true when the block describes the workpiece blank for the control's graphics (BLK FORM)."
+        },
+        "positionsRotary": {
+          "$ref": "#/$defs/flag",
+          "title": "Turns the rotary axes",
+          "description": "true when the code turns the rotary axes to angles the program does not write (PLANE … TURN, G53.1, CYCLE800)."
+        },
+        "conflicts": {
+          "title": "Refused while",
+          "description": "The states in which the control refuses this code: tcp, radiusComp, lengthComp, cycle, surfaceSpeed, feedNotPerMinute, frame:<group> or code:<code>; a ! in front means \"refused unless\", for example [\"!frame:frame\"].",
+          "type": "array",
+          "items": {
+            "title": "State",
+            "description": "One state, for example \"radiusComp\" or \"code:G43.4\".",
+            "type": "string",
+            "pattern": "^!?(tcp|radiusComp|lengthComp|cycle|surfaceSpeed|feedNotPerMinute|frame:[A-Za-z][A-Za-z0-9]*|code:[A-Za-z][A-Za-z0-9.]*)$"
+          }
+        },
+        "alone": {
+          "$ref": "#/$defs/flag",
+          "title": "Stands alone",
+          "description": "true when the code has to stand in a block of its own."
+        },
+        "requires": {
+          "title": "Needs one of",
+          "description": "Addresses or keywords of which the block has to write at least one, for example [\"MOVE\", \"TURN\", \"STAY\"].",
+          "type": "array",
+          "items": {
+            "title": "Word",
+            "description": "An address or a keyword, for example F.",
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "usedBy": {
+          "title": "Read by the cycles",
+          "description": "On a cycle that only defines values: the codes of the cycles that read them when they are called, for example [\"CYCL DEF 21\", \"CYCL DEF 22\"] for the contour data of cycle 20.",
+          "type": "array",
+          "items": {
+            "title": "Word",
+            "description": "An address or a keyword, for example F.",
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "ownWords": {
+          "title": "Its own words",
+          "description": "Addresses that belong to the code when they stand behind it in its block, for example [\"F\"] for M128 F800.",
+          "type": "array",
+          "items": {
+            "title": "Word",
+            "description": "An address or a keyword, for example F.",
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "contour": {
+          "title": "Contour",
+          "description": "\"open\" and \"close\" mark the blocks that describe a contour a later cycle machines; they do not move.",
+          "enum": [
+            "open",
+            "close"
+          ]
+        },
+        "pole": {
+          "title": "Pole",
+          "description": "\"set\" on the code whose axis words are the circle centre or pole (CC), \"use\" on the codes that move around it.",
+          "enum": [
+            "set",
+            "use"
+          ]
+        },
+        "call": {
+          "$ref": "#/$defs/flag",
+          "title": "Calls a program",
+          "description": "true when the code runs another program or section and comes back (G65, CALL LBL)."
+        },
+        "blockFeed": {
+          "$ref": "#/$defs/flag",
+          "title": "Feed for this block only",
+          "description": "true when the feed word of the block is the feed of that block only."
+        },
+        "shift": {
+          "$ref": "#/$defs/flag",
+          "title": "Shifts the coordinates",
+          "description": "true when the axis words shift or set the program's coordinate system (G52, G92, TRANS)."
+        },
+        "shiftZeroIsNone": {
+          "$ref": "#/$defs/flag",
+          "title": "All zero is no shift",
+          "description": "With \"shift\" (or a data code of the offset group): a block whose every axis value is a written zero sets no shift."
+        },
+        "verify": {
+          "$ref": "#/$defs/flag",
+          "title": "Not confirmed",
+          "description": "true for an entry that is not confirmed yet; it is not shown in hover."
+        },
+        "review": {
+          "title": "Review",
+          "description": "\"pending\" for an entry written from the manuals and not reviewed yet. It changes nothing gEdit shows or computes.",
+          "enum": [
+            "pending"
+          ]
+        },
+        "params": {
+          "title": "Words of the code",
+          "description": "The words that belong to the code, in the order a form shows them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/param"
+          }
+        },
+        "sets": {
+          "$ref": "#/$defs/sets"
+        },
+        "expand": {
+          "$ref": "#/$defs/expand"
+        },
+        "dwell": {
+          "$ref": "#/$defs/dwell"
+        },
+        "orient": {
+          "$ref": "#/$defs/flag",
+          "title": "Oriented spindle stop",
+          "description": "true when the code stops the spindle at an angle given by its own value (SPOS=)."
+        },
+        "machineType": {
+          "title": "Machine type",
+          "description": "\"mill\" or \"lathe\" where one code database serves both and the code is for one of them only; only the cycle form reads it.",
+          "enum": [
+            "mill",
+            "lathe"
+          ]
+        },
+        "replace": {
+          "title": "Replace whole",
+          "description": "In a file laid over another code database: true replaces that database's entry whole instead of changing only the members written here.",
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "replace": {
+                "const": true
+              }
+            },
+            "required": [
+              "replace"
+            ]
+          },
+          "then": {
+            "required": [
+              "label"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "wordsAreData": {
+                "const": true
+              }
+            },
+            "required": [
+              "wordsAreData"
+            ]
+          },
+          "then": {
+            "properties": {
+              "axisWords": {
+                "const": "data"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "frameEmptyCloses"
+            ]
+          },
+          "then": {
+            "required": [
+              "frameZeroWords"
+            ],
+            "properties": {
+              "frameZeroWords": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "frameIdentity"
+            ]
+          },
+          "then": {
+            "required": [
+              "frameZeroWords"
+            ],
+            "properties": {
+              "frameZeroWords": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "shiftZeroIsNone": {
+                "const": true
+              }
+            },
+            "required": [
+              "shiftZeroIsNone"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "shift": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "shift"
+                ]
+              },
+              {
+                "required": [
+                  "axisWords",
+                  "group"
+                ],
+                "properties": {
+                  "axisWords": {
+                    "const": "data"
+                  },
+                  "group": {
+                    "pattern": "^\\s*offset\\s*$"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "positionsRotary": {
+                  "const": true
+                }
+              },
+              "required": [
+                "positionsRotary"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "items": {
+                  "properties": {
+                    "keepsRotary": {
+                      "not": {
+                        "const": true
+                      }
+                    },
+                    "turnsRotary": {
+                      "not": {
+                        "const": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "frame": {
+                  "const": "open"
+                }
+              },
+              "required": [
+                "frame"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "items": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "frameZero"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "frameCloses"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "shift": {
+                  "const": true
+                }
+              },
+              "required": [
+                "shift"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "items": {
+                  "not": {
+                    "required": [
+                      "toolOffsetValues"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "required": [
+                "blocks"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "items": {
+                  "not": {
+                    "required": [
+                      "block"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "required": [
+                "expand"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "items": {
+                  "not": {
+                    "required": [
+                      "expandRole"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "expand"
+            ]
+          },
+          "then": {
+            "required": [
+              "sets"
+            ],
+            "properties": {
+              "sets": {
+                "required": [
+                  "cycle"
+                ],
+                "properties": {
+                  "cycle": {
+                    "enum": [
+                      "start",
+                      "define"
+                    ]
+                  }
+                }
+              },
+              "tapping": {
+                "not": {
+                  "const": true
+                }
+              },
+              "pitchFeed": {
+                "not": {
+                  "const": true
+                }
+              },
+              "pitchFeedAmbiguous": {
+                "not": {
+                  "const": true
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "param": {
+      "title": "Parameter",
+      "description": "One word that belongs to the code, for example Z of G81 or Q201 of CYCL DEF 200: its address, its label and how gEdit reads its value.",
+      "type": "object",
+      "required": [
+        "address",
+        "label"
+      ],
+      "properties": {
+        "address": {
+          "title": "Address",
+          "description": "The address letter or name of the word, for example \"Z\", \"Q201\" or \"RTP\".",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "label": {
+          "title": "Label",
+          "description": "What the word means, in a few words, for example \"Depth\".",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "required": {
+          "$ref": "#/$defs/flag",
+          "title": "Required",
+          "description": "true when the code needs this word in its block."
+        },
+        "min": {
+          "title": "Lowest value",
+          "description": "The lowest value the word may have.",
+          "type": "number"
+        },
+        "max": {
+          "title": "Highest value",
+          "description": "The highest value the word may have.",
+          "type": "number"
+        },
+        "unit": {
+          "title": "How the value is read",
+          "description": "Where the value is read differently from its address: \"length\", \"angle\", \"feedPerMin\", \"feedPerRev\", \"dwell\", \"increment\" (always steps of the least increment, with or without a point) or \"count\" (a plain number nothing converts, such as a repeat count).",
+          "enum": [
+            "length",
+            "angle",
+            "feedPerMin",
+            "feedPerRev",
+            "dwell",
+            "increment",
+            "count"
+          ]
+        },
+        "decimals": {
+          "$ref": "#/$defs/flag",
+          "title": "Count with decimals",
+          "description": "With \"unit\": \"count\" only: the count may have decimals, for example a weight or a direction."
+        },
+        "position": {
+          "title": "What it is to a shift",
+          "description": "What the value is when the program is shifted: \"tool-axis\" (a level on the tool axis, such as a reference plane or a depth), \"none\" (no position: a distance, a feed, a count), \"other\" (another position: the block is refused) or \"mode\" (a choice that changes how the other values are read). Left out: not reviewed, and a shift refuses the block.",
+          "enum": [
+            "tool-axis",
+            "none",
+            "other",
+            "mode"
+          ]
+        },
+        "axis": {
+          "title": "Coordinate of an axis",
+          "description": "The axis letter when the value is a coordinate of that axis, for example the intermediate point I1 of a CIP arc is a coordinate of X.",
+          "type": "string",
+          "pattern": "^\\s*[A-Za-z]\\s*$"
+        },
+        "programNumber": {
+          "title": "Names a program",
+          "description": "\"plain\" when the value is a program number (G65 P2000), \"packed\" when it may also carry a repeat count in front of a four-digit program number (M98 P52000).",
+          "enum": [
+            "plain",
+            "packed"
+          ]
+        },
+        "inPlane": {
+          "title": "Angle or side in the plane",
+          "description": "\"angle\" when the value turns what the cycle cuts in the working plane, \"side\" when it names a side or corner. Rotate and mirror then refuse the cycle.",
+          "enum": [
+            "angle",
+            "side"
+          ]
+        },
+        "keepsRotary": {
+          "$ref": "#/$defs/flag",
+          "title": "0 keeps the rotary axes",
+          "description": "On a code that turns the rotary axes: written as 0, this word keeps them where they are (CYCLE800 _DIR)."
+        },
+        "turnsRotary": {
+          "$ref": "#/$defs/flag",
+          "title": "Turns the rotary axes",
+          "description": "On a code that turns the rotary axes: it turns them only in a block that writes this word."
+        },
+        "frameZero": {
+          "title": "Value that means no frame",
+          "description": "On a call that opens a frame: \"zero\" when the call opens no frame while this word is 0, \"onesDigit\" when it opens none while the ones digit is 0.",
+          "enum": [
+            "zero",
+            "onesDigit"
+          ]
+        },
+        "frameCloses": {
+          "title": "Value that closes the frames",
+          "description": "On a call that opens a frame: written exactly as this text, the word closes the frames of the code's group, for example \"\\\"0\\\"\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "signOf": {
+          "title": "Its sign is a direction",
+          "description": "\"next-move\" when the sign of the value is the direction of the move that follows (Okuma G75/G76 L). A mirror then refuses the block.",
+          "enum": [
+            "next-move"
+          ]
+        },
+        "lengthAlong": {
+          "title": "Length along an axis",
+          "description": "The axis letter when the value is a length along that axis (a size, a diameter, a taper), or \"plane\" for a length in the working plane. Multiplying that axis then refuses the block.",
+          "type": "string",
+          "pattern": "^\\s*(?:plane|[A-Za-z])\\s*$"
+        },
+        "lengthInForce": {
+          "$ref": "#/$defs/flag",
+          "title": "Length stays in force",
+          "description": "With \"lengthAlong\" only: the value stays in force for the following blocks until it is written as 0 (RNDM)."
+        },
+        "toolOffsetValues": {
+          "title": "Values that write a tool offset",
+          "description": "On a code that sets an offset (G10 L): the values of this word, as whole numbers written as text, with which the block writes a tool offset instead of a work offset, for example [\"1\", \"10\", \"11\"].",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "title": "Value",
+            "description": "A whole number written as text.",
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "twin": {
+          "title": "Same depth the other way",
+          "description": "The address of the other word of this code that gives the same depth the other way, for example DP and DPR. Both name each other; one is a level on the tool axis, the other a distance.",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "expandRole": {
+          "title": "Role in the expansion",
+          "description": "What the word is to the expansion of a drilling cycle into plain moves and to the time estimate, for example \"depth\", \"peck\" or \"feed\". Only on a code with \"expand\".",
+          "enum": [
+            "position",
+            "r-plane",
+            "surface",
+            "clearance",
+            "depth",
+            "depth-relative",
+            "return",
+            "return-relative",
+            "peck",
+            "first-peck",
+            "first-peck-relative",
+            "peck-decrement",
+            "peck-minimum",
+            "chip-breaks",
+            "chip-retract",
+            "advance",
+            "dwell",
+            "dwell-top",
+            "feed",
+            "feed-out",
+            "repeat",
+            "variant",
+            "spindle-direction",
+            "orient-angle",
+            "lift-off-first",
+            "lift-off-second",
+            "lift-off-axis",
+            "default"
+          ]
+        },
+        "block": {
+          "title": "Block of a two-block cycle",
+          "description": "On a code with \"blocks\": 2 only: the block of the cycle the word belongs to, 1 or 2. Left out: both blocks.",
+          "enum": [
+            1,
+            2
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "decimals": {
+                "const": true
+              }
+            },
+            "required": [
+              "decimals"
+            ]
+          },
+          "then": {
+            "required": [
+              "unit"
+            ],
+            "properties": {
+              "unit": {
+                "const": "count"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "lengthAlong"
+            ]
+          },
+          "then": {
+            "properties": {
+              "position": {
+                "const": "none"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "lengthInForce": {
+                "const": true
+              }
+            },
+            "required": [
+              "lengthInForce"
+            ]
+          },
+          "then": {
+            "required": [
+              "lengthAlong"
+            ]
+          }
+        }
+      ]
+    },
+    "sets": {
+      "title": "What the code switches",
+      "description": "What the code switches on or off for the following blocks, as the modal state reads it, for example { \"motion\": \"feed\", \"path\": \"arc\", \"arcDirection\": \"cw\" }.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "feedUnit": {
+          "title": "Feed unit",
+          "description": "How the following feeds are read.",
+          "enum": [
+            "per-minute",
+            "per-rev",
+            "per-tooth",
+            "inverse-time",
+            "travel-time"
+          ]
+        },
+        "speedUnit": {
+          "title": "Speed unit",
+          "description": "\"surface\" when the word's own value is a cutting speed (SVC=), \"rpm\" for a spindle speed.",
+          "enum": [
+            "rpm",
+            "surface"
+          ]
+        },
+        "distance": {
+          "title": "Distance mode",
+          "description": "Absolute or incremental positions from this code on.",
+          "enum": [
+            "absolute",
+            "incremental"
+          ]
+        },
+        "units": {
+          "title": "Units",
+          "description": "The program's units from this code on.",
+          "enum": [
+            "mm",
+            "inch"
+          ]
+        },
+        "plane": {
+          "title": "Working plane",
+          "description": "The working plane from this code on.",
+          "enum": [
+            "XY",
+            "ZX",
+            "YZ"
+          ]
+        },
+        "cycle": {
+          "title": "Cycle",
+          "description": "\"start\" or \"cancel\" a cycle; \"define\", \"call\" and \"call-modal\" for a control that defines a cycle once and calls it later; \"call-modal-next\" for a word that makes the cycle behind it modal (MCALL).",
+          "enum": [
+            "start",
+            "cancel",
+            "define",
+            "call",
+            "call-modal",
+            "call-modal-next"
+          ]
+        },
+        "speedLimit": {
+          "title": "Speed limit",
+          "description": "true when the S word of this block is a spindle speed limit, not a speed.",
+          "type": "boolean"
+        },
+        "speedLimitBound": {
+          "title": "Which limit",
+          "description": "With \"speedLimit\" only: \"upper\" (a clamp) or \"lower\" (a minimum).",
+          "enum": [
+            "upper",
+            "lower"
+          ]
+        },
+        "diameter": {
+          "title": "Diameter programming",
+          "description": "Switches diameter programming on, off, or for absolute positions only.",
+          "enum": [
+            "on",
+            "off",
+            "absolute-only"
+          ]
+        },
+        "tcp": {
+          "title": "Tool centre point control",
+          "description": "Switches tool centre point control on or off.",
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "planeFromAxisWord": {
+          "title": "Plane from the axis letter",
+          "description": "true when a bare axis letter in the block names the tool axis and so the working plane (TOOL CALL 1 Z).",
+          "type": "boolean"
+        },
+        "spindle": {
+          "title": "Spindle",
+          "description": "Starts or stops the spindle the plain S word drives.",
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "toolSpindle": {
+          "title": "Driven tool spindle",
+          "description": "Starts or stops a driven tool's spindle.",
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "motion": {
+          "title": "Motion",
+          "description": "\"rapid\" or \"feed\": how the code moves.",
+          "enum": [
+            "rapid",
+            "feed"
+          ]
+        },
+        "radiusComp": {
+          "title": "Radius compensation",
+          "description": "Switches cutter or nose radius compensation on or off.",
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "lengthComp": {
+          "title": "Length compensation",
+          "description": "Switches the tool length offset on or off.",
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "exitSpeed": {
+          "title": "Speed after it",
+          "description": "\"zero\" when leaving this code sets the spindle speed to zero.",
+          "enum": [
+            "zero"
+          ]
+        },
+        "language": {
+          "title": "Language",
+          "description": "From this code on the control reads its ISO dialect (\"iso\") or its own language (\"native\").",
+          "enum": [
+            "iso",
+            "native"
+          ]
+        },
+        "path": {
+          "title": "Path",
+          "description": "\"arc\" for an arc, \"cycle\" when each block is a whole pass of its own. Left out: a straight line.",
+          "enum": [
+            "arc",
+            "cycle"
+          ]
+        },
+        "arcDirection": {
+          "title": "Arc direction",
+          "description": "With \"path\": \"arc\" only: clockwise (\"cw\", G2) or counter-clockwise (\"ccw\", G3), as the control defines it.",
+          "enum": [
+            "cw",
+            "ccw"
+          ]
+        },
+        "compSide": {
+          "title": "Compensation side",
+          "description": "With \"radiusComp\": \"on\" only: the side the tool keeps to, seen along the direction of travel.",
+          "enum": [
+            "left",
+            "right"
+          ]
+        },
+        "cycleReturn": {
+          "title": "Cycle return level",
+          "description": "The level a drilling cycle returns to after each hole: \"initial\" (G98) or \"r-plane\" (G99).",
+          "enum": [
+            "initial",
+            "r-plane"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "speedLimitBound"
+            ]
+          },
+          "then": {
+            "required": [
+              "speedLimit"
+            ],
+            "properties": {
+              "speedLimit": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "arcDirection"
+            ]
+          },
+          "then": {
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "const": "arc"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "compSide"
+            ]
+          },
+          "then": {
+            "required": [
+              "radiusComp"
+            ],
+            "properties": {
+              "radiusComp": {
+                "const": "on"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "level": {
+      "title": "Level",
+      "description": "\"start\", \"r-plane\", \"clearance\", \"depth\" or \"return\".",
+      "enum": [
+        "start",
+        "r-plane",
+        "clearance",
+        "depth",
+        "return"
+      ]
+    },
+    "expandValue": {
+      "title": "Value",
+      "description": "Where a value comes from: a word of the cycle by its role, { \"role\": \"peck\" }, or a field of the form, { \"form\": \"peckRetract\" }.",
+      "type": "object",
+      "properties": {
+        "role": {
+          "title": "Role",
+          "description": "The role of the word that gives the value.",
+          "$ref": "#/$defs/param/properties/expandRole"
+        },
+        "form": {
+          "title": "Form field",
+          "description": "\"peckRetract\" or \"peckClearance\", asked in the form and filled in from the machine.",
+          "enum": [
+            "peckRetract",
+            "peckClearance"
+          ]
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "role"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "role": {}
+          }
+        },
+        {
+          "required": [
+            "form"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "form": {}
+          }
+        }
+      ]
+    },
+    "expandStep": {
+      "title": "Step",
+      "description": "One step of one hole, in the order the control runs it, for example { \"step\": \"feed\", \"to\": \"depth\" }.",
+      "type": "object",
+      "required": [
+        "step"
+      ],
+      "properties": {
+        "step": {
+          "title": "Kind of step",
+          "description": "\"rapid\", \"feed\", \"pecks\", \"dwell\", \"spindle-stop\", \"spindle-restore\", \"orient\" or \"lift-off\".",
+          "enum": [
+            "rapid",
+            "feed",
+            "pecks",
+            "dwell",
+            "spindle-stop",
+            "spindle-restore",
+            "orient",
+            "lift-off"
+          ]
+        },
+        "to": {
+          "$ref": "#/$defs/level",
+          "title": "To",
+          "description": "For \"rapid\" and \"feed\": the level the move goes to."
+        },
+        "feed": {
+          "title": "At which feed",
+          "description": "For \"feed\": \"feed\" (the in-feed, the default) or \"feed-out\".",
+          "enum": [
+            "feed",
+            "feed-out"
+          ]
+        },
+        "mode": {
+          "title": "Pecking",
+          "description": "For \"pecks\": \"chip-break\" (back a little after each peck), \"full-retract\" (back out after each peck) or \"universal\" (some chip breaks, then a full retract).",
+          "enum": [
+            "chip-break",
+            "full-retract",
+            "universal"
+          ]
+        },
+        "retract": {
+          "$ref": "#/$defs/expandValue",
+          "title": "Chip break retract",
+          "description": "For chip-break and universal pecking: how far back after a peck."
+        },
+        "back": {
+          "title": "Back",
+          "description": "For full-retract and universal pecking: the level a full retract goes back to. For \"lift-off\": true for the same move the other way."
+        },
+        "reentry": {
+          "$ref": "#/$defs/expandValue",
+          "title": "Down again to",
+          "description": "For full-retract and universal pecking: how far above the last bottom the tool comes back down at rapid."
+        },
+        "retractAt": {
+          "title": "Retract at",
+          "description": "For \"pecks\": a retract moves at \"rapid\" (the default) or at \"feed-out\".",
+          "enum": [
+            "rapid",
+            "feed-out"
+          ]
+        },
+        "at": {
+          "title": "Where",
+          "description": "For \"dwell\": at the \"bottom\" or at the \"top\".",
+          "enum": [
+            "bottom",
+            "top"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "step": {
+                "const": "rapid"
+              }
+            },
+            "required": [
+              "step"
+            ]
+          },
+          "then": {
+            "required": [
+              "to"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "step": {},
+              "to": {}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "step": {
+                "const": "feed"
+              }
+            },
+            "required": [
+              "step"
+            ]
+          },
+          "then": {
+            "required": [
+              "to"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "step": {},
+              "to": {},
+              "feed": {}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "step": {
+                "const": "pecks"
+              }
+            },
+            "required": [
+              "step"
+            ]
+          },
+          "then": {
+            "required": [
+              "mode"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "step": {},
+              "mode": {},
+              "retract": {},
+              "back": {
+                "$ref": "#/$defs/level"
+              },
+              "reentry": {},
+              "retractAt": {}
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "const": "chip-break"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "retract"
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "back"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reentry"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "const": "full-retract"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "back",
+                    "reentry"
+                  ],
+                  "not": {
+                    "required": [
+                      "retract"
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "const": "universal"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "retract",
+                    "back",
+                    "reentry"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "step": {
+                "const": "dwell"
+              }
+            },
+            "required": [
+              "step"
+            ]
+          },
+          "then": {
+            "required": [
+              "at"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "step": {},
+              "at": {}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "step": {
+                "const": "spindle-stop"
+              }
+            },
+            "required": [
+              "step"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "step": {}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "step": {
+                "const": "spindle-restore"
+              }
+            },
+            "required": [
+              "step"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "step": {}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "step": {
+                "const": "orient"
+              }
+            },
+            "required": [
+              "step"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "step": {}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "step": {
+                "const": "lift-off"
+              }
+            },
+            "required": [
+              "step"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "step": {},
+              "back": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "expandSchema": {
+      "title": "Expansion",
+      "description": "How one drilling cycle runs, as steps: what it is, the steps of one hole, where it returns to and what it leaves in force.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "steps",
+        "returnBy",
+        "leaves"
+      ],
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "description": "What the messages and the statistics call the cycle: \"drill\", \"peck\" or \"bore\".",
+          "enum": [
+            "drill",
+            "peck",
+            "bore"
+          ]
+        },
+        "steps": {
+          "title": "Steps",
+          "description": "The steps of one hole, at least one, and one of them reaches the depth.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/expandStep"
+          }
+        },
+        "returnBy": {
+          "title": "Return level from",
+          "description": "\"code\": the level the return code in force names (G98/G99); \"role\": the word with the role return.",
+          "enum": [
+            "code",
+            "role"
+          ]
+        },
+        "relativeDepth": {
+          "title": "Relative depth",
+          "description": "How a depth measured from the surface is read: \"signed\" (surface plus the value) or \"into-material\" (surface minus the value, without its sign).",
+          "enum": [
+            "signed",
+            "into-material"
+          ]
+        },
+        "leaves": {
+          "title": "What it leaves in force",
+          "description": "What the blocks after the cycle find in force, for example { \"motion\": \"before\", \"feed\": \"cycle\" }.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "motion",
+            "feed"
+          ],
+          "properties": {
+            "motion": {
+              "title": "Motion",
+              "description": "\"before\": the motion in force before the cycle; \"cycle\": what the cycle left.",
+              "enum": [
+                "before",
+                "cycle"
+              ]
+            },
+            "feed": {
+              "title": "Feed",
+              "description": "\"before\": the feed in force before the cycle; \"cycle\": what the cycle left.",
+              "enum": [
+                "before",
+                "cycle"
+              ]
+            }
+          }
+        },
+        "defaults": {
+          "title": "Default values",
+          "description": "For each word with the role default: the value the expansion understands, as text, or a list of values that mean the same, for example { \"_AXN\": [\"0\", \"3\"] }.",
+          "type": "object",
+          "additionalProperties": {
+            "title": "Value",
+            "description": "A value written as text, or a list of them.",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "\\S"
+                }
+              }
+            ]
+          }
+        },
+        "feedOutZero": {
+          "title": "A feed out of 0 means",
+          "description": "\"feed\": a feed-out value of 0 means the moves out run at the in-feed.",
+          "enum": [
+            "feed"
+          ]
+        }
+      }
+    },
+    "expand": {
+      "title": "Expansion into plain moves",
+      "description": "On a drilling cycle: how it runs, as steps, so it can be written out as plain moves and timed. Either one schema, or { \"by\": …, \"cases\": … } when one word picks the way it runs.",
+      "type": "object",
+      "properties": {
+        "by": {
+          "title": "Picked by",
+          "description": "The address of the word with the role variant whose value picks the case.",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "cases": {
+          "title": "Cases",
+          "description": "For each value of that word, as written, the schema of the cycle, for example { \"0\": {…}, \"1\": {…} }.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/expandSchema"
+          }
+        }
+      },
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "by"
+            ]
+          },
+          {
+            "required": [
+              "cases"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "by",
+          "cases"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "by": {},
+          "cases": {}
+        }
+      },
+      "else": {
+        "$ref": "#/$defs/expandSchema"
+      }
+    },
+    "dwell": {
+      "title": "How a dwell is written",
+      "description": "On a dwell code: the word that takes seconds, the one that takes the least time increments, the one that takes spindle revolutions, or the lines a dwell is written as, with {s} for the seconds.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "seconds": {
+          "title": "Seconds",
+          "description": "The address of the word that takes seconds, for example \"X\".",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "increments": {
+          "title": "Least time increments",
+          "description": "The address of the word that takes the least time increments, for example \"P\".",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "revolutions": {
+          "title": "Revolutions",
+          "description": "The address of the word that takes spindle revolutions, for example \"S\".",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "lines": {
+          "title": "Lines",
+          "description": "The lines a dwell is written as, one of them with {s} for the seconds, for example [\"CYCL DEF 9.0 DWELL TIME\", \"CYCL DEF 9.1 DWELL {s}\"].",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "title": "Line",
+            "description": "One line.",
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "template": {
+      "title": "Template",
+      "description": "A block or a few blocks you insert from the Insert tab: plain NC text with {{field}} places, and a form for the fields.",
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "group",
+        "body"
+      ],
+      "properties": {
+        "id": {
+          "title": "Id",
+          "description": "Lower-case letters, digits and -, at most 64, not starting or ending with -, for example \"program-start\". A template with the id of one in the database below replaces it.",
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "label": {
+          "title": "Label",
+          "description": "The name on the Insert tab, one line of at most 80 characters.",
+          "type": "string",
+          "pattern": "^(?:\\s*\\S(?:[^\\r\\n]{0,78}\\S)?\\s*)$"
+        },
+        "group": {
+          "title": "Group",
+          "description": "The group on the Insert tab, one line of at most 40 characters, for example \"Drilling\".",
+          "type": "string",
+          "pattern": "^(?:\\s*\\S(?:[^\\r\\n]{0,38}\\S)?\\s*)$"
+        },
+        "description": {
+          "title": "Description",
+          "description": "A short description, one line of at most 500 characters.",
+          "type": "string",
+          "pattern": "^(?:|\\s*\\S(?:[^\\r\\n]{0,498}\\S)?\\s*)$"
+        },
+        "toolbar": {
+          "title": "Button",
+          "description": "true puts a button on the Insert tab; the others are in the group's \"More…\" list.",
+          "type": "boolean"
+        },
+        "snippet": {
+          "title": "Snippet",
+          "description": "true for a body in snippet form (${1:Z-5.}) with no form and no fields.",
+          "type": "boolean"
+        },
+        "body": {
+          "title": "Body",
+          "description": "The NC text, with {{id}} for a field, {{N}} at the start of a line for a block number, {{sys.date}}, {{sys.time}}, {{sys.file}} or {{sys.stem}}, and \\{{ for a literal {{. At most 200 lines.",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "params": {
+          "title": "Fields",
+          "description": "The fields of the form, in form order, at most 40.",
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "$ref": "#/$defs/templateParam"
+          }
+        },
+        "machineType": {
+          "title": "Machine type",
+          "description": "\"mill\" or \"lathe\": only programs of that machine type see the template. Left out: every program of the database.",
+          "enum": [
+            "mill",
+            "lathe"
+          ]
+        },
+        "review": {
+          "title": "Review",
+          "description": "\"pending\" for a template that is not reviewed yet; the Insert tab says so.",
+          "enum": [
+            "pending"
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "snippet": {
+            "const": true
+          }
+        },
+        "required": [
+          "snippet"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    "templateParam": {
+      "title": "Template field",
+      "description": "One field of the template's form: its id, its label, what it collects and how the value is written.",
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "title": "Id",
+          "description": "The name the body uses as {{id}}: a lower-case letter or _, then letters, digits or _, at most 32. Not sys, pi or a formula function.",
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]{0,31}$"
+        },
+        "label": {
+          "title": "Label",
+          "description": "What the form shows beside the field, one line of at most 80 characters.",
+          "type": "string",
+          "pattern": "^(?:\\s*\\S(?:[^\\r\\n]{0,78}\\S)?\\s*)$"
+        },
+        "type": {
+          "title": "Type",
+          "description": "\"number\", \"integer\", \"text\", \"choice\" or \"formula\" (computed from the other fields).",
+          "enum": [
+            "number",
+            "integer",
+            "text",
+            "choice",
+            "formula"
+          ]
+        },
+        "help": {
+          "title": "Help",
+          "description": "A short help text for the field, one line of at most 300 characters.",
+          "type": "string",
+          "pattern": "^(?:|\\s*\\S(?:[^\\r\\n]{0,298}\\S)?\\s*)$"
+        },
+        "required": {
+          "title": "Required",
+          "description": "true when the field may not be left empty. Not on a formula.",
+          "type": "boolean"
+        },
+        "min": {
+          "title": "Lowest value",
+          "description": "For a number or an integer: the lowest value allowed.",
+          "type": "number"
+        },
+        "max": {
+          "title": "Highest value",
+          "description": "For a number or an integer: the highest value allowed.",
+          "type": "number"
+        },
+        "default": {
+          "title": "Default",
+          "description": "The value the form starts with. A number may be written as text, for example \"0.5\". Not on a formula.",
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "choices": {
+          "title": "Choices",
+          "description": "For a choice: the options, 1 to 50, each with its own value.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/templateChoice"
+          }
+        },
+        "prefix": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^[^\\r\\n{}\\u0000-\\u0008\\u000b-\\u001f]*$",
+          "title": "Written before",
+          "description": "Written in front of the value, usually the address, for example \"Z\" or \"Q201=\"; at most 16 characters without { or }. An empty optional value drops it."
+        },
+        "suffix": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^[^\\r\\n{}\\u0000-\\u0008\\u000b-\\u001f]*$",
+          "title": "Written after",
+          "description": "Written behind the value; at most 16 characters without { or }."
+        },
+        "decimals": {
+          "title": "Decimals",
+          "description": "For a number or a formula: \"as-entered\", \"min1\" (at least a decimal point, 10 becomes 10.) or a fixed count of decimals from 0 to 6.",
+          "anyOf": [
+            {
+              "enum": [
+                "as-entered",
+                "min1"
+              ]
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6
+            }
+          ]
+        },
+        "digits": {
+          "title": "Digits",
+          "description": "For an integer or a formula: pad with zeros to this many digits, 1 to 9 (42 becomes 0042).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9
+        },
+        "plusSign": {
+          "title": "Plus sign",
+          "description": "true writes + before a positive number.",
+          "type": "boolean"
+        },
+        "uppercase": {
+          "title": "Upper case",
+          "description": "For a text: true refuses a value that is not upper case.",
+          "type": "boolean"
+        },
+        "comment": {
+          "title": "As a comment",
+          "description": "For a text: true writes it inside the profile's comment marks.",
+          "type": "boolean"
+        },
+        "maxLength": {
+          "title": "Longest text",
+          "description": "For a text: at most this many characters, 1 to 200. A longer value is refused, never cut.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "charset": {
+          "title": "Allowed characters",
+          "description": "For a text: \"no-spaces\", \"letters-digits\" (A to Z and 0 to 9 only) or \"name\" (a letter, then letters and digits).",
+          "enum": [
+            "no-spaces",
+            "letters-digits",
+            "name"
+          ]
+        },
+        "unit": {
+          "title": "Unit",
+          "description": "For a number, an integer or a formula: the unit shown beside the field, for example \"mm/min\"; at most 16 characters. It is only shown, never written.",
+          "type": "string",
+          "pattern": "^(?:|\\s*[^\\s\\u0000-\\u0008\\u000b-\\u001f](?:[^\\r\\n\\u0000-\\u0008\\u000b-\\u001f]{0,14}[^\\s\\u0000-\\u0008\\u000b-\\u001f])?\\s*)$"
+        },
+        "remember": {
+          "title": "Remember",
+          "description": "true keeps the last value for the next time. Not on a formula.",
+          "type": "boolean"
+        },
+        "formula": {
+          "title": "Formula",
+          "description": "For a formula: the calculation over the other fields, for example \"s * z * fz\".",
+          "type": "string"
+        },
+        "hidden": {
+          "title": "Hidden",
+          "description": "For a formula: true leaves it out of the form; its value is still written.",
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "min"
+                ]
+              },
+              {
+                "required": [
+                  "max"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "number",
+                  "integer"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "integer"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "min": {
+                "type": "integer"
+              },
+              "max": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "choice"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "choices"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "choices"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "decimals"
+            ]
+          },
+          "then": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "number",
+                  "formula"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "digits"
+            ]
+          },
+          "then": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "integer",
+                  "formula"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "plusSign": {
+                "const": true
+              }
+            },
+            "required": [
+              "plusSign"
+            ]
+          },
+          "then": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "number",
+                  "integer",
+                  "formula"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "uppercase": {
+                "const": true
+              }
+            },
+            "required": [
+              "uppercase"
+            ]
+          },
+          "then": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "comment": {
+                "const": true
+              }
+            },
+            "required": [
+              "comment"
+            ]
+          },
+          "then": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "maxLength"
+            ]
+          },
+          "then": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "charset"
+            ]
+          },
+          "then": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "unit"
+            ],
+            "properties": {
+              "unit": {
+                "pattern": "\\S"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "number",
+                  "integer",
+                  "formula"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "formula"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "formula"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "required"
+                  ]
+                },
+                {
+                  "required": [
+                    "default"
+                  ]
+                },
+                {
+                  "required": [
+                    "remember"
+                  ]
+                }
+              ]
+            }
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "formula"
+                  ]
+                },
+                {
+                  "required": [
+                    "hidden"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "text"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[^\\r\\n\\u0000-\\u0008\\u000b-\\u001f]*$"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "templateChoice": {
+      "title": "Choice",
+      "description": "One option: the label shown and the value written.",
+      "type": "object",
+      "required": [
+        "label",
+        "value"
+      ],
+      "properties": {
+        "label": {
+          "title": "Label",
+          "description": "What the form shows, one line of at most 80 characters.",
+          "type": "string",
+          "pattern": "^(?:\\s*\\S(?:[^\\r\\n]{0,78}\\S)?\\s*)$"
+        },
+        "value": {
+          "title": "Value",
+          "description": "What is written into the program, one line of at most 80 characters without { or }. A number is written as it is.",
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "maxLength": 80,
+              "pattern": "^[^\\r\\n{}\\u0000-\\u0008\\u000b-\\u001f]*$"
+            }
+          ]
+        }
+      }
+    }
+  }
 }

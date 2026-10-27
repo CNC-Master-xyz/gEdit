@@ -122,7 +122,9 @@ function readConflicts(raw: unknown, path: string, report: (p: CodeDbProblem) =>
   }
   const out: string[] = [];
   raw.forEach((item, i) => {
-    const text = str(item);
+    // P4.39b (the agreement with codes.schema.json): read exactly as written, as the scripts
+    // compare it; " tcp" with a blank was read as "tcp" here and as nothing by Python.
+    const text = typeof item === 'string' && item !== '' ? item : undefined;
     const name = text?.startsWith('!') ? text.slice(1) : text;
     const ok =
       name !== undefined &&
@@ -196,8 +198,10 @@ function oneOf<T extends string>(
   report: (p: CodeDbProblem) => void,
 ): T | undefined {
   if (raw === undefined) return undefined;
-  const text = str(raw);
-  if (text !== undefined && (allowed as readonly string[]).includes(text)) return text as T;
+  // P4.39b (the agreement with codes.schema.json): the value as written. The scripts read the
+  // file's own text (`param.get("position") == "none"`), so a value with blanks around it
+  // (" none") was "none" here and nothing there; now it is reported here too.
+  if (typeof raw === 'string' && (allowed as readonly string[]).includes(raw)) return raw as T;
   report({ path, message: `has to be one of ${allowed.join(', ')}` });
   return undefined;
 }
@@ -306,9 +310,14 @@ function readParams(
     const max = num(item.max);
     if (min !== undefined) param.min = min;
     if (max !== undefined) param.max = max;
+    // P4.39b (the agreement with codes.schema.json): a bound that is no number was dropped
+    // without a word, so the form took any value; now it is reported.
+    if (item.min !== undefined && min === undefined) report({ path: `${at}.min`, message: 'min has to be a number' });
+    if (item.max !== undefined && max === undefined) report({ path: `${at}.max`, message: 'max has to be a number' });
     if (item.unit !== undefined) {
-      const unit = str(item.unit);
-      if (unit !== undefined && (PARAM_UNITS as readonly string[]).includes(unit)) {
+      // P4.39b: as written, like `oneOf`.
+      const unit = item.unit;
+      if (typeof unit === 'string' && (PARAM_UNITS as readonly string[]).includes(unit)) {
         param.unit = unit as CodeParam['unit'];
       } else {
         report({ path: `${at}.unit`, message: `unit has to be one of ${PARAM_UNITS.join(', ')}` });
@@ -430,6 +439,10 @@ function readAddresses(
       continue;
     }
     const description = str(value.description);
+    // P4.39b: a description that is no text was dropped without a word.
+    if (value.description !== undefined && typeof value.description !== 'string') {
+      report({ path: `${at}.description`, message: 'description has to be a text' });
+    }
     out[letter] = description ? { label, description } : { label };
   }
   return out;
@@ -460,12 +473,12 @@ function readSets(raw: unknown, path: string, report: (p: CodeDbProblem) => void
       report({ path: at, message: `${member} is not something a code sets` });
       continue;
     }
-    const text = str(value);
-    if (text === undefined || !allowed.includes(text)) {
+    // P4.39b: as written, like `oneOf`.
+    if (typeof value !== 'string' || !allowed.includes(value)) {
       report({ path: at, message: `${member} has to be one of ${allowed.join(', ')}` });
       continue;
     }
-    out[member] = text;
+    out[member] = value;
   }
   // P9: a bound without a limit says nothing a reader could act on, and a reader that
   // trusted it would have to guess which word is limited.
@@ -510,6 +523,12 @@ function readEntry(
   const entry: CodeEntry = { code: normalizeCode(rawCode), label };
   const group = str(raw.group);
   if (group) entry.group = group;
+  // P4.39b (the agreement with codes.schema.json): a group or a description that is no text
+  // was dropped without a word; a group read as none changes the modal state.
+  if (raw.group !== undefined && typeof raw.group !== 'string') report({ path: `${path}.group`, message: 'group has to be a text' });
+  if (raw.description !== undefined && typeof raw.description !== 'string') {
+    report({ path: `${path}.description`, message: 'description has to be a text' });
+  }
   if (flag(raw.modal, `${path}.modal`, report)) entry.modal = true;
   if (flag(raw.pitchFeed, `${path}.pitchFeed`, report)) entry.pitchFeed = true;
   if (flag(raw.pitchFeedAmbiguous, `${path}.pitchFeedAmbiguous`, report)) entry.pitchFeedAmbiguous = true;
@@ -698,6 +717,17 @@ export function loadCodeDb(raw: unknown, onProblem?: (p: CodeDbProblem) => void)
 
   const version = num(raw.version);
   if (version === undefined) report({ path: 'version', message: 'version is missing; read as 1' });
+  // P4.39b (the agreement with codes.schema.json): `remove` is consumed by `resolve.ts`, which
+  // skips what it cannot read; a user file is read here on its own first (`stores/codes.ts`), so
+  // a `remove` that removes nothing is said here.
+  if (raw.remove !== undefined) {
+    if (!Array.isArray(raw.remove)) report({ path: 'remove', message: 'remove has to be a list of codes' });
+    else {
+      raw.remove.forEach((code, i) => {
+        if (str(code) === undefined) report({ path: `remove[${i}]`, message: 'has to be a code, such as "G81"' });
+      });
+    }
+  }
 
   const addresses = readAddresses(raw.addresses, report);
   const codes: CodeEntry[] = [];

@@ -576,7 +576,7 @@
         },
         "partners": {
           "title": "Who it waits for",
-          "description": "Which channels a wait waits for: \"all\", a \"fixed\" list, the value of a \"word\" on the wait's line (P12), or a \"line\" pattern.",
+          "description": "Which channels a wait waits for: \"all\", a \"fixed\" list, the value of a \"word\" on the wait's line (for example P12), or a \"line\" pattern.",
           "type": "object",
           "required": [
             "kind"
@@ -1042,7 +1042,7 @@
         },
         "maxFeed": {
           "title": "Top feed",
-          "description": "The highest cutting feed per minute, in the block's units, at most 200,000 mm/min. A higher programmed feed is counted at this one.",
+          "description": "The highest cutting feed per minute, in the block's units, at most 200,000 mm/min (7,874 in/min). A higher programmed feed is counted at this one.",
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 200000
@@ -1056,53 +1056,82 @@
         },
         "peckRetract": {
           "title": "Peck retract",
-          "description": "How far a high-speed peck drilling cycle (G73) lifts, in the block's units, at most 100 mm. Only fills in the forms.",
+          "description": "How far a high-speed peck drilling cycle (G73) lifts, in the block's units, at most 100 mm (3.937 inch). Only fills in the forms.",
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 100
         },
         "peckClearance": {
           "title": "Peck clearance",
-          "description": "How far above the last depth a deep peck drilling cycle (G83) comes back down to, in the block's units, at most 100 mm. Only fills in the forms.",
+          "description": "How far above the last depth a deep peck drilling cycle (G83) comes back down to, in the block's units, at most 100 mm (3.937 inch). Only fills in the forms.",
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 100
         }
       },
-      "if": {
-        "anyOf": [
-          {
-            "required": [
-              "maxFeed"
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "maxFeed"
+                ]
+              },
+              {
+                "required": [
+                  "peckRetract"
+                ]
+              },
+              {
+                "required": [
+                  "peckClearance"
+                ]
+              },
+              {
+                "required": [
+                  "rapid"
+                ],
+                "properties": {
+                  "rapid": {
+                    "minProperties": 1
+                  }
+                }
+              }
             ]
           },
-          {
+          "then": {
             "required": [
-              "peckRetract"
+              "units"
             ]
-          },
-          {
+          }
+        },
+        {
+          "if": {
             "required": [
-              "peckClearance"
-            ]
-          },
-          {
-            "required": [
-              "rapid"
+              "units"
             ],
             "properties": {
-              "rapid": {
-                "minProperties": 1
+              "units": {
+                "const": "inch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "maxFeed": {
+                "maximum": 7874.0157480314965
+              },
+              "peckRetract": {
+                "maximum": 3.937007874015748
+              },
+              "peckClearance": {
+                "maximum": 3.937007874015748
               }
             }
           }
-        ]
-      },
-      "then": {
-        "required": [
-          "units"
-        ]
-      }
+        }
+      ]
     },
     "limits": {
       "title": "Limits",

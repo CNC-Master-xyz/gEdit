@@ -1234,3 +1234,62 @@ describe('P4b follow-ups (v1.2.0)', () => {
     }
   });
 });
+
+describe('P4.39b: the loader agrees with schemas/codes.schema.json', () => {
+  it('reads a value of a closed list exactly as written: blanks around it are reported, not trimmed', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        {
+          code: 'G2',
+          label: 'Arc',
+          frame: ' open',
+          conflicts: [' tcp', 'radiusComp'],
+          sets: { motion: 'feed ', path: 'arc' },
+          params: [{ address: 'R', label: 'Radius', position: 'none ', unit: ' length' }],
+        },
+      ],
+    });
+    expect(problems.map((p) => p.path)).toEqual([
+      'codes[0].frame',
+      'codes[0].conflicts[0]',
+      'codes[0].params[0].unit',
+      'codes[0].params[0].position',
+      'codes[0].sets.motion',
+    ]);
+    const g2 = db.codes[0];
+    expect(g2.frame).toBeUndefined();
+    expect(g2.conflicts).toEqual(['radiusComp']);
+    expect(g2.sets).toEqual({ path: 'arc' });
+    expect(g2.params?.[0].position).toBeUndefined();
+    expect(g2.params?.[0].unit).toBeUndefined();
+  });
+
+  it('reports a bound, a group or a description that is no text or number, instead of dropping it silently', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      addresses: { X: { label: 'X axis', description: 5 } },
+      codes: [
+        { code: 'G1', label: 'Line', group: 7, description: ['a'] },
+        { code: 'G81', label: 'Drill', params: [{ address: 'Z', label: 'Depth', min: '-5', max: null }] },
+        { code: 'G0', label: 'Rapid', group: 'motion', description: '' },
+      ],
+    });
+    expect(problems.map((p) => p.path)).toEqual([
+      'addresses.X.description',
+      'codes[0].group',
+      'codes[0].description',
+      'codes[1].params[0].min',
+      'codes[1].params[0].max',
+    ]);
+    expect(db.codes.map((e) => e.code)).toEqual(['G1', 'G81', 'G0']);
+  });
+
+  it('reports a remove list it cannot read; a good one says nothing', () => {
+    expect(load({ dialect: 'x', version: 1, codes: [], remove: 'G81' }).problems.map((p) => p.path)).toEqual(['remove']);
+    expect(load({ dialect: 'x', version: 1, codes: [], remove: ['G81', 5, ' '] }).problems.map((p) => p.path)).toEqual(['remove[1]', 'remove[2]']);
+    expect(load({ dialect: 'x', version: 1, codes: [], remove: ['G81', 'G82'] }).problems).toEqual([]);
+  });
+});
