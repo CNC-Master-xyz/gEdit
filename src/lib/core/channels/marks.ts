@@ -57,6 +57,7 @@ import {
   type MaskedLines,
 } from './resolve';
 import { execAfterNonWord, lookbehindPrefilter, unguardedWordRe } from './prefilter';
+import type { JobList } from './jobList';
 import { documentChannel } from './siblings';
 import {
   CHANNEL_CAPS,
@@ -635,8 +636,8 @@ export interface ResolvedDocument {
   layout: ChannelParams['layout'];
   /** `multi-file`: the channel this document is; null otherwise. */
   self: ChannelRef | null;
-  /** `multi-file`: how `self` was found. */
-  by: 'fileName' | 'marker' | 'assigned' | null;
+  /** `multi-file`: how `self` was found (`jobList`: P4.30b, an open job list, `o.job`). */
+  by: 'fileName' | 'marker' | 'assigned' | 'jobList' | null;
   /** `multi-file`: the stem its file name gives (`''` when the name is no channel file). */
   stem: string;
   sections: ChannelSection[];
@@ -676,7 +677,7 @@ export function resolveDocument(
   lines: readonly string[],
   cp: CompiledProfile,
   p: ChannelParams,
-  o: ChannelBudget & MacroCalls & MaskedLines & { assigned?: string | null } = {},
+  o: ChannelBudget & MacroCalls & MaskedLines & { assigned?: string | null; job?: JobList | null } = {},
 ): ResolvedDocument {
   const none = (problems: ChannelProblem[], abandoned = false, stem = ''): ResolvedDocument => ({
     layout: 'none',

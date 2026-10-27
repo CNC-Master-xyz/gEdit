@@ -360,8 +360,9 @@ export type ChannelMember =
       exists: boolean;
       docId: DocId | null;
       /** How this document was tied to the channel: a pattern, or the user's own assignment
-       *  (`channels.assign`, remembered by M7's per-file memory). The status item says which. */
-      by: 'fileName' | 'marker' | 'assigned';
+       *  (`channels.assign`, remembered by M7's per-file memory), or (P4.30b) an open Siemens
+       *  job list of the folder. The status item says which. */
+      by: 'fileName' | 'marker' | 'assigned' | 'jobList';
     };
 
 /**

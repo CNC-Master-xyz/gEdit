@@ -56,7 +56,14 @@ export function channelStatusView(o: {
     if (m.kind === 'section') {
       lines.push(`${m.channel.name}: ${t('channels.status.foundSections', { count: m.ranges.length })}`);
     } else {
-      const how = m.by === 'fileName' ? 'channels.status.foundFileName' : m.by === 'marker' ? 'channels.status.foundMarker' : 'channels.status.foundAssigned';
+      const how =
+        m.by === 'fileName'
+          ? 'channels.status.foundFileName'
+          : m.by === 'marker'
+            ? 'channels.status.foundMarker'
+            : m.by === 'jobList'
+              ? 'channelFiles.status.foundJobList'
+              : 'channels.status.foundAssigned';
       const state = m.docId !== null ? 'channels.status.stateOpen' : 'channels.status.stateNotOpen';
       lines.push(`${m.channel.name}: ${t(how)}, ${t(state)}`);
     }

@@ -1,8 +1,9 @@
 // A Siemens job list as a source of "this file is channel n" (Phase 4, T126, plan section 6.8).
-// Written by the P4f prelude as **stubs**; implemented by **P4.30b**.
+// Written by the P4f prelude as stubs; implemented by P4.30b.
 //
 // The manual's shape (Sinumerik 840D sl operating manual, "Creating a job list"; HMI-Advanced
-// operating manual, job list syntax): a job list is a text file (`.JOB`) of instructions
+// operating manual, job list syntax; the pages are cited in the plan): a job list is a text
+// file (`.JOB`) of instructions
 //
 //     SELECT <program> CH=<channel number> [DISK]
 //
@@ -41,7 +42,8 @@
 //  J7. **Bounds.** At most `MAX_JOB_ENTRIES` entries and `MAX_JOB_LINES` lines are read; a line
 //      longer than `CHANNEL_CAPS.lineLength` is skipped and counted.
 
-import type { ChannelParams, ChannelProblem, ChannelRef } from './types';
+import { resolveChannelToken } from './resolve';
+import { CHANNEL_CAPS, type ChannelParams, type ChannelProblem, type ChannelRef } from './types';
 
 export const MAX_JOB_ENTRIES = 64;
 export const MAX_JOB_LINES = 2000;
@@ -63,25 +65,139 @@ export interface JobList {
   isJobList: boolean;
   entries: JobListEntry[];
   problems: ChannelProblem[];
+  /** J7: lines longer than `CHANNEL_CAPS.lineLength`, not read. */
+  longLines?: number;
+  /** J7: a limit stopped the reading (`MAX_JOB_LINES` lines or `MAX_JOB_ENTRIES` entries). */
+  truncated?: boolean;
 }
 
-const NOT_BUILT = 'not built yet (P4.30b)';
+/** The instructions a job list is made of (J2). */
+const INSTRUCTION = /^(SELECT|LOAD|COPY)(?![A-Za-z0-9_])/i;
+
+/**
+ * `SELECT <program> CH=<channel> [DISK]`. The program runs up to the blank before `CH=`; the
+ * channel is a number, a name, or a name, a comma and a number (`ncu_b,1`, also with blanks
+ * around the comma).
+ */
+const SELECT = /^SELECT\s+(?<program>\S(?:.*?\S)?)\s+CH\s*=\s*(?<channel>[^\s,]+(?:\s*,\s*[^\s,]+)?)(?:\s+(?<disk>DISK))?$/i;
+
+/** The line without its comments: `;` to the end of the line, and text in round brackets (an unclosed bracket runs to the end). */
+function withoutComments(line: string): string {
+  const semi = line.indexOf(';');
+  const cut = semi < 0 ? line : line.slice(0, semi);
+  return cut.replace(/\([^)]*(?:\)|$)/g, ' ').trim();
+}
+
+function lineProblem(line: number, key: string, params: Record<string, string | number> = {}): ChannelProblem {
+  return { path: `line:${line}`, message: { key, params: { line, ...params } } };
+}
+
+/**
+ * J2, cheaply: whether the first line that is neither blank nor a comment starts with
+ * `SELECT`, `LOAD` or `COPY`; null when `lines` hold no such line (read more to decide).
+ */
+export function startsLikeJobList(lines: readonly string[]): boolean | null {
+  for (const raw of lines) {
+    if (raw.length > CHANNEL_CAPS.lineLength) continue;
+    const text = withoutComments(raw);
+    if (text !== '') return INSTRUCTION.test(text);
+  }
+  return null;
+}
 
 /** J2, J3, J7: the entries of an open document's lines. */
-export function readJobList(_lines: readonly string[]): JobList {
-  throw new Error(NOT_BUILT);
+export function readJobList(lines: readonly string[]): JobList {
+  const entries: JobListEntry[] = [];
+  const problems: ChannelProblem[] = [];
+  let first: string | null = null;
+  let longLines = 0;
+  let truncated = lines.length > MAX_JOB_LINES;
+  const count = Math.min(lines.length, MAX_JOB_LINES);
+  for (let i = 0; i < count; i++) {
+    const raw = lines[i];
+    if (raw.length > CHANNEL_CAPS.lineLength) {
+      longLines++;
+      continue;
+    }
+    const text = withoutComments(raw);
+    if (text === '') continue;
+    if (first === null) {
+      first = text;
+      // J2: a program is no job list; nothing more is read from it.
+      if (!INSTRUCTION.test(first)) return { isJobList: false, entries: [], problems: [] };
+    }
+    if (!/^SELECT(?![A-Za-z0-9_])/i.test(text)) continue; // LOAD and COPY say nothing about channels
+    const line = i + 1;
+    const m = SELECT.exec(text);
+    if (m?.groups === undefined) {
+      problems.push(lineProblem(line, 'channelFiles.jobList.badSelect'));
+      continue;
+    }
+    if (entries.length >= MAX_JOB_ENTRIES) {
+      truncated = true;
+      break;
+    }
+    const channel = m.groups.channel.replace(/\s+/g, '');
+    const channelKind: JobListEntry['channelKind'] = /^\d+$/.test(channel) ? 'number' : channel.includes(',') ? 'ncu' : 'name';
+    entries.push({ line, program: m.groups.program, channel, channelKind, disk: m.groups.disk !== undefined });
+    // J3: a name is defined in a file gEdit does not read; refuse rather than guess.
+    if (channelKind !== 'number') problems.push(lineProblem(line, 'channelFiles.jobList.channelByName', { channel }));
+  }
+  if (longLines > 0) problems.push({ path: 'lines', message: { key: 'channelFiles.jobList.longLines', params: { count: longLines, max: CHANNEL_CAPS.lineLength } } });
+  if (truncated) problems.push({ path: 'lines', message: { key: 'channelFiles.jobList.truncated', params: { lines: MAX_JOB_LINES, entries: MAX_JOB_ENTRIES } } });
+  const isJobList = first !== null && entries.length > 0;
+  return { isJobList, entries: isJobList ? entries : [], problems: isJobList ? problems : [], longLines, truncated };
 }
 
 /** J4: the form two program names compare in. */
-export function programKey(_name: string): string {
-  throw new Error(NOT_BUILT);
+export function programKey(name: string): string {
+  const last = name.trim().split(/[\\/]/).pop() ?? '';
+  const archive = /^_N_(.+)_(?:MPF|SPF)$/i.exec(last);
+  const plain = archive !== null ? archive[1] : last.replace(/\.(?:MPF|SPF)$/i, '');
+  return plain.toUpperCase();
 }
 
 /** J3 to J6: which channel the job list gives the file `baseName`, and the `SELECT` line that says so. */
 export function jobListChannel(
-  _job: JobList,
-  _baseName: string,
-  _p: ChannelParams,
+  job: JobList,
+  baseName: string,
+  p: ChannelParams,
 ): { channel: ChannelRef; line: number } | { ambiguous: number[] } | null {
-  throw new Error(NOT_BUILT);
+  if (p.layout !== 'multi-file' || !job.isJobList) return null;
+  const key = programKey(baseName);
+  if (key === '') return null;
+  const matching = job.entries.filter((e) => programKey(e.program) === key);
+  if (matching.length === 0) return null;
+  const found = new Map<string, { channel: ChannelRef; line: number }>();
+  let unknown = false;
+  for (const e of matching) {
+    const ref = e.channelKind === 'number' ? resolveChannelToken(p, e.channel) : null;
+    if (ref === null) unknown = true;
+    else if (!found.has(ref.id)) found.set(ref.id, { channel: ref, line: e.line });
+  }
+  // One entry that names no channel of this machine beside one that does: which one runs here
+  // is not known (J3, refuse rather than guess).
+  if (found.size > 1 || (found.size === 1 && unknown)) return { ambiguous: matching.map((e) => e.line) };
+  return found.size === 1 ? [...found.values()][0] : null;
+}
+
+/**
+ * The file name the job list gives each channel, when it can be told: the last segment of the
+ * program as written, only when it carries an extension (a program written without one, such
+ * as `SELECT PART12 CH=1`, names no file: which extension it has is not guessed). A channel
+ * with two different names gets none.
+ */
+export function jobListNames(job: JobList, p: ChannelParams): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  if (p.layout !== 'multi-file' || !job.isJobList) return out;
+  for (const e of job.entries) {
+    const ref = e.channelKind === 'number' ? resolveChannelToken(p, e.channel) : null;
+    if (ref === null) continue;
+    const last = e.program.trim().split(/[\\/]/).pop() ?? '';
+    const name = /^[^.]+\.[A-Za-z0-9]+$/.test(last) && !/^_N_/i.test(last) ? last : null;
+    const before = out.get(ref.id);
+    if (before === undefined) out.set(ref.id, name);
+    else if (before !== null && (name === null || before.toLowerCase() !== name.toLowerCase())) out.set(ref.id, null);
+  }
+  return out;
 }

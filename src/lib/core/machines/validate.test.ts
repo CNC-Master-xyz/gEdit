@@ -387,6 +387,23 @@ describe('M12 (WP12.3): validateChannels', () => {
     expect(rel(checkCh(per))).toEqual(['list[0].fileName']);
   });
 
+  it('P4.30b: the file name of the first channel is a pattern with a stem and without a channel, for one program per channel only', () => {
+    expect(checkCh({ ...multi(), firstFileName: '^(?<stem>[^.]+)$' })).toEqual([]);
+    expect(checkCh({ ...multi() })).toEqual([]); // no default: absent is fine
+    const noStem = checkCh({ ...multi(), firstFileName: '^[^.]+$' });
+    expect(rel(noStem)).toEqual(['firstFileName']);
+    expect(noStem[0].message).toContain('(?<stem>…)');
+    const withChannel = checkCh({ ...multi(), firstFileName: '^(?<stem>.+)_(?<channel>1)$' });
+    expect(rel(withChannel)).toEqual(['firstFileName']);
+    expect(withChannel[0].message).toContain('(?<channel>…)');
+    for (const bad of ['(?<stem>', '', 5, 'x'.repeat(1001)]) expect(rel(checkCh({ ...multi(), firstFileName: bad })), String(bad)).toEqual(['firstFileName']);
+    expect(rel(checkCh({ ...good(), firstFileName: '^(?<stem>[^.]+)$' }))).toEqual(['firstFileName']);
+    // The block is broken (not the record), and the problem has the member's JSON path.
+    const block = channelBlock(machine({ params: { channels: { ...multi(), firstFileName: '^[^.]+$' } as never } }), 'machines[0]');
+    expect(block.state).toBe('invalid');
+    expect(block.state === 'invalid' ? block.problems.map((p) => p.path) : []).toEqual(['machines[0].params.channels.firstFileName']);
+  });
+
   it('refuses a single-brace {stem} or {channel}, and a template that never names the channel (CODE-4)', () => {
     const one = checkCh({ ...multi(), fileNameFor: '{stem}.NC{channel}' });
     expect(rel(one)).toEqual(['fileNameFor']);
