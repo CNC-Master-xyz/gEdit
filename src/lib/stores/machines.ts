@@ -39,6 +39,7 @@ import {
   serializeMachinesFile,
 } from '$lib/core/machines/file';
 import { MACHINES_VERSION, ReportedError } from '$lib/core/machines/types';
+import { machineForPath, platformIsCaseInsensitive } from '$lib/core/machines/folderRules';
 import { MAX_ID_LENGTH, MAX_MACHINES, MAX_NAME_LENGTH, validateMachine } from '$lib/core/machines/validate';
 import { codes as appCodes } from '$lib/stores/codes';
 import { docs as appDocs } from '$lib/stores/documents';
@@ -123,6 +124,11 @@ export interface MachineServiceDeps {
   chooseMachine?(docId: DocId): void;
   /** False in a plain browser build, where there is no file to read or write. */
   isTauri(): boolean;
+  /**
+   * P4f (plan 6.8.4, R1): paths compare without case (macOS, Windows). Absent = the
+   * platform's own rule; a test pins it.
+   */
+  caseInsensitivePaths?: boolean;
 }
 
 /**
@@ -520,12 +526,13 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
 
   /**
    * Which machine a document uses, in the AD-31 order: an explicit choice (an id, or an
-   * explicit "none"), then the base profile's default machine, then none.
+   * explicit "none"), then the folder its file is in (P4f, plan 6.8.4), then the base
+   * profile's default machine, then none.
    *
    * A chosen id that no longer exists, is not understood, or does not fit the document's
-   * profile any more falls through to the default — with one message, because a silent
-   * fallback is exactly the case where a program would be read differently than the user
-   * thinks.
+   * profile any more falls through to the folder and the default — with one message, because a
+   * silent fallback is exactly the case where a program would be read differently than the user
+   * thinks. The same holds for the machine of a folder that cannot be used.
    */
   function resolveChoice(
     docId: DocId,
@@ -537,18 +544,34 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
     if (typeof wanted === 'string') {
       const chosen = record(wanted);
       if (usable(chosen) && fits(chosen, chain)) return { machine: chosen, choice: 'document' };
-      if (!toldAboutFallback.has(docId)) {
-        toldAboutFallback.add(docId);
-        // Three different reasons, three different sentences: "gone", "not for this
-        // profile" and "the file says something I cannot use" send the user to three
-        // different places, and a wrong one wastes the search.
-        notifyFromRead(
-          chosen === undefined
-            ? t('machines.gone')
-            : fits(chosen, chain)
-              ? t('machines.unusable', { name: chosen.name })
-              : t('machines.incompatible', { name: chosen.name }),
-        );
+      tellAboutFallback(
+        docId,
+        chosen === undefined
+          ? t('machines.gone')
+          : fits(chosen, chain)
+            ? t('machines.unusable', { name: chosen.name })
+            : t('machines.incompatible', { name: chosen.name }),
+      );
+    }
+
+    // R4: only a document with a file path is asked; two machines on one folder (`ambiguous`)
+    // choose nothing, and the document goes on to the default as if there were no rule.
+    const path = deps.docs.get(docId)?.path;
+    if (typeof path === 'string' && path !== '') {
+      const match = machineForPath(path, file.machines, {
+        caseInsensitive: deps.caseInsensitivePaths ?? platformIsCaseInsensitive(),
+      });
+      if (match.kind === 'machine') {
+        const ruled = record(match.machineId);
+        if (usable(ruled) && fits(ruled, chain)) return { machine: ruled, choice: 'folder' };
+        if (ruled !== undefined) {
+          tellAboutFallback(
+            docId,
+            fits(ruled, chain)
+              ? t('machines.unusable', { name: ruled.name })
+              : t('machines.incompatible', { name: ruled.name }),
+          );
+        }
       }
     }
 
@@ -556,6 +579,16 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
     const byDefault = fallback === null ? undefined : record(fallback);
     if (usable(byDefault) && compatible(byDefault, chain)) return { machine: byDefault, choice: 'default' };
     return { machine: null, choice: 'none' };
+  }
+
+  /** One message per document about a machine that was asked for and not applied. */
+  function tellAboutFallback(docId: DocId, text: string): void {
+    if (toldAboutFallback.has(docId)) return;
+    toldAboutFallback.add(docId);
+    // Three different reasons, three different sentences: "gone", "not for this
+    // profile" and "the file says something I cannot use" send the user to three
+    // different places, and a wrong one wastes the search.
+    notifyFromRead(text);
   }
 
   function defaultFor(profileId: string): string | null {
@@ -900,7 +933,8 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
       const wanted = choiceOf(docId);
       // The text version is part of it: without a machine the variant comes out of the
       // program, so a document whose program was replaced has to be looked at again.
-      const signature = `${wanted === undefined ? '' : (wanted ?? 'none')}|${rev}|${versionOf(docId)}`;
+      // The file path is part of it too: Save As moves a document into another folder (P4f).
+      const signature = `${wanted === undefined ? '' : (wanted ?? 'none')}|${rev}|${versionOf(docId)}|${deps.docs.get(docId)?.path ?? ''}`;
       const cached = views.get(docId);
       if (cached && cached.profileId === profileId && cached.signature === signature) return cached.view;
 
