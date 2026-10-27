@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
+  "id": "tab-width",
+  "name": "A tab width past 16",
+  "shortName": "TABS",
+  "version": 1,
+  "extends": "okuma-osp",
+  "editing": {
+    "tabWidth": 20
+  }
+}

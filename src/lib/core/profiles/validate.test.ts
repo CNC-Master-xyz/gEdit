@@ -660,6 +660,29 @@ describe('the machine-parameter declaration', () => {
     ]);
   });
 
+  // P4.39a agreement fix (§6.10 rule 2): the schema describes an overlay's members with the
+  // shapes of the profile's own; the validator now gives the same answer instead of letting a
+  // wrong value through until the variant is applied to a document.
+  it('checks an overlay member with the shape of the profile member, requiring none of them', () => {
+    const at = 'machineParams.variants[0].choices[1].overlay';
+    expect(lathePaths((p) => (choices(p)[1].overlay = { toolCall: { toolFrom: 'last-before' } }))).toEqual([]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { toolCall: { toolFrom: 'previous' } }))).toEqual([`${at}.toolCall.toolFrom`]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { toolCall: { tool: 'T(\\d+)' } }))).toEqual([`${at}.toolCall.tool`]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { toolCall: 'M6' }))).toEqual([`${at}.toolCall`]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { addresses: { diameter: ['X', 'U'], incremental: { U: 'X' } } }))).toEqual([]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { addresses: { diameter: 'X' } }))).toEqual([`${at}.addresses.diameter`]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { addresses: { incremental: { U: 7 } } }))).toEqual([`${at}.addresses.incremental.U`]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { addresses: { axes: [] } }))).toEqual([`${at}.addresses.axes`]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { addresses: 5 }))).toEqual([`${at}.addresses`]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { numbering: { step: 0 } }))).toEqual([`${at}.numbering.step`]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { numbering: { references: [{ trigger: 'M99' }] } }))).toEqual([
+      `${at}.numbering.references[0].addresses`,
+    ]);
+    expect(lathePaths((p) => (choices(p)[1].overlay = { numbering: { calls: [{ trigger: 'M98', address: 'P', maxDigits: 0 }] } }))).toEqual([
+      `${at}.numbering.calls[0].maxDigits`,
+    ]);
+  });
+
   it('checks a variant detection rule like every other pattern', () => {
     expect(lathePaths((p) => (choices(p)[1].detect = [{ pattern: '(?<![A-Z])G92(?!\\d)', weight: 6 }]))).toEqual([]);
     expect(lathePaths((p) => (choices(p)[1].detect = [{ pattern: '(?<=A+)B', weight: 6 }]))).toEqual([

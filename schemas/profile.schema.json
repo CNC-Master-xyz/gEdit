@@ -2,8 +2,2195 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
   "title": "gEdit dialect profile",
-  "description": "A dialect profile of gEdit: how one kind of NC file looks. Written by hand from src/lib/core/profiles/types.ts and held to validateProfile by src/lib/core/profiles/schema.test.ts (plan \u00a76.10). Prelude skeleton: P4.39a fills it.",
+  "description": "A dialect profile of gEdit: how one kind of NC program is written. A profile file with \"extends\" writes only what differs from the profile it builds on; a file without it writes everything. gEdit checks every profile itself when it loads it; this schema gives an editor the same help while you type.",
+  "$comment": "Written by hand from src/lib/core/profiles/types.ts and held to validateProfile by src/lib/core/profiles/schema.test.ts. The rules JSON Schema cannot say are listed there (VALIDATOR_ONLY).",
   "type": "object",
-  "x-gedit-stub": "P4.39a",
-  "$defs": {}
+  "x-gedit-order": [
+    "id",
+    "name",
+    "shortName",
+    "version",
+    "extends",
+    "machineType",
+    "grammar",
+    "codes",
+    "files",
+    "detect",
+    "syntax",
+    "addresses",
+    "toolCall",
+    "program",
+    "outline",
+    "numbering",
+    "numberFormat",
+    "modal",
+    "machineParams",
+    "onLoad",
+    "toolList",
+    "compare",
+    "editing",
+    "colors"
+  ],
+  "properties": {
+    "$schema": {
+      "title": "Schema",
+      "description": "The address of this schema, so an editor such as VS Code can check the file while you type. gEdit does not read it."
+    },
+    "id": {
+      "title": "Id",
+      "description": "The name of the profile inside gEdit: small letters, digits, \".\", \"_\" and \"-\", for example \"shop-lathe\". It is the file name of a profile of your own.",
+      "$ref": "#/$defs/profileId"
+    },
+    "name": {
+      "title": "Name",
+      "description": "The full name of the profile, shown in the profile list, at most 80 characters.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "shortName": {
+      "title": "Short name",
+      "description": "The name in the status bar, at most 16 characters, for example \"FANUC\".",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16
+    },
+    "version": {
+      "title": "Version",
+      "description": "The version of this profile file, a whole number from 1. Raise it when you change the file.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "extends": {
+      "title": "Builds on",
+      "description": "The id of the profile this one builds on, for example \"fanuc-lathe\". Everything you do not write here comes from it; a list you write replaces the whole list.",
+      "$ref": "#/$defs/profileId"
+    },
+    "machineType": {
+      "title": "Machine type",
+      "description": "\"mill\" or \"lathe\". Left out: mill.",
+      "enum": [
+        "mill",
+        "lathe"
+      ]
+    },
+    "grammar": {
+      "title": "Colouring",
+      "description": "Which colouring rules the editor uses: \"iso\" (Fanuc and similar), \"klartext\" (Heidenhain), \"okuma\" or \"sinumerik\".",
+      "enum": [
+        "iso",
+        "klartext",
+        "okuma",
+        "sinumerik"
+      ]
+    },
+    "codes": {
+      "title": "Code list",
+      "description": "The id of the code list this profile reads (G and M codes, cycles, templates), for example \"fanuc-lathe\".",
+      "$ref": "#/$defs/profileId"
+    },
+    "files": {
+      "title": "Files",
+      "description": "The file names of this kind of program and how new files are written.",
+      "type": "object",
+      "properties": {
+        "extensions": {
+          "title": "Extensions",
+          "description": "The file extensions of these programs without the dot, in small letters, the usual one first, for example [\"nc\", \"tap\"]. JSON and Python files cannot be NC programs.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_+-]*$",
+            "maxLength": 80,
+            "not": {
+              "enum": [
+                "json",
+                "py"
+              ]
+            }
+          },
+          "x-gedit-kind": "text-list"
+        },
+        "defaultExtension": {
+          "title": "Default extension",
+          "description": "The extension a new file gets. It has to be one of the extensions.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_+-]*$",
+          "not": {
+            "enum": [
+              "json",
+              "py"
+            ]
+          }
+        },
+        "filterName": {
+          "title": "File type name",
+          "description": "The name of these files in the open and save dialogs, for example \"Fanuc programs\".",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "encoding": {
+          "title": "Encoding",
+          "description": "Always \"keep\": a file is saved in the encoding it was opened with.",
+          "const": "keep",
+          "x-gedit-advanced": true
+        },
+        "lineEnding": {
+          "title": "Line ending",
+          "description": "Always \"keep\": a file keeps the line endings it was opened with.",
+          "const": "keep",
+          "x-gedit-advanced": true
+        },
+        "newFileLineEnding": {
+          "title": "Line ending of a new file",
+          "description": "\"crlf\" (Windows), \"lf\" or \"cr\".",
+          "enum": [
+            "crlf",
+            "lf",
+            "cr"
+          ]
+        }
+      }
+    },
+    "detect": {
+      "title": "Detection",
+      "description": "How gEdit tells that a file is one of these programs when it is opened.",
+      "type": "object",
+      "properties": {
+        "extensions": {
+          "title": "Extensions",
+          "description": "File extensions in small letters without the dot, and how much each one counts, for example { \"nc\": 1, \"mpf\": 10 }.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9_+-]*$",
+            "not": {
+              "enum": [
+                "json",
+                "py"
+              ]
+            }
+          },
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          },
+          "x-gedit-kind": "weights"
+        },
+        "content": {
+          "title": "Content",
+          "description": "Patterns tested on the first lines of the file, each with a weight. On each line only the strongest matching pattern counts.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/weightedPattern"
+          },
+          "x-gedit-kind": "rows"
+        },
+        "folders": {
+          "title": "Folders",
+          "description": "A file inside one of these folders uses this profile outright, for example \"/programs/lathe\".",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 260
+          },
+          "x-gedit-kind": "text-list"
+        },
+        "priority": {
+          "title": "Priority",
+          "description": "Decides between two profiles that score the same; the higher one wins.",
+          "type": "number",
+          "x-gedit-advanced": true
+        },
+        "vetoes": {
+          "title": "Not this kind of program",
+          "description": "Patterns that rule this profile out: when one matches any line read, the profile scores nothing for the file, for example \"DIAMON\" on a milling profile.",
+          "$ref": "#/$defs/patternList",
+          "x-gedit-kind": "pattern-list",
+          "x-gedit-advanced": true
+        }
+      }
+    },
+    "syntax": {
+      "title": "Syntax",
+      "description": "How the text of a program is written: comments, block numbers, decimal points and the special words of the control.",
+      "type": "object",
+      "properties": {
+        "caseSensitive": {
+          "title": "Case sensitive",
+          "description": "True: patterns and codes match small and capital letters apart. Left out: they match either.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        },
+        "strings": {
+          "title": "Strings",
+          "description": "True when \" opens a text string, as in Heidenhain tool names. Left out: a quote is an ordinary character.",
+          "type": "boolean"
+        },
+        "comments": {
+          "title": "Comments",
+          "description": "How a comment starts and ends, for example { \"start\": \"(\", \"end\": \")\" } or { \"start\": \";\", \"end\": null } for a comment that runs to the end of the line.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "title": "Start",
+                "description": "The text that opens the comment, for example \"(\" or \";\".",
+                "$ref": "#/$defs/text"
+              },
+              "end": {
+                "title": "End",
+                "description": "The text that closes it, for example \")\", or null when the comment runs to the end of the line.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              }
+            }
+          },
+          "x-gedit-kind": "rows"
+        },
+        "sectionHeading": {
+          "title": "Section heading",
+          "description": "A line that matches this starts a section in the program map.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "continuation": {
+          "title": "Line continues",
+          "description": "Matches the mark at the end of a line that joins it to the next line, for example \"~$\" on Heidenhain.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "continuationMark": {
+          "title": "Continuation mark",
+          "description": "The mark itself, used where gEdit writes one, for example \"~\".",
+          "$ref": "#/$defs/text",
+          "x-gedit-advanced": true
+        },
+        "continuationStart": {
+          "title": "Line belongs to the block above",
+          "description": "Matches the mark at the start of a line that belongs to the block above it, for example \"^\\$ \" on Okuma. It has to start with ^ in every alternative and may not match a line without the mark.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/pattern"
+            },
+            {
+              "pattern": "^\\^"
+            }
+          ],
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "blockSkip": {
+          "title": "Block skip",
+          "description": "The block skip mark, for example \"/\".",
+          "type": "object",
+          "properties": {
+            "chars": {
+              "title": "Marks",
+              "description": "The characters that skip a block, for example \"/\".",
+              "$ref": "#/$defs/text"
+            },
+            "position": {
+              "title": "Position",
+              "description": "Where the mark stands: \"before-number\", \"after-number\" or \"either\".",
+              "enum": [
+                "before-number",
+                "after-number",
+                "either"
+              ]
+            },
+            "levels": {
+              "title": "Levels",
+              "description": "True when a digit after the mark selects a skip level, for example /2.",
+              "type": "boolean"
+            },
+            "plainLevel": {
+              "title": "Level of a plain mark",
+              "description": "The level a mark without a digit is: \"0\" on Siemens, \"1\" on Fanuc.",
+              "enum": [
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9"
+              ]
+            }
+          }
+        },
+        "blockNumber": {
+          "title": "Block numbers",
+          "description": "How a block number is written.",
+          "type": "object",
+          "properties": {
+            "mode": {
+              "title": "Kind",
+              "description": "\"prefix\": a letter and a number, for example N10. \"leading-integer\": a plain number at the start of the line, as on Heidenhain.",
+              "enum": [
+                "prefix",
+                "leading-integer"
+              ]
+            },
+            "prefix": {
+              "title": "Letter",
+              "description": "The letter of a block number, usually \"N\". Needed when the kind is \"prefix\".",
+              "$ref": "#/$defs/address"
+            },
+            "altPrefixes": {
+              "title": "Other letters",
+              "description": "Other letters that also start a block number; renumbering writes the main letter instead.",
+              "$ref": "#/$defs/addressList",
+              "x-gedit-kind": "text-list",
+              "x-gedit-advanced": true
+            },
+            "mandatory": {
+              "title": "Required",
+              "description": "True when every block has to have a block number.",
+              "type": "boolean"
+            },
+            "mainPrefix": {
+              "title": "Main block mark",
+              "description": "The mark of a main block number, one character that is no letter, digit or blank, for example \":\" on Siemens (:123). It may not be a character that already starts a comment, a block skip, a string, a sign or an expression.",
+              "type": "string",
+              "pattern": "^[^A-Za-z0-9\\s]$",
+              "not": {
+                "enum": [
+                  "(",
+                  ")",
+                  ";",
+                  "/",
+                  "\"",
+                  "'",
+                  "%",
+                  "$",
+                  "<",
+                  ">",
+                  "+",
+                  "-",
+                  ".",
+                  ",",
+                  "=",
+                  "[",
+                  "]",
+                  "#",
+                  "*"
+                ]
+              },
+              "x-gedit-advanced": true
+            }
+          }
+        },
+        "decimalSeparator": {
+          "title": "Decimal separator",
+          "description": "The character that starts the fraction of a number: \".\" or \",\".",
+          "enum": [
+            ".",
+            ","
+          ]
+        },
+        "decimalSeparatorAlt": {
+          "title": "Second decimal separator",
+          "description": "A second character also read as a decimal separator, for example \",\" beside \".\" on Heidenhain. New numbers are still written with the first one.",
+          "enum": [
+            ".",
+            ","
+          ],
+          "x-gedit-advanced": true
+        },
+        "decimalPointSignificant": {
+          "title": "Decimal point matters",
+          "description": "True when X10 and X10. mean different values (a number without a point counts in increments). It has to agree with the default number input of the machine settings.",
+          "type": "boolean"
+        },
+        "wordSeparatorRequired": {
+          "title": "Blanks between words",
+          "description": "True when words have to be separated by blanks (Heidenhain); false when words may be packed, as in N10G1X10.",
+          "type": "boolean"
+        },
+        "incrementalPrefix": {
+          "title": "Incremental mark",
+          "description": "The letter in front of an axis word that makes it incremental, for example \"I\" in IX10 on Heidenhain.",
+          "$ref": "#/$defs/address",
+          "x-gedit-advanced": true
+        },
+        "variables": {
+          "title": "Variables",
+          "description": "Matches a variable, for example \"#\\d+\" or \"R\\d+\". It has to take at least one character.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern"
+        },
+        "keywords": {
+          "title": "Keywords",
+          "description": "Words of the control that are read before single letters, for example \"GOTO\" or \"TOOL CALL\".",
+          "$ref": "#/$defs/textList",
+          "x-gedit-kind": "text-list"
+        },
+        "maxLineLength": {
+          "title": "Longest block",
+          "description": "The most characters a block may have on this control.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxWordDigits": {
+          "title": "Most digits in a word",
+          "description": "The most digits a word may have once the control counts it in increments, for example 8 on Fanuc. Check Program reports a longer one.",
+          "type": "integer",
+          "minimum": 1,
+          "x-gedit-advanced": true
+        },
+        "maxMCodes": {
+          "title": "Most M codes in a block",
+          "description": "The most M codes the control takes in one block, for example 8 on Okuma.",
+          "type": "integer",
+          "minimum": 1,
+          "x-gedit-advanced": true
+        },
+        "sequenceNames": {
+          "title": "Block names",
+          "description": "True when a block number letter may also carry a name, for example NLAP1 on Okuma. Such a name is never renumbered.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        },
+        "assignment": {
+          "title": "Assignment words",
+          "description": "Matches a word written with \"=\" and a value, for example \"SB=1200\" on Okuma or \"CR=15\" on Siemens.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "labels": {
+          "title": "Labels",
+          "description": "Matches a label at the start of a block, for example \"LOOP_A:\" on Siemens. It has to name the label with the group (?<name>…).",
+          "allOf": [
+            {
+              "$ref": "#/$defs/pattern"
+            },
+            {
+              "pattern": "\\(\\?<name>"
+            }
+          ],
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "calls": {
+          "title": "Calls with brackets",
+          "description": "True when a name written in front of \"(\" is a call with its arguments, for example CYCLE81(10,0,2,-12) on Siemens.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        },
+        "systemVariables": {
+          "title": "System variables",
+          "description": "Matches a variable of the control itself, for example \"\\$[A-Z_][A-Z0-9_]*\" on Siemens.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "systemVariableNumbers": {
+          "title": "First system variable number",
+          "description": "The number from which on a numbered variable belongs to the control, for example 1000 on Fanuc (#5221 is the X of G54). The geometry scripts refuse to change such a variable.",
+          "type": "integer",
+          "minimum": 1,
+          "x-gedit-advanced": true
+        },
+        "incrementTravelsShift": {
+          "title": "Increments travel a shift",
+          "description": "True when an incremental move after a change of the zero point also travels that change, until the axis is written absolutely. Rotate and Mirror then refuse such a move.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        },
+        "tcpTableCoordinates": {
+          "title": "Tool centre point in table coordinates",
+          "description": "True when Translate should say that it reads tool centre point coordinates in the table's coordinate system, which a machine parameter may change.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        },
+        "cycleRAbsoluteWith": {
+          "title": "Cycle R absolute with",
+          "description": "The \"Feeds without a point\" choices under which the R of a drilling cycle can be an absolute position. Translate then adds a note where it leaves such an R as written.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "x-gedit-kind": "text-list",
+          "x-gedit-advanced": true
+        },
+        "extraAxisNames": {
+          "title": "Extra axis names",
+          "description": "Axis names of more than one letter read with the value packed behind them, for example AA in AA90. Letters only, 2 to 8 of them, at most 16 names. Usually set on the machine page, not here.",
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2,8}$"
+          },
+          "x-gedit-kind": "text-list",
+          "x-gedit-advanced": true
+        },
+        "header": {
+          "title": "File header",
+          "description": "Matches a header on the first line of the file, for example \"^%_N_\\w+_(MPF|SPF)\" on Siemens.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "names": {
+          "title": "Names",
+          "description": "Matches a name the program gives itself, a variable or a jump target, so it is not read as a row of single letter words, for example \"[A-Z_]{2}[A-Z0-9_]*\".",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "programNames": {
+          "title": "Program names",
+          "description": "Matches a program name written instead of a number, for example \"<[A-Za-z0-9+\\-_.]+>\" on Fanuc. It has to take at least one character.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "assignmentIndex": {
+          "title": "Indexed assignment",
+          "description": "True when an assignment word may carry one index in brackets, for example LIMS[2]=1800 on Siemens.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        },
+        "extendedAddresses": {
+          "title": "Control addresses",
+          "description": "Matches the assignment words that are addresses of the control, for example SB or TL on Okuma; the others are local variables.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        },
+        "exponentMarker": {
+          "title": "Exponent mark",
+          "description": "The letters of an exponent inside a number, at least two, for example \"EX\" in 1.5EX3 on Siemens.",
+          "type": "string",
+          "pattern": "^[A-Za-z]{2,}$",
+          "x-gedit-advanced": true
+        },
+        "symbolAddresses": {
+          "title": "Symbol addresses",
+          "description": "Single characters that are the address of the value right behind them, for example \"#\" in #5 on Heidenhain. No letter, digit, blank, sign, bracket or a mark the profile already uses.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^A-Za-z0-9\\s]$",
+            "not": {
+              "enum": [
+                "\"",
+                "+",
+                "-",
+                ".",
+                ",",
+                "(",
+                ")",
+                "[",
+                "]",
+                "="
+              ]
+            }
+          },
+          "x-gedit-kind": "text-list",
+          "x-gedit-advanced": true
+        },
+        "removeSpaces": {
+          "title": "Remove Spaces",
+          "description": "\"refuse\": the command is not offered (Siemens). \"keepAroundLongAddresses\": the blank beside a word with a longer address stays (Okuma).",
+          "enum": [
+            "refuse",
+            "keepAroundLongAddresses"
+          ],
+          "x-gedit-advanced": true
+        },
+        "freeText": {
+          "title": "Kept text",
+          "description": "Patterns for text the control keeps but does not run, each with the group (?<text>…), for example the cycle name behind CYCL DEF on Heidenhain.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/pattern"
+              },
+              {
+                "pattern": "\\(\\?<text>"
+              }
+            ]
+          },
+          "x-gedit-kind": "pattern-list",
+          "x-gedit-advanced": true
+        },
+        "colonWords": {
+          "title": "Words with a colon",
+          "description": "Longer addresses whose value stands behind a colon, for example \"VCONST\" in VCONST:ON on Heidenhain.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          },
+          "x-gedit-kind": "text-list",
+          "x-gedit-advanced": true
+        },
+        "callTargets": {
+          "title": "Called program names",
+          "description": "A program name written behind a call keyword, for example CALL OABCD on Okuma.",
+          "type": "object",
+          "properties": {
+            "after": {
+              "title": "Behind",
+              "description": "The keywords the name follows; each one has to be one of the keywords.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/text"
+              },
+              "x-gedit-kind": "text-list"
+            },
+            "pattern": {
+              "title": "Name",
+              "description": "Matches the name, for example \"O[A-Z0-9]{1,4}\".",
+              "$ref": "#/$defs/pattern",
+              "x-gedit-kind": "pattern"
+            }
+          },
+          "x-gedit-advanced": true
+        },
+        "labelAfter": {
+          "title": "Jump keywords",
+          "description": "Keywords behind which a name is a jump target, for example GOTOF on Siemens. Each one has to be one of the keywords.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/text"
+          },
+          "x-gedit-kind": "text-list",
+          "x-gedit-advanced": true
+        },
+        "declareAfter": {
+          "title": "Declaration keywords",
+          "description": "Keywords that declare variables, for example DEF on Siemens. Each one has to be one of the keywords.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/text"
+          },
+          "x-gedit-kind": "text-list",
+          "x-gedit-advanced": true
+        },
+        "plainTextRun": {
+          "title": "Plain text run",
+          "description": "A run of this many letters or more without a digit is read as plain text, not as single letter words, for example 3 on Fanuc. At least 2.",
+          "type": "integer",
+          "minimum": 2,
+          "x-gedit-advanced": true
+        },
+        "tapeMarker": {
+          "title": "Tape mark",
+          "description": "False when a lone \"%\" is not a tape mark on this control (Heidenhain). Left out: it is.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        }
+      },
+      "not": {
+        "required": [
+          "decimalSeparator",
+          "decimalSeparatorAlt"
+        ],
+        "anyOf": [
+          {
+            "properties": {
+              "decimalSeparator": {
+                "const": "."
+              },
+              "decimalSeparatorAlt": {
+                "const": "."
+              }
+            }
+          },
+          {
+            "properties": {
+              "decimalSeparator": {
+                "const": ","
+              },
+              "decimalSeparatorAlt": {
+                "const": ","
+              }
+            }
+          }
+        ]
+      }
+    },
+    "addresses": {
+      "title": "Addresses",
+      "description": "The letters of the axes and of the tool, feed and spindle words.",
+      "$ref": "#/$defs/addresses"
+    },
+    "toolCall": {
+      "title": "Tool change",
+      "description": "How a tool change line looks and where its tool number is.",
+      "$ref": "#/$defs/toolCall"
+    },
+    "program": {
+      "title": "Program start and end",
+      "description": "The lines that start and end a program in the file.",
+      "type": "object",
+      "properties": {
+        "start": {
+          "title": "Program start",
+          "description": "Patterns of a line that starts a program, for example \"^O\\d+\" on Fanuc.",
+          "$ref": "#/$defs/patternList",
+          "x-gedit-kind": "pattern-list"
+        },
+        "end": {
+          "title": "Program end",
+          "description": "Patterns of a line that ends a program, for example \"(?<![A-Z])M30(?!\\d)\".",
+          "$ref": "#/$defs/patternList",
+          "x-gedit-kind": "pattern-list"
+        },
+        "endRecord": {
+          "title": "End line closes the file",
+          "description": "True when the end line closes the program in the file and is not a block the program could skip, for example END PGM on Heidenhain.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        }
+      }
+    },
+    "outline": {
+      "title": "Program map",
+      "description": "The rules that build the program map, in order: the first rule that matches a line decides. Each names a kind (tool, program, section, comment, label, stop, end, subprogram-call) and a pattern; the groups (?<text>…) and (?<name>…) give the label.",
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "pattern"
+        ],
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "description": "What the line is in the program map.",
+            "enum": [
+              "tool",
+              "program",
+              "section",
+              "comment",
+              "label",
+              "stop",
+              "end",
+              "subprogram-call"
+            ]
+          },
+          "pattern": {
+            "title": "Pattern",
+            "description": "A line that matches this gets a row of that kind.",
+            "$ref": "#/$defs/pattern",
+            "x-gedit-kind": "pattern"
+          }
+        }
+      },
+      "x-gedit-kind": "rows"
+    },
+    "numbering": {
+      "title": "Block numbers",
+      "description": "How Renumber, automatic block numbers and Go to Block number the blocks.",
+      "$ref": "#/$defs/numbering"
+    },
+    "numberFormat": {
+      "title": "Number format",
+      "description": "How the transforms write a number they change.",
+      "type": "object",
+      "properties": {
+        "decimals": {
+          "title": "Decimals",
+          "description": "\"keep\": as many decimals as written. A number from 0 to 9: round to that many decimals (half away from zero).",
+          "anyOf": [
+            {
+              "const": "keep"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9
+            }
+          ]
+        },
+        "trailingZeros": {
+          "title": "Trailing zeros",
+          "description": "\"keep\" or \"drop\" the zeros at the end of the fraction.",
+          "enum": [
+            "keep",
+            "drop"
+          ]
+        },
+        "keepPoint": {
+          "title": "Keep the point",
+          "description": "True: a number whose fraction is dropped keeps its decimal point (10. stays 10.).",
+          "type": "boolean"
+        },
+        "plusSign": {
+          "title": "Plus sign",
+          "description": "\"keep\" as written, \"always\", \"never\", or \"signed\": a + where the written number had a sign of either kind.",
+          "enum": [
+            "keep",
+            "always",
+            "never",
+            "signed"
+          ]
+        }
+      }
+    },
+    "modal": {
+      "title": "Power-on state",
+      "description": "The codes in force when the control is switched on. Units and diameter programming are the machine's settings and cannot be written here.",
+      "type": "object",
+      "properties": {
+        "initial": {
+          "title": "Power-on codes",
+          "description": "Modal group and the code in force at the start of a program, written as the code list writes it, for example { \"motion\": \"G0\", \"plane\": \"G17\" } (\"G0\", not \"G00\").",
+          "$ref": "#/$defs/modalInitial"
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "units"
+            ]
+          },
+          {
+            "required": [
+              "diameter"
+            ]
+          },
+          {
+            "required": [
+              "sources"
+            ]
+          }
+        ]
+      }
+    },
+    "machineParams": {
+      "title": "Machine settings",
+      "description": "What a machine of this profile may set on the machine page, with the documented defaults. Left out: the profile has no machine settings.",
+      "$ref": "#/$defs/machineParams"
+    },
+    "onLoad": {
+      "title": "When a file is opened",
+      "description": "What gEdit does to a file of this profile when it opens it.",
+      "type": "object",
+      "properties": {
+        "stripNul": {
+          "title": "Remove NUL characters",
+          "description": "True: NUL characters at the start and end of the file (tape leader) are removed.",
+          "type": "boolean"
+        }
+      }
+    },
+    "toolList": {
+      "title": "Tool list",
+      "description": "How the tool list finds the description of a tool.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "description": "Where the comment that describes a tool stands: \"auto\" (tries the others), \"above\", \"below\" or \"trailing\" (on the same line).",
+          "enum": [
+            "auto",
+            "above",
+            "below",
+            "trailing"
+          ]
+        },
+        "commentFilter": {
+          "title": "Decoration",
+          "description": "A comment that matches this is decoration, for example a row of dashes, and not a description.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern"
+        },
+        "dropLeadingZeros": {
+          "title": "Drop leading zeros",
+          "description": "True: T01 is listed as tool 1.",
+          "type": "boolean"
+        },
+        "collapseOffsetDigits": {
+          "title": "Tool and offset as one",
+          "description": "True: a lathe tool word with its offset digits (T0101) is listed as one tool.",
+          "type": "boolean"
+        }
+      }
+    },
+    "compare": {
+      "title": "Compare",
+      "description": "What Compare ignores by default for programs of this profile.",
+      "type": "object",
+      "properties": {
+        "ignoreBlockNumbers": {
+          "title": "Ignore block numbers",
+          "description": "True: block numbers are left out of the comparison.",
+          "type": "boolean"
+        },
+        "ignoreWhitespace": {
+          "title": "Ignore blanks",
+          "description": "True: blanks are left out of the comparison.",
+          "type": "boolean"
+        },
+        "ignoreComments": {
+          "title": "Ignore comments",
+          "description": "True: comments are left out, except the ones the control reads (see \"Comments the control reads\").",
+          "type": "boolean"
+        },
+        "ignoreCase": {
+          "title": "Ignore case",
+          "description": "True: small and capital letters compare alike.",
+          "type": "boolean"
+        },
+        "ignoreNumberFormat": {
+          "title": "Ignore number format",
+          "description": "True: X10.0 and X10. compare alike where they mean the same value.",
+          "type": "boolean"
+        },
+        "ignoreCycleNames": {
+          "title": "Ignore cycle names",
+          "description": "True: the cycle names in dialog language are left out. Offered only with cycle name patterns.",
+          "type": "boolean"
+        },
+        "keepComments": {
+          "title": "Comments the control reads",
+          "description": "A line that matches one of these patterns keeps its comments when comments are ignored.",
+          "$ref": "#/$defs/patternList",
+          "x-gedit-kind": "pattern-list"
+        },
+        "cycleNames": {
+          "title": "Cycle names",
+          "description": "Patterns that find the cycle names in dialog language, each with the group (?<name>…).",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/pattern"
+              },
+              {
+                "pattern": "\\(\\?<name>"
+              }
+            ]
+          },
+          "x-gedit-kind": "json"
+        },
+        "tolerance": {
+          "title": "Tolerance (not used)",
+          "description": "Kept from older files and not read.",
+          "x-gedit-advanced": true
+        }
+      }
+    },
+    "editing": {
+      "title": "Typing",
+      "description": "How typing behaves in a program of this profile.",
+      "type": "object",
+      "properties": {
+        "forceUppercase": {
+          "title": "Capital letters",
+          "description": "True: letters typed outside comments and strings are written as capitals.",
+          "type": "boolean"
+        },
+        "preventLineJoin": {
+          "title": "Keep lines apart",
+          "description": "True: Backspace at the start and Delete at the end of a line do not join two blocks.",
+          "type": "boolean"
+        },
+        "autoSpace": {
+          "title": "Blank between words",
+          "description": "True: a blank is put in front of a new address word typed right after a word, so G1X becomes G1 X.",
+          "type": "boolean"
+        },
+        "autoNumber": {
+          "title": "Next block number",
+          "description": "True: Enter at the end of a numbered block starts the next line with the next block number.",
+          "type": "boolean"
+        },
+        "tabWidth": {
+          "title": "Tab width",
+          "description": "How many columns a tab takes in programs of this profile, 1 to 16. Left out: the general setting.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "rulers": {
+          "title": "Rulers",
+          "description": "Columns where a ruler line is drawn, at most 8, each from 1 to 1000, for example [80]. An empty list shows none. Left out: the general setting.",
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "x-gedit-kind": "text-list"
+        }
+      }
+    },
+    "colors": {
+      "title": "Code colours",
+      "description": "Colours of this profile's programs, per theme, written as #rrggbb, for example { \"dark\": { \"feed\": \"#ffaa00\" } }. Each colour has to be readable on the editor background (a contrast of at least 4.5 to 1). Left out: your own code colours, then the built-in ones.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dark": {
+          "title": "Dark theme",
+          "description": "The colour of each kind of word in the dark theme.",
+          "$ref": "#/$defs/roleColors"
+        },
+        "light": {
+          "title": "Light theme",
+          "description": "The colour of each kind of word in the light theme.",
+          "$ref": "#/$defs/roleColors"
+        }
+      },
+      "x-gedit-kind": "colors"
+    }
+  },
+  "if": {
+    "not": {
+      "required": [
+        "extends"
+      ]
+    }
+  },
+  "then": {
+    "$ref": "#/$defs/complete"
+  },
+  "else": {
+    "required": [
+      "id",
+      "name",
+      "shortName"
+    ]
+  },
+  "$defs": {
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "textList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/text"
+      }
+    },
+    "address": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+    },
+    "addressList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/address"
+      }
+    },
+    "pattern": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "patternList": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/pattern"
+      }
+    },
+    "profileId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "increment": {
+      "type": "string",
+      "pattern": "^(?:1|0\\.0*1)$"
+    },
+    "weightedPattern": {
+      "type": "object",
+      "required": [
+        "pattern",
+        "weight"
+      ],
+      "properties": {
+        "pattern": {
+          "title": "Pattern",
+          "description": "A regular expression tested against each line, for example \"^%\" or \"(?<![A-Z])G96(?!\\d)\".",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern"
+        },
+        "weight": {
+          "title": "Weight",
+          "description": "How much one match counts. A larger weight makes this rule more decisive than the others.",
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "modalInitial": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "\\S"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/text"
+      }
+    },
+    "roleColors": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "blockNumber",
+          "skip",
+          "gcode",
+          "mcode",
+          "axis",
+          "arcCenter",
+          "feed",
+          "spindle",
+          "tool",
+          "variable",
+          "keyword",
+          "comment",
+          "section",
+          "programMarker",
+          "number",
+          "string",
+          "operator",
+          "invalid"
+        ]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^#[0-9a-fA-F]{6}$"
+      }
+    },
+    "toolCall": {
+      "type": "object",
+      "properties": {
+        "trigger": {
+          "title": "Tool change line",
+          "description": "A line that matches this changes the tool, for example \"(?<![A-Z])M0?6(?!\\d)\" for M6 or \"TOOL CALL\" on Heidenhain.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern"
+        },
+        "tool": {
+          "title": "Tool number",
+          "description": "Finds the tool number on a line. It has to name the number with the group (?<tool>…), for example \"(?<![A-Z])T(?<tool>\\d+)\".",
+          "allOf": [
+            {
+              "$ref": "#/$defs/pattern"
+            },
+            {
+              "pattern": "\\(\\?<tool>"
+            }
+          ],
+          "x-gedit-kind": "pattern"
+        },
+        "toolFrom": {
+          "title": "Where the tool number is",
+          "description": "\"same-line\": the T word on the tool change line. \"same-line-or-last\": that T word, or the last T written before the line. \"last-before\": the last T written before the line; a T on the change line itself selects the next tool.",
+          "enum": [
+            "same-line",
+            "same-line-or-last",
+            "last-before"
+          ]
+        },
+        "ignore": {
+          "title": "Not a tool change",
+          "description": "A tool change line that also matches this is not a tool change, for example a lathe line \"T0100\" that only cancels the offset.",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern",
+          "x-gedit-advanced": true
+        }
+      }
+    },
+    "addresses": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "title": "Tool address",
+          "description": "The letter of the tool word, usually \"T\".",
+          "$ref": "#/$defs/address"
+        },
+        "feed": {
+          "title": "Feed address",
+          "description": "The letter of the feed word, usually \"F\".",
+          "$ref": "#/$defs/address"
+        },
+        "rapid": {
+          "title": "Rapid word",
+          "description": "The address or keyword that marks a rapid move where the control has one, for example \"FMAX\" on Heidenhain.",
+          "$ref": "#/$defs/address"
+        },
+        "spindle": {
+          "title": "Spindle address",
+          "description": "The letter of the spindle speed word, usually \"S\".",
+          "$ref": "#/$defs/address"
+        },
+        "axes": {
+          "title": "Axes",
+          "description": "The axis addresses of this control, for example X, Y, Z, A, B, C. Lists at least one.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/addressList"
+            },
+            {
+              "minItems": 1
+            }
+          ],
+          "x-gedit-kind": "text-list"
+        },
+        "arcCenter": {
+          "title": "Arc centre words",
+          "description": "The addresses that give the centre of an arc, for example I, J, K.",
+          "$ref": "#/$defs/addressList",
+          "x-gedit-kind": "text-list"
+        },
+        "arcCenterMode": {
+          "title": "Arc centre values",
+          "description": "\"incremental\": the centre is measured from the start point of the arc. \"absolute\": the centre is a position in the work coordinates.",
+          "enum": [
+            "incremental",
+            "absolute"
+          ]
+        },
+        "incremental": {
+          "title": "Incremental addresses",
+          "description": "An address that moves an axis by a distance, and the axis it moves, for example U moves X and W moves Z on a lathe. The axis has to be one of the axes.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/address"
+          },
+          "x-gedit-advanced": true
+        },
+        "diameter": {
+          "title": "Diameter addresses",
+          "description": "The addresses written as a diameter while diameter programming is on, for example X and U on a lathe.",
+          "$ref": "#/$defs/addressList",
+          "x-gedit-kind": "text-list"
+        },
+        "angular": {
+          "title": "Rotary axes",
+          "description": "The axes that turn, whose values are angles in degrees, for example A, B, C.",
+          "$ref": "#/$defs/addressList",
+          "x-gedit-kind": "text-list"
+        },
+        "feedUnitWords": {
+          "title": "Feed unit words",
+          "description": "Words that set the feed unit by themselves, for example FU for feed per revolution and FZ for feed per tooth on Heidenhain. Values: \"per-minute\", \"per-rev\", \"per-tooth\", \"inverse-time\".",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+          },
+          "additionalProperties": {
+            "enum": [
+              "per-minute",
+              "per-rev",
+              "per-tooth",
+              "inverse-time"
+            ]
+          },
+          "x-gedit-advanced": true
+        },
+        "speedLimitWords": {
+          "title": "Speed limit words",
+          "description": "Words whose value limits the spindle speed instead of setting it, for example LIMS on Siemens. Scripts that scale speeds leave them alone.",
+          "$ref": "#/$defs/addressList",
+          "x-gedit-kind": "text-list",
+          "x-gedit-advanced": true
+        },
+        "offsetWords": {
+          "title": "Offset number words",
+          "description": "Words that select an offset by its number and are never a position, for example D on Siemens. The geometry scripts leave them as written.",
+          "$ref": "#/$defs/addressList",
+          "x-gedit-kind": "text-list",
+          "x-gedit-advanced": true
+        },
+        "mainSpindle": {
+          "title": "Main spindle number",
+          "description": "The number of the main spindle where spindles are numbered, for example \"1\" on Siemens (S1= is then the main spindle).",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+$",
+          "x-gedit-advanced": true
+        },
+        "arcDirectionWords": {
+          "title": "Arc direction words",
+          "description": "Where the arc direction is a word and not a G code: the word as written (an address and its sign) and the direction, for example \"DR+\" is \"ccw\" and \"DR-\" is \"cw\" on Heidenhain. At most one word per direction.",
+          "type": "object",
+          "maxProperties": 2,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9]*[+-]$"
+          },
+          "additionalProperties": {
+            "enum": [
+              "cw",
+              "ccw"
+            ]
+          },
+          "allOf": [
+            {
+              "not": {
+                "minProperties": 2,
+                "additionalProperties": {
+                  "const": "cw"
+                }
+              }
+            },
+            {
+              "not": {
+                "minProperties": 2,
+                "additionalProperties": {
+                  "const": "ccw"
+                }
+              }
+            }
+          ],
+          "x-gedit-advanced": true
+        }
+      }
+    },
+    "referenceRule": {
+      "type": "object",
+      "required": [
+        "trigger",
+        "addresses"
+      ],
+      "properties": {
+        "trigger": {
+          "title": "Line",
+          "description": "A line that matches this carries a block number reference, for example \"(?<![A-Z])M99(?!\\d)\".",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern"
+        },
+        "addresses": {
+          "title": "Words",
+          "description": "The words on that line whose value is a block number, for example P.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/addressList"
+            },
+            {
+              "minItems": 1
+            }
+          ],
+          "x-gedit-kind": "text-list"
+        },
+        "rewrite": {
+          "title": "Rewrite",
+          "description": "True (the default): renumbering writes the new number into the word. False: the reference is only reported, for example an M99 P that may name a block in the calling program.",
+          "type": "boolean"
+        },
+        "program": {
+          "title": "Which program",
+          "description": "\"own\" (the default): a block of the program the line stands in. \"called\": a block of the program the same line calls. \"caller\": a block of the program that called this one.",
+          "enum": [
+            "own",
+            "called",
+            "caller"
+          ]
+        }
+      }
+    },
+    "callRule": {
+      "type": "object",
+      "required": [
+        "trigger",
+        "address"
+      ],
+      "properties": {
+        "trigger": {
+          "title": "Line",
+          "description": "A line that matches this calls another program, for example \"(?<![A-Z])M98(?!\\d)\".",
+          "$ref": "#/$defs/pattern",
+          "x-gedit-kind": "pattern"
+        },
+        "address": {
+          "title": "Program word",
+          "description": "The word that names the called program, for example P in \"M98 P1000\".",
+          "$ref": "#/$defs/address"
+        },
+        "maxDigits": {
+          "title": "Digits of the program number",
+          "description": "The most digits the program number has. A longer value is a repeat count followed by the program number (Fanuc \"M98 P21010\" runs O1010 twice). Leave it out when the whole value is the program number.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "repeatAddress": {
+          "title": "Repeat word",
+          "description": "The word that carries the repeat count instead, for example L. On a line with it, the whole value is the program number.",
+          "$ref": "#/$defs/address"
+        },
+        "localAddress": {
+          "title": "Local call word",
+          "description": "The word that makes the line a call of a part of this same program when there is no program word, for example Q in \"M98 Q30\".",
+          "$ref": "#/$defs/address"
+        },
+        "interrupt": {
+          "title": "Interrupt",
+          "description": "True when the line starts a program that runs on a signal and returns to whatever it interrupted, for example M96 P… on Fanuc.",
+          "type": "boolean"
+        }
+      }
+    },
+    "numbering": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "title": "Numbering kind",
+          "description": "\"free\": any start and step. \"consecutive\": every block, step 1, no gaps (Heidenhain).",
+          "enum": [
+            "free",
+            "consecutive"
+          ]
+        },
+        "start": {
+          "title": "Start",
+          "description": "The first block number, for example 10.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "step": {
+          "title": "Step",
+          "description": "The increment between block numbers, for example 10.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "digits": {
+          "title": "Digits",
+          "description": "Pads the number with zeros to this many digits, for example 4 gives N0010. 0 or left out: no padding.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 12
+        },
+        "max": {
+          "title": "Largest number",
+          "description": "The largest block number the control accepts, for example 99999.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "onOverflow": {
+          "title": "Past the largest number",
+          "description": "\"wrap\": start again at the start value. \"stop\": refuse to renumber.",
+          "enum": [
+            "wrap",
+            "stop"
+          ]
+        },
+        "spacesAfter": {
+          "title": "Blanks after the number",
+          "description": "How many blanks follow a new block number, 0 to 16.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "skipStartingWith": {
+          "title": "Lines left unnumbered",
+          "description": "Lines that start with one of these texts keep their text and get no number, for example \"%\" or \"O\".",
+          "$ref": "#/$defs/textList",
+          "x-gedit-kind": "text-list"
+        },
+        "skipEmpty": {
+          "title": "Skip empty lines",
+          "description": "True: empty lines get no number.",
+          "type": "boolean"
+        },
+        "restartAtProgramStart": {
+          "title": "Restart at each program",
+          "description": "True: numbering starts again at the start value at each program start in the file.",
+          "type": "boolean"
+        },
+        "onlyNumbered": {
+          "title": "Only numbered blocks",
+          "description": "True: only lines that already have a block number are renumbered.",
+          "type": "boolean"
+        },
+        "fitToMax": {
+          "title": "Fit below the largest number",
+          "description": "True: choose the largest whole step that keeps the last block at or below the largest number; the step is then not used. Needs a largest number.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        },
+        "alignColumn": {
+          "title": "Code column",
+          "description": "The column (counted from 1) where the code behind a new block number starts. 0 or left out: the blanks after the number decide.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "x-gedit-advanced": true
+        },
+        "everyNth": {
+          "title": "Number every Nth block",
+          "description": "Numbers every Nth block; the blocks between lose their number, except a block that a jump or call names. 1 or left out: every block.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "x-gedit-advanced": true
+        },
+        "skipContaining": {
+          "title": "Lines containing",
+          "description": "Lines that contain one of these texts keep their text unnumbered. Each text is one word without blanks.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^\\S+$"
+          },
+          "x-gedit-kind": "text-list",
+          "x-gedit-advanced": true
+        },
+        "skipFirst": {
+          "title": "Leave the first lines",
+          "description": "The first this many lines are left as they are.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000,
+          "x-gedit-advanced": true
+        },
+        "skipLast": {
+          "title": "Leave the last lines",
+          "description": "The last this many lines are left as they are.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000,
+          "x-gedit-advanced": true
+        },
+        "startTrigger": {
+          "title": "Start at the text",
+          "description": "Numbering starts at the first line that contains this text; the lines above keep their text. Empty: from the first line.",
+          "type": "string",
+          "maxLength": 200,
+          "x-gedit-advanced": true
+        },
+        "startAfterTrigger": {
+          "title": "Start after the text",
+          "description": "True: numbering starts at the line after the one with the start text.",
+          "type": "boolean",
+          "x-gedit-advanced": true
+        },
+        "references": {
+          "title": "Block number references",
+          "description": "Lines whose words name a block number, so a renumber can follow them, for example M99 P30 or GOTO 100.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/referenceRule"
+          },
+          "x-gedit-kind": "json",
+          "x-gedit-advanced": true
+        },
+        "calls": {
+          "title": "Program calls",
+          "description": "Lines that call another program and the word that names it, for example M98 P1000. Read only to find the program a reference points into.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/callRule"
+          },
+          "x-gedit-kind": "json",
+          "x-gedit-advanced": true
+        }
+      }
+    },
+    "overlay": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "modal",
+          "toolCall",
+          "numbering",
+          "addresses"
+        ]
+      },
+      "properties": {
+        "modal": {
+          "title": "Power-on state",
+          "description": "The power-on codes this choice sets, by modal group, for example { \"initial\": { \"feedmode\": \"G99\" } }.",
+          "type": "object",
+          "properties": {
+            "initial": {
+              "title": "Power-on codes",
+              "description": "Modal group and the code in force when the control is switched on, written as the code list writes it (\"G99\", not \"G099\").",
+              "$ref": "#/$defs/modalInitial"
+            }
+          }
+        },
+        "toolCall": {
+          "title": "Tool change",
+          "description": "How a tool change is read with this choice; the members you leave out stay as the profile says.",
+          "$ref": "#/$defs/toolCall"
+        },
+        "numbering": {
+          "title": "Block numbers",
+          "description": "How blocks are numbered with this choice; the members you leave out stay as the profile says.",
+          "$ref": "#/$defs/numbering"
+        },
+        "addresses": {
+          "title": "Addresses",
+          "description": "The addresses with this choice, for example the incremental words of a lathe; the members you leave out stay as the profile says.",
+          "$ref": "#/$defs/addresses"
+        }
+      }
+    },
+    "variantChoice": {
+      "type": "object",
+      "required": [
+        "value",
+        "label"
+      ],
+      "properties": {
+        "value": {
+          "title": "Value",
+          "description": "The value stored on a machine, for example \"A\".",
+          "$ref": "#/$defs/text"
+        },
+        "label": {
+          "title": "Label",
+          "description": "What the machine page shows, for example \"G-code system A\".",
+          "$ref": "#/$defs/text"
+        },
+        "codes": {
+          "title": "Code list",
+          "description": "The code list this choice reads, a code list that builds on the profile's own. Left out: the profile's code list.",
+          "$ref": "#/$defs/profileId"
+        },
+        "overlay": {
+          "title": "Changes",
+          "description": "What this choice changes in the profile: only the power-on state, the tool change, the block numbers and the addresses.",
+          "$ref": "#/$defs/overlay"
+        },
+        "detect": {
+          "title": "Detection",
+          "description": "Patterns that point to this choice when a program has no machine. Each pattern counts its weight once.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/weightedPattern"
+          }
+        }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "default",
+        "choices"
+      ],
+      "properties": {
+        "id": {
+          "title": "Name",
+          "description": "The name of the setting as a machine stores it, letters and digits, for example \"gcodeSystem\".",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+        },
+        "label": {
+          "title": "Label",
+          "description": "What the machine page shows, for example \"G-code system\".",
+          "$ref": "#/$defs/text"
+        },
+        "default": {
+          "title": "Default",
+          "description": "The value of the choice that applies when nothing is chosen and nothing detected.",
+          "$ref": "#/$defs/text"
+        },
+        "defaultBy": {
+          "title": "Default follows",
+          "description": "Makes the default follow another setting of this profile: while that setting has one of the values listed, the default is the choice given for it.",
+          "type": "object",
+          "required": [
+            "variant",
+            "values"
+          ],
+          "properties": {
+            "variant": {
+              "title": "Other setting",
+              "description": "The name of the other setting, for example \"gcodeSystem\".",
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+            },
+            "values": {
+              "title": "Defaults",
+              "description": "A value of the other setting and the default it gives this one, for example { \"B\": \"none\" }.",
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/text"
+              }
+            }
+          }
+        },
+        "choices": {
+          "title": "Choices",
+          "description": "The values a machine may choose from.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/variantChoice"
+          }
+        }
+      }
+    },
+    "machineParams": {
+      "type": "object",
+      "properties": {
+        "numberInput": {
+          "title": "Number input",
+          "description": "How a control may read the numbers of a program, offered by name on the machine page. Left out: numbers are read as the profile says, with no choice.",
+          "type": "object",
+          "properties": {
+            "default": {
+              "title": "Default",
+              "description": "The id of the choice that applies with no machine. It has to match the decimal point setting of the syntax.",
+              "$ref": "#/$defs/text"
+            },
+            "presets": {
+              "title": "Choices",
+              "description": "The ways of reading numbers a machine may choose from.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "label",
+                  "value"
+                ],
+                "properties": {
+                  "id": {
+                    "title": "Id",
+                    "description": "The name a machine stores, small letters, digits and \"-\", for example \"is-b\".",
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  },
+                  "label": {
+                    "title": "Label",
+                    "description": "What the machine page shows, for example \"Increments of 0.001 mm (IS-B)\". It says what the control does to a number.",
+                    "$ref": "#/$defs/text"
+                  },
+                  "value": {
+                    "title": "Number reading",
+                    "description": "How numbers are read with this choice: the reading and the increments per kind of number.",
+                    "$ref": "machines.schema.json#/$defs/numberInput"
+                  },
+                  "source": {
+                    "title": "Source",
+                    "description": "Where the manual or the notes say so, for example the manual and its page. Shown beside the choice.",
+                    "$ref": "#/$defs/text"
+                  },
+                  "verify": {
+                    "title": "Check on the machine",
+                    "description": "True when the value is a documented default nobody has confirmed for a real machine yet; the choice is then marked as unconfirmed.",
+                    "type": "boolean"
+                  },
+                  "digitCheck": {
+                    "title": "Counts for the digit check",
+                    "description": "False: the digit check of Check Program leaves this choice out when no machine is chosen, for example a coarse increment few machines run.",
+                    "type": "boolean"
+                  }
+                }
+              }
+            },
+            "pointlessFeeds": {
+              "title": "Feeds without a point",
+              "description": "A machine option on top of the number input: how the control counts a feed written without a decimal point.",
+              "type": "object",
+              "properties": {
+                "default": {
+                  "title": "Default",
+                  "description": "The choice a machine has until it says otherwise. It sets no steps.",
+                  "$ref": "#/$defs/text"
+                },
+                "choices": {
+                  "title": "Choices",
+                  "description": "The ways a control may count a feed written without a decimal point.",
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "value",
+                      "label"
+                    ],
+                    "properties": {
+                      "value": {
+                        "title": "Value",
+                        "description": "The value stored on a machine, for example \"per-minute\".",
+                        "$ref": "#/$defs/text"
+                      },
+                      "label": {
+                        "title": "Label",
+                        "description": "What the machine page shows.",
+                        "$ref": "#/$defs/text"
+                      },
+                      "classes": {
+                        "title": "Steps",
+                        "description": "The step a feed without a point counts in, per kind of feed: \"feedPerMin\" and \"feedPerRev\". Each gives \"increment\" in mm and may give \"incrementInch\".",
+                        "type": "object",
+                        "propertyNames": {
+                          "enum": [
+                            "feedPerMin",
+                            "feedPerRev"
+                          ]
+                        },
+                        "additionalProperties": {
+                          "type": "object",
+                          "required": [
+                            "increment"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "increment": {
+                              "title": "Step (mm)",
+                              "description": "The value of one step in a metric program, written as text, for example \"0.001\".",
+                              "$ref": "#/$defs/increment"
+                            },
+                            "incrementInch": {
+                              "title": "Step (inch)",
+                              "description": "The value of one step in an inch program, written as text, for example \"0.00001\".",
+                              "$ref": "#/$defs/increment"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "source": {
+                  "title": "Source",
+                  "description": "Where the manual or the notes say so, for example the manual and its page. Shown beside the choice.",
+                  "$ref": "#/$defs/text"
+                },
+                "verify": {
+                  "title": "Check on the machine",
+                  "description": "True when the value is a documented default nobody has confirmed for a real machine yet; the choice is then marked as unconfirmed.",
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        },
+        "units": {
+          "title": "Units",
+          "description": "The units a machine starts in when nothing else is said: \"mm\" or \"inch\". Left out: mm.",
+          "enum": [
+            "mm",
+            "inch"
+          ]
+        },
+        "diameter": {
+          "title": "Diameter programming",
+          "description": "Lathes only: whether X is a diameter when the machine starts, \"on\" or \"off\".",
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "modalGroups": {
+          "title": "Power-on codes",
+          "description": "The modal groups of the code list whose power-on code a machine may set, for example \"feedmode\".",
+          "$ref": "#/$defs/textList",
+          "x-gedit-kind": "text-list"
+        },
+        "variants": {
+          "title": "Settings",
+          "description": "Settings with a fixed set of choices, for example the G-code system A or B of a lathe.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variant"
+          },
+          "x-gedit-kind": "json"
+        },
+        "channels": {
+          "title": "Channels",
+          "description": "Starting points for a machine with more than one channel. They are never applied without a machine.",
+          "type": "object",
+          "properties": {
+            "waitLetters": {
+              "title": "Wait code letters",
+              "description": "The letters the wait codes of this control may use, one capital letter each, for example [\"M\"].",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z]$"
+              },
+              "x-gedit-kind": "text-list"
+            },
+            "presets": {
+              "title": "Starting points",
+              "description": "The channel set-ups a machine may start from.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "label",
+                  "value"
+                ],
+                "properties": {
+                  "id": {
+                    "title": "Id",
+                    "description": "The name of the starting point, small letters, digits and \"-\", for example \"two-turrets\".",
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  },
+                  "label": {
+                    "title": "Label",
+                    "description": "What the machine page shows.",
+                    "$ref": "#/$defs/text"
+                  },
+                  "value": {
+                    "title": "Channels",
+                    "description": "The channels, their names and how they wait for each other.",
+                    "$ref": "machines.schema.json#/$defs/channelParams"
+                  },
+                  "source": {
+                    "title": "Source",
+                    "description": "Where the manual or the notes say so, for example the manual and its page. Shown beside the choice.",
+                    "$ref": "#/$defs/text"
+                  },
+                  "verify": {
+                    "title": "Check on the machine",
+                    "description": "True when the value is a documented default nobody has confirmed for a real machine yet; the choice is then marked as unconfirmed.",
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "x-gedit-kind": "json"
+        },
+        "extraAxes": {
+          "title": "Extra axes",
+          "description": "A machine of this profile may name extra axes, axis names of more than one letter that the machine builder set up (for example AA). Left out: the machine page does not offer them.",
+          "type": "object",
+          "properties": {
+            "source": {
+              "title": "Source",
+              "description": "Where the manual or the notes say so, for example the manual and its page. Shown beside the choice.",
+              "$ref": "#/$defs/text"
+            },
+            "verify": {
+              "title": "Check on the machine",
+              "description": "True when the value is a documented default nobody has confirmed for a real machine yet; the choice is then marked as unconfirmed.",
+              "type": "boolean"
+            }
+          }
+        },
+        "builderCodes": {
+          "title": "Machine builder codes",
+          "description": "A machine of this profile may list the machine builder's own codes, for example G810 to G829 on Siemens. Left out: the machine page does not offer them.",
+          "type": "object",
+          "properties": {
+            "letters": {
+              "title": "Letters",
+              "description": "The letters such a code may have, one capital letter each, for example [\"G\"].",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z]$"
+              },
+              "x-gedit-kind": "text-list"
+            },
+            "example": {
+              "title": "Example",
+              "description": "Shown as the example of the field, for example \"G810-G829\".",
+              "$ref": "#/$defs/text"
+            },
+            "source": {
+              "title": "Source",
+              "description": "Where the manual or the notes say so, for example the manual and its page. Shown beside the choice.",
+              "$ref": "#/$defs/text"
+            },
+            "verify": {
+              "title": "Check on the machine",
+              "description": "True when the value is a documented default nobody has confirmed for a real machine yet; the choice is then marked as unconfirmed.",
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "complete": {
+      "required": [
+        "id",
+        "name",
+        "shortName",
+        "version",
+        "grammar",
+        "codes",
+        "files",
+        "detect",
+        "syntax",
+        "addresses",
+        "toolCall",
+        "program",
+        "outline",
+        "numbering"
+      ],
+      "properties": {
+        "files": {
+          "required": [
+            "extensions",
+            "defaultExtension",
+            "filterName",
+            "encoding",
+            "lineEnding",
+            "newFileLineEnding"
+          ]
+        },
+        "detect": {
+          "required": [
+            "extensions",
+            "content"
+          ]
+        },
+        "syntax": {
+          "required": [
+            "comments",
+            "blockNumber",
+            "decimalSeparator",
+            "decimalPointSignificant",
+            "wordSeparatorRequired"
+          ],
+          "properties": {
+            "blockSkip": {
+              "required": [
+                "chars",
+                "position"
+              ]
+            },
+            "blockNumber": {
+              "required": [
+                "mode",
+                "mandatory"
+              ],
+              "if": {
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "const": "prefix"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "prefix"
+                ]
+              }
+            },
+            "callTargets": {
+              "required": [
+                "after",
+                "pattern"
+              ]
+            }
+          }
+        },
+        "addresses": {
+          "required": [
+            "axes"
+          ]
+        },
+        "toolCall": {
+          "required": [
+            "trigger",
+            "tool",
+            "toolFrom"
+          ]
+        },
+        "program": {
+          "required": [
+            "start",
+            "end"
+          ]
+        },
+        "numbering": {
+          "required": [
+            "start",
+            "step"
+          ]
+        },
+        "numberFormat": {
+          "required": [
+            "decimals",
+            "trailingZeros",
+            "keepPoint",
+            "plusSign"
+          ]
+        },
+        "toolList": {
+          "required": [
+            "description"
+          ]
+        },
+        "machineParams": {
+          "properties": {
+            "numberInput": {
+              "required": [
+                "default",
+                "presets"
+              ],
+              "properties": {
+                "pointlessFeeds": {
+                  "required": [
+                    "default",
+                    "choices"
+                  ]
+                }
+              }
+            },
+            "channels": {
+              "required": [
+                "presets"
+              ]
+            },
+            "builderCodes": {
+              "required": [
+                "letters"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
 }
