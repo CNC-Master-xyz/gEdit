@@ -160,7 +160,7 @@ Each run is one undo step.
 
 | Golden | What it holds |
 |---|---|
-| `okuma-lathe.tools.json`, `sinumerik-lathe.tools.json` | As X1. Okuma: 5 tools. Sinumerik: `ROUGH`, `T1`, `T2`, `THREAD_M44`. |
+| `okuma-lathe.tools.json`, `sinumerik-lathe.tools.json` | As X1. Okuma: 5 tools; the driven tool shows `SB=2400` in its speed column (Wave Y, T116). Sinumerik: `ROUGH`, `T1`, `T2`, `THREAD_M44`. |
 | `okuma-lathe.feed90.MIN` + report | Six feeds scaled. The `G71` lead is listed. The dwell is left (counted in the summary). `SB=` is untouched. |
 | `sinumerik-lathe.feed90.MPF` + report | Five feeds scaled. The `F0.15` of the `G33` block is refused and listed ("G33 takes its lead from I, J or K"). |
 | `sinumerik-lathe.speed110.MPF` + report | `S` scaled. The three `LIMS=` stay as clamps. The three `G33` blocks are flagged. |

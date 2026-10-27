@@ -32,7 +32,7 @@
     {
       "line": 4,
       "severity": "warning",
-      "message": "Tool change without a tool number."
+      "message": "Tool change without a tool number: 1 feed (F100.) and 1 speed (S1000) belong to the tool it loads, which the list cannot name, so they are in no tool's range."
     }
   ]
 }

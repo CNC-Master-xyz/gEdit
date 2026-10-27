@@ -1,0 +1,13 @@
+{
+  "about": "T113 (rule 7): a TOOL CALL that names the tool already in the spindle and no tool axis only changes the speed, as the program map and the tool list read it (syntax-heidenhain §5.1): no tool change, the tool stays. With an axis it is a real call (the control may swap in a sister tool). A number compares as a number, a name exactly, and the indexed tool 12.1 is not tool 12.",
+  "input": "../../nc/heidenhain/h06-same-tool-speed.h",
+  "states": [
+    { "line": 4, "after": { "tool": "4", "speed": "3000", "block": { "toolChange": true } } },
+    { "line": 6, "about": "The same tool, no axis: a speed change.", "after": { "tool": "4", "speed": "4000", "block": { "toolChange": false } } },
+    { "line": 8, "after": { "tool": "\"DRILL_8\"", "speed": "2000", "block": { "toolChange": true } } },
+    { "line": 10, "about": "The same name, no axis: a speed change.", "after": { "tool": "\"DRILL_8\"", "speed": "2500", "block": { "toolChange": false } } },
+    { "line": 12, "after": { "tool": "12.1", "block": { "toolChange": true } } },
+    { "line": 13, "about": "Tool 12 is not the indexed tool 12.1: a tool change.", "after": { "tool": "12", "speed": "1900", "block": { "toolChange": true } } },
+    { "line": 14, "after": { "tool": "12", "speed": "2000", "block": { "toolChange": false } } }
+  ]
+}

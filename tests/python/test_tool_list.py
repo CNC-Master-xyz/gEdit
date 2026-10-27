@@ -774,7 +774,8 @@ class TestTurningDialects(unittest.TestCase):
         self.assertEqual((row["feed"], row["speed"]), ("0.3 /rev", "180 m/min (G96)"))
 
     def test_driven_tool_and_numbered_spindle_speeds_are_not_the_main_spindle_speed(self):
-        self.assertEqual(self.rows("okuma-turret")["T11"]["speed"], "")
+        # Never in the main range; since Wave Y (T116) listed after it under its own word.
+        self.assertEqual(self.rows("okuma-turret")["T11"]["speed"], "SB=2000")
 
     def test_a_word_that_names_the_main_spindle_is_its_speed(self):
         # M10 P10 (decision 3; the owner, 2026-09-27: "we consider S1= as main spindle"):
@@ -790,19 +791,21 @@ class TestTurningDialects(unittest.TestCase):
         result = helpers.run_script(SCRIPT, stdin=program, context=context)
         self.assertTrue(result.ok, result.stderr)
         speeds = {row["tool"]: row["speed"] for row in result.json()["rows"]}
-        self.assertEqual(speeds, {"T1": "800", "T2": "700", "T3": "", "T4": ""})
+        # `S2=` and `S[2]=` stay out of the main range; since Wave Y (T116) the column lists
+        # them under their own word.
+        self.assertEqual(speeds, {"T1": "800", "T2": "700", "T3": "S2=600", "T4": "S[2]=500"})
         # A profile that names no main spindle has none: there `S1=` stays another spindle's.
         profile = dict(context["profile"])
         profile["addresses"] = {k: v for k, v in profile["addresses"].items() if k != "mainSpindle"}
         result = helpers.run_script(SCRIPT, stdin=program, context=dict(context, profile=profile))
         self.assertTrue(result.ok, result.stderr)
-        self.assertEqual([row["speed"] for row in result.json()["rows"]], ["", "", "", ""])
+        self.assertEqual([row["speed"] for row in result.json()["rows"]], ["S1=800", "S[1]=700", "S2=600", "S[2]=500"])
 
     def test_an_indexed_spindle_word_is_not_the_main_spindle_speed(self):
         # M9 review F1: `S[2]=500` was read as the main spindle's `S`, so the roughing tool
         # showed 200-500 m/min. Like `S2=`, the index names spindle 2.
         row = self.rows("sinumerik-indexed-spindles")["T1"]
-        self.assertEqual((row["feed"], row["speed"]), ("0.2-0.25 /rev", "200 m/min (G96)"))
+        self.assertEqual((row["feed"], row["speed"]), ("0.2-0.25 /rev", "200 m/min (G96); S[2]=500"))
 
     def test_a_travel_time_is_in_no_feed_range(self):
         # M9 review F8: the F of a G931 block is the time the move takes, not a feed.
@@ -1039,3 +1042,66 @@ class TestM13Review(unittest.TestCase):
     def test_a_range_in_another_unit_than_the_program_says_which(self):
         report = self.report("fanuc-lathe", "O1\nG99\nT0101\nG97 S800 M03\nG01 Z-20. F0.25\nT0505\nG98 G01 X10. F100.\nM30\n")
         self.assertEqual([(row["tool"], row["feed"]) for row in report["rows"]], [("T1", "0.25 /rev"), ("T5", "100. /min")])
+
+
+def report_of(profile_id, text, params=None):
+    """The tool list of ``text`` on a profile's own defaults (no machine)."""
+    effective = helpers.effective_context(profile_id)
+    context = helpers.make_context(params=dict(params or {}))
+    context["profile"] = effective["profile"]
+    context["codes"] = effective["codes"]
+    context["machine"] = dict(effective["machine"])
+    context["document"]["profile"] = profile_id
+    context["input"] = {"scope": "document", "startLine": 1, "endLine": text.count("\n") + 1}
+    result = helpers.run_script(SCRIPT, stdin=text, context=context)
+    if not result.ok:
+        raise AssertionError(result.stderr)
+    return result.json()
+
+
+class TestWaveY(unittest.TestCase):
+    """Wave Y: T090 (a block over several lines), T115 (an unnamed tool change), T116 (`SB=`)."""
+
+    def test_a_thread_code_on_a_continuation_line_keeps_the_lead_out_of_the_range(self):
+        report = report_of("okuma-osp", "T0101\nG00 X50 Z5\nG01 X30 Z-20 F2\n$ G33\nG01 X40 F0.2\n")
+        (row,) = report["rows"]
+        self.assertEqual(row["feed"], "0.2 /rev")
+        (finding,) = report["findings"]
+        self.assertEqual(finding["line"], 3)
+        self.assertIn("the F of 1 block is a thread pitch", finding["message"])
+
+    def test_the_values_of_an_unnamed_tool_change_are_named_not_dropped(self):
+        report = report_of("fanuc-gcode", "O1000\nG90 G54\nS1200 M3\nM6\nG01 X10 F200\nG01 X20 F150\nT2 M6\nS800 M3\nG01 X5 F100\n")
+        (row,) = report["rows"]
+        self.assertEqual((row["tool"], row["feed"], row["speed"]), ("T2", "100", "800"))
+        (finding,) = report["findings"]
+        self.assertEqual(finding["line"], 4)
+        self.assertEqual(
+            finding["message"],
+            "Tool change without a tool number: 2 feeds (F200, F150) and 1 speed (S1200) belong to "
+            "the tool it loads, which the list cannot name, so they are in no tool's range.",
+        )
+
+    def test_an_unnamed_tool_change_with_nothing_written_for_it_says_only_that(self):
+        report = report_of("fanuc-gcode", "O1000\nM6\nT2 M6\nS800 M3\nG01 X5 F100\n")
+        self.assertEqual([f["message"] for f in report["findings"]], ["Tool change without a tool number."])
+
+    def test_a_driven_tool_speed_is_listed_under_its_own_word(self):
+        text = (
+            "N10 T0101\nN20 G97 S800 M03\nN30 G00 X50 Z5\nN40 T0303\nN50 M110\n"
+            "N60 SB=2000 M13\nN70 G01 X40 C10 F100\nN80 SB=2500\nN90 G01 X30\nN100 G97 S900\nN110 G01 X20\n"
+        )
+        rows = {row["tool"]: row for row in report_of("okuma-osp", text)["rows"]}
+        self.assertEqual(rows["T1"]["speed"], "800")
+        self.assertEqual(rows["T3"]["speed"], "900; SB=2000-2500")
+
+    def test_a_tool_with_only_another_spindles_speed_shows_it(self):
+        text = "N10 T0303\nN20 M110\nN30 SB=1500 M13\nN40 G01 X40 C10 F100\n"
+        (row,) = report_of("okuma-osp", text)["rows"]
+        self.assertEqual(row["speed"], "SB=1500")
+
+    def test_another_spindle_by_number_and_an_angle_word(self):
+        # Sinumerik: `S2=` is spindle 2, never the main range; `SF=` is a thread's start angle.
+        text = "N10 T1 D1\nN20 M6\nN30 S2=1200 M2=3\nN40 G1 X10 F0.2\nN50 G33 Z-10 K1.5 SF=90\n"
+        (row,) = report_of("sinumerik", text)["rows"]
+        self.assertEqual(row["speed"], "S2=1200")
