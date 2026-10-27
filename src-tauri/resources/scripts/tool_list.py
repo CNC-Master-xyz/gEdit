@@ -885,7 +885,7 @@ def build(
         for block_line in block:
             i = block_line.index
             line = block_line.text
-            _nc_block.read_line(tracker, block_line)
+            _nc_block.read_line(tracker, block_line, entries=False)
             flags.add(block_line)
             surface.read(block_line.written)
             mark = marks[i]
@@ -1143,7 +1143,7 @@ def collect(
     if tracker.pitch_feed:
         pitch_reason = lead_elsewhere(tracker, spec) or "pitch"
     elif tracker.pitch_feed_ambiguous and _nc_block.plain_owner_of(
-        spec.feed_address, getattr(tracker, "entries", ())
+        spec.feed_address, _nc_block.block_entries(block_tokens if block_tokens is not None else tokens, tracker)
     ) is None:
         # T090: a code of the block that is no thread anywhere and declares the feed word as
         # its own (an Okuma LAP `G85 … F0.3` under a `$ G84` condition change) settles it.

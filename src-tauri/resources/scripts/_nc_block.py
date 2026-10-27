@@ -446,16 +446,23 @@ class BlockReader:
             yield block
 
 
-def read_line(tracker: gedit_nc.FeedModeTracker, line: BlockLine, owners: bool = True) -> None:
+def read_line(
+    tracker: gedit_nc.FeedModeTracker, line: BlockLine, owners: bool = True, entries: bool = True
+) -> None:
     """Applies one line of a block to ``tracker`` and keeps what only that moment can answer.
 
     ``owners`` asks for the words a function of the block owns (:attr:`BlockLine.owners`),
-    which only the scripts that read feeds need.
+    which only the scripts that read feeds need; ``entries`` for the database entries of the
+    line's codes (:func:`block_entries`), which a caller that does not read them can skip and
+    work out from :attr:`BlockFlags.tokens` when it needs them.
     """
     tracker.update(line.tokens, continued=line.head)
-    line.entries = block_entries(line.tokens, tracker)
-    line.written = list(tracker.written)
-    if owners:
+    if entries:
+        line.entries = block_entries(line.tokens, tracker)
+    # `update` hands over a new list every time, so it is kept as it is.
+    line.written = tracker.written
+    # Only a database with a code that owns words (Klartext `M128 F800`) can answer yes.
+    if owners and getattr(tracker, "_own_words", True):
         for token in line.tokens:
             if token.kind == "word":
                 owner = tracker.own_word_of(token)
@@ -497,6 +504,7 @@ class BlockFlags:
         #: Every token of the block, its lines in order.
         self.tokens: List[gedit_nc.Token] = []
         self._owners: Dict[int, str] = {}
+        self._lines = 0
 
     def add(self, line: BlockLine) -> None:
         """Takes what the tracker says after ``line``, one line of this block."""
@@ -514,10 +522,16 @@ class BlockFlags:
         if not self.tapping and tracker.tapping:
             self.tapping, self.tapping_code = True, tracker.tapping_code
         self.data_code = self.data_code or tracker.data_code
-        self.written.extend(line.written)
-        self.entries.extend(line.entries)
-        self.tokens.extend(line.tokens)
-        self._owners.update(line.owners)
+        if self._lines == 0:
+            # A block of one line, nearly every block: its own lists, not copies.
+            self.written, self.entries, self.tokens = line.written, line.entries, line.tokens
+        else:
+            self.written = self.written + line.written
+            self.entries = self.entries + line.entries
+            self.tokens = self.tokens + line.tokens
+        self._lines += 1
+        if line.owners:
+            self._owners.update(line.owners)
 
     def entry(self, code: str) -> Optional[Dict[str, Any]]:
         """The database entry for a written code, following aliases, or ``None``."""
