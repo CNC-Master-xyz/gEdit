@@ -21,7 +21,7 @@ import { parseNumber } from '$lib/core/nc/numbers';
 import { lexSpec, tokenizeLine } from '$lib/core/nc/tokenizer';
 import type { LineState, NcToken, NumericLiteral } from '$lib/core/nc/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
-import type { ParseQueryResult, SearchFlags, SearchHit, SearchQuery, WordOp } from './types';
+import type { LineRange, ParseQueryResult, SearchFlags, SearchHit, SearchOptions, SearchQuery, WordOp } from './types';
 import { SEARCH_MAX_HITS } from './types';
 
 export * from './types';
@@ -411,19 +411,47 @@ export function findInLines(
   lines: string[],
   cp: CompiledProfile,
   q: SearchQuery,
-  o?: { max?: number; codes?: CodeDb },
+  o?: SearchOptions,
 ): { hits: SearchHit[]; truncated: boolean } {
   const max = o?.max ?? SEARCH_MAX_HITS;
   const scan = scannerFor(cp, q, o?.codes);
   const hits: SearchHit[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const found = scan(lines[i]);
-    for (const hit of found) {
-      if (hits.length >= max) return { hits, truncated: true };
-      hits.push({ line: i + 1, start: hit.start, end: hit.end, text: lines[i] });
+  const spans = o?.ranges === undefined ? [{ startLine: 1, endLine: lines.length }] : normalizeRanges(o.ranges, lines.length);
+  for (const span of spans) {
+    // (A continued block's flag carries over a gap between ranges; it only changes how a block
+    // start is classified, never what a search finds.)
+    for (let i = span.startLine - 1; i < span.endLine; i++) {
+      const found = scan(lines[i]);
+      for (const hit of found) {
+        if (hits.length >= max) return { hits, truncated: true };
+        hits.push({ line: i + 1, start: hit.start, end: hit.end, text: lines[i] });
+      }
     }
   }
   return { hits, truncated: false };
+}
+
+/**
+ * `ranges` clipped to `1..count`, in line order, with overlapping and touching spans joined
+ * (touching spans need no reset between them). Spans that are not whole numbers or hold no line are dropped.
+ */
+export function normalizeRanges(ranges: readonly LineRange[], count: number): LineRange[] {
+  const clipped = ranges
+    .map((r) => ({ startLine: Math.max(1, Math.floor(r.startLine)), endLine: Math.min(count, Math.floor(r.endLine)) }))
+    .filter((r) => Number.isFinite(r.startLine) && Number.isFinite(r.endLine) && r.startLine <= r.endLine)
+    .sort((a, b) => a.startLine - b.startLine);
+  const out: LineRange[] = [];
+  for (const r of clipped) {
+    const last = out[out.length - 1];
+    if (last !== undefined && r.startLine <= last.endLine + 1) last.endLine = Math.max(last.endLine, r.endLine);
+    else out.push({ ...r });
+  }
+  return out;
+}
+
+/** The lines of `lines` that `ranges` cover, in line order: what a guard has to read for a scoped search. */
+export function linesInRanges(lines: readonly string[], ranges: readonly LineRange[]): string[] {
+  return normalizeRanges(ranges, lines.length).flatMap((r) => lines.slice(r.startLine - 1, r.endLine));
 }
 
 /**
