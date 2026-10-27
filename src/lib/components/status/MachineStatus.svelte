@@ -17,7 +17,9 @@
 -->
 <script lang="ts">
   import { commands } from '$lib/app/registry/commands';
+  import { get } from 'svelte/store';
   import { machineTooltip } from '$lib/core/machines/fields';
+  import { folderNote, machineForPath, platformIsCaseInsensitive } from '$lib/core/machines/folderRules';
   import { docs } from '$lib/stores/documents';
   import { machines } from '$lib/stores/machines';
   import { profiles } from '$lib/stores/profiles';
@@ -37,6 +39,13 @@
     const profile = profiles.profile(doc.profileId);
     const assumed = eff.id === null;
     const warning = machines.typeMismatch(doc.id);
+    // P4f: the folder that chose this machine, or the two machines that claim the folder and
+    // so chose none (plan 6.8.4). Only a document with a file path is ruled by a folder.
+    const all = get(machines.list);
+    const folder =
+      doc.path === null
+        ? null
+        : folderNote(machineForPath(doc.path, all, { caseInsensitive: platformIsCaseInsensitive() }), all, eff.choice);
     return {
       id: eff.id ?? '',
       choice: eff.choice,
@@ -48,6 +57,7 @@
       // (system B powers up in feed per revolution) and the line names that source.
       tooltip:
         machineTooltip(eff, profile.machineParams, effective.profile.modal?.initial, profile.addresses?.diameter) +
+        (folder === null ? '' : '\n\n' + folder) +
         (warning === null
           ? ''
           : '\n\n' + t('machines.typeDiffers', { name: warning.name, machineType: t(warning.machineType === 'lathe' ? 'machines.typeLathe' : 'machines.typeMill'), documentType: t(warning.documentType === 'lathe' ? 'machines.typeLathe' : 'machines.typeMill') })),
