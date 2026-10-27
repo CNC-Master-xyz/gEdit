@@ -213,6 +213,12 @@ const READING_MEMBERS = ['unit', 'position', 'axis', 'programNumber', 'lengthAlo
  * (a declaration without `block` counts for both), and two declarations of one address agree on
  * `READING_MEMBERS`, so a reader that does not know the block still reads the value right. A
  * declaration that breaks either rule is reported and dropped; the first one stays.
+ *
+ * P4h (plan §6.10 rule 11, the block-aware unit of AD-31; T118): `unit` alone may differ, and
+ * only between a `block: 1` and a `block: 2` declaration (the `G76` `P`: a packed count in the
+ * first block, the thread height in increments in the second). A reader that knows the block
+ * reads that block's unit; one that does not finds two units and gives the word no class, so no
+ * value is ever read with the other block's unit.
  */
 function checkBlockParams(params: CodeParam[], path: string, report: (p: CodeDbProblem) => void): CodeParam[] {
   const kept: CodeParam[] = [];
@@ -227,7 +233,9 @@ function checkBlockParams(params: CodeParam[], path: string, report: (p: CodeDbP
       });
       return;
     }
-    const differs = others.length > 0 ? READING_MEMBERS.find((m) => others[0][m] !== param[m]) : undefined;
+    const perBlock = others.length > 0 && others[0].block !== undefined && param.block !== undefined;
+    const differs =
+      others.length > 0 ? READING_MEMBERS.find((m) => others[0][m] !== param[m] && !(m === 'unit' && perBlock)) : undefined;
     if (differs !== undefined) {
       report({
         path: `${path}[${i}].${differs}`,

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/machines.schema.json",
+  "title": "gEdit machines file",
+  "description": "The machines file of gEdit (<config>/machines.json): the machine configurations and the default machine per profile. Written by hand from src/lib/core/machines/types.ts and src/lib/core/channels/types.ts and held to readMachine, validateMachine, channelBlock, motionBlock and limitsBlock by src/lib/core/machines/schema.test.ts (plan \u00a76.10). Its $defs numberInput and channelParams are also used by profile.schema.json. Prelude skeleton: P4.39b fills it.",
+  "type": "object",
+  "x-gedit-stub": "P4.39b",
+  "$defs": {}
+}

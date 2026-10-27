@@ -564,3 +564,64 @@ describe('the user guide writes file name templates the way the product reads th
     }
   });
 });
+
+// P4h prelude (plan §6.10 rules 13 and 14; T123): the shape of a machine's extra axes and
+// builder codes, and that its profile offers them. The rules that need the profile's addresses,
+// keywords and the code database are P4.43b's and come on top.
+describe('extra axes and builder codes (P4h)', () => {
+  const OFFERING: Profile = {
+    ...MILL,
+    machineParams: { ...MILL.machineParams, extraAxes: {}, builderCodes: { letters: ['G'], example: 'G810-G829' } },
+  };
+  const mill = (params: MachineConfig['params']): MachineConfig => machine({ profile: 'fanuc-gcode', params });
+
+  it('accepts names with a kind and a list of codes on a profile that offers them', () => {
+    expect(
+      check(mill({ extraAxes: [{ name: 'AA', kind: 'linear' }, { name: 'QQ', kind: 'rotary' }], builderCodes: 'G810-G819, G825' }), OFFERING),
+    ).toEqual([]);
+  });
+
+  it('refuses both on a profile that does not offer them', () => {
+    expect(check(mill({ extraAxes: [{ name: 'AA', kind: 'linear' }], builderCodes: 'G810' }), MILL)).toEqual([
+      'machines[0].params.extraAxes: the profile "fanuc-gcode" has no extra axes',
+      'machines[0].params.builderCodes: the profile "fanuc-gcode" has no machine builder codes',
+    ]);
+  });
+
+  it('names each broken axis by its path', () => {
+    const bad = check(
+      mill({
+        extraAxes: [
+          { name: 'aa', kind: 'linear' },
+          { name: 'A', kind: 'linear' },
+          { name: 'AA1', kind: 'rotary' },
+          { name: 'BB', kind: 'angle' },
+          { name: 'CC', kind: 'linear' },
+          { name: 'CC', kind: 'linear' },
+          'DD',
+        ] as unknown as MachineConfig['params']['extraAxes'],
+      }),
+      OFFERING,
+    ).map((row) => row.slice(0, row.indexOf(':')));
+    expect(bad).toEqual([
+      'machines[0].params.extraAxes[0].name',
+      'machines[0].params.extraAxes[1].name',
+      'machines[0].params.extraAxes[2].name',
+      'machines[0].params.extraAxes[3].kind',
+      'machines[0].params.extraAxes[5].name',
+      'machines[0].params.extraAxes[6]',
+    ]);
+    const many = Array.from({ length: 17 }, (_, i) => ({ name: `A${String.fromCharCode(65 + i)}`, kind: 'linear' as const }));
+    expect(check(mill({ extraAxes: many }), OFFERING)).toEqual(['machines[0].params.extraAxes: a machine names at most 16 extra axes']);
+    expect(check(mill({ extraAxes: 'AA' as unknown as [] }), OFFERING)).toEqual(['machines[0].params.extraAxes: the extra axes are a list']);
+  });
+
+  it('refuses a code list it cannot read or with another letter, in its own words', () => {
+    for (const bad of ['', 'M810', 'G820-G810', 'G8x0', 12]) {
+      const rows = check(mill({ builderCodes: bad as string }), OFFERING);
+      expect(rows, String(bad)).toHaveLength(1);
+      expect(rows[0], String(bad)).toMatch(/^machines\[0\]\.params\.builderCodes: the builder codes are /);
+      expect(rows[0], String(bad)).not.toMatch(/wait/);
+    }
+  });
+});

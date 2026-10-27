@@ -839,7 +839,9 @@ describe('editing (P13)', () => {
     expect(pathsOf((p) => (p.editing = { forceUppercase: 'yes' }))).toEqual(['editing.forceUppercase']);
     expect(pathsOf((p) => (p.editing = { preventLineJoin: 1 }))).toEqual(['editing.preventLineJoin']);
     expect(pathsOf((p) => (p.editing = []))).toEqual(['editing']);
-    expect(pathsOf((p) => (p.editing = { tabWidth: 'wide', later: true }))).toEqual([]);
+    // P4h (§6.10 rule 9): `tabWidth` is read now, so a wrong one is named; a later member is still carried.
+    expect(pathsOf((p) => (p.editing = { tabWidth: 'wide', later: true }))).toEqual(['editing.tabWidth']);
+    expect(pathsOf((p) => (p.editing = { tabWidth: 4, later: true }))).toEqual([]);
     expect(pathsOf((p) => delete p.editing)).toEqual([]);
   });
 
@@ -1018,5 +1020,68 @@ describe('P4a fix B1: the members the geometry scripts read (plan §7 #314, #319
     expect(pathsOf((p) => (syntaxOf(p).cycleRAbsoluteWith = []))).toEqual(['syntax.cycleRAbsoluteWith']);
     expect(pathsOf((p) => (syntaxOf(p).cycleRAbsoluteWith = 'series-15'))).toEqual(['syntax.cycleRAbsoluteWith']);
     expect(pathsOf((p) => (syntaxOf(p).cycleRAbsoluteWith = ['Series 15']))).toEqual(['syntax.cycleRAbsoluteWith[0]']);
+  });
+});
+
+// P4h prelude (plan §6.10 rules 6, 9, 13 and 14): the members the milestone adds, checked by the
+// hand-written validator before any work package reads them, so the schema of P4.39 has one
+// answer to agree with.
+describe('P4h members', () => {
+  const syntaxOf = (p: Record<string, unknown>): Record<string, unknown> => p.syntax as Record<string, unknown>;
+  it('reads editing.tabWidth as a whole number from 1 to 16', () => {
+    expect(pathsOf((p) => (p.editing = { tabWidth: 1 }))).toEqual([]);
+    expect(pathsOf((p) => (p.editing = { tabWidth: 16 }))).toEqual([]);
+    for (const bad of [0, 17, 2.5, '4', null]) {
+      expect(pathsOf((p) => (p.editing = { tabWidth: bad })), String(bad)).toEqual(['editing.tabWidth']);
+    }
+  });
+
+  it('reads editing.rulers as at most 8 different whole numbers from 1 to 1000', () => {
+    expect(pathsOf((p) => (p.editing = { rulers: [] }))).toEqual([]);
+    expect(pathsOf((p) => (p.editing = { rulers: [80, 512, 1000] }))).toEqual([]);
+    expect(pathsOf((p) => (p.editing = { rulers: 80 }))).toEqual(['editing.rulers']);
+    expect(pathsOf((p) => (p.editing = { rulers: [1, 2, 3, 4, 5, 6, 7, 8, 9] }))).toEqual(['editing.rulers']);
+    expect(pathsOf((p) => (p.editing = { rulers: [0, 80.5, 1001, 'x'] }))).toEqual([
+      'editing.rulers[0]',
+      'editing.rulers[1]',
+      'editing.rulers[2]',
+      'editing.rulers[3]',
+    ]);
+    expect(pathsOf((p) => (p.editing = { rulers: [80, 80] }))).toEqual(['editing.rulers[1]']);
+  });
+
+  it('reads colors as role colours per theme that reach the contrast limit', () => {
+    expect(pathsOf((p) => (p.colors = {}))).toEqual([]);
+    expect(pathsOf((p) => (p.colors = { dark: { feed: '#ffaa00' }, light: { feed: '#7a3d00' } }))).toEqual([]);
+    expect(pathsOf((p) => (p.colors = 'blue'))).toEqual(['colors']);
+    expect(pathsOf((p) => (p.colors = { dim: {} }))).toEqual(['colors.dim']);
+    expect(pathsOf((p) => (p.colors = { dark: { speed: '#ffaa00' } }))).toEqual(['colors.dark.speed']);
+    expect(pathsOf((p) => (p.colors = { dark: { feed: 'orange' } }))).toEqual(['colors.dark.feed']);
+    const low = errorsOf((p) => (p.colors = { dark: { feed: '#222222' } }));
+    expect(low).toHaveLength(1);
+    expect(low[0]).toMatch(/^colors\.dark\.feed: has a contrast of .*at least 4\.5:1/);
+  });
+
+  it('reads syntax.extraAxisNames as at most 16 different names of 2 to 8 letters', () => {
+    expect(pathsOf((p) => (syntaxOf(p).extraAxisNames = ['AA', 'qq']))).toEqual([]);
+    expect(pathsOf((p) => (syntaxOf(p).extraAxisNames = 'AA'))).toEqual(['syntax.extraAxisNames']);
+    expect(pathsOf((p) => (syntaxOf(p).extraAxisNames = ['A', 'AA1', 'ABCDEFGHI']))).toEqual([
+      'syntax.extraAxisNames[0]',
+      'syntax.extraAxisNames[1]',
+      'syntax.extraAxisNames[2]',
+    ]);
+    expect(pathsOf((p) => (syntaxOf(p).extraAxisNames = ['AA', 'aa']))).toEqual(['syntax.extraAxisNames[1]']);
+    const many = Array.from({ length: 17 }, (_, i) => `A${String.fromCharCode(65 + i)}`);
+    expect(pathsOf((p) => (syntaxOf(p).extraAxisNames = many))).toEqual(['syntax.extraAxisNames']);
+  });
+
+  it('reads machineParams.extraAxes and machineParams.builderCodes as offers', () => {
+    const decl = (p: Record<string, unknown>): Record<string, unknown> => p.machineParams as Record<string, unknown>;
+    expect(pathsOf((p) => (decl(p).extraAxes = { source: 'a manual', verify: true }))).toEqual([]);
+    expect(pathsOf((p) => (decl(p).extraAxes = true))).toEqual(['machineParams.extraAxes']);
+    expect(pathsOf((p) => (decl(p).builderCodes = { letters: ['G'], example: 'G810-G829' }))).toEqual([]);
+    expect(pathsOf((p) => (decl(p).builderCodes = { letters: [] }))).toEqual(['machineParams.builderCodes.letters']);
+    expect(pathsOf((p) => (decl(p).builderCodes = { letters: ['g'] }))).toEqual(['machineParams.builderCodes.letters[0]']);
+    expect(pathsOf((p) => (decl(p).builderCodes = { example: 'G810' }))).toEqual(['machineParams.builderCodes.letters']);
   });
 });

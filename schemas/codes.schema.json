@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/codes.schema.json",
+  "title": "gEdit code database",
+  "description": "A code database file of gEdit (G and M codes, cycles, templates). Written by hand from src/lib/core/codes/types.ts and src/lib/core/templates/types.ts and held to loadCodeDb and loadTemplates by src/lib/core/codes/schema.test.ts (plan \u00a76.10). Prelude skeleton: P4.39b fills it.",
+  "type": "object",
+  "x-gedit-stub": "P4.39b",
+  "$defs": {}
+}

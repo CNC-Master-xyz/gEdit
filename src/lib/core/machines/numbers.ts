@@ -321,6 +321,13 @@ export function numberClassOf(
      * could not name (rule 3).
      */
     inForce?: readonly CodeEntry[];
+    /**
+     * P4h (plan §6.10 rule 11; T118). Which block of a two-block cycle of `blockCodes` this
+     * block is (`cycleBlockOf`), or null when that cannot be told. P4.43a reads it: a parameter
+     * declared with another unit per block is read with this block's unit, and with no class
+     * when the block is not known. Until then it is accepted and not read.
+     */
+    cycleBlock?: 1 | 2 | null;
   },
 ): ResolvedClass {
   const word = upper(address);

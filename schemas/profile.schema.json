@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
+  "title": "gEdit dialect profile",
+  "description": "A dialect profile of gEdit: how one kind of NC file looks. Written by hand from src/lib/core/profiles/types.ts and held to validateProfile by src/lib/core/profiles/schema.test.ts (plan \u00a76.10). Prelude skeleton: P4.39a fills it.",
+  "type": "object",
+  "x-gedit-stub": "P4.39a",
+  "$defs": {}
+}

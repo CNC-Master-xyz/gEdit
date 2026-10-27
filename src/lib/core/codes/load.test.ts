@@ -683,13 +683,32 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
         { address: 'U', label: 'Again', block: 1 },
         { address: 'R', label: 'Retract' },
         { address: 'R', label: 'Retract of the second block', block: 2 },
-        { address: 'P', label: 'Packed', unit: 'count', block: 1 },
-        { address: 'P', label: 'Height', unit: 'increment', block: 2 },
+        { address: 'Q', label: 'Depth', position: 'none', block: 1 },
+        { address: 'Q', label: 'Depth again', position: 'tool-axis', block: 2 },
       ]),
     );
-    expect(problems.map((p) => p.path)).toEqual(['codes[0].params[1]', 'codes[0].params[3]', 'codes[0].params[5].unit']);
-    expect(problems[2].message).toContain('same unit in both blocks');
-    expect(db.codes[0].params?.map((p) => p.label)).toEqual(['Depth of cut', 'Retract', 'Packed']);
+    expect(problems.map((p) => p.path)).toEqual(['codes[0].params[1]', 'codes[0].params[3]', 'codes[0].params[5].position']);
+    expect(problems[2].message).toContain('same position in both blocks');
+    expect(db.codes[0].params?.map((p) => p.label)).toEqual(['Depth of cut', 'Retract', 'Depth']);
+  });
+
+  // P4h (plan §6.10 rule 11; T118): the block-aware unit. Before P4h the second `P` was refused.
+  it('keeps a unit that differs between a block-1 and a block-2 declaration, and only there', () => {
+    const { db, problems } = load(
+      g71([
+        { address: 'P', label: 'Packed', unit: 'count', block: 1 },
+        { address: 'P', label: 'Thread height', unit: 'increment', block: 2 },
+        { address: 'W', label: 'Both blocks', unit: 'increment' },
+        { address: 'W', label: 'Second block', unit: 'count', block: 2 },
+      ]),
+    );
+    // `W` without a block counts for both blocks, so a second `W` clashes with it first.
+    expect(problems.map((p) => p.path)).toEqual(['codes[0].params[3]']);
+    expect(db.codes[0].params?.map((p) => [p.address, p.block ?? null, p.unit])).toEqual([
+      ['P', 1, 'count'],
+      ['P', 2, 'increment'],
+      ['W', null, 'increment'],
+    ]);
   });
 
   it('reads review: "pending" and drops any other value', () => {

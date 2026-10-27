@@ -27,7 +27,7 @@ import type { MachineParamsDecl, Profile, VariantDecl } from '$lib/core/profiles
 import { parseWaitCodes } from '$lib/core/channels/codes';
 import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE, type ChannelParams } from '$lib/core/channels/types';
 import { t } from '$lib/i18n';
-import { patternSubsetProblem } from '$lib/core/profiles/validate';
+import { EXTRA_AXIS_NAME, MAX_EXTRA_AXES, patternSubsetProblem } from '$lib/core/profiles/validate';
 import type { MachineConfig, MachineProblem, NumberClass, NumberReading } from './types';
 
 /** `MachineConfig.id`, in characters; [`MACHINE_ID_RE`] is written from it. */
@@ -284,7 +284,84 @@ export function validateMachine(m: MachineConfig, o: ValidateMachineOptions): Ma
     }
   }
 
+  problems.push(...builderProblems(params, decl, m.profile, id, at));
   return problems;
+}
+
+/** An extra axis name as a machine stores it: upper case, letters only (§6.10 rule 13). */
+const STORED_AXIS_NAME = /^[A-Z]{2,8}$/;
+
+/** The most characters of `params.builderCodes` (§6.10 rule 14). */
+export const MAX_BUILDER_CODES_LENGTH = 1000;
+
+/**
+ * P4h (plan §6.10 rules 13 and 14; T123): the shape of `params.extraAxes` and
+ * `params.builderCodes`, and that the profile offers them. The rules that need the profile's
+ * addresses and keywords and the code database (a name the profile already reads, a builder
+ * code gEdit knows) are P4.43b's and come on top of these.
+ */
+function builderProblems(
+  params: Record<string, unknown>,
+  decl: MachineParamsDecl,
+  profileId: string,
+  id: string | null,
+  at: (member: string) => string,
+): MachineProblem[] {
+  const out: MachineProblem[] = [];
+  const axes = params.extraAxes;
+  if (axes !== undefined) {
+    if (decl.extraAxes === undefined) {
+      out.push(problem(id, at('extraAxes'), `the profile "${profileId}" has no extra axes`));
+    } else if (!Array.isArray(axes)) {
+      out.push(problem(id, at('extraAxes'), 'the extra axes are a list'));
+    } else if (axes.length > MAX_EXTRA_AXES) {
+      out.push(problem(id, at('extraAxes'), `a machine names at most ${MAX_EXTRA_AXES} extra axes`));
+    } else {
+      const seen = new Set<string>();
+      axes.forEach((axis, i) => {
+        const where = `${at('extraAxes')}[${i}]`;
+        if (!isRecord(axis)) {
+          out.push(problem(id, where, 'an extra axis has a name and a kind'));
+          return;
+        }
+        const name = axis.name;
+        if (typeof name !== 'string' || !STORED_AXIS_NAME.test(name) || !EXTRA_AXIS_NAME.test(name)) {
+          out.push(problem(id, `${where}.name`, 'an extra axis name is 2 to 8 capital letters, e.g. "AA"'));
+        } else if (seen.has(name)) {
+          out.push(problem(id, `${where}.name`, `"${name}" is already listed`));
+        } else {
+          seen.add(name);
+        }
+        if (axis.kind !== 'linear' && axis.kind !== 'rotary') {
+          out.push(problem(id, `${where}.kind`, 'an extra axis is "linear" or "rotary"'));
+        }
+      });
+    }
+  }
+
+  const codes = params.builderCodes;
+  if (codes !== undefined) {
+    if (decl.builderCodes === undefined) {
+      out.push(problem(id, at('builderCodes'), `the profile "${profileId}" has no machine builder codes`));
+    } else if (typeof codes !== 'string' || codes.trim() === '' || codes.length > MAX_BUILDER_CODES_LENGTH) {
+      out.push(
+        problem(id, at('builderCodes'), `the builder codes are a list such as "G810-G829", at most ${MAX_BUILDER_CODES_LENGTH} characters`),
+      );
+    } else {
+      // The wait codes' list reader; its messages speak of wait codes, so the problem has its own words.
+      const letters = decl.builderCodes.letters;
+      if (parseWaitCodes(codes, { letters }).errors.length > 0) {
+        out.push(
+          problem(
+            id,
+            at('builderCodes'),
+            `the builder codes are codes and ranges of the letter${letters.length === 1 ? '' : 's'} ${letters.join(', ')}, such as "${decl.builderCodes.example ?? `${letters[0] ?? 'G'}810-${letters[0] ?? 'G'}829`}"`,
+          ),
+        );
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -292,7 +369,7 @@ export function validateMachine(m: MachineConfig, o: ValidateMachineOptions): Ma
  * preset it was given (§7.15), so this is the shape that decides how every literal of that
  * machine is read — and the one place a typo in the file has to be caught.
  */
-function numberInputProblems(raw: unknown, id: string | null, path: string): MachineProblem[] {
+export function numberInputProblems(raw: unknown, id: string | null, path: string): MachineProblem[] {
   const problems: MachineProblem[] = [];
   if (!isRecord(raw)) return [problem(id, path, 'the number input must be a JSON object')];
 

@@ -399,6 +399,7 @@ def number_class_of(
     block_codes: "Sequence[Dict[str, Any]]",
     pitch_feed: bool = False,
     in_force: "Optional[Sequence[Dict[str, Any]]]" = None,
+    cycle_block: Optional[int] = None,
 ) -> Optional[str]:
     """The number class of one address in one block, or ``None`` when it has none.
 
@@ -409,7 +410,10 @@ def number_class_of(
     that is active carries a pitch feed. ``in_force`` (M9) are the entries of the codes in
     force that the block does not write — the modal cycle, the motion code, a mode such as
     ``G63``; a caller without them passes nothing, and a pitch it flags is then one it
-    could not name (rule 3).
+    could not name (rule 3). ``cycle_block`` (P4h, plan §6.10 rule 11) is the block of a
+    two-block cycle of ``block_codes`` this block is (``_nc_modal.cycle_block_of``), or
+    ``None``; P4.43a reads it as ``numberClassOf``'s ``cycleBlock`` does. Until then it is
+    accepted and not read.
 
     The answer is a class, ``'increment'`` or ``'count'`` (both from ``CodeParam.unit``),
     or ``None``. The order is the one in the header of this section, and the first match

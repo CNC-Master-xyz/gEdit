@@ -40,6 +40,7 @@
 //     hand passes them, and a caller that does not simply does not get those two checks.
 
 import { normalizeCode } from '$lib/core/codes/lookup';
+import { paletteProblems } from '$lib/core/grammar/contrast';
 import { COMPARE_OPTION_KEYS } from '$lib/core/compare/types';
 import type { Eol } from '$lib/app/types';
 import type { NumberClass, NumberReading, ParamSource } from '$lib/core/machines/types';
@@ -115,6 +116,15 @@ const RESERVED_HEAD_CHARS = new Set('();/"\'%$<>+-.,=[]#*'.split(''));
 
 /** P9. An exponent marker: letters only (`EX`). */
 const LETTERS = /^[A-Za-z]+$/;
+
+/** P4h (plan §6.10 rule 13; T123): an extra axis name, letters only, two to eight of them. */
+export const EXTRA_AXIS_NAME = /^[A-Za-z]{2,8}$/;
+/** P4h (§6.10 rule 13): the most extra axis names a profile or a machine may list. */
+export const MAX_EXTRA_AXES = 16;
+/** P4h (§6.10 rule 9; Q4-19): the bounds of `editing.tabWidth` and `editing.rulers`. */
+export const MAX_TAB_WIDTH = 16;
+export const MAX_RULERS = 8;
+export const MAX_RULER_COLUMN = 1000;
 
 /** A profile id is also a Monaco language id, so it stays plain. */
 const PROFILE_ID = /^[a-z0-9][a-z0-9._-]*$/;
@@ -716,6 +726,8 @@ function checkSyntax(value: unknown, p: Problems): void {
   // Review round (D6-4, NC-9): two notes of Translate.
   optBool(syntax.tcpTableCoordinates, 'syntax.tcpTableCoordinates', p);
   optStrArr(syntax.cycleRAbsoluteWith, 'syntax.cycleRAbsoluteWith', p, { min: 1, allow: /^[a-z0-9][a-z0-9-]*$/ });
+  // P4h (§6.10 rule 13; T123): the machine's axis names read with the value packed behind.
+  checkExtraAxisNames(syntax.extraAxisNames, p);
   optPattern(syntax.header, 'syntax.header', p);
   // M8 integration (§7.16): the names a program gives itself, one token each.
   optPattern(syntax.names, 'syntax.names', p);
@@ -755,6 +767,20 @@ function checkSyntax(value: unknown, p: Problems): void {
   optNum(syntax.maxWordDigits, 'syntax.maxWordDigits', p, { int: true, min: 1 });
   optNum(syntax.maxMCodes, 'syntax.maxMCodes', p, { int: true, min: 1 });
   checkTextFields(syntax, caseSensitive, p);
+}
+
+/** P4h (§6.10 rule 13): `syntax.extraAxisNames`, letters only, no name twice (ignoring case). */
+function checkExtraAxisNames(value: unknown, p: Problems): void {
+  if (value === undefined) return;
+  const before = p.list.length;
+  strArr(value, 'syntax.extraAxisNames', p, { allow: EXTRA_AXIS_NAME, cap: MAX_EXTRA_AXES });
+  if (p.list.length !== before || !Array.isArray(value)) return;
+  const seen = new Set<string>();
+  value.forEach((name, i) => {
+    const key = String(name).toUpperCase();
+    if (seen.has(key)) p.add(`syntax.extraAxisNames[${i}]`, `"${String(name)}" is already listed`);
+    seen.add(key);
+  });
 }
 
 /** M12.5: a colon word's name, `VCONST`, `HSC-MODE` — letters, digits, `_` and `-`, starting with a letter. */
@@ -1337,6 +1363,7 @@ function checkMachineParams(root: Record<string, unknown>, p: Problems, o: Profi
   }
 
   checkChannelPresets(decl.channels, p);
+  checkBuilderDecls(decl, p);
 
   const numberInput = optObj(decl.numberInput, 'machineParams.numberInput', p);
   if (!numberInput) return;
@@ -1420,6 +1447,25 @@ function checkChannelPresets(value: unknown, p: Problems): void {
   });
 }
 
+/**
+ * P4h (plan §6.10 rules 13 and 14; T123): that a machine of this profile may name extra axes
+ * and list the machine builder's codes. Both are only offers; the values are the machine's.
+ */
+function checkBuilderDecls(decl: Record<string, unknown>, p: Problems): void {
+  const axes = optObj(decl.extraAxes, 'machineParams.extraAxes', p);
+  if (axes) {
+    optStr(axes.source, 'machineParams.extraAxes.source', p);
+    optBool(axes.verify, 'machineParams.extraAxes.verify', p);
+  }
+  const codes = optObj(decl.builderCodes, 'machineParams.builderCodes', p);
+  if (codes) {
+    strArr(codes.letters, 'machineParams.builderCodes.letters', p, { min: 1, allow: /^[A-Z]$/ });
+    optStr(codes.example, 'machineParams.builderCodes.example', p);
+    optStr(codes.source, 'machineParams.builderCodes.source', p);
+    optBool(codes.verify, 'machineParams.builderCodes.verify', p);
+  }
+}
+
 function checkNumberFormat(value: unknown, p: Problems): void {
   const fmt = optObj(value, 'numberFormat', p);
   if (!fmt) return;
@@ -1464,9 +1510,10 @@ function checkCompare(value: unknown, p: Problems): void {
 }
 
 /**
- * P13 (AD-30), P4c (plan §6.5). `forceUppercase`, `preventLineJoin`, `autoSpace` and
- * `autoNumber` are optional booleans (an absent one is off); any other member (`tabWidth`
- * on `fanuc-gcode`, a field of a later phase) is carried unread.
+ * P13 (AD-30), P4c (plan §6.5), P4h (§6.10 rule 9). `forceUppercase`, `preventLineJoin`,
+ * `autoSpace` and `autoNumber` are optional booleans (an absent one is off); `tabWidth` a whole
+ * number from 1 to 16; `rulers` at most 8 different whole numbers from 1 to 1000. Any other
+ * member (a field of a later phase) is carried unread.
  */
 function checkEditing(value: unknown, p: Problems): void {
   const editing = optObj(value, 'editing', p);
@@ -1475,6 +1522,30 @@ function checkEditing(value: unknown, p: Problems): void {
   optBool(editing.preventLineJoin, 'editing.preventLineJoin', p);
   optBool(editing.autoSpace, 'editing.autoSpace', p);
   optBool(editing.autoNumber, 'editing.autoNumber', p);
+  optNum(editing.tabWidth, 'editing.tabWidth', p, { int: true, min: 1, max: MAX_TAB_WIDTH });
+  if (editing.rulers === undefined) return;
+  const rulers = arr(editing.rulers, 'editing.rulers', p);
+  if (!rulers) return;
+  if (rulers.length > MAX_RULERS) {
+    p.add('editing.rulers', `lists more than ${MAX_RULERS} rulers`);
+    return;
+  }
+  const seen = new Set<unknown>();
+  rulers.forEach((column, i) => {
+    num(column, `editing.rulers[${i}]`, p, { int: true, min: 1, max: MAX_RULER_COLUMN });
+    if (seen.has(column)) p.add(`editing.rulers[${i}]`, `${String(column)} is already listed`);
+    seen.add(column);
+  });
+}
+
+/**
+ * P4h (plan §6.10 rule 6). `colors`: only `dark` and `light`, only roles, only `#rrggbb` values
+ * that reach the contrast limit against the editor background of their theme
+ * (`core/grammar/contrast.ts`). A colour that cannot be read is refused, never shown.
+ */
+function checkColors(value: unknown, p: Problems): void {
+  if (value === undefined) return;
+  for (const [path, message] of paletteProblems(value)) p.add(path === '' ? 'colors' : `colors.${path}`, message);
 }
 
 // ---------------------------------------------------------------------------
@@ -1533,6 +1604,7 @@ export function validateProfile(raw: unknown, o: ProfileValidationOptions = {}):
   checkToolList(root.toolList, p);
   checkCompare(root.compare, p);
   checkEditing(root.editing, p);
+  checkColors(root.colors, p);
 
   return p.list.length === 0 ? { ok: true, profile: raw as Profile } : { ok: false, errors: p.list };
 }
