@@ -256,6 +256,15 @@ describe('channel presets (§8.9)', () => {
     expect(profileOf('fanuc-lathe').machineParams?.channels?.presets.find((x) => x.id === 'fanuc-3path-digits-nop12')?.label).toMatch(/version file/);
   });
 
+  it('P4.30b: the label of fanuc-3path-digits-nop12 says path 1 may be written without an extension, which is what its firstFileName reads', () => {
+    const p = preset('fanuc-lathe', 'fanuc-3path-digits-nop12');
+    expect(profileOf('fanuc-lathe').machineParams?.channels?.presets.find((x) => x.id === 'fanuc-3path-digits-nop12')?.label).toContain(
+      'path 1 may also be written without an extension (PART)',
+    );
+    expect(new RegExp(p.firstFileName ?? '$^').test('PART')).toBe(true);
+    expect(new RegExp(p.firstFileName ?? '$^').test('PART.ISO')).toBe(false);
+  });
+
   it('M12.5: fanuc-2head-m100 — M100 to M197 are waits for both heads, M198 is not one, and the label says why', () => {
     const p = preset('fanuc-lathe', 'fanuc-2head-m100');
     expect(p.fileName).toBeUndefined();

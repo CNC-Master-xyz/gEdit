@@ -789,8 +789,11 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
       if (source === undefined) throw new Error(`no machine "${id}"`);
       assertRoom();
       const taken = new Set(file.machines.map((machine) => machine.id));
+      // The folders stay with the machine they were written for (two machines claiming one folder is
+      // the conflict the Machines page shows, plan 6.8.4): the copy starts without any.
+      const { folders: _folders, ...rest } = source;
       const copy: MachineConfig = {
-        ...source,
+        ...rest,
         id: freeId(name, taken),
         name,
         params: structuredClone(source.params),

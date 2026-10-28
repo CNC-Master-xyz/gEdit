@@ -215,6 +215,17 @@ describe('editing the folders of a machine', () => {
     ]);
   });
 
+  it('a duplicate does not take the folders of its source (session decision 2026-10-27)', async () => {
+    const h = harness([LATHE('/dnc/b/part.nc')]);
+    const copyId = await h.machines.duplicate('lathe-b', 'Lathe B copy');
+    const written = h.saved.at(-1)?.machines as { id: string; folders?: unknown }[];
+    expect(written.find((m) => m.id === copyId)).toBeDefined();
+    expect('folders' in written.find((m) => m.id === copyId)!).toBe(false);
+    // The source keeps its folders and still decides the program.
+    expect(written.find((m) => m.id === 'lathe-b')?.folders).toEqual([{ path: '/dnc/b' }, { path: '/dnc/shared' }]);
+    expect(eff(h, 'd1')).toMatchObject({ id: 'lathe-b', choice: 'folder' });
+  });
+
   it('removing a machine takes its folders with it', async () => {
     const h = harness([LATHE('/dnc/b/part.nc')]);
     await h.machines.remove('lathe-b');

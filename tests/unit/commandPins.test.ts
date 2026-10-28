@@ -207,6 +207,13 @@ const PINNED: { id: string; keys?: Keys; title: string; owner: string; pending?:
   { id: 'file.appendFile', title: 'insertFile.append', owner: 'insertFile.ts' },
   { id: 'file.print', keys: 'Mod+P', title: 'print.print', owner: 'print.ts' },
   { id: 'file.exportHtml', title: 'print.exportHtml', owner: 'print.ts' },
+  // Phase 4, P4f (pinned at the P4f integration; Phase 4 plan §6.11). Find in Folder
+  // (`contrib/findInFolder.ts`, P4.28): Edit tab, group `search.group`, order 133; no key
+  // (`Mod+Shift+F` is Find All, and the `Mod+Alt` letters wait for the AltGr check). Save Channel
+  // Files (`contrib/channels.ts`, P4.31): NC tab, group `channels.group`, order 96; no key; its
+  // title is `channelScope.saveFiles`.
+  { id: 'search.findInFolder', title: 'findInFolder.command', owner: 'findInFolder.ts' },
+  { id: 'channels.saveChannelFiles', title: 'channelScope.saveFiles', owner: 'channels.ts' },
 ];
 /**
  * The ribbon groups of those entries: NC tab (M10, M12 navigation), Edit tab (search, M13
