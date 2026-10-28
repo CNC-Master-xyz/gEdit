@@ -202,8 +202,9 @@ Showing the channels of a program side by side is planned for Phase 4.
   [channels](docs/user/channels.md),
   [understanding a block](docs/user/inspector.md) (the inspector, the hover and the motion colours),
   [writing with templates](docs/user/templates.md) (the Insert tab, Edit Cycle, formulas and the template manager),
-  [transformations](docs/user/transformations.md), [scripts](docs/user/scripts.md) and the
-  [keyboard](docs/user/shortcuts.md).
+  [transformations](docs/user/transformations.md), [scripts](docs/user/scripts.md) (with script packages),
+  the [keyboard](docs/user/shortcuts.md) (with your own keys) and
+  [settings search, language, and exporting or importing your configuration](docs/user/configuration.md).
 - **[Planning](docs/planning/README.md)** — scope, roadmap and feature notes.
 - **[TODO.md](TODO.md)** — the open items and the decisions still to be made.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — setup, conventions, checks and the runtime harness.

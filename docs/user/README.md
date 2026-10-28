@@ -1066,7 +1066,7 @@ in lower case, on every shipped dialect.
 
 ## Settings
 
-`Cmd/Ctrl+,` opens the settings dialog. Seven pages:
+`Cmd/Ctrl+,` opens the settings dialog. A search box at the top finds a setting or a page ([Finding a setting](configuration.md#finding-a-setting)). Ten pages:
 
 | Page | What you can set |
 |---|---|
@@ -1077,6 +1077,9 @@ in lower case, on every shipped dialect.
 | **Scripts** | The Python interpreter, extra script folders, the time limit for a run, whether the bundled scripts are listed — and the path of your own scripts folder |
 | **Machines** | Your machine configurations: add, edit, duplicate, remove, import and export, and which one is the default for a dialect — see [Machines](machines.md) |
 | **Profiles** | Your own profiles and code files: new, open, import, export, remove, test on the open program — see [Your own profiles and code files](profiles.md). **Manage Profiles…** in the palette opens the dialog on this page |
+| **Keyboard** | Your own key for any command, reset, and the keys that clash — see [Your own keys](shortcuts.md#your-own-keys) |
+| **Packages** | Script packages: folders of scripts, profiles and code files, switched on or off — see [Script packages](scripts.md#script-packages) |
+| **Configuration** | Export everything you set up to one zip file, and import such a file with a preview and a backup — see [Export and import](configuration.md#export-and-import) |
 
 **Closing the dialog with something unsaved asks first.** If you typed a new value and leave
 without **Save** — **Cancel**, `Esc`, a click outside the dialog, or **Open settings file** —
@@ -1087,7 +1090,7 @@ without saving it?*): when you close the dialog, press **Open settings file** or
 also when you click another page of the dialog, because the page you leave drops the form.
 With nothing typed, nothing is asked.
 
-The Machines and Profiles pages are not pages of settings. Machine configurations are
+The Machines, Profiles, Keyboard, Packages and Configuration pages are not pages of settings: they act at once on their own file or folder, and the dialog's **Save** does not cover them. Machine configurations are
 records with names of their own, and they live in their own file (`machines.json`), not in
 `settings.json`; your profiles and code files are files of their own in two folders.
 
@@ -1168,12 +1171,15 @@ Being clear about this saves disappointment on the shop floor.
 | Settings | `<config>/settings.json` |
 | Machine configurations | `<config>/machines.json` |
 | Your own scripts | `<config>/scripts/` |
+| Script packages, one folder each | `<config>/packages/` |
+| Your own keys | `<config>/keybindings.json` |
 | Your own profiles | `<config>/profiles/` |
 | Your own code files, with your own templates | `<config>/codes/` |
 | Recent files, panel sizes, remembered form values, the last script you ran, the last session, and your place in each file | `<data>/state.json` |
 | Window size and position | `<config>/.window-state.json` |
 | The copies made before a save | `<data>/backups/` |
 | Unsaved work kept for a crash | `<data>/recovery/` |
+| The copies an import of a configuration made first | `<data>/import-backups/` |
 
 `<config>` and `<data>` are the standard application folders of your operating system: on
 macOS both are `~/Library/Application Support/com.pburg.gedit`, on Windows both are
