@@ -618,6 +618,14 @@ class Extents:
         self.block(step, number, holes)
         if record and not self.following:
             self.after_call(step, number)
+        elif not record and self.may_call(step):
+            # Wave Y skeptic D6: a call on a line above the selection is not followed (the run
+            # does not hold the called program's lines there), so the called program may have
+            # moved the tool anywhere: every axis is not known, as after a call the run does not
+            # follow. The finding is the selection's own (`incremental-start`, ...).
+            call = _nc_geom._line_has_call(_nc_geom._block_of(step, self.tracker))
+            if call is not None:
+                self.tracker.forget_all("%s (line %d)" % (call, number))
         return state
 
     # -- subprogram calls (v1.2.0, T110) --------------------------------------
@@ -658,10 +666,11 @@ class Extents:
 
     def after_call(self, step: Step, number: int) -> None:
         """v1.2.0 (T110): a block that calls a program. A program of this document, called once
-        by its number (the profile's ``numbering.calls`` rule: no repeat count, no jump into it,
-        no number that packs a count), with no call of its own, is walked right here from where
-        the caller stands, and the caller goes on from where it ends. Any other call leaves every
-        axis not known: the called program may have moved the tool anywhere."""
+        by its number (the profile's ``numbering.calls`` rule: no repeat
+        count, no jump into it, no number that packs a count), with no call of its own, is walked
+        right here from where the caller stands, and the caller goes on from where it ends. Any
+        other call leaves every axis not known: the called program may have moved the tool
+        anywhere."""
         if not self.may_call(step):
             return
         call = _nc_geom._line_has_call(_nc_geom._block_of(step, self.tracker))

@@ -830,6 +830,37 @@ class LaterVersionTest(unittest.TestCase):
         report = helpers.run_script(SCRIPT, stdin=klartext, context=helpers.effective_context("heidenhain-klartext")).json()
         self.assertIn("call", reasons(report))
 
+    T110_CALLER = "%\nO1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)\nG21 G17 G90\nG0 X0. Y0. Z50.\n{call}\nG91 G0 X1.\nG90\nM30"
+    T110_SUB = "\nO2000\nG90 G0 X300. Y-200.\nM99\n%"
+
+    def selection_report(self, text, start, end):
+        lines = text.split("\n")
+        context = helpers.effective_context("fanuc-gcode")
+        context["input"] = {
+            "scope": "selection",
+            "startLine": start,
+            "endLine": end,
+            "precedingLines": lines[: start - 1],
+            "followingLines": lines[end:],
+        }
+        out = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
+        self.assertTrue(out.ok, out.stderr)
+        return out.json()
+
+    def test_d6_a_call_above_the_selection_leaves_the_axes_not_known(self):
+        # Wave Y skeptic D6: the lines above a selection are not followed into a called program,
+        # so a call there leaves every position not known, like a call the whole run does not
+        # follow. Before, the selection's G91 X1. was counted from X0 (X max 1, no finding).
+        for name, text in (
+            ("t110k: the program is not in the file", self.T110_CALLER.format(call="M98 P2000")),
+            ("t110l: the program is in the file", self.T110_CALLER.format(call="M98 P2000") + self.T110_SUB),
+        ):
+            with self.subTest(name):
+                report = self.selection_report(text, 6, 7)
+                x = row(report, "X")
+                self.assertEqual((x["max"], x["unresolved"]), ("", 1), x)
+                self.assertIn("incremental-start", reasons(report))
+
     def test_t112_okuma_l_arcs(self):
         report = report_of("t112-okuma-l-arcs")
         self.assertEqual([f["reason"] for f in report["findings"]], ["arc"])  # only the CALRG arc
