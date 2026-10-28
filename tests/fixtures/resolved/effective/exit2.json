@@ -5,8 +5,8 @@
   "checks-lathe.nc|X8 Lathe IS-B": "effective/exit2/fanuc-lathe/k-cbd3dc73.json",
   "checks-lathe.nc|none": "effective/exit2/fanuc-lathe/k-cf4e10b5.json",
   "checks-mill.nc|none": "effective/exit2/fanuc-gcode/k-963125df.json",
-  "checks-okuma.MIN|X8 Okuma 1um": "effective/exit2/okuma-osp/k-d4cb51b9.json",
-  "checks-okuma.MIN|none": "effective/exit2/okuma-osp/k-9c4501c6.json",
+  "checks-okuma.MIN|X8 Okuma 1um": "effective/exit2/okuma-osp/k-5d8cc390.json",
+  "checks-okuma.MIN|none": "effective/exit2/okuma-osp/k-580dd843.json",
   "checks-sinumerik.MPF|none": "effective/exit2/sinumerik/k-5d901a91.json",
   "decimal-lathe.nc|Lathe IS-B": "effective/exit2/fanuc-lathe/k-17faf40e.json",
   "decimal-lathe.nc|Lathe calc": "effective/exit2/fanuc-lathe/k-8e5621b3.json",
@@ -23,7 +23,7 @@
   "fanuc-lathe-b.nc|X11 Lathe A": "effective/exit2/fanuc-lathe/k-0c7c5dce.json",
   "fanuc-lathe-b.nc|X8 Lathe IS-B": "effective/exit2/fanuc-lathe/k-cbd3dc73.json",
   "fanuc-lathe-b.nc|none": "effective/exit2/fanuc-lathe/k-4433f538.json",
-  "okuma-lathe.MIN|X8 Okuma 1um": "effective/exit2/okuma-osp/k-d4cb51b9.json",
-  "okuma-lathe.MIN|none": "effective/exit2/okuma-osp/k-9c4501c6.json",
+  "okuma-lathe.MIN|X8 Okuma 1um": "effective/exit2/okuma-osp/k-5d8cc390.json",
+  "okuma-lathe.MIN|none": "effective/exit2/okuma-osp/k-580dd843.json",
   "sinumerik-lathe.MPF|none": "effective/exit2/sinumerik/k-5d901a91.json"
 }

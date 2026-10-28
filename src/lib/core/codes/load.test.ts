@@ -745,7 +745,8 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
     // v1.2 NC fix round (NCF-A follow-up): the thread passes and the L-radius arcs (lengthAlong).
     // Manual-check review round (NC-5): the turret wait M100.
     // Wave Y (T101, T102): G24, G25 and G314.
-    expect(marked('okuma')).toEqual(['G2', 'G3', 'G20', 'G21', 'G24', 'G25', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'G314', 'M85', 'M100', 'GOTO', 'IF']);
+    // Wave Y data batch: G17, G18 and G19 held in force (modal), G18 at power-on.
+    expect(marked('okuma')).toEqual(['G2', 'G3', 'G17', 'G18', 'G19', 'G20', 'G21', 'G24', 'G25', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'G314', 'M85', 'M100', 'GOTO', 'IF']);
     // The Sinumerik and Klartext codes (package A7-S); SLOT2, CYCLE72, ADIS and ADISPOS were
     // added from the manuals afterwards (owner decision 2026-10-12) and carry the same mark,
     // as does CYCLE62, whose description now names CYCLE72 next to the turning cycles.

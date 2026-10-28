@@ -26,7 +26,8 @@
       "diameter": "machine",
       "modalInitial": {
         "distance": "profile",
-        "feedmode": "machine"
+        "feedmode": "machine",
+        "plane": "profile"
       },
       "numberInput": "profile",
       "units": "profile",
@@ -411,12 +412,14 @@
       "diameter": "off",
       "initial": {
         "distance": "G90",
-        "feedmode": "G94"
+        "feedmode": "G94",
+        "plane": "G18"
       },
       "sources": {
         "diameter": "machine",
         "distance": "profile",
         "feedmode": "machine",
+        "plane": "profile",
         "units": "profile"
       },
       "units": "mm"

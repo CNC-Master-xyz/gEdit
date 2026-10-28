@@ -145,7 +145,7 @@
       { "trigger": "(?<![A-Z])G0*8[5-8](?![\\d.])", "addresses": ["N"] }
     ]
   },
-  "modal": { "initial": { "feedmode": "G95", "distance": "G90" } },
+  "modal": { "initial": { "plane": "G18", "feedmode": "G95", "distance": "G90" } },
   "machineParams": {
     "numberInput": {
       "default": "okuma-1mm",
