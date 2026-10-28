@@ -159,8 +159,7 @@ with one row for each kind of number: **Length**, **Angle**, **Feed per minute**
 revolution** and **Dwell**. It shows what the machine reads, the same answer the hover gives
 for a word, never a copy of what is stored. Choosing a number input fills it; a row you change
 by hand is saved with the machine, and the choice above then reads **Custom** because no preset
-has exactly those rules (this replaces "edited in the file": you no longer need the file for
-it). Saving writes the whole number rule, checked by the same rules as the file, and a problem
+has exactly those rules. You no longer need the file to change a rule. Saving writes the whole number rule, checked by the same rules as the file, and a problem
 shows at its row.
 
 | | |
