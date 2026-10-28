@@ -711,6 +711,14 @@ export function createProfileForm(deps: ProfileFormDeps): ProfileFormModel {
         lastGood = checked.profile;
         preview = checked.profile;
       }
+      // The registry wants a profile that extends another to write its own name and short
+      // name (it checks the file, not the merge), so a cleared one is a problem here too.
+      if (parentId !== null) {
+        for (const own of ['name', 'shortName']) {
+          const value = file[own];
+          if (typeof value !== 'string' || value === '') (problems[own] ??= []).push(t('profileForm.problem.ownField'));
+        }
+      }
     }
 
     const hasProblems = Object.keys(problems).length > 0 || loose.length > 0;

@@ -66,6 +66,7 @@ export default {
   failed: 'The profile form failed: {detail}',
   problem: {
     noParent: 'The profile {parent} that this one extends is not loaded.',
+    ownField: 'A profile built on another one needs its own name.',
   },
   leave: {
     title: 'Discard changes?',
