@@ -176,6 +176,16 @@ export function effectiveMachine(
   const hasDiameter = defaults.diameter !== null && (diameter === 'on' || diameter === 'off');
   if (hasDiameter) params.diameter = diameter as 'on' | 'off';
 
+  // P4h (plan §6.10 rules 13, 14; T123): only from the machine (no profile default, no
+  // detection), only where the profile offers them, and only when set, so the key of every
+  // machine without them stays what it was.
+  const extraAxes = m?.params?.extraAxes;
+  if (decl?.extraAxes !== undefined && Array.isArray(extraAxes) && extraAxes.length > 0) params.extraAxes = clone(extraAxes);
+  const builderCodes = m?.params?.builderCodes;
+  if (decl?.builderCodes !== undefined && typeof builderCodes === 'string' && builderCodes.trim() !== '') {
+    params.builderCodes = builderCodes;
+  }
+
   const groups = decl?.modalGroups;
   const offered = new Set(Array.isArray(groups) ? groups : []);
   const modalSources: Record<string, ParamSource> = {};
@@ -284,6 +294,39 @@ export function applyMachine(p: Profile, eff: EffectiveMachine): { profile: Prof
     const syntax = isRecord(out.syntax) ? { ...(out.syntax as Record<string, unknown>) } : {};
     syntax.decimalPointSignificant = lengthMode === 'increment';
     out.syntax = syntax;
+  }
+
+  // P4h (plan §6.10 rule 13; T123): the machine's extra axes are axes of the profile, read by
+  // both tokenizers (`syntax.extraAxisNames`, after the profile's own, no name twice ignoring
+  // case), by the number classes (`addresses.axes`) and, for a rotary one, in degrees
+  // (`addresses.angular`).
+  const extraAxes = eff.params.extraAxes;
+  if (decl?.extraAxes !== undefined && Array.isArray(extraAxes) && extraAxes.length > 0) {
+    const syntax = isRecord(out.syntax) ? { ...(out.syntax as Record<string, unknown>) } : {};
+    const addresses = isRecord(out.addresses) ? { ...(out.addresses as Record<string, unknown>) } : {};
+    const appended = (list: unknown, names: readonly string[]): string[] => {
+      const own = Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === 'string') : [];
+      const seen = new Set(own.map((entry) => entry.toUpperCase()));
+      const out2 = [...own];
+      for (const name of names) {
+        if (seen.has(name.toUpperCase())) continue;
+        seen.add(name.toUpperCase());
+        out2.push(name);
+      }
+      return out2;
+    };
+    // Tolerant of a hand-written record, as everything here is: `validateMachine` reports a
+    // broken axis, and only a well-formed one is applied.
+    const wellFormed = extraAxes.filter(
+      (axis) => isRecord(axis) && typeof axis.name === 'string' && /^[A-Za-z]{2,8}$/.test(axis.name) && (axis.kind === 'linear' || axis.kind === 'rotary'),
+    );
+    const names = wellFormed.map((axis) => axis.name);
+    syntax.extraAxisNames = appended(syntax.extraAxisNames, names);
+    addresses.axes = appended(addresses.axes, names);
+    const rotary = wellFormed.filter((axis) => axis.kind === 'rotary').map((axis) => axis.name);
+    if (rotary.length > 0) addresses.angular = appended(addresses.angular, rotary);
+    out.syntax = syntax;
+    out.addresses = addresses;
   }
 
   const modal = isRecord(out.modal) ? { ...(out.modal as Record<string, unknown>) } : {};

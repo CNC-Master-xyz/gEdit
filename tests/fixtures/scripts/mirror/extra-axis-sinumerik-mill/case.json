@@ -1,0 +1,10 @@
+{
+  "profile": "sinumerik-mill",
+  "machine": {
+    "extraAxes": [
+      { "name": "AA", "kind": "linear" },
+      { "name": "QQ", "kind": "rotary" }
+    ]
+  },
+  "machineName": "Mill extra axes"
+}

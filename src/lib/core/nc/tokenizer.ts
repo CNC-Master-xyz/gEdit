@@ -163,6 +163,16 @@
 //     digit behind the marker and its optional sign (`1.5EX3`, `2EX-4`); a lone `EX` is
 //     whatever it was before. The value is `null`: nothing computes with an exponent yet,
 //     so no script can scale one wrongly.
+//   - P4h (plan §6.10 rule 13; T123): an extra axis of the machine (`syntax.extraAxisNames`,
+//     which `applyMachine` writes from the machine's `extraAxes`) is a name of more than one
+//     letter that the control reads with its value written straight behind it (`AA90`). Where
+//     a run of letters starts (not behind a letter or `_`), after the comment, string,
+//     keyword, bracket-call and assignment rules and before the names, a run that is exactly
+//     a listed name (the profile's case rule) followed by a digit, a point, or a sign and a
+//     digit or a point is one `word`: `address` the name as listed, the value read by the
+//     value reader of every address (`AA-5.5`, `BB.5`; `AA90X10` is `AA` then `X`). A longer
+//     run (`AAX1`), a name with no value (`AA`), `AA=10` and `AA(1)` keep their readings;
+//     without the setting `AA90` stays one `unknown` token and a lone `QQ0` a call.
 //
 // Two program markers are not in any profile field and are read from the punched-tape
 // convention instead: `%` as the first character of a line, unless the profile uses `%`
@@ -337,6 +347,13 @@ interface LexSpec {
   declareAfter: ReadonlySet<string>;
   /** M12.5 `syntax.plainTextRun`; 0 when the profile does not set it. */
   plainTextRun: number;
+  /**
+   * P4h `syntax.extraAxisNames` (§6.10 rule 13): the key is the name as the line is compared
+   * (upper case unless the profile is case sensitive), the value the name as listed.
+   */
+  extraAxes: ReadonlyMap<string, string>;
+  /** The first characters of the extra axis names, both cases unless case sensitive. */
+  extraAxisLeads: ReadonlySet<number>;
 }
 
 /**
@@ -526,6 +543,16 @@ function buildSpec(cp: CompiledProfile): LexSpec {
     colonLeads.add(name.charCodeAt(0));
     if (!caseSensitive) colonLeads.add(name.toLowerCase().charCodeAt(0));
   }
+  const extraAxes = new Map<string, string>();
+  const extraAxisLeads = new Set<number>();
+  for (const name of Array.isArray(syntax.extraAxisNames) ? syntax.extraAxisNames : []) {
+    if (typeof name !== 'string' || !/^[A-Za-z]+$/.test(name)) continue;
+    const key = caseSensitive ? name : name.toUpperCase();
+    if (extraAxes.has(key)) continue;
+    extraAxes.set(key, name);
+    extraAxisLeads.add(key.charCodeAt(0));
+    if (!caseSensitive) extraAxisLeads.add(key.toLowerCase().charCodeAt(0));
+  }
   const callPattern = stickyPattern(syntax.callTargets?.pattern, `${cp.flags}y`);
   const callAfter = canonicalKeywords(syntax.callTargets?.after);
   const plainTextRun = syntax.plainTextRun;
@@ -582,6 +609,8 @@ function buildSpec(cp: CompiledProfile): LexSpec {
     labelAfter: canonicalKeywords(syntax.labelAfter),
     declareAfter: canonicalKeywords(syntax.declareAfter),
     plainTextRun: typeof plainTextRun === 'number' && Number.isInteger(plainTextRun) && plainTextRun >= 2 ? plainTextRun : 0,
+    extraAxes,
+    extraAxisLeads,
   };
 }
 
@@ -741,6 +770,30 @@ function lettersEndAt(line: string, p: number, limit: number): number {
   let i = p;
   while (i < limit && isLetter(line.charCodeAt(i))) i++;
   return i;
+}
+
+/**
+ * P4h (§6.10 rule 13): the name of an extra axis of the machine at `p` (`syntax.extraAxisNames`)
+ * as listed, when a run of letters starts at `p`, is exactly that name and has a value start
+ * behind it: a digit, a point, or a sign followed by a digit or a point. Null otherwise.
+ */
+function extraAxisAt(line: string, p: number, limit: number, spec: LexSpec): { name: string; end: number } | null {
+  if (p > 0) {
+    const before = line.charCodeAt(p - 1);
+    if (isLetter(before) || before === UNDERSCORE) return null;
+  }
+  const end = lettersEndAt(line, p, limit);
+  const run = line.slice(p, end);
+  const name = spec.extraAxes.get(spec.caseSensitive ? run : run.toUpperCase());
+  if (name === undefined || end >= limit) return null;
+  const isPoint = (c: number): boolean => c === spec.decimalPoint || (spec.decimalPointAlt !== NO_CHAR && c === spec.decimalPointAlt);
+  const first = line.charCodeAt(end);
+  if (isDigit(first) || isPoint(first)) return { name, end };
+  if ((first === PLUS || first === MINUS) && end + 1 < limit) {
+    const next = line.charCodeAt(end + 1);
+    if (isDigit(next) || isPoint(next)) return { name, end };
+  }
+  return null;
 }
 
 /**
@@ -1659,6 +1712,22 @@ export function tokenizeLine(line: string, cp: CompiledProfile, prev?: LineState
           p = token.end;
           continue;
         }
+      }
+    }
+
+    // P4h (§6.10 rule 13; T123): an extra axis of the machine with its value (`AA90`), after
+    // the assignment (`AA=10`) and the bracket call (`AA(1)`), before the names (`AA90` would
+    // be one unknown token, a lone `QQ0` a call). The value is read like any address's.
+    if (spec.extraAxisLeads.has(code)) {
+      const axis = extraAxisAt(line, p, limit, spec);
+      const value = axis ? readValue(line, axis.end, limit, spec, false) : null;
+      if (axis && value) {
+        const token = push(tokens, 'word', line, p, value.end);
+        token.address = axis.name;
+        token.valueText = value.text;
+        token.value = value.value;
+        p = value.end;
+        continue;
       }
     }
 

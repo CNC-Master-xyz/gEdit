@@ -14,7 +14,9 @@ import { describe, expect, it } from 'vitest';
 import {
   CUSTOM_PRESET,
   DIAMETER_WORDS_KEY,
+  FIELD_BUILDER_CODES,
   FIELD_DIAMETER,
+  FIELD_EXTRA_AXES,
   FIELD_NAME,
   FIELD_NOTES,
   FIELD_NUMBER_INPUT,
@@ -22,6 +24,8 @@ import {
   FIELD_UNITS,
   PROFILE_DEFAULT,
   diameterLabel,
+  extraFieldErrors,
+  formatExtraAxes,
   groupCodes,
   machineFields,
   machineFromValues,
@@ -29,6 +33,7 @@ import {
   machineTooltip,
   modalFieldId,
   modalGroupOf,
+  parseExtraAxes,
   presetIdOf,
   presetOf,
   pointlessFeedsIdOf,
@@ -713,5 +718,82 @@ describe('machines stored before the point-less feeds options changed (review CO
     const perRev = oldIncrement('0.001', '0.0001', '0.001', { mm: '0.001', inch: '0.00001' });
     expect(pointlessFeedsIdOf(millDecl, machine({ profile: 'fanuc-gcode', params: { numberInput: perRev } }))).toBe('per-rev');
     expect(pointlessFeedsIdOf(millDecl, machine({ profile: 'fanuc-gcode', params: { numberInput: oldIncrement('0.001', '0.0001', '0.001', oldPerRev) } }))).toBe('standard');
+  });
+});
+
+// P4h (plan §6.10 rules 13, 14; T123): the two fields of a Siemens machine.
+describe('the extra axes and builder codes fields (P4.43b)', () => {
+  it('are offered on the Siemens profiles only, before the notes', () => {
+    for (const info of WITH_PARAMS) {
+      const ids = machineFields(declOf(info.id), dbOf(info.id)).map((field) => field.id);
+      const siemens = info.id === 'sinumerik' || info.id === 'sinumerik-mill';
+      expect(ids.includes(FIELD_EXTRA_AXES), info.id).toBe(siemens);
+      expect(ids.includes(FIELD_BUILDER_CODES), info.id).toBe(siemens);
+      if (siemens) expect(ids.slice(-3), info.id).toEqual([FIELD_EXTRA_AXES, FIELD_BUILDER_CODES, FIELD_NOTES]);
+    }
+  });
+
+  it('are plain text fields with a label, help and the example of the profile', () => {
+    const fields = machineFields(declOf('sinumerik'), dbOf('sinumerik'));
+    const axes = byId(fields, FIELD_EXTRA_AXES);
+    const codesField = byId(fields, FIELD_BUILDER_CODES);
+    expect([axes?.type, codesField?.type]).toEqual(['text', 'text']);
+    expect(axes?.label).toBe(t('machines.param.extraAxes'));
+    expect(codesField?.label).toBe(t('machines.param.builderCodes'));
+    expect(codesField?.help).toContain('G810-G829');
+    expect(axes?.help).not.toContain('{');
+    expect([axes?.default, codesField?.default]).toEqual(['', '']);
+  });
+
+  it('show what the machine stores, and write back what the user typed', () => {
+    const stored = machine({
+      profile: 'sinumerik',
+      params: { extraAxes: [{ name: 'AA', kind: 'linear' }, { name: 'QQ', kind: 'rotary' }], builderCodes: 'G810-G819' },
+    });
+    const fields = machineFields(declOf('sinumerik'), dbOf('sinumerik'), stored);
+    expect(byId(fields, FIELD_EXTRA_AXES)?.default).toBe('AA, QQ rotary');
+    expect(byId(fields, FIELD_BUILDER_CODES)?.default).toBe('G810-G819');
+    const values = { ...initialValues(fields), [FIELD_EXTRA_AXES]: 'bb ROTARY; cc', [FIELD_BUILDER_CODES]: ' G820-G829 ' };
+    const built = machineFromValues(declOf('sinumerik'), values, stored).params;
+    expect(built.extraAxes).toEqual([{ name: 'BB', kind: 'rotary' }, { name: 'CC', kind: 'linear' }]);
+    expect(built.builderCodes).toBe('G820-G829');
+    // Empty fields remove both members; another profile's form never writes them.
+    const cleared = machineFromValues(declOf('sinumerik'), { ...values, [FIELD_EXTRA_AXES]: ' ', [FIELD_BUILDER_CODES]: '' }, stored).params;
+    expect('extraAxes' in cleared || 'builderCodes' in cleared).toBe(false);
+    expect('extraAxes' in machineFromValues(declOf('fanuc-gcode'), { [FIELD_EXTRA_AXES]: 'AA' }).params).toBe(false);
+  });
+
+  it('read the list of axes, and quote what they cannot read', () => {
+    expect(parseExtraAxes('AA, BB rotary, cc linear')).toEqual({
+      axes: [{ name: 'AA', kind: 'linear' }, { name: 'BB', kind: 'rotary' }, { name: 'CC', kind: 'linear' }],
+      errors: [],
+    });
+    expect(parseExtraAxes('A, AA1, BB turning, CC rotary x').errors).toEqual(
+      ['A', 'AA1', 'BB turning', 'CC rotary x'].map((item) => ({ key: 'machines.extra.notAxis', params: { item } })),
+    );
+    expect(parseExtraAxes('AA, aa').errors).toEqual([{ key: 'machines.extra.twice', params: { name: 'AA' } }]);
+    const many = Array.from({ length: 17 }, (_, i) => `A${String.fromCharCode(65 + i)}`).join(', ');
+    expect(parseExtraAxes(many).errors).toEqual([{ key: 'machines.extra.tooMany', params: { max: 16 } }]);
+    // A list the field cannot read leaves the stored axes alone (the page refuses to save it).
+    const stored = machine({ profile: 'sinumerik', params: { extraAxes: [{ name: 'AA', kind: 'linear' }] } });
+    expect(machineFromValues(declOf('sinumerik'), { [FIELD_EXTRA_AXES]: 'A1' }, stored).params.extraAxes).toEqual([{ name: 'AA', kind: 'linear' }]);
+    expect(formatExtraAxes(undefined)).toBe('');
+    for (const key of ['machines.extra.notAxis', 'machines.extra.twice', 'machines.extra.tooMany', 'machines.extra.problem']) expect(hasKey(key), key).toBe(true);
+  });
+
+  it('put the record\'s problems at their field, a text it cannot read first', () => {
+    const decl = declOf('sinumerik');
+    const problems = [
+      { path: 'machine.params.extraAxes[0].name', message: '"SF" is already a rotary axis of this profile' },
+      { path: 'machine.params.builderCodes', message: 'G17 is a code gEdit already knows, not a code of the machine builder' },
+    ];
+    expect(extraFieldErrors(decl, { [FIELD_EXTRA_AXES]: 'SF', [FIELD_BUILDER_CODES]: 'G17' }, problems)).toEqual({
+      [FIELD_EXTRA_AXES]: { key: 'machines.extra.problem', params: { message: problems[0].message } },
+      [FIELD_BUILDER_CODES]: { key: 'machines.extra.problem', params: { message: problems[1].message } },
+    });
+    expect(extraFieldErrors(decl, { [FIELD_EXTRA_AXES]: 'S', [FIELD_BUILDER_CODES]: '' }, [])).toEqual({
+      [FIELD_EXTRA_AXES]: { key: 'machines.extra.notAxis', params: { item: 'S' } },
+    });
+    expect(extraFieldErrors(declOf('fanuc-gcode'), { [FIELD_EXTRA_AXES]: 'S' }, problems)).toEqual({});
   });
 });

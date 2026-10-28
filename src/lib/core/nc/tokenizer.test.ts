@@ -1340,6 +1340,54 @@ describe('the Sinumerik call-rule exclusions', () => {
   });
 });
 
+describe('P4h: the extra axes of a machine (§6.10 rule 13; T123)', () => {
+  interface ExtraAxisGolden {
+    profiles: string[];
+    extraAxisNames: string[];
+    lines: { line: string; tokens: Record<string, unknown>[]; plain: Record<string, unknown>[] }[];
+  }
+  const golden = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../../../../tests/fixtures/tokens/sinumerik-extra-axes.json', import.meta.url)), 'utf8'),
+  ) as ExtraAxisGolden;
+  const raw = (id: string): Profile => (BUILTIN_PROFILE_JSON.find((entry) => (entry as Profile).id === id) ?? {}) as Profile;
+  const withAxes = (id: string): CompiledProfile =>
+    compileProfile({ ...raw(id), syntax: { ...raw(id).syntax, extraAxisNames: golden.extraAxisNames } } as Profile);
+  const shaped = (line: string, cp: CompiledProfile): Record<string, unknown>[] =>
+    code(tokenizeLine(line, cp).tokens).map((token) => {
+      const out: Record<string, unknown> = { kind: token.kind, text: token.text };
+      for (const key of ['address', 'valueText', 'incremental', 'index'] as const) if (token[key] !== undefined) out[key] = token[key];
+      return out;
+    });
+
+  it.each(golden.profiles)('%s reads every line as the shared golden says, with and without the extra axes', (id) => {
+    const extra = withAxes(id);
+    const plain = compileProfile(raw(id));
+    for (const entry of golden.lines) {
+      expect(shaped(entry.line, extra), entry.line).toEqual(entry.tokens);
+      expect(shaped(entry.line, plain), entry.line).toEqual(entry.plain);
+    }
+  });
+
+  it('changes some lines and leaves the others exactly as they were', () => {
+    const changed = golden.lines.filter((entry) => JSON.stringify(entry.tokens) !== JSON.stringify(entry.plain));
+    expect(changed.length).toBeGreaterThanOrEqual(10);
+    expect(golden.lines.length - changed.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('gives the word the name as listed and reads the value like any address', () => {
+    const cp = withAxes('sinumerik');
+    const [aa] = code(tokenizeLine('aa-12.5', cp).tokens);
+    expect([aa.kind, aa.address, aa.valueText, aa.value?.raw]).toEqual(['word', 'AA', '-12.5', '-12.5']);
+    // A case-sensitive profile compares the name as written.
+    const strict = compileProfile({
+      ...raw('sinumerik'),
+      syntax: { ...raw('sinumerik').syntax, caseSensitive: true, extraAxisNames: ['AA'] },
+    } as Profile);
+    expect(code(tokenizeLine('AA5', strict).tokens).map((t) => t.address)).toEqual(['AA']);
+    expect(code(tokenizeLine('aa5', strict).tokens)[0].address).not.toBe('AA');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // M12.5 (§7.16 #179, WP-RP2): the seven `syntax` fields for names and free text. The
 // goldens hold the lines of the plan (both tokenizers); the sentences below hold the edges

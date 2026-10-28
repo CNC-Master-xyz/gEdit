@@ -25,6 +25,7 @@
 
 import { hasKey, t } from '$lib/i18n';
 import type { ChannelParams } from '$lib/core/channels/types';
+import type { Msg } from '$lib/app/types';
 import type { CodeDb, CodeEntry } from '$lib/core/codes/types';
 import type { FieldChoice, FieldSpec } from '$lib/core/forms/types';
 import type {
@@ -34,9 +35,10 @@ import type {
   PointlessFeedsDecl,
   VariantDecl,
 } from '$lib/core/profiles/types';
-import { MAX_NAME_LENGTH, MAX_NOTES_LENGTH } from './validate';
+import { MAX_BUILDER_CODES_LENGTH, MAX_NAME_LENGTH, MAX_NOTES_LENGTH } from './validate';
+import { EXTRA_AXIS_NAME, MAX_EXTRA_AXES } from '$lib/core/profiles/validate';
 import { variantDefaultOf } from './effective';
-import type { EffectiveMachine, MachineConfig, MachineParams, NumberInput, ParamSource } from './types';
+import type { EffectiveMachine, ExtraAxis, MachineConfig, MachineParams, NumberInput, ParamSource } from './types';
 
 /** Field ids. They are stable: the runtime scenarios read `data-field` (§7.9). */
 export const FIELD_NAME = 'name';
@@ -46,6 +48,10 @@ export const FIELD_POINTLESS_FEEDS = 'pointlessFeeds';
 export const FIELD_UNITS = 'units';
 export const FIELD_DIAMETER = 'diameter';
 export const FIELD_NOTES = 'notes';
+/** P4h (§6.10 rule 13; T123): the machine's extra axes as one line of text (`AA, BB rotary`). */
+export const FIELD_EXTRA_AXES = 'extraAxes';
+/** P4h (§6.10 rule 14; T123): the machine builder's codes, in the wait codes' list form. */
+export const FIELD_BUILDER_CODES = 'builderCodes';
 /** `variant.<id>` and `modal.<group>`, so one flat values record holds the whole machine. */
 export const VARIANT_PREFIX = 'variant.';
 export const MODAL_PREFIX = 'modal.';
@@ -410,6 +416,29 @@ export function machineFields(
     });
   }
 
+  // P4h (§6.10 rules 13, 14; T123): offered where the profile declares them.
+  if (decl.extraAxes !== undefined) {
+    fields.push({
+      id: FIELD_EXTRA_AXES,
+      type: 'text',
+      label: t('machines.param.extraAxes'),
+      help: t('machines.param.extraAxesHelp'),
+      maxLength: EXTRA_AXES_TEXT_LENGTH,
+      default: formatExtraAxes(current?.params?.extraAxes),
+    });
+  }
+  if (decl.builderCodes !== undefined) {
+    const letters = Array.isArray(decl.builderCodes.letters) ? decl.builderCodes.letters : [];
+    fields.push({
+      id: FIELD_BUILDER_CODES,
+      type: 'text',
+      label: t('machines.param.builderCodes'),
+      help: t('machines.param.builderCodesHelp', { example: decl.builderCodes.example ?? `${letters[0] ?? 'G'}810-${letters[0] ?? 'G'}829` }),
+      maxLength: MAX_BUILDER_CODES_LENGTH,
+      default: typeof current?.params?.builderCodes === 'string' ? current.params.builderCodes : '',
+    });
+  }
+
   fields.push({
     id: FIELD_NOTES,
     type: 'text',
@@ -481,9 +510,94 @@ export function machineFromValues(
   if (Object.keys(modalInitial).length > 0) params.modalInitial = modalInitial;
   else delete params.modalInitial;
 
+  // P4h (§6.10 rules 13, 14): an empty field removes the member; a list the field cannot read
+  // leaves the stored one alone (the page refuses to save it, `extraFieldProblems`).
+  if (decl.extraAxes !== undefined && typeof values[FIELD_EXTRA_AXES] === 'string') {
+    const parsed = parseExtraAxes(values[FIELD_EXTRA_AXES] as string);
+    if (parsed.errors.length === 0) {
+      if (parsed.axes.length > 0) params.extraAxes = parsed.axes;
+      else delete params.extraAxes;
+    }
+  }
+  if (decl.builderCodes !== undefined && typeof values[FIELD_BUILDER_CODES] === 'string') {
+    const text = (values[FIELD_BUILDER_CODES] as string).trim();
+    if (text !== '') params.builderCodes = text;
+    else delete params.builderCodes;
+  }
+
   const name = typeof values[FIELD_NAME] === 'string' ? (values[FIELD_NAME] as string).trim() : '';
   const notes = typeof values[FIELD_NOTES] === 'string' ? (values[FIELD_NOTES] as string).trim() : '';
   return { name, notes, params };
+}
+
+/** The longest text of the extra axes field: 16 names of 8 letters with ", " and " rotary". */
+export const EXTRA_AXES_TEXT_LENGTH = MAX_EXTRA_AXES * (8 + 7 + 2);
+
+/**
+ * P4h (§6.10 rule 13): the extra axes field's text. Names are separated by commas (or
+ * semicolons); each is 2 to 8 letters, stored in capitals, optionally followed by "rotary" or
+ * "linear" (the default). Every item that cannot be read is an error that quotes it.
+ */
+export function parseExtraAxes(text: string): { axes: ExtraAxis[]; errors: Msg[] } {
+  const axes: ExtraAxis[] = [];
+  const errors: Msg[] = [];
+  const seen = new Set<string>();
+  for (const raw of text.split(/[,;\n]/)) {
+    const item = raw.trim();
+    if (item === '') continue;
+    const parts = item.split(/\s+/);
+    const kind = parts.length === 2 ? parts[1].toLowerCase() : 'linear';
+    if (parts.length > 2 || !EXTRA_AXIS_NAME.test(parts[0]) || (kind !== 'linear' && kind !== 'rotary')) {
+      errors.push({ key: 'machines.extra.notAxis', params: { item } });
+      continue;
+    }
+    const name = parts[0].toUpperCase();
+    if (seen.has(name)) {
+      errors.push({ key: 'machines.extra.twice', params: { name } });
+      continue;
+    }
+    seen.add(name);
+    axes.push({ name, kind });
+  }
+  if (errors.length === 0 && axes.length > MAX_EXTRA_AXES) errors.push({ key: 'machines.extra.tooMany', params: { max: MAX_EXTRA_AXES } });
+  return { axes, errors };
+}
+
+/**
+ * P4h (§6.10 rules 13, 14): the problems of the two fields, by field id. A text the field cannot
+ * read says so first; otherwise the record's own rules speak (`validateMachine`, run by the
+ * caller on the machine the form describes and handed in as `problems`): a name the profile
+ * already reads, a builder code gEdit knows, a list it cannot read.
+ */
+export function extraFieldErrors(
+  decl: MachineParamsDecl,
+  values: Readonly<Record<string, unknown>>,
+  problems: readonly { path: string; message: string }[],
+): Record<string, Msg> {
+  const errors: Record<string, Msg> = {};
+  const fromRecord = (member: string): Msg | undefined => {
+    const found = problems.find((problem) => /\.params\.(\w+)/.exec(problem.path)?.[1] === member);
+    return found ? { key: 'machines.extra.problem', params: { message: found.message } } : undefined;
+  };
+  if (decl.extraAxes !== undefined && typeof values[FIELD_EXTRA_AXES] === 'string') {
+    const parsed = parseExtraAxes(values[FIELD_EXTRA_AXES] as string);
+    const error = parsed.errors[0] ?? fromRecord('extraAxes');
+    if (error) errors[FIELD_EXTRA_AXES] = error;
+  }
+  if (decl.builderCodes !== undefined && typeof values[FIELD_BUILDER_CODES] === 'string') {
+    const error = fromRecord('builderCodes');
+    if (error) errors[FIELD_BUILDER_CODES] = error;
+  }
+  return errors;
+}
+
+/** The field's text of stored extra axes: `AA, BB rotary`. Tolerant of a hand-written list. */
+export function formatExtraAxes(axes: readonly ExtraAxis[] | undefined): string {
+  if (!Array.isArray(axes)) return '';
+  return axes
+    .filter((axis) => isRecord(axis) && typeof axis.name === 'string')
+    .map((axis) => (axis.kind === 'rotary' ? `${axis.name} rotary` : axis.name))
+    .join(', ');
 }
 
 /**
