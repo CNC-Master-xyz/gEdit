@@ -122,7 +122,7 @@ describe('the fanuc-lathe calculator preset', () => {
       return value;
     });
     expect(labels).toHaveLength(1);
-    expect(labels[0]).toContain('G76 P (second block) and Q');
+    expect(labels[0]).toContain('G76 Q and P (second block)');
     expect(labels[0]).toContain('in microns');
   });
 });
