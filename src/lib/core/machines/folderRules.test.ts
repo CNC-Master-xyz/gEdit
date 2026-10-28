@@ -56,6 +56,17 @@ describe('folder rules', () => {
       }
     });
 
+    it('a name matches whether it is written composed or decomposed (macOS hands over the decomposed form)', () => {
+      const nfc = 'Fr\u00e4sen';
+      const nfd = 'Fra\u0308sen';
+      expect(nfc).not.toBe(nfd);
+      expect(normalizeFolderPath(`/dnc/${nfd}`, false)).toBe(normalizeFolderPath(`/dnc/${nfc}`, false));
+      const m = [machine('mill', [{ path: `/dnc/${nfc}` }])];
+      expect(machineForPath(`/dnc/${nfd}/part.nc`, m, LINUX)).toEqual({ kind: 'machine', machineId: 'mill', folder: `/dnc/${nfc}` });
+      const w = [machine('mill', [{ path: `D:\\${nfd}` }])];
+      expect(machineForPath(`d:/${nfc}/part.nc`, w, WIN)).toMatchObject({ kind: 'machine', machineId: 'mill' });
+    });
+
     it('Linux keeps the case of the path', () => {
       const m = [machine('lathe1', [{ path: '/dnc/Lathe1' }])];
       expect(machineForPath('/dnc/Lathe1/p.nc', m, LINUX).kind).toBe('machine');
