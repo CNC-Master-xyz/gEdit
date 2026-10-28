@@ -47,6 +47,23 @@ export async function waitMessage(h, text, timeout = 8000) {
   return message(h)
 }
 
+/**
+ * Notes every status message from now on, so a message that fades after a few seconds is still seen by a check that comes later.
+ * @param {Harness} h
+ * @returns {{ seen: string[], stop(): void }}
+ */
+export function watchMessages(h) {
+  /** @type {string[]} */
+  const seen = []
+  const note = () => {
+    const text = message(h)
+    if (text !== '' && seen[seen.length - 1] !== text) seen.push(text)
+  }
+  const observer = new MutationObserver(note)
+  observer.observe(document.body, { subtree: true, childList: true, characterData: true })
+  return { seen, stop: () => observer.disconnect() }
+}
+
 /** The run folder's own subfolder `name`, as a path (not created). @param {Harness} h @param {string} name */
 export const under = (h, name) => `${h.cfg.run}/${name}`
 
