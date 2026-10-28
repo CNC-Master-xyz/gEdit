@@ -185,6 +185,14 @@ describe('writing', () => {
     const own = { $schema: 'https://example.com/other.json', ...plain };
     expect(serializeMachinesFile(parseMachinesFile(own))).toHaveProperty('$schema', 'https://example.com/other.json');
   });
+
+  it('gives a file with no member at all (a fresh install) the $schema line, and a file with members none (CODE-3)', () => {
+    const fresh = parseMachinesFile({});
+    expect(fresh.unknown).toEqual({ $schema: MACHINES_SCHEMA_URL });
+    expect(Object.keys(serializeMachinesFile(fresh))[0]).toBe('$schema');
+    expect(parseMachinesFile({ machines: [] }).unknown).toEqual({});
+    expect(parseMachinesFile({ defaults: {} }).unknown).toEqual({});
+  });
 });
 
 describe('a default machine that is not text (owner decision (b), 2026-10-27)', () => {

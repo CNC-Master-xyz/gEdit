@@ -146,7 +146,9 @@ export function parseMachinesFile(raw: unknown): ParsedMachinesFile {
     ? ({ ...raw.defaults } as Record<string, string>)
     : {};
 
-  const unknown: Record<string, unknown> = {};
+  // A file with no member at all is a fresh install (Rust hands over `{}` for a missing file): its
+  // first save writes the `$schema` line, as every new file does (Q4h-2).
+  const unknown: Record<string, unknown> = Object.keys(raw).length === 0 ? { $schema: MACHINES_SCHEMA_URL } : {};
   for (const [member, value] of Object.entries(raw)) {
     if (!KNOWN_MEMBERS.has(member)) unknown[member] = value;
   }
