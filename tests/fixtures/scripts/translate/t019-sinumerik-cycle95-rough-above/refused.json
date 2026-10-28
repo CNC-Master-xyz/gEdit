@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be moved by Z-1: 1 cycle with positions of its own. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "N67 CYCLE95(\"ANFANG:ENDE\",2,0.1,0.2,0.1,0.3,0.25,0.1,5,0,0,…: a cycle with positions of its own (a pattern, a pocket, a contour elsewhere) that gEdit does not move.",
+      "reason": "cycle-position"
+    }
+  ]
+}

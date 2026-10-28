@@ -1116,5 +1116,72 @@ class LaterVersionTest(unittest.TestCase):
         self.assertIn((5, "cycle-position"), found)
 
 
+class ContourNamedOutsideTest(unittest.TestCase):
+    """Wave Y skeptic of BL-NC-geometry, D3: a contour between two labels moves with the cycle
+    that names it only while no cycle outside the selection names the same labels (it would
+    stay where it is and run the moved contour), and only when the lines below the selection
+    are known. Each test fails without the fix, except those marked as guards."""
+
+    # A roughing and a finishing CYCLE95 on one contour written after M30 (the skeptic's t019a).
+    LINES = [
+        "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE", "N10 G18 G90 G95 DIAMON", "N20 T1 D1",
+        "N30 G96 S200 M3 LIMS=3000", "N40 G0 X65 Z2", 'N50 CYCLE95("ANFANG:ENDE",2,0.1,0.2,0.1,0.3,0.25,0.1,1,0,0,0.5)',
+        "N60 G0 X100 Z50", "N65 T2 D1", "N66 G0 X65 Z2", 'N67 CYCLE95("ANFANG:ENDE",2,0.1,0.2,0.1,0.3,0.25,0.1,5,0,0,0.5)',
+        "N68 G0 X100 Z50", "N70 M30", "ANFANG:", "N80 G1 X20 Z0", "N90 Z-20", "N100 X40 Z-30", "N110 X60", "ENDE:",
+    ]
+    # Lines 9-18: the finishing cycle and the contour.
+    START = 9
+
+    def errors(self, result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def finishing(self, lines: List[str], following: Optional[List[str]] = None) -> Dict[str, Any]:
+        return run_inline("\n".join(lines[self.START - 1:]), "sinumerik", {"dz": -1}, lines[: self.START - 1], following)
+
+    def without_roughing(self) -> List[str]:
+        return [line if not line.startswith("N50 ") else "N50 G0 X70" for line in self.LINES]
+
+    def test_a_cycle_above_the_selection_names_the_contour(self) -> None:
+        result = self.finishing(self.LINES)
+        self.assertEqual(self.errors(result), [(10, "cycle-position")])
+        self.assertEqual(result["text"], "\n".join(self.LINES[self.START - 1:]))
+
+    def test_guard_the_same_selection_without_the_cycle_above_moves(self) -> None:
+        result = self.finishing(self.without_roughing())
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N80 G1 X20 Z-1", result["text"].split("\n"))
+
+    def test_a_cycle_below_the_selection_names_the_contour(self) -> None:
+        below = ['N200 CYCLE95("anfang : ende",2,0.1,0.2,0.1,0.3,0.25,0.1,5,0,0,0.5)']
+        self.assertEqual(self.errors(self.finishing(self.without_roughing(), below)), [(10, "cycle-position")])
+
+    def test_a_contour_call_below_names_the_labels_one_by_one(self) -> None:
+        # A contour call of the cutting cycles names the start and the end label as two strings.
+        below = ['N200 CYCLE62(,1,"ANFANG","ENDE")']
+        self.assertEqual(self.errors(self.finishing(self.without_roughing(), below)), [(10, "cycle-position")])
+
+    def test_without_the_lines_below_the_run_refuses(self) -> None:
+        lines = self.without_roughing()
+        context = helpers.effective_context("sinumerik", params={"dz": -1})
+        context["input"] = {
+            "scope": "selection", "startLine": self.START, "endLine": len(lines), "precedingLines": lines[: self.START - 1],
+        }
+        out = run_script(SCRIPT, stdin="\n".join(lines[self.START - 1:]), context=context)
+        self.assertTrue(out.ok, out.stderr)
+        self.assertEqual(self.errors(out.json()), [(10, "cycle-position")])
+
+    def test_guard_both_cycles_and_the_contour_in_the_run(self) -> None:
+        result = run_inline("\n".join(self.LINES), "sinumerik", {"dz": -1})
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N80 G1 X20 Z-1", result["text"].split("\n"))
+        # A selection that holds both cycles and the contour moves them too.
+        result = run_inline("\n".join(self.LINES[4:]), "sinumerik", {"dz": -1}, self.LINES[:4])
+        self.assertEqual(self.errors(result), [])
+
+    def test_guard_other_labels_outside_the_selection_do_not_refuse(self) -> None:
+        below = ['N200 CYCLE95("START:STOP",2,0.1,0.2,0.1,0.3,0.25,0.1,5,0,0,0.5)', "START:", "N210 G1 X30 Z0", "STOP:"]
+        self.assertEqual(self.errors(self.finishing(self.without_roughing(), below)), [])
+
+
 if __name__ == "__main__":
     unittest.main()
