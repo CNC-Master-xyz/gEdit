@@ -428,6 +428,16 @@ describe('one file per channel', () => {
     expect(w.svc.forDoc(a).members).toHaveLength(1);
   });
 
+  it('does not pair two open sets of the same name in different folders (P4f fix E)', () => {
+    const a = w.open('part_CH1.nc', MARKS, '/jobs/a/part_CH1.nc');
+    w.open('part_CH2.nc', ['O2', 'M901 P12'], '/jobs/b/part_CH2.nc');
+    expect(w.svc.forDoc(a).members).toHaveLength(1);
+    // The same folder still pairs, and an untitled document never does.
+    const same = w.open('part_CH2.nc', ['O2', 'M901 P12'], '/jobs/a/part_CH2.nc');
+    w.open('part_CH2.nc', ['O2', 'M901 P12'], null);
+    expect(w.svc.forDoc(a).members.map((m) => (m.kind === 'file' ? m.docId : null))).toEqual([a, same]);
+  });
+
   it('an assignment ties a document no pattern claims, and survives in the file memory', () => {
     const odd = w.open('odd.nc', MARKS, '/jobs/odd.nc');
     expect(w.svc.forDoc(odd).layout).toBe('none');

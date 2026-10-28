@@ -681,6 +681,10 @@ struct RegistryInner {
     /// The last search that started, running or ended: the one whose files `folder_grant` opens.
     /// A new search replaces it, so a result row of an older search stops opening.
     last: Option<Arc<Search>>,
+    /// The `last` that the running search replaced: it is given back when the search is refused
+    /// before it walks (its folder is not allowed, missing, a drive root...), so a refused search
+    /// leaves the last set alone, as a busy or stuck one does.
+    before: Option<Arc<Search>>,
 }
 
 /// Managed state (`lib.rs`): the search that is running (`id` and cancel flag), how many
@@ -707,7 +711,7 @@ impl SearchRegistry {
         }
         let search = Arc::new(Search::new());
         inner.running = Some((id.to_owned(), Arc::clone(&search)));
-        inner.last = Some(Arc::clone(&search));
+        inner.before = inner.last.replace(Arc::clone(&search));
         Ok(search)
     }
 
@@ -727,6 +731,18 @@ impl SearchRegistry {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// The search was refused before it walked: the set of the search before it is the last one again.
+    fn refused(&self, search: &Arc<Search>) {
+        let mut inner = self.lock();
+        if inner
+            .last
+            .as_ref()
+            .is_some_and(|held| Arc::ptr_eq(held, search))
+        {
+            inner.last = inner.before.take();
         }
     }
 
@@ -831,6 +847,10 @@ where
     loop {
         match rx.recv_timeout(POLL) {
             Ok(answer) => {
+                if answer.is_err() {
+                    // The job answers an error only before it walks (the folder was refused).
+                    registry.refused(&search);
+                }
                 registry.release(&search);
                 return answer;
             }
@@ -3672,6 +3692,32 @@ mod tests {
         assert!(registry.lock().last.is_some());
         open_gate(&gate);
         assert!(held.join().unwrap().is_ok());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_search_whose_folder_is_refused_leaves_the_last_set_alone() {
+        let dir = scratch("grant-root-refused");
+        let root = dir.join("root");
+        put(&root.join("a.nc"), b"G0\n");
+        let state_file = dir.join("data").join("state.json");
+        let registry = SearchRegistry::default();
+        search_through(&registry, "s-1", &root);
+        // A second search on a folder the scope does not allow: refused after it took the slot.
+        let refused = supervise(&registry, "s-2", &Limits::default(), |_| {
+            resolve_root("/nowhere-at-all", &|_| false).map(|_| FolderSummary::default())
+        });
+        assert!(refused.is_err());
+        // The webview restores the first search id, so its rows must still open.
+        assert!(grant_via(&registry, &root, &root.join("a.nc"), &state_file).is_ok());
+        // A search that did start still replaces the set.
+        let other = dir.join("other");
+        put(&other.join("b.nc"), b"G0\n");
+        search_through(&registry, "s-3", &other);
+        assert_eq!(
+            grant_via(&registry, &root, &root.join("a.nc"), &state_file),
+            Err(E_NOT_SENT)
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
