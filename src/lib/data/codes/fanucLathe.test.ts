@@ -70,6 +70,13 @@ const MILL_CYCLES = ['G73', 'G74', 'G76', 'G81', 'G82', 'G83', 'G84', 'G84.2', '
 type Unit = NonNullable<CodeParam['unit']>;
 
 /** The unit §8.2 gives `<dialect>` `<code>` `<address>`, or undefined for "by class". */
+/** T210: the codes whose `F` carries the feed marker, per resolved database (NURBS G6.2 is inherited). */
+const FEED_MARKED: Record<string, string[]> = {
+  fanuc: ['G6.2', 'G73', 'G74', 'G76', 'G81', 'G82', 'G83', 'G84', 'G84.2', 'G84.3', 'G85', 'G86', 'G87', 'G88', 'G89'],
+  'fanuc-lathe': ['G6.2', 'G71', 'G72', 'G73', 'G74', 'G75', 'G77', 'G79', 'G83', 'G85', 'G87', 'G89', 'G90', 'G94'],
+  'fanuc-lathe-b': ['G6.2', 'G71', 'G72', 'G73', 'G74', 'G75', 'G77', 'G79', 'G83', 'G85', 'G87', 'G89', 'G90', 'G94'],
+};
+
 function tableUnit(dialect: string, code: string, address: string): Unit | undefined {
   // Rows without a dialect in §8.2 hold wherever the code is defined.
   if (code === 'G4') return address === 'P' ? 'count' : address === 'X' || address === 'U' ? 'dwell' : undefined;
@@ -78,6 +85,9 @@ function tableUnit(dialect: string, code: string, address: string): Unit | undef
   // whatever the feed mode says, and the database says so (`numberClassOf` rule 1). A tap's
   // F is not a lead (`G84`, `G74`, `G63`): it follows the feed unit in force.
   if (address === 'F' && ['G32', 'G33', 'G34'].includes(code)) return 'feedPerRev';
+  // T210: the feed marker on the F of every cycle that cuts at a feed rate in the unit in
+  // force (a tap's F included); the lathe tapping cycles G84/G88 name it a lead and carry none.
+  if (address === 'F' && (FEED_MARKED[dialect] ?? []).includes(code)) return 'feed';
   if (address === 'F' && dialect !== MILL && code === 'G76') return 'feedPerRev';
   // v1.2.0 (NCR-4): system A reads G78 as system B's threading pass, lead and all.
   if (address === 'F' && ((dialect === A && (code === 'G92' || code === 'G78')) || (dialect === B && code === 'G78'))) return 'feedPerRev';

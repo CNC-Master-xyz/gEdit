@@ -1724,12 +1724,15 @@ class TestTurningDialects(unittest.TestCase):
         self.assertIn("(FA=, FB=)", okuma["message"])
 
     def test_a_factor_of_the_feed_is_not_listed_as_a_feed(self):
-        # FRF multiplies the feed for the first peck; it follows the feed it multiplies.
+        # FRF multiplies the feed for the first peck; it follows the feed it multiplies. The
+        # shipped database marks FFR of CYCLE85 a feed and leaves FRF of CYCLE83 unmarked (T210).
         helpers.import_gedit_nc()
         import scale_feed  # the bundled folder is on sys.path now
 
-        self.assertIsNone(scale_feed.CALL_FEED_LABEL.search("Feed factor for the first peck"))
-        self.assertIsNotNone(scale_feed.CALL_FEED_LABEL.search("Feed on the way in"))
+        entries = {e["code"]: e for e in helpers.effective_context("sinumerik-mill")["codes"] if isinstance(e, dict)}
+        params = lambda code: {p["address"]: p for p in entries[code]["params"]}
+        self.assertFalse(scale_feed.param_is_feed(params("CYCLE83")["FRF"]))
+        self.assertTrue(scale_feed.param_is_feed(params("CYCLE85")["FFR"]))
         self.assertEqual(
             scale_feed.call_arguments('5,0,2,-30,,-8,"A,B",AC(1,2),[R1,2]'),
             ["5", "0", "2", "-30", "", "-8", '"A,B"', "AC(1,2)", "[R1,2]"],
@@ -2188,17 +2191,49 @@ class TestWaveYFeedsByUnit(unittest.TestCase):
         self.assertTrue(rows[1].startswith("Argument 14 of CYCLE82 (S_FD,"), rows[1])
         self.assertIn("2 cycle feeds left unchanged", payload["message"])
 
-    def test_the_declared_unit_decides_before_the_label(self):
+    def test_only_the_marker_makes_a_feed_never_the_label(self):
+        # T210, owner rule of 2026-10-27: a value is treated as a feed only when the data marks it.
         helpers.import_gedit_nc()
         import scale_feed
 
         is_feed = scale_feed.param_is_feed
-        label = scale_feed.CALL_FEED_LABEL
-        self.assertTrue(is_feed({"address": "A", "label": "Something", "unit": "feedPerMin"}, label))
-        self.assertFalse(is_feed({"address": "A", "label": "Feed of its own", "unit": "count"}, label))
-        self.assertFalse(is_feed({"address": "A", "label": "Feed", "unit": "length"}, label))
-        # A lead is declared per revolution too: the label tells a lead from a feed.
-        self.assertFalse(is_feed({"address": "K", "label": "Lead along Z", "unit": "feedPerRev"}, label))
-        self.assertTrue(is_feed({"address": "FF1", "label": "Feed for roughing", "unit": "feedPerRev"}, label))
-        # No unit at all: the label, until the data declares one.
-        self.assertTrue(is_feed({"address": "Q206", "label": "Plunging feed"}, scale_feed.FEED_PARAM_LABEL))
+        self.assertTrue(is_feed({"address": "Q206", "label": "Plunging feed", "unit": "feed"}))
+        self.assertTrue(is_feed({"address": "A", "label": "Something", "unit": "feedPerMin"}))
+        self.assertTrue(is_feed({"address": "A", "label": "Something", "unit": "feed"}))
+        self.assertFalse(is_feed({"address": "A", "label": "Feed of its own", "unit": "count"}))
+        self.assertFalse(is_feed({"address": "A", "label": "Feed", "unit": "length"}))
+        # A feed per revolution is how the database declares a thread lead: no feed.
+        self.assertFalse(is_feed({"address": "K", "label": "Lead along Z", "unit": "feedPerRev"}))
+        self.assertFalse(is_feed({"address": "FF1", "label": "Feed for roughing", "unit": "feedPerRev"}))
+        # No unit at all is no feed, whatever the label says.
+        self.assertFalse(is_feed({"address": "Q206", "label": "Plunging feed"}))
+        self.assertFalse(is_feed({"address": "FFR", "label": "Feed on the way in"}))
+
+    def test_an_unmarked_parameter_labelled_a_feed_is_not_listed_and_a_marked_one_is(self):
+        # T210 regression: the label used to make Q206 and FFR feeds; now only the marker does.
+        def codes_with(profile_id, code, marked):
+            codes = []
+            for entry in helpers.effective_context(profile_id)["codes"]:
+                if isinstance(entry, dict) and entry.get("code") == code:
+                    params = []
+                    for param in entry["params"]:
+                        param = {k: v for k, v in param.items() if k != "unit" or v != "feed"}
+                        if param["address"] in marked:
+                            param["unit"] = "feed"
+                        params.append(param)
+                    entry = dict(entry, params=params)
+                codes.append(entry)
+            return codes
+
+        text = "TOOL CALL 1 Z S2000\nCYCL DEF 200 BOHREN ~\n  Q200=2 ;SICHERHEITS-ABST. ~\n  Q201=-20 ;TIEFE ~\n  Q206=150 ;VORSCHUB TIEFENZ. ~\n  Q202=5 ;ZUSTELL-TIEFE ~\n  Q210=0 ;VERWEILZEIT OBEN ~\n  Q203=+0 ;KOOR. OBERFLAECHE ~\n  Q204=50 ;2. SICHERHEITS-ABST. ~\n  Q211=0 ;VERWEILZEIT UNTEN\nL X+10 Y+10 R0 FMAX M99\n"
+        rows = lambda payload: [f["message"] for f in payload["findings"] if "Q206" in f["message"]]
+        self.assertEqual(rows(run_inline("heidenhain-klartext", text, codes=codes_with("heidenhain-klartext", "CYCL DEF 200", ()))), [])
+        marked = run_inline("heidenhain-klartext", text, codes=codes_with("heidenhain-klartext", "CYCL DEF 200", ("Q206",)))
+        self.assertEqual(rows(marked), ["Q206 is a feed of CYCL DEF 200 and is left unchanged."])
+
+        call = "N10 G90 G94 G17\nN20 F200\nN30 CYCLE85(10,0,2,-20,,0,300,500)\n"
+        listed = lambda payload: [f["message"] for f in payload["findings"] if f["line"] == 3]
+        self.assertEqual(listed(run_inline("sinumerik-mill", call, codes=codes_with("sinumerik-mill", "CYCLE85", ()))), [])
+        both = listed(run_inline("sinumerik-mill", call, codes=codes_with("sinumerik-mill", "CYCLE85", ("FFR", "RFF"))))
+        self.assertEqual(len(both), 2, both)
+        self.assertTrue(both[0].startswith("Argument 7 of CYCLE85 (FFR, feed on the way in) is 300"), both[0])

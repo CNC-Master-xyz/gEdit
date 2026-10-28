@@ -259,7 +259,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -1428,7 +1429,8 @@
           "block": 2,
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "S",
@@ -1508,7 +1510,8 @@
           "block": 2,
           "label": "Feed",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         }
       ],
       "pitchFeedAmbiguous": true,
@@ -1652,7 +1655,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1755,7 +1759,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1807,7 +1812,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1898,7 +1904,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2528,7 +2535,8 @@
           "block": 2,
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "S",
@@ -2600,7 +2608,8 @@
           "block": 2,
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "S",
@@ -2680,7 +2689,8 @@
           "block": 2,
           "label": "Feed",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -2711,7 +2721,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -2786,7 +2797,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending",

@@ -956,7 +956,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "T",
@@ -1017,7 +1018,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "T",
@@ -1084,7 +1086,8 @@
           "address": "F",
           "label": "Tapping feed, tied to the pitch",
           "min": 0,
-          "required": true
+          "required": true,
+          "unit": "feed"
         }
       ],
       "pitchFeed": true,
@@ -1116,7 +1119,8 @@
           "address": "F",
           "label": "Tapping feed, tied to the pitch",
           "min": 0,
-          "required": true
+          "required": true,
+          "unit": "feed"
         }
       ],
       "pitchFeed": true,
@@ -1180,7 +1184,8 @@
         {
           "address": "FA",
           "label": "Feed after the first point",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "XB",
@@ -1203,7 +1208,8 @@
         {
           "address": "FB",
           "label": "Feed after the second point",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "pitchFeedAmbiguous": true,
@@ -1225,7 +1231,8 @@
         {
           "address": "F",
           "label": "Roughing feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "U",
@@ -1257,7 +1264,8 @@
         {
           "address": "F",
           "label": "Roughing feed, until the shape sets one with E",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "U",
@@ -1953,7 +1961,8 @@
         {
           "address": "F",
           "label": "Drilling feed per minute",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "Q",
@@ -2006,7 +2015,8 @@
         {
           "address": "F",
           "label": "Boring feed per minute",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "Q",
@@ -2071,7 +2081,8 @@
         {
           "address": "F",
           "label": "Drilling feed per minute",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "Q",
@@ -2125,7 +2136,8 @@
           "address": "F",
           "label": "Tapping feed, tied to the pitch",
           "min": 0,
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "Q",
@@ -2252,7 +2264,8 @@
         {
           "address": "F",
           "label": "Reaming feed per minute",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "Q",

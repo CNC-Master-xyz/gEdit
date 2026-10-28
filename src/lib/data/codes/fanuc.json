@@ -208,7 +208,7 @@
         },
         { "address": "K", "label": "Knot value, a real number", "unit": "count", "decimals": true },
         { "address": "R", "label": "Weight of the control point (1 when left out)", "unit": "count", "decimals": true },
-        { "address": "F", "label": "Feed", "min": 0 }
+        { "address": "F", "label": "Feed", "min": 0, "unit": "feed" }
       ]
     },
     {
@@ -1081,6 +1081,7 @@
           "label": "Drilling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1139,6 +1140,7 @@
           "label": "Feed from the thread pitch",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1198,6 +1200,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1262,6 +1265,7 @@
           "label": "Drilling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1331,6 +1335,7 @@
           "label": "Drilling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1402,6 +1407,7 @@
           "label": "Drilling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1460,6 +1466,7 @@
           "label": "Feed from the thread pitch",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1500,7 +1507,7 @@
         { "address": "Y", "label": "Hole position Y" },
         { "address": "Z", "label": "Hole bottom", "required": true },
         { "address": "R", "label": "R point: where the feed starts (G99 returns here)", "required": true, "position": "tool-axis" },
-        { "address": "F", "label": "Feed from the thread pitch", "required": true, "min": 0, "position": "none" },
+        { "address": "F", "label": "Feed from the thread pitch", "required": true, "min": 0, "unit": "feed", "position": "none" },
         { "address": "P", "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)", "min": 0, "unit": "count", "position": "none" },
         { "address": "L", "label": "Repeat count", "min": 0, "unit": "count", "position": "none" }
       ]
@@ -1520,7 +1527,7 @@
         { "address": "Y", "label": "Hole position Y" },
         { "address": "Z", "label": "Hole bottom", "required": true },
         { "address": "R", "label": "R point: where the feed starts (G99 returns here)", "required": true, "position": "tool-axis" },
-        { "address": "F", "label": "Feed from the thread pitch", "required": true, "min": 0, "position": "none" },
+        { "address": "F", "label": "Feed from the thread pitch", "required": true, "min": 0, "unit": "feed", "position": "none" },
         { "address": "P", "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)", "min": 0, "unit": "count", "position": "none" },
         { "address": "L", "label": "Repeat count", "min": 0, "unit": "count", "position": "none" }
       ]
@@ -1563,6 +1570,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1625,6 +1633,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1690,6 +1699,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1748,6 +1758,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1805,6 +1816,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },

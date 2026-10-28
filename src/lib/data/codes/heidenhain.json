@@ -230,7 +230,8 @@
         },
         {
           "address": "F",
-          "label": "Feed"
+          "label": "Feed",
+          "unit": "feed"
         },
         {
           "address": "DL",
@@ -321,7 +322,8 @@
         {
           "address": "F",
           "label": "Feed for the rounding",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -344,7 +346,8 @@
         {
           "address": "F",
           "label": "Feed for the chamfer",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -677,6 +680,7 @@
           "address": "F",
           "label": "Feed for positioning the rotary axes automatically",
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "turnsRotary": true
         },
@@ -813,6 +817,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -900,6 +905,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -915,6 +921,7 @@
           "label": "Retract feed (0: the plunging feed Q206)",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed-out"
         },
@@ -973,6 +980,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -985,6 +993,7 @@
           "address": "Q208",
           "label": "Retract feed",
           "required": true,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1038,6 +1047,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1094,6 +1104,7 @@
           "label": "Retract feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1134,6 +1145,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1207,12 +1219,14 @@
           "label": "Feed for pre-positioning",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
           "address": "Q208",
           "label": "Retract feed",
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1249,6 +1263,7 @@
           "label": "Plunging feed from speed times pitch",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1339,6 +1354,7 @@
           "label": "Plunging feed on the helix",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1487,6 +1503,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1548,6 +1565,7 @@
           "label": "Feed for pre-positioning",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1579,6 +1597,7 @@
           "label": "Milling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1586,6 +1605,7 @@
           "label": "Feed for approaching the thread, 0 the milling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         }
       ]
@@ -1650,6 +1670,7 @@
           "label": "Milling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1682,6 +1703,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1725,6 +1747,7 @@
           "label": "Finishing feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1766,6 +1789,7 @@
           "label": "Milling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1798,6 +1822,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1841,6 +1866,7 @@
           "label": "Finishing feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1903,6 +1929,7 @@
           "label": "Milling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1935,6 +1962,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1972,6 +2000,7 @@
           "label": "Finishing feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2063,6 +2092,7 @@
           "label": "Milling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2095,6 +2125,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2132,6 +2163,7 @@
           "label": "Finishing feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2209,6 +2241,7 @@
           "label": "Milling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2235,6 +2268,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2287,6 +2321,7 @@
           "address": "Q385",
           "label": "Finishing feed",
           "min": 0,
+          "unit": "feed",
           "position": "none"
         }
       ]
@@ -2324,6 +2359,7 @@
           "label": "Milling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2350,6 +2386,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2402,6 +2439,7 @@
           "address": "Q385",
           "label": "Finishing feed",
           "min": 0,
+          "unit": "feed",
           "position": "none"
         }
       ]
@@ -2665,6 +2703,7 @@
           "label": "Milling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2672,6 +2711,7 @@
           "label": "Finishing feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2679,6 +2719,7 @@
           "label": "Feed for prepositioning and for moving to the next line",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2849,6 +2890,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2885,6 +2927,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2892,6 +2935,7 @@
           "label": "Milling feed in the plane",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2912,12 +2956,14 @@
           "label": "Feed when plunging back and forth",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
           "address": "Q208",
           "label": "Retract feed (0: the milling feed; 99999.9999 or FMAX: rapid)",
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2945,6 +2991,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2952,12 +2999,14 @@
           "label": "Milling feed in the plane",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
           "address": "Q208",
           "label": "Retract feed (0: the milling feed; 99999.9999 or FMAX: rapid)",
           "min": 0,
+          "unit": "feed",
           "position": "none"
         }
       ]
@@ -2987,6 +3036,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -2994,6 +3044,7 @@
           "label": "Milling feed in the plane",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -3048,6 +3099,7 @@
           "label": "Plunging feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -3055,6 +3107,7 @@
           "label": "Milling feed in the plane",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -3116,7 +3169,8 @@
         {
           "address": "F",
           "label": "Feed for the tilting move",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -3134,7 +3188,8 @@
         {
           "address": "F",
           "label": "Feed for the tilting move",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -3152,7 +3207,8 @@
         {
           "address": "F",
           "label": "Feed for the tilting move",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -3169,7 +3225,8 @@
         {
           "address": "F",
           "label": "Feed for the tilting move",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -3186,7 +3243,8 @@
         {
           "address": "F",
           "label": "Feed for the tilting move",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -3203,7 +3261,8 @@
         {
           "address": "F",
           "label": "Feed for the tilting move",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -3221,7 +3280,8 @@
         {
           "address": "F",
           "label": "Feed for the tilting move",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -3238,7 +3298,8 @@
         {
           "address": "F",
           "label": "Feed for the tilting move",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -3440,7 +3501,8 @@
         {
           "address": "F",
           "label": "Feed for the compensating moves",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -3484,7 +3546,8 @@
         {
           "address": "F",
           "label": "Feed for the retract",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },

@@ -177,7 +177,8 @@ Cycle parameters
     a Klartext cycle definition carries its feeds as `Q` parameters (`Q206`), and a cycle
     written as a call (`CYCLE85(…)`, `CYCLE95(…)`) carries them as arguments. Both are
     listed and left unchanged (plan section 5); which argument is which comes from the
-    order of the database's ``params``.
+    order of the database's ``params``. A parameter is a feed only where the database marks
+    it as one (T210, :func:`param_is_feed`), never by the words of its label.
 A tapping cycle written as a call
     stands in a block of its own, so it has no `F` word of its own either. A call whose
     database entry carries ``pitchFeed`` is one that may take its thread lead from the
@@ -361,21 +362,17 @@ INVERSE_TIME_MODES = ("G93",)
 #: here: they are addresses, and the profile's `addresses.feedUnitWords` says what they mean.
 UNIT_OF_MODE = {"G93": "inverse-time", "G94": "per-minute", "G95": "per-rev", "G931": "travel-time"}
 
-#: The declared units (`CodeParam.unit`) of a parameter that is a feed (T210).
-FEED_UNITS = ("feedPerMin", "feedPerRev", "feedPerTooth")
+#: The feed marker of the code database (T210, `CodeParam.unit`): a feed rate whose unit is
+#: the one in force or the control's own for a cycle feed (`Q206`, `_FFP1`).
+FEED_MARKER = "feed"
 
-#: A cycle parameter whose code-database label names it a feed. The label is display text
-#: out of the database we ship, and this only decides what is **listed**: a cycle
-#: parameter is left unchanged either way, because it is not a feed word. T210: it is read
-#: only for a parameter whose entry declares no `unit`; a declared unit decides
-#: (:func:`param_is_feed`).
-FEED_PARAM_LABEL = re.compile(r"\bfeed", re.IGNORECASE)
+#: The declared units of a word under an address of its own (`FRC=`) that leave it a feed
+#: (:func:`other_feed_word`): the marker, and the fixed feed units.
+FEED_UNITS = (FEED_MARKER, "feedPerMin", "feedPerRev", "feedPerTooth")
 
-#: The same question for the arguments of a cycle written as a call (`CYCLE85(…)`), where a
-#: database also names factors of the feed (`FRF`, "feed factor for the first peck"). A
-#: factor follows the feed it multiplies, so listing it as a feed left alone would invite a
-#: hand edit that doubles the change; it is not listed.
-CALL_FEED_LABEL = re.compile(r"\bfeed\b(?!\s+factor)", re.IGNORECASE)
+#: The declared units of a cycle parameter that is a feed rate (:func:`param_is_feed`). A
+#: feed per revolution is not among them: the database declares the thread **lead** so.
+PARAM_FEED_UNITS = (FEED_MARKER, "feedPerMin", "feedPerTooth")
 
 #: The second feed-like address of the ISO dialects: a contour feed of its own inside a
 #: turning-cycle shape on one control (the feed along an Okuma LAP contour), a thread lead
@@ -756,23 +753,18 @@ def cycle_definition(
     return None
 
 
-def param_is_feed(param: Dict[str, Any], label_rule: "re.Pattern[str]") -> bool:
-    """Whether a code's parameter is a feed, as the code database says (T210).
+def param_is_feed(param: Dict[str, Any]) -> bool:
+    """Whether a code's parameter is a feed rate: only where the code database marks it (T210).
 
-    The declared ``unit`` decides first: a feed unit is a feed, and any other unit (a count,
-    a length, a dwell) never is, whatever its label says — `_VARI` of `CYCLE82` is a count
-    whose label speaks of "a feed of its own". A thread lead is declared a feed per
-    revolution too, so that unit alone is no feed here: a lead is not listed as one, and the
-    label says which of the two it is. Only a parameter with no unit at all is read by its
-    label, the English text of the database we ship, until the data declares one for each.
+    Owner rule of 2026-10-27: a value is treated as a feed only when the data marks it. The
+    mark is the declared ``unit``: the feed marker ``'feed'`` or a fixed feed unit (Okuma
+    `G101` declares its `F` a feed per minute). Nothing else is a feed — no unit at all, a
+    count, a length, a dwell, and a feed per revolution, which is how the database declares
+    a thread lead. The label is display text and is never read: "Feed factor for the first
+    peck" (`FRF` of `CYCLE83`), the percentage `S_FA` of `CYCLE82` and the R point "where the
+    feed starts" speak of a feed and are none.
     """
-    unit = param.get("unit")
-    if unit == "feedPerMin" or unit == "feedPerTooth":
-        return True
-    label = param.get("label")
-    if isinstance(unit, str) and unit != "feedPerRev":
-        return False
-    return isinstance(label, str) and label_rule.search(label) is not None
+    return param.get("unit") in PARAM_FEED_UNITS
 
 
 def cycle_feed_addresses(entry: Dict[str, Any]) -> List[str]:
@@ -782,7 +774,7 @@ def cycle_feed_addresses(entry: Dict[str, Any]) -> List[str]:
         if not isinstance(param, dict):
             continue
         address = param.get("address")
-        if isinstance(address, str) and address != "" and param_is_feed(param, FEED_PARAM_LABEL):
+        if isinstance(address, str) and address != "" and param_is_feed(param):
             out.append(address.upper())
     return out
 
@@ -832,15 +824,16 @@ def list_call_feeds(
     for position, (param, argument) in enumerate(zip(params, call_arguments(token.value_text)), 1):
         if not isinstance(param, dict) or argument == "":
             continue
-        label = param.get("label")
-        if not isinstance(label, str) or not param_is_feed(param, CALL_FEED_LABEL):
+        if not param_is_feed(param):
             continue
+        label = param.get("label")
+        what = lower_first(label) if isinstance(label, str) and label != "" else "a feed"
         counts.cycle += 1
         findings.add(
             line,
             "info",
             "Argument %d of %s (%s, %s) is %s and is left unchanged: this run does not "
-            "scale the arguments of a cycle." % (position, code, param.get("address"), lower_first(label), argument),
+            "scale the arguments of a cycle." % (position, code, param.get("address"), what, argument),
         )
 
 
@@ -1205,7 +1198,10 @@ def or_list(words: Sequence[str]) -> str:
 def declared_feed_class(
     token: gedit_nc.Token, entries: Sequence[Dict[str, Any]], in_force: Sequence[Dict[str, Any]]
 ) -> Optional[str]:
-    """The class a code of the block, or else one in force, declares for this feed word."""
+    """The class a code of the block, or else one in force, declares for this feed word.
+
+    The feed marker (T210) declares no class: the word is read in the feed mode in force.
+    """
     address = (token.address or "").upper()
     for group in (entries, in_force):
         for entry in group:
@@ -1213,8 +1209,9 @@ def declared_feed_class(
                 if not isinstance(param, dict):
                     continue
                 written = param.get("address")
-                if isinstance(written, str) and written.upper() == address and isinstance(param.get("unit"), str):
-                    return param["unit"]
+                unit = param.get("unit")
+                if isinstance(written, str) and written.upper() == address and isinstance(unit, str) and unit != FEED_MARKER:
+                    return unit
     return None
 
 
