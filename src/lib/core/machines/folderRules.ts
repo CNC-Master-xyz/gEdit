@@ -76,7 +76,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function comparable(path: unknown, caseInsensitive: boolean, file: boolean): string | null {
   if (typeof path !== 'string' || path === '' || CONTROL.test(path)) return null;
   if (!file && path.length > MAX_FOLDER_CHARS) return null;
-  const plain = plainPath(path);
+  const plain = plainPath(path).normalize('NFC');
   const drive = /^[A-Za-z]:(?=[\\/])/.test(plain);
   const unc = /^[\\/]{2}(?![\\/])/.test(plain);
   const rooted = plain.startsWith('/') && !plain.startsWith('//');
