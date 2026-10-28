@@ -216,3 +216,36 @@ describe('the shared goldens', () => {
     expect(valueOf(lit, 'angle', machine(written), 'mm')).toBe('9');
   });
 });
+
+describe('the inch step of a feed row (NC-5)', () => {
+  const base = preset('fanuc-gcode', 'is-b');
+  const path = 'params.numberInput';
+
+  it('refuses a feed row read in increments whose metric step changed and whose inch step is empty', () => {
+    const rows = numberRows(base);
+    for (const cls of ['feedPerMin', 'feedPerRev'] as const) {
+      const problems = numberRowProblems(base, edit(rows, cls, { increment: '0.005', incrementInch: null }), 'm', path);
+      expect(problems.map((p) => p.path), cls).toEqual([`${path}.classes.${cls}.incrementInch`]);
+      expect(problems[0].message).toContain('hundredth');
+      expect(problems[0].message).toContain('tenth');
+    }
+  });
+
+  it('takes the same row once the inch step is written, and writes both steps', () => {
+    const rows = edit(numberRows(base), 'feedPerRev', { increment: '0.005', incrementInch: '0.00005' });
+    expect(numberRowProblems(base, rows, 'm', path)).toEqual([]);
+    expect(numberInputFromRows(base, rows).classes?.feedPerRev).toEqual({ increment: '0.005', incrementInch: '0.00005' });
+  });
+
+  it('asks for nothing where an empty inch field is right: lengths (a tenth), a feed read as written or scaled', () => {
+    const rows = numberRows(base);
+    expect(numberRowProblems(base, edit(rows, 'length', { increment: '0.01', incrementInch: null }), 'm', path)).toEqual([]);
+    expect(numberRowProblems(base, edit(rows, 'feedPerRev', { mode: 'calculator', incrementInch: null }), 'm', path)).toEqual([]);
+    expect(numberRowProblems(base, edit(rows, 'feedPerMin', { mode: 'scale', increment: '1', incrementInch: null }), 'm', path)).toEqual([]);
+  });
+
+  it('refuses an emptied inch field of a feed row even when the metric step did not change', () => {
+    const rows = edit(numberRows(base), 'feedPerMin', { incrementInch: null });
+    expect(numberRowProblems(base, rows, 'm', path).map((p) => p.path)).toEqual([`${path}.classes.feedPerMin.incrementInch`]);
+  });
+});

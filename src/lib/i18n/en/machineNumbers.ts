@@ -43,8 +43,13 @@ export default {
     feedPerMin: 'inch/min',
     feedPerRev: 'inch/rev',
   },
-  /** Shown in an empty inch field. */
+  /** Help of the inch field of a length. */
   inchEmpty: 'Empty: a tenth of the metric increment (none for “Every number times the unit”)',
+  /** Help of the inch field of a feed: no single rule fits, so it is always written. */
+  inchFeed: 'Write it whenever the metric increment is set or changed. Fanuc: a hundredth of the metric step, Okuma: a tenth.',
+  /** The increment of the length row. With “As written” the cycle values in steps still use it. */
+  incrementHelpLength:
+    'The increment, or for “Every number times the unit” the value of a written 1. A decimal number above zero, such as 0.001. With “As written” the step still counts the cycle values the control always takes in steps (G74/G75 P and Q, G76 P and Q, G83 Q).',
   incrementHelp: 'The increment, or for “Every number times the unit” the value of a written 1. A decimal number above zero, such as 0.001.',
   /** Shown beside a row that differs from the machine's base reading. */
   ownRule: 'Own rule',

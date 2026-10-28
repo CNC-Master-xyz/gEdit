@@ -12,7 +12,7 @@
   modal).
 -->
 <script module lang="ts">
-  import { NUMBER_FORM_READINGS, followsUnits, problemClass, type NumberClassRow } from '$lib/core/machines/numberForm';
+  import { NUMBER_FORM_READINGS, followsUnits, problemClass, sameDecimal, type NumberClassRow } from '$lib/core/machines/numberForm';
   import type { MachineProblem, NumberClass, NumberReading } from '$lib/core/machines/types';
   import type { FieldSpec } from '$lib/core/forms/types';
   import type { Msg } from '$lib/app/types';
@@ -35,7 +35,7 @@
         id: fieldIdOf(row.cls, 'increment'),
         type: 'text',
         label: t('machineNumbers.increment'),
-        help: t('machineNumbers.incrementHelp'),
+        help: t(row.cls === 'length' ? 'machineNumbers.incrementHelpLength' : 'machineNumbers.incrementHelp'),
         unit: t(`machineNumbers.unit.${row.cls}`),
         default: row.increment,
       },
@@ -45,7 +45,7 @@
         id: fieldIdOf(row.cls, 'incrementInch'),
         type: 'text',
         label: t('machineNumbers.incrementInch'),
-        help: t('machineNumbers.inchEmpty'),
+        help: t(row.cls === 'length' ? 'machineNumbers.inchEmpty' : 'machineNumbers.inchFeed'),
         unit: t(`machineNumbers.unitInch.${row.cls}`),
         default: row.incrementInch ?? '',
       });
@@ -62,13 +62,20 @@
     };
   }
 
-  /** The row after the field `id` changed to `value`. An emptied inch field means "the reader's own inch step". */
+  /**
+   * The row after the field `id` changed to `value`. An emptied inch field means "the reader's own
+   * inch step". A new metric step clears the inch step beside it (NC-5): the old one belonged to
+   * the old metric step, and the page asks for the new one before the row can be saved.
+   */
   export function changedRow(row: NumberClassRow, id: string, value: unknown): NumberClassRow {
     const text = typeof value === 'string' ? value.trim() : value === undefined || value === null ? '' : String(value);
     if (id === fieldIdOf(row.cls, 'mode')) {
       return NUMBER_FORM_READINGS.includes(text as NumberReading) ? { ...row, mode: text as NumberReading } : row;
     }
-    if (id === fieldIdOf(row.cls, 'increment')) return { ...row, increment: text };
+    if (id === fieldIdOf(row.cls, 'increment')) {
+      const same = sameDecimal(row.increment, text);
+      return { ...row, increment: text, incrementInch: same ? row.incrementInch : null };
+    }
     if (id === fieldIdOf(row.cls, 'incrementInch') && followsUnits(row.cls)) return { ...row, incrementInch: text === '' ? null : text };
     return row;
   }

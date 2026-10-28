@@ -214,3 +214,54 @@ describe('the table on the Machines page', { timeout: 120_000 }, () => {
     expect(patch.params.numberInput).toEqual(own);
   });
 });
+
+describe('the inch step of a row (NC-5, NC-7)', () => {
+  const feed: NumberClassRow = { cls: 'feedPerRev', mode: 'increment', increment: '0.01', incrementInch: '0.0001', fromBase: false };
+  const length: NumberClassRow = { cls: 'length', mode: 'increment', increment: '0.001', incrementInch: '0.0001', fromBase: true };
+
+  it('clears the inch field of a row whose metric step is edited, and keeps it when the value is the same', () => {
+    expect(changedRow(feed, 'feedPerRev.increment', '0.001').incrementInch).toBeNull();
+    expect(changedRow(length, 'length.increment', '0.01').incrementInch).toBeNull();
+    expect(changedRow(feed, 'feedPerRev.increment', '0.0100').incrementInch).toBe('0.0001');
+    expect(changedRow(feed, 'feedPerRev.mode', 'scale').incrementInch).toBe('0.0001');
+  });
+
+  it('names the inch step of a feed in the help, and no longer calls an empty field a tenth', () => {
+    const help = (row: NumberClassRow) => numberFieldsOf(row).find((f) => f.id.endsWith('.incrementInch'))?.help ?? '';
+    expect(help(feed)).toContain('Fanuc: a hundredth of the metric step, Okuma: a tenth');
+    expect(help(feed)).not.toMatch(/^Empty/);
+    expect(help(length)).toContain('a tenth of the metric increment');
+  });
+
+  it('says on the length row that the step still counts the micrometre cycle values', () => {
+    const help = (row: NumberClassRow) => numberFieldsOf(row).find((f) => f.id.endsWith('.increment'))?.help ?? '';
+    expect(help(length)).toContain('G74/G75 P and Q, G76 P and Q, G83 Q');
+    expect(help(length)).toContain('As written');
+    expect(help(feed)).not.toContain('G76');
+  });
+
+  it('blocks a Save on the page until the feed row has its inch step', () => {
+    const draft = addDraft('fanuc-gcode', deps);
+    const rows = numberRowsOf(draft, deps) ?? [];
+    const typed = changedRow(rows.find((r) => r.cls === 'feedPerRev') as NumberClassRow, 'feedPerRev.increment', '0.005');
+    const open = withNumberRows(draft, rows.map((r) => (r.cls === 'feedPerRev' ? typed : r)), deps);
+    expect(numberProblemsOf(open).map((p) => p.path)).toEqual([`${NUMBERS_PATH}.classes.feedPerRev.incrementInch`]);
+    const { byField } = numberErrors(numberProblemsOf(open), NUMBERS_PATH);
+    expect(Object.keys(byField)).toEqual(['feedPerRev.incrementInch']);
+    const written = withNumberRows(open, (open.numbers?.rows ?? []).map((r) => (r.cls === 'feedPerRev' ? { ...r, incrementInch: '0.00005' } : r)), deps);
+    expect(numberProblemsOf(written)).toEqual([]);
+  });
+});
+
+describe('rows typed to read like a preset (CODE-10)', () => {
+  it('keeps the typed text and still names the preset', () => {
+    const draft = addDraft('fanuc-gcode', deps);
+    const rows = numberRowsOf(draft, deps) ?? [];
+    const typed = withNumberRows(draft, edit(rows, 'length', { increment: '0.0010' }), deps);
+    expect(typed.values[FIELD_NUMBER_INPUT]).toBe('is-b');
+    expect(typed.numbers?.rows.find((r) => r.cls === 'length')?.increment).toBe('0.0010');
+    // …and what is saved is the preset's own value.
+    expect(numberProblemsOf(typed)).toEqual([]);
+    expect(typed.numbers?.base).toEqual(preset('fanuc-gcode', 'is-b'));
+  });
+});
