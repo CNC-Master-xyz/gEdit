@@ -90,4 +90,5 @@ export default {
   runningStop: 'Stop and search',
   failed: 'Find in Folder could not search that folder.',
   cannotOpen: 'Could not open {file}.',
+  olderSearch: '{file} is from an earlier search, so it cannot be opened from this list any more. Search the folder again to open it.',
 } as const satisfies Messages;

@@ -523,6 +523,22 @@ describe('a click on a row', () => {
     expect(fake.said.at(-1)).toMatchObject({ text: t('findInFolder.cannotOpen', { file: 'a/part.nc' }), error: true });
   });
 
+  it('tells a row of an earlier search that it cannot be opened any more, and asks Rust nothing (owner decision 2026-10-27)', async () => {
+    fake.walk = walkOf([file('a.nc', TEXT)]);
+    const first = await search({ query: 'T17', wholeAddress: false });
+    expect(first.rows[0].search).toEqual(expect.any(String));
+    const second = await search({ query: 'T17', wholeAddress: false });
+    expect(second.rows[0].search).not.toBe(first.rows[0].search);
+    await finder.openRow(first.rows[0]);
+    expect(fake.grants).toHaveLength(0);
+    expect(fake.opened).toHaveLength(0);
+    expect(fake.said.at(-1)).toMatchObject({ text: t('findInFolder.olderSearch', { file: 'a.nc' }), error: true });
+    // The newest search's rows still open.
+    await finder.openRow(second.rows[0]);
+    expect(fake.grants).toHaveLength(1);
+    expect(fake.opened).toHaveLength(1);
+  });
+
   it('ignores a row with no path', async () => {
     await finder.openRow({ file: 'x', line: 1 });
     expect(fake.grants).toHaveLength(0);

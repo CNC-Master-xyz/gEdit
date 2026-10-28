@@ -148,6 +148,12 @@ interface Running {
 
 let running: Running | null = null;
 let counter = 0;
+/**
+ * The id of the search that started last. `folder_grant` opens only the files the last search sent
+ * (plan section 6.8, S4 and S6), so a row of an earlier search is told so here, in plain words,
+ * before Rust is asked.
+ */
+let latestSearch = '';
 
 /** Resolves when no search is running (for the tests and for a second search that waits for the first). */
 export async function folderSearchIdle(): Promise<void> {
@@ -162,6 +168,7 @@ function newId(): string {
 /** Runs one search to its end and shows the report. Never rejects. */
 export function startSearch(form: FolderForm, prepared: Prepared): Running {
   const id = newId();
+  latestSearch = id;
   let halted = false;
   let stoppedByUser = false;
 
@@ -275,6 +282,7 @@ export function startSearch(form: FolderForm, prepared: Prepared): Running {
     }
     outcome.summary = summary;
     outcome.stoppedByUser = stoppedByUser;
+    for (const row of rows) row.search = id;
     results.show(reportOf(form, prepared, rows, outcome));
     status.show(t(rows.length === 0 ? 'findInFolder.foundNone' : 'findInFolder.found', { count: rows.length }));
   };
@@ -321,7 +329,7 @@ export function reportOf(form: FolderForm, prepared: Prepared, rows: FolderRow[]
   return { title, ...(message === '' ? {} : { message }), columns, rows: rows as unknown as Record<string, unknown>[], openRow };
 }
 
-/** What a click on a row does: grant the one file, open it (or find the open tab) and show the line. */
+/** What a click on a row does: grant the one file (only if the last search sent it), open it (or find the open tab) and show the line. */
 export async function openRow(row: Record<string, unknown>): Promise<void> {
   const path = typeof row.path === 'string' ? row.path : '';
   const root = typeof row.root === 'string' ? row.root : '';
@@ -330,6 +338,11 @@ export async function openRow(row: Record<string, unknown>): Promise<void> {
   // An open document needs no grant: it was opened with its own.
   let id = docs.byPath(path)?.id;
   if (id === undefined) {
+    // Only the last search's files open: a row of an earlier search says so and asks nothing of Rust.
+    if (typeof row.search === 'string' && row.search !== latestSearch) {
+      status.show(t('findInFolder.olderSearch', { file: typeof row.file === 'string' ? row.file : path }), { error: true });
+      return;
+    }
     try {
       await folderGrant(root, path);
     } catch (err) {

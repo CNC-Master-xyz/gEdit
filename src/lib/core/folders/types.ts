@@ -50,6 +50,8 @@ export interface FolderRow {
   /** Local date and time, `YYYY-MM-DD HH:mm`. */
   modified: string;
   bytes: number;
+  /** The id of the search that made the row; set when the report is shown (`folder_grant` opens only the last search's files). */
+  search?: string;
 }
 
 /** The plain-words refusals of the form; the keys live in `i18n/en/findInFolder.ts`. */

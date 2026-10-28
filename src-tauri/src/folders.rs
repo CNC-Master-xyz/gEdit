@@ -13,13 +13,15 @@
 //! - [`folder_search_cancel`]: stops the running search.
 //! - [`folder_siblings`]: the names of the files next to an open document that fit a pattern
 //!   (the channel files of a set), names only.
-//! - [`folder_grant`]: lets the webview open one file the search found, by granting that one
-//!   file to the fs scope (never the folder).
+//! - [`folder_grant`]: lets the webview open one file the last search sent, by granting that one
+//!   file to the fs scope (never the folder). A file an older search sent, or one no search
+//!   sent, is refused.
 //!
 //! None of them returns a path the webview did not already hold or a folder listing it did not
 //! ask for by pattern, and none takes a path that is not inside the fs scope. The rules are in
 //! the plan's section 6.8 ("Security: the limits"); the constants below are those limits.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf, Prefix};
@@ -73,6 +75,10 @@ pub const MAX_ABANDONED_SEARCHES: usize = 4;
 /// pattern must hold (a pattern such as `*` lists the whole folder and is refused).
 pub const MAX_SIBLING_NAMES: usize = 5_000;
 pub const MIN_SIBLING_LITERALS: usize = 2;
+/// Paths of the files the last search sent that `folder_grant` remembers (owner decision of
+/// 2026-10-27, section 6.8 S4 and S6). A search sends at most [`MAX_FILES_READ`] files, so the
+/// bound is the same number; it is a limit of its own so a lowered search limit never raises it.
+pub const MAX_GRANTABLE: usize = 20_000;
 
 /// What a search asks for. camelCase on the wire; passed as `req`.
 #[derive(Debug, Clone, Deserialize)]
@@ -198,6 +204,8 @@ pub const E_NOT_ALLOWED: &str = "path is not allowed";
 pub const E_NOT_FOLDER: &str = "path is not a folder";
 pub const E_DRIVE_ROOT: &str = "the root of a drive or of the file system cannot be searched";
 pub const E_NOT_IN_FOLDER: &str = "file is not in that folder";
+pub const E_NOT_SENT: &str =
+    "this file was not in the last search; search the folder again to open it";
 pub const E_ID: &str = "search id is not valid";
 pub const E_BUSY: &str = "another search is already running";
 pub const E_STUCK: &str = "earlier searches are still waiting on a folder that does not answer; wait for them or restart gEdit";
@@ -210,13 +218,14 @@ pub const E_FAILED: &str = "the folder command failed";
 
 /// Every sentence a folder command may answer with (the tests hold the list equal to the constants).
 #[cfg(test)]
-pub const REFUSALS: [&str; 14] = [
+pub const REFUSALS: [&str; 15] = [
     E_PATH,
     E_PATH_LONG,
     E_NOT_ALLOWED,
     E_NOT_FOLDER,
     E_DRIVE_ROOT,
     E_NOT_IN_FOLDER,
+    E_NOT_SENT,
     E_ID,
     E_BUSY,
     E_STUCK,
@@ -620,6 +629,9 @@ pub struct Search {
     /// behind cannot send once more after the command has answered.
     send_lock: Mutex<()>,
     summary: Mutex<FolderSummary>,
+    /// The paths this search sent (at most [`MAX_GRANTABLE`]): the only files `folder_grant` opens
+    /// while this is the last search that started.
+    sent: Mutex<HashSet<String>>,
 }
 
 impl Search {
@@ -630,7 +642,26 @@ impl Search {
             abandoned: AtomicBool::new(false),
             send_lock: Mutex::new(()),
             summary: Mutex::new(FolderSummary::default()),
+            sent: Mutex::new(HashSet::new()),
         }
+    }
+
+    fn sent(&self) -> MutexGuard<'_, HashSet<String>> {
+        self.sent.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Notes a path about to be sent. False: the registry is full and the file must not be sent.
+    fn remember(&self, path: &str) -> bool {
+        let mut sent = self.sent();
+        sent.len() < MAX_GRANTABLE && {
+            sent.insert(path.to_owned());
+            true
+        }
+    }
+
+    /// The send did not happen: the path is not one the webview holds.
+    fn forget(&self, path: &str) {
+        self.sent().remove(path);
     }
 
     fn cancelled(&self) -> bool {
@@ -647,10 +678,13 @@ impl Search {
 struct RegistryInner {
     running: Option<(String, Arc<Search>)>,
     abandoned: usize,
+    /// The last search that started, running or ended: the one whose files `folder_grant` opens.
+    /// A new search replaces it, so a result row of an older search stops opening.
+    last: Option<Arc<Search>>,
 }
 
-/// Managed state (`lib.rs`): the search that is running (`id` and cancel flag) and how many
-/// stopped searches still have a thread stuck in a read.
+/// Managed state (`lib.rs`): the search that is running (`id` and cancel flag), how many
+/// stopped searches still have a thread stuck in a read, and the last search's sent paths.
 #[derive(Clone, Default)]
 pub struct SearchRegistry {
     inner: Arc<Mutex<RegistryInner>>,
@@ -673,7 +707,16 @@ impl SearchRegistry {
         }
         let search = Arc::new(Search::new());
         inner.running = Some((id.to_owned(), Arc::clone(&search)));
+        inner.last = Some(Arc::clone(&search));
         Ok(search)
+    }
+
+    /// Whether `path` is one of the files the last search that started has sent.
+    pub fn was_sent(&self, path: &str) -> bool {
+        self.lock()
+            .last
+            .as_ref()
+            .is_some_and(|search| search.sent().contains(path))
     }
 
     /// Asks the search `id` to stop. Whether one with that id was running.
@@ -1149,7 +1192,14 @@ impl<S: Sink> Walker<'_, S> {
             bytes: size,
             mtime_ms: modified,
         };
+        // Remembered before the send, so a row the webview shows can always be opened; taken back
+        // when the send did not happen.
+        if !self.search.remember(path_text) {
+            self.stop = Some(FolderStop::Files);
+            return;
+        }
         if !self.sink.file(event, data) {
+            self.search.forget(path_text);
             self.stop = Some(FolderStop::Cancelled);
             return;
         }
@@ -1504,6 +1554,21 @@ pub fn grant_target(
     Ok(real)
 }
 
+/// `folder_grant` as the command runs it: the file must be one the last search sent (owner
+/// decision of 2026-10-27), then the checks of [`grant_target`].
+pub fn grant_sent(
+    registry: &SearchRegistry,
+    root: &str,
+    path: &str,
+    is_allowed: &dyn Fn(&Path) -> bool,
+    state_file: &Path,
+) -> Result<PathBuf, &'static str> {
+    if !registry.was_sent(path) {
+        return Err(E_NOT_SENT);
+    }
+    grant_target(root, path, is_allowed, state_file)
+}
+
 // --- the commands --------------------------------------------------------------------------------
 
 /// Walks the folder `req.root` and streams what passes the checks of the request. See the
@@ -1581,11 +1646,17 @@ pub async fn folder_siblings(
     .map_err(String::from)
 }
 
-/// Grants the one file `path` to the fs scope so the webview can open it, when it lies in
-/// `root` (a folder the scope already allows), and every step between is a plain folder and
-/// the file a regular file (no link). Never grants a folder.
+/// Grants the one file `path` to the fs scope so the webview can open it, when the last search
+/// sent it, it lies in `root` (a folder the scope already allows), and every step between is a
+/// plain folder and the file a regular file (no link). Never grants a folder.
 #[tauri::command]
-pub async fn folder_grant(app: AppHandle, root: String, path: String) -> Result<(), String> {
+pub async fn folder_grant(
+    app: AppHandle,
+    registry: State<'_, SearchRegistry>,
+    root: String,
+    path: String,
+) -> Result<(), String> {
+    let registry = registry.inner().clone();
     let scope = app.fs_scope();
     let state_file = paths::app_dirs(&app)
         .map_err(|_| E_FAILED.to_string())?
@@ -1594,7 +1665,13 @@ pub async fn folder_grant(app: AppHandle, root: String, path: String) -> Result<
         // On a bounded thread: a share that does not answer must not hold the row click for ever.
         let key = path.clone();
         let checked = files::run_bounded(vec![key], GRANT_BUDGET, move |_| {
-            grant_target(&root, &path, &|p| scope.is_allowed(p), &state_file)
+            grant_sent(
+                &registry,
+                &root,
+                &path,
+                &|p| scope.is_allowed(p),
+                &state_file,
+            )
         })
         .into_iter()
         .next()
@@ -3402,6 +3479,220 @@ mod tests {
                 Err(E_NOT_IN_FOLDER)
             );
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // --- S4 and S6: the grant opens only what the last search sent (owner decision 2026-10-27) ----------
+
+    /// Runs one search of `root` through the registry, as the command does, and answers the paths it sent.
+    fn search_through(registry: &SearchRegistry, id: &str, root: &Path) -> Vec<String> {
+        let root = root.to_path_buf();
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        struct Paths(Arc<Mutex<Vec<String>>>);
+        impl Sink for Paths {
+            fn file(&mut self, event: FolderEvent, _: Vec<u8>) -> bool {
+                if let FolderEvent::File { path, .. } = event {
+                    self.0.lock().unwrap().push(path);
+                }
+                true
+            }
+            fn progress(&mut self, _: u32, _: u32) -> bool {
+                true
+            }
+        }
+        let sink = Paths(Arc::clone(&seen));
+        supervise(registry, id, &Limits::default(), move |search| {
+            Ok(walk(
+                &root,
+                &request(serde_json::json!({})),
+                &Limits::default(),
+                search,
+                sink,
+            ))
+        })
+        .unwrap();
+        let paths = seen.lock().unwrap().clone();
+        paths
+    }
+
+    fn grant_via(
+        registry: &SearchRegistry,
+        root: &Path,
+        path: &Path,
+        state_file: &Path,
+    ) -> Result<PathBuf, &'static str> {
+        grant_sent(
+            registry,
+            root.to_str().unwrap(),
+            path.to_str().unwrap(),
+            &all,
+            state_file,
+        )
+    }
+
+    #[test]
+    fn a_file_that_no_search_sent_is_not_granted_even_when_it_is_in_the_folder() {
+        let dir = scratch("grant-unsent");
+        let root = dir.join("root");
+        put(&root.join("a.nc"), b"G0\n");
+        let state_file = dir.join("data").join("state.json");
+        let registry = SearchRegistry::default();
+        // No search has run: nothing opens.
+        assert_eq!(
+            grant_via(&registry, &root, &root.join("a.nc"), &state_file),
+            Err(E_NOT_SENT)
+        );
+        let sent = search_through(&registry, "s-1", &root);
+        assert_eq!(sent.len(), 1);
+        // Another file of the folder, created after the search, was never sent.
+        put(&root.join("later.nc"), b"G0\n");
+        assert_eq!(
+            grant_via(&registry, &root, &root.join("later.nc"), &state_file),
+            Err(E_NOT_SENT)
+        );
+        assert!(grant_via(&registry, &root, &root.join("a.nc"), &state_file).is_ok());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_the_search_filtered_out_is_not_granted() {
+        let dir = scratch("grant-filtered");
+        let root = dir.join("root");
+        put(&root.join("a.nc"), b"G0\n");
+        put(&root.join("b.txt"), b"G0\n");
+        let state_file = dir.join("data").join("state.json");
+        let registry = SearchRegistry::default();
+        let root2 = root.clone();
+        let sink = Collect::default();
+        supervise(&registry, "s-1", &Limits::default(), move |search| {
+            Ok(walk(
+                &root2,
+                &request(serde_json::json!({ "namePatterns": ["*.nc"] })),
+                &Limits::default(),
+                search,
+                sink,
+            ))
+        })
+        .unwrap();
+        assert!(grant_via(&registry, &root, &root.join("a.nc"), &state_file).is_ok());
+        assert_eq!(
+            grant_via(&registry, &root, &root.join("b.txt"), &state_file),
+            Err(E_NOT_SENT)
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_row_of_an_older_search_stops_opening_after_a_new_search() {
+        let dir = scratch("grant-older");
+        let one = dir.join("one");
+        let two = dir.join("two");
+        put(&one.join("a.nc"), b"G0\n");
+        put(&two.join("b.nc"), b"G0\n");
+        let state_file = dir.join("data").join("state.json");
+        let registry = SearchRegistry::default();
+        search_through(&registry, "s-1", &one);
+        assert!(grant_via(&registry, &one, &one.join("a.nc"), &state_file).is_ok());
+        search_through(&registry, "s-2", &two);
+        assert_eq!(
+            grant_via(&registry, &one, &one.join("a.nc"), &state_file),
+            Err(E_NOT_SENT)
+        );
+        assert!(grant_via(&registry, &two, &two.join("b.nc"), &state_file).is_ok());
+        // The same folder searched again: its rows are the new search's.
+        search_through(&registry, "s-3", &two);
+        assert!(grant_via(&registry, &two, &two.join("b.nc"), &state_file).is_ok());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_search_that_is_refused_does_not_take_the_rows_of_the_last_one() {
+        let dir = scratch("grant-refused");
+        let root = dir.join("root");
+        put(&root.join("a.nc"), b"G0\n");
+        let state_file = dir.join("data").join("state.json");
+        let registry = SearchRegistry::default();
+        search_through(&registry, "s-1", &root);
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let held = {
+            let (registry, job) = (registry.clone(), held_job(&gate));
+            std::thread::spawn(move || supervise(&registry, "s-2", &Limits::default(), job))
+        };
+        wait_until("the second search registers", || {
+            registry.lock().running.is_some()
+        });
+        // The second search began, so the first one's rows are already gone.
+        assert_eq!(
+            grant_via(&registry, &root, &root.join("a.nc"), &state_file),
+            Err(E_NOT_SENT)
+        );
+        // A third, refused as busy, changes nothing about that or about the running one.
+        let busy = supervise(&registry, "s-3", &Limits::default(), |_| {
+            Ok(FolderSummary::default())
+        });
+        assert_eq!(busy.unwrap_err(), E_BUSY);
+        assert!(registry.lock().last.is_some());
+        open_gate(&gate);
+        assert!(held.join().unwrap().is_ok());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_whose_send_failed_is_not_remembered_and_the_registry_is_bounded() {
+        let search = Search::new();
+        assert!(search.remember("/nc/a.nc"));
+        search.forget("/nc/a.nc");
+        assert!(search.sent().is_empty());
+        for n in 0..MAX_GRANTABLE {
+            assert!(search.remember(&format!("/nc/{n}.nc")), "{n}");
+        }
+        // The 20,001st is refused and the walk stops instead of sending a file it could not open.
+        assert!(!search.remember("/nc/one-more.nc"));
+        assert_eq!(search.sent().len(), MAX_GRANTABLE);
+        assert_eq!(MAX_GRANTABLE, 20_000);
+
+        let dir = scratch("grant-send-failed");
+        let root = dir.join("root");
+        put(&root.join("a.nc"), b"G0\n");
+        let search = Search::new();
+        let sink = Collect {
+            refuse: true,
+            ..Collect::default()
+        };
+        let summary = walk(
+            &root,
+            &request(serde_json::json!({})),
+            &Limits::default(),
+            &search,
+            sink,
+        );
+        assert_eq!(summary.files_sent, 0);
+        assert!(search.sent().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_registry_stops_the_walk_when_it_is_full() {
+        let dir = scratch("grant-full");
+        let root = dir.join("root");
+        put(&root.join("a.nc"), b"G0\n");
+        let search = Search::new();
+        for n in 0..MAX_GRANTABLE {
+            assert!(search.remember(&format!("/other/{n}.nc")));
+        }
+        let (summary, sink) = {
+            let mut sink = Collect::default();
+            let summary = walk(
+                &root,
+                &request(serde_json::json!({})),
+                &Limits::default(),
+                &search,
+                &mut sink,
+            );
+            (summary, sink)
+        };
+        assert!(sink.files.is_empty());
+        assert_eq!(summary.files_sent, 0);
         let _ = fs::remove_dir_all(&dir);
     }
 }
