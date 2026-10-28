@@ -2282,3 +2282,32 @@ class LaterVersionTest(unittest.TestCase):
         # CALRG is a code of the database (a marker of the larger arc), no word nobody describes.
         self.assertEqual([role for role, _ in self.roles("okuma-osp", text, 4, "okuma-1mm")], ["code-arc", "point", "point", "radius"])
 
+    #: The skeptic's probes t017z and t017y: the C axis connected (M110), then a plane code.
+    Y_AXIS_MODE = "G90 G18 G50 S2000\nG0 X100. Z5. C0\nM110\n%s\nG1 X40. Y0 Z-2. F100\n%s\nG1 X-40.\nG18\nG0 X200. Z200.\nM02"
+
+    def test_d8_an_okuma_arc_in_the_planes_of_the_y_axis_mode_is_refused_by_the_z_mirror(self) -> None:
+        # Okuma OSP-P300 MacTurn/Multus (LG32-163-R10, p.222-223): in the Y-axis mode G00-G03
+        # also move in G17 (XY) and G19 (YZ); G119 is a plane of its own. t017z: with Y kept,
+        # X and Y of the arc stay, so swapping G2 for G3 would cut the other arc; the mirror
+        # refuses the arc instead, whichever way the machine takes Y.
+        text = self.Y_AXIS_MODE % ("G17", "G02 X0 Y20. L20.")
+        context = helpers.effective_context("okuma-osp", preset="okuma-1mm")
+        for choice in ("turns", "stays"):
+            with self.subTest(counterSpindleY=choice):
+                result = run_patched("mirror", text, with_variant(context, "counterSpindleY", choice), LATHE_Z[1])
+                self.assertIn((6, "arc-unsupported"), errors(result))
+                self.assertNotIn("G03", result.get("text") or "")
+        for plane, arc in (
+            ("G17", "G2 X0 Y20. I-20. J0"),
+            ("G17", "G2 X0 Z-22. L20."),
+            ("G19", "G2 X40. Z-22. I0 K-10."),
+            ("G119", "G2 X0 Z-22. L20."),
+        ):
+            for op in (LATHE, _nc_geom.LatheZMirror(D(0), False)):
+                with self.subTest(plane=plane, arc=arc, op=op):
+                    self.assertIn("arc-unsupported", self.refusals("okuma-osp", self.Y_AXIS_MODE % (plane, arc), 6, op, "okuma-1mm"))
+        # A translate moves the end points and keeps the arc, in any plane.
+        self.assertEqual(self.refusals("okuma-osp", self.Y_AXIS_MODE % ("G17", "G2 X0 Z-22. L20."), 6, _nc_geom.Translate({"X": D(1), "Z": D(1)}), "okuma-1mm"), [])
+        # G18 written again: the turning plane, the T017 case.
+        text = "G90 G18\nG0 X40 Z2\nG17\nG18\nG2 X50 Z-10 L20"
+        self.assertEqual(self.refusals("okuma-osp", text, 5, LATHE, "okuma-1mm"), [])
