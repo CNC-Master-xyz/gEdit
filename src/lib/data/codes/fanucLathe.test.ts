@@ -135,6 +135,7 @@ describe('the shipped Fanuc databases', () => {
       'heidenhain',
       'okuma',
       'sinumerik',
+      'sinumerik-mill',
     ]);
   });
 

@@ -444,6 +444,7 @@ describe('the services the manager reads', () => {
     const lathe = addDoc('fanuc-lathe');
     const mill = addDoc('fanuc-gcode');
     const turning = addDoc('sinumerik');
+    const milling = addDoc('sinumerik-mill');
     const klartext = addDoc('heidenhain-klartext');
     expect(await builtinIds(lathe, 'fanuc-lathe')).toEqual(offered(lathe));
     expect(await builtinIds(lathe, 'fanuc-lathe')).not.toContain('tapping');
@@ -451,8 +452,11 @@ describe('the services the manager reads', () => {
     expect(await builtinIds(mill, 'fanuc')).not.toContain('threading');
     // The code set of system B is a lathe set too (the choice of the lathe profile's variant).
     expect(await builtinIds(lathe, 'fanuc-lathe-b')).toEqual(offered(lathe));
-    // One code set, two profiles (turning and milling): both machine types are offered.
-    expect(await builtinIds(turning, 'sinumerik')).toEqual(expect.arrayContaining(['stock-removal', 'peck-drill', 'program-start']));
+    // Wave Y (T156): each Siemens profile has its own code set, so each set offers one machine type.
+    expect(await builtinIds(turning, 'sinumerik')).toEqual(offered(turning));
+    expect(await builtinIds(turning, 'sinumerik')).not.toContain('peck-drill');
+    expect(await builtinIds(milling, 'sinumerik-mill')).toEqual(offered(milling));
+    expect(await builtinIds(milling, 'sinumerik-mill')).not.toContain('stock-removal');
     expect(await builtinIds(klartext, 'heidenhain')).toEqual(offered(klartext));
   });
 
@@ -477,7 +481,9 @@ describe('the services the manager reads', () => {
     expect(machineTypesOf('fanuc-lathe')).toEqual(['lathe']);
     expect(machineTypesOf('fanuc-lathe-b')).toEqual(['lathe']);
     expect(machineTypesOf('fanuc')).toEqual(['mill']);
-    expect([...machineTypesOf('sinumerik')].sort()).toEqual(['lathe', 'mill']);
+    // Wave Y (T156): the milling profile reads its own set, which extends the turning one.
+    expect(machineTypesOf('sinumerik')).toEqual(['lathe']);
+    expect(machineTypesOf('sinumerik-mill')).toEqual(['mill']);
     expect(machineTypesOf('no-such-set')).toEqual([]);
   });
 

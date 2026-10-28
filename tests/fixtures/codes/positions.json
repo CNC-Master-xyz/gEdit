@@ -109,6 +109,7 @@
       { "code": "CYCLE95", "params": [["NPP", "other"], ["MID", "none"], ["FALZ", "none"], ["FALX", "none"], ["FAL", "none"], ["FF1", "none"], ["FF2", "none"], ["FF3", "none"], ["VARI", "none"], ["DT", "none"], ["DAM", "none"], ["_VRT", "none"], ["_GMODE", "mode"], ["_DMODE", "mode"]] },
       { "code": "CYCLE97", "params": [["PIT", "none"], ["MPIT", "none"], ["SPL", "other"], ["FPL", "other"], ["DM1", "other"], ["DM2", "other"], ["APP", "none"], ["ROP", "none"], ["TDEP", "none"], ["FAL", "none"], ["IANG", "none"], ["NSP", "none"], ["NRC", "none"], ["NID", "none"], ["VARI", "none"], ["NUMT", "none"], ["_VRT", "none"]] },
       { "code": "CYCLE800", "params": [["_FR", "none"], ["_TC", "none"], ["_ST", "mode"], ["_MODE", "mode"], ["_X0", "other"], ["_Y0", "other"], ["_Z0", "other"], ["_A", "none"], ["_B", "none"], ["_C", "none"], ["_X1", "other"], ["_Y1", "other"], ["_Z1", "other"], ["_DIR", "none"], ["_FR_I", "none"], ["_DMODE", "mode"]] }
-    ]
+    ],
+    "sinumerik-mill": []
   }
 }

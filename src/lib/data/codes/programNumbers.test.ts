@@ -30,6 +30,7 @@ const EXPECTED: Record<string, string[][]> = {
   heidenhain: [],
   okuma: [],
   sinumerik: [],
+  'sinumerik-mill': [],
 };
 
 describe('the parameters that name a program (CodeParam.programNumber)', () => {

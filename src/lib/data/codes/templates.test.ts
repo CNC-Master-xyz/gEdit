@@ -9,10 +9,11 @@
 //     the content ships unreviewed and says so; the owner's review deletes the mark template by
 //     template, and this expectation with the last one;
 //   - a database that profiles of both machine types read marks its templates with `machineType`
-//     (`fanuc` is read by the lathe through `extends`; `sinumerik` by the turning and the milling
-//     profile). The one exception, written out below: Sinumerik's `program-start` and
-//     `program-end` serve both machine types, because a file holds an id once and both profiles
-//     need the Home button;
+//     (`fanuc` is read by the lathe through `extends`; `sinumerik` by the turning profile and,
+//     through `sinumerik-mill`, by the milling profile). The one exception, written out below:
+//     Sinumerik's `program-end` serves both machine types. Since Wave Y (T156) each Siemens
+//     profile has its own `program-start`: the turning one in `sinumerik`, the milling one in
+//     `sinumerik-mill`, which replaces it by its id;
 //   - `blocks: 2` stands exactly on the cycles the manuals write in two blocks with the same code
 //     (the Fanuc lathe G71–G76), so the cycle form refuses them;
 //   - one golden per template (`tests/fixtures/templates/<db>/<id>.json`): its text tokenizes with
@@ -71,15 +72,22 @@ const PROFILE_DBS: { profile: string; db: string }[] = [
   { profile: 'heidenhain-klartext', db: 'heidenhain' },
   { profile: 'okuma-osp', db: 'okuma' },
   { profile: 'sinumerik', db: 'sinumerik' },
-  { profile: 'sinumerik-mill', db: 'sinumerik' },
+  { profile: 'sinumerik-mill', db: 'sinumerik-mill' },
 ];
+
+/** Profiles that read a database's own templates through a child database (`extends`): the goldens of these templates may render with them. */
+const THROUGH_CHILD: Record<string, string[]> = { sinumerik: ['sinumerik-mill'] };
+
+/** The parent of a child database, whose templates the child keeps where it writes none of its own. */
+const PARENT: Record<string, string> = { 'fanuc-lathe-b': 'fanuc-lathe', 'sinumerik-mill': 'sinumerik' };
 
 /** Databases read by profiles of both machine types, and the templates there that serve both. */
 const SHARED: Record<string, string[]> = {
   fanuc: [],
   'fanuc-lathe': [],
   'fanuc-lathe-b': [],
-  sinumerik: ['program-start', 'program-end'],
+  sinumerik: ['program-end'],
+  'sinumerik-mill': [],
 };
 
 interface Golden {
@@ -170,10 +178,21 @@ describe('the built-in templates load', () => {
   });
 
   it('the Sinumerik milling profile gets a milling set beside the turning set', () => {
-    const mill = templatesForMachine(DBS.sinumerik.templates, 'mill').map((t) => t.id);
+    const mill = templatesForMachine(DBS['sinumerik-mill'].templates, 'mill').map((t) => t.id);
     const lathe = templatesForMachine(DBS.sinumerik.templates, 'lathe').map((t) => t.id);
     expect(mill).toEqual(['program-start', 'tool-change', 'drill', 'drill-dwell', 'peck-drill', 'tapping', 'program-end']);
     expect(lathe).toEqual(['program-start', 'tool-start', 'stock-removal', 'threading', 'tool-end', 'program-end']);
+  });
+
+  it('T156: each Siemens profile reads its own code set, and the milling set replaces only the Program start', () => {
+    expect(profile('sinumerik').profile.codes).toBe('sinumerik');
+    expect(profile('sinumerik-mill').profile.codes).toBe('sinumerik-mill');
+    expect(ownTemplates('sinumerik-mill').map((t) => `${t.id}:${t.machineType}`)).toEqual(['program-start:mill']);
+    expect(FILES['sinumerik-mill'].codes).toEqual([]);
+    // The codes are the turning set's, entry for entry.
+    expect(DBS['sinumerik-mill'].codes).toEqual(DBS.sinumerik.codes);
+    // A milling program that names the turning set gets no Program start rather than the turning one.
+    expect(templatesForMachine(DBS.sinumerik.templates, 'mill').map((t) => t.id)).not.toContain('program-start');
   });
 });
 
@@ -204,7 +223,7 @@ describe('the goldens', () => {
     expect(g.codes).toBe(db);
     expect(g.template).toBe(id);
     const t = templateOf(db, id);
-    const reads = PROFILE_DBS.filter((p) => p.db === db).map((p) => p.profile);
+    const reads = [...PROFILE_DBS.filter((p) => p.db === db).map((p) => p.profile), ...(THROUGH_CHILD[db] ?? [])];
     expect(reads).toContain(g.profile);
     expect(t.machineType === undefined || t.machineType === profile(g.profile).profile.machineType).toBe(true);
     const ids = new Set((t.params ?? []).map((p) => p.id));
@@ -253,18 +272,20 @@ describe('the goldens', () => {
     heidenhain: 'tool-call',
     okuma: 'tool-start',
     sinumerik: 'tool-start',
+    'sinumerik-mill': 'tool-change',
   };
 
   it.each(GOLDENS)('$db/$id: in a program made of its database\'s templates, it is detected as its profile', ({ db, id }) => {
     const g = golden(db, id);
-    // System B takes its program end from A (it overrides only what differs); the Sinumerik
-    // milling set shares the start with turning, so its context is the milling choice of it.
-    const own = (template: string) => (FILES[db].templates ?? []).some((t) => (t as { id: string }).id === template);
-    const from = (template: string) => golden(own(template) ? db : 'fanuc-lathe', template).expected;
-    let start = from('program-start');
-    let tool = g.profile === 'sinumerik-mill' ? golden(db, 'tool-change').expected : from(FIRST_TOOL[db]);
-    if (g.profile === 'sinumerik-mill') start = start.replace('G18 G90 G95 DIAMON', 'G17 G90 G94 G40');
-    if (id === FIRST_TOOL[db] || id === 'tool-change') tool = '';
+    // A child set takes what it does not write from its parent (system B its program end from A,
+    // the Sinumerik milling set everything but its program start); a Sinumerik milling template
+    // written in the turning set stands in a program made of the milling set.
+    const set = g.profile === 'sinumerik-mill' ? 'sinumerik-mill' : db;
+    const own = (d: string, template: string) => (FILES[d].templates ?? []).some((t) => (t as { id: string }).id === template);
+    const from = (template: string) => golden(own(set, template) ? set : PARENT[set], template).expected;
+    const start = from('program-start');
+    let tool = from(FIRST_TOOL[set]);
+    if (id === FIRST_TOOL[set]) tool = '';
     const body = id === 'program-start' || id === 'program-end' ? '' : g.expected;
     const text = [start, tool, body, from('program-end')].filter((part) => part !== '').join('\n');
     expect(detectResult(PROFILES, null, text, 'none').id).toBe(g.profile);
@@ -317,18 +338,22 @@ describe('P3b fix NC: the content', () => {
     return out;
   };
 
-  it('NC-03: the Sinumerik Program start opens with no machining chosen, on the turning and the milling profile', () => {
+  it('NC-03, T156: each Siemens profile has its own Program start, which needs no choice of machining', () => {
+    const startOf = (id: string): TemplateDef => {
+      const cp = profile(id);
+      const t = templatesForMachine(DBS[cp.profile.codes].templates, cp.profile.machineType).find((x) => x.id === 'program-start');
+      if (!t) throw new Error(`no program-start for ${id}`);
+      return t;
+    };
     for (const id of ['sinumerik', 'sinumerik-mill']) {
-      const t = templatesForMachine(DBS.sinumerik.templates, profile(id).profile.machineType).find((x) => x.id === 'program-start');
-      if (!t) throw new Error('no program-start');
-      const values = initialValues(templateFields(t));
-      expect(values.setup, id).toBeUndefined();
-      expect(validateTemplateValues(t, values, profile(id)).setup?.key, id).toBe('templates.value.required');
+      const t = startOf(id);
+      expect((t.params ?? []).map((p) => p.id), id).toEqual(['title', 'units', 'offset']);
+      expect(validateTemplateValues(t, initialValues(templateFields(t)), profile(id)), id).toEqual({});
     }
-    const t = templateOf('sinumerik', 'program-start');
-    const mill = rendered(t, 'sinumerik-mill', { ...defaults(t), setup: 'G17 G90 G94 G40' });
-    expect(mill).toMatch(/\bG17\b/);
-    expect(mill).toMatch(/\bG94\b/);
+    const lathe = rendered(startOf('sinumerik'), 'sinumerik');
+    expect(lathe.split('\n')[1]).toBe('N110 G18 G90 G95 DIAMON G71');
+    const mill = rendered(startOf('sinumerik-mill'), 'sinumerik-mill');
+    expect(mill.split('\n')[1]).toBe('N110 G17 G90 G94 G40 G71');
     expect(mill).not.toMatch(/\bG18\b|\bG95\b|DIAMON/);
   });
 

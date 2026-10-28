@@ -47,6 +47,7 @@ describe('built-in code databases', () => {
       'heidenhain',
       'okuma',
       'sinumerik',
+      'sinumerik-mill',
     ]);
     expect(fanuc.db.dialect).toBe('fanuc');
     expect(heidenhain.db.dialect).toBe('heidenhain');

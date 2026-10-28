@@ -102,8 +102,12 @@ class PowerOnTest(unittest.TestCase):
         self.assertEqual(helpers.effective_context(MILLING)["machine"]["params"]["diameter"], "off")
         # Everything else is the turning profile's (AD-16) — but for the rotary axes, which
         # the milling profile names as axes and as angles since M10 (P10).
-        for key in ("syntax", "outline", "numbering", "program", "codes", "grammar"):
+        for key in ("syntax", "outline", "numbering", "program", "grammar"):
             self.assertEqual(mill[key], turn[key], key)
+        # Wave Y (T156): the milling profile reads its own code set, the turning set with the
+        # milling Program start; its codes are the turning set's, entry for entry.
+        self.assertEqual((mill["codes"], turn["codes"]), (MILLING, TURNING))
+        self.assertEqual(helpers.resolved_codes(MILLING), helpers.resolved_codes(TURNING))
         rest = lambda addresses: {k: v for k, v in addresses.items() if k not in ("axes", "angular")}
         self.assertEqual(rest(mill["addresses"]), rest(turn["addresses"]))
         self.assertEqual(mill["addresses"]["axes"], ["X", "Y", "Z", "A", "B", "C"])

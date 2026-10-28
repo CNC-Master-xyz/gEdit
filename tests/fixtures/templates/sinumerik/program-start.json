@@ -3,9 +3,7 @@
   "codes": "sinumerik",
   "profile": "sinumerik",
   "template": "program-start",
-  "values": {
-    "setup": "G18 G90 G95 DIAMON"
-  },
+  "values": {},
   "env": {
     "prevBlockNumber": null,
     "numbered": true,
