@@ -1037,12 +1037,13 @@ class TestP4aReviewLatheCycleValues(unittest.TestCase):
         self.assertEqual(finding_at(payload, 4)["reason"], "not-scaled")
 
     def test_an_end_point_without_the_lengths_is_not_scaled_either(self):
-        # The control takes Q and R from the first block or its own settings, unscaled.
+        # The control takes Q and R from the first block or its own settings, unscaled; since
+        # the P4.43a data line the thread height P of the second block is a length too (T118).
         payload = self.lathe("G76 X40. Z-20. F1.5", operation="multiply", operand=2, addresses=["X"])
         self.assertEqual(lines_of(payload)[2], "G76 X40. Z-20. F1.5")
         self.assertEqual(
             finding_at(payload, 3)["message"],
-            "G76 X40. Z-20. F1.5: G76 has depths or distances of its own (Q and R) that a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+            "G76 X40. Z-20. F1.5: G76 has depths or distances of its own (Q, R and P) that a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
         )
 
     def test_an_incremental_end_point_is_refused_like_an_absolute_one(self):
@@ -1990,8 +1991,11 @@ class TestFb2ToolDirection(unittest.TestCase):
 class TestP4hG76ThreadHeightByBlock(unittest.TestCase):
     """P4h fix round, D1 / NC-2 (plan §6.10 rule 11; T118): the `G76` `P` is a packed count in
     the first block and the thread height in increments in the second. Every Python caller of
-    `number_class_of` passes the block (`gedit_nc.block_cycle_of`); without it both `P` words
-    had no class and the cycle was refused as "does not know what kind of number"."""
+    `number_class_of` passes the block (`gedit_nc.block_cycle_of`), and the cycle's parameter is
+    read by its block's declaration; without it both `P` words had no class and the cycle was
+    refused as "does not know what kind of number". Now the second-block `P` is a value of the
+    cycle, left and listed like its `Q` and `R` (NC-16), and the first-block `P` is a count,
+    which a shift of `P` changes as written (README "The form")."""
 
     PROGRAM = "G21 G18 G99\nG0 X50. Z5.\nG76 P010060 Q100 R0.05\nG76 X20. Z-30. P1500 Q300 F2.\nM30\n"
 
@@ -2003,23 +2007,30 @@ class TestP4hG76ThreadHeightByBlock(unittest.TestCase):
             raise AssertionError(result.stderr)
         return result.json()
 
-    def test_is_b_moves_the_thread_height_and_reads_the_first_block_p_as_a_count(self):
-        payload = self.run_on(helpers.effective_context("fanuc-lathe", preset="is-b"))
+    def check(self, payload):
         lines = lines_of(payload)
-        # Block 2: P1500 is 1.5 mm in increments of 0.001 mm; plus 0.5 mm is P2000.
-        self.assertEqual(lines[3], "G76 X20. Z-30. P2000 Q300 F2.")
-        # Block 1: a count, changed as written (the user chose P), and rounded to a whole number.
+        # Block 1: a count, changed as written (the user chose P), rounded to a whole number.
         self.assertEqual(lines[2], "G76 P10061 Q100 R0.05")
-        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "rounded")])
+        # Block 2: the thread height, a value of the cycle and no position: left and listed.
+        self.assertEqual(lines[3], "G76 X20. Z-30. P1500 Q300 F2.")
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "rounded"), (4, "data")])
+        self.assertEqual(finding_at(payload, 4)["message"], "P1500: a value of G76, not a position of this program.")
         self.assertNotIn("kind of number", json.dumps(payload))
 
-    def test_without_a_machine_the_thread_height_waits_for_one(self):
-        payload = self.run_on(helpers.effective_context("fanuc-lathe"))
+    def test_is_b(self):
+        self.check(self.run_on(helpers.effective_context("fanuc-lathe", preset="is-b")))
+
+    def test_without_a_machine(self):
+        self.check(self.run_on(helpers.effective_context("fanuc-lathe")))
+
+    def test_a_multiply_names_the_thread_height_among_the_lengths_it_does_not_scale(self):
+        context = helpers.effective_context("fanuc-lathe", preset="is-b")
+        payload = self.run_on(context, operation="multiply", operand=2, addresses=["X"])
         self.assertEqual(lines_of(payload)[3], "G76 X20. Z-30. P1500 Q300 F2.")
-        found = finding_at(payload, 4)
-        self.assertEqual(found["reason"], "cycle-unresolved")
-        self.assertIn("P1500 cannot be moved (the reading depends on the machine", found["message"])
-        self.assertNotIn("kind of number", json.dumps(payload))
+        self.assertEqual(
+            finding_at(payload, 4)["message"],
+            "G76 X20. Z-30. P1500 Q300 F2.: G76 writes P1500, which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+        )
 
 
 class TestManualCheckD43OnlyPositionsNeedTheDistanceMode(unittest.TestCase):
