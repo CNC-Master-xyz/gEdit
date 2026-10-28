@@ -666,7 +666,7 @@ class Extents:
 
     def after_call(self, step: Step, number: int) -> None:
         """v1.2.0 (T110): a block that calls a program. A program of this document, called once
-        by its number (the profile's ``numbering.calls`` rule: no repeat
+        by its number (the profile's ``numbering.calls`` rule, not an external one: no repeat
         count, no jump into it, no number that packs a count), with no call of its own, is walked
         right here from where the caller stands, and the caller goes on from where it ends. Any
         other call leaves every axis not known: the called program may have moved the tool
@@ -729,7 +729,9 @@ class Extents:
                         break
                 except re.error:
                     return None
-        if rule is None:
+        if rule is None or rule.get("external") is True:
+            # Wave Y skeptic D7: an external rule (Fanuc `M198`) runs a program from an external
+            # device or a data server, not a program of this document of the same number.
             return None
         digits = token.value_text or ""
         most = rule.get("maxDigits")

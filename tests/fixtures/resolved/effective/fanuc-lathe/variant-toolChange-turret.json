@@ -991,6 +991,7 @@
         },
         {
           "address": "P",
+          "external": true,
           "maxDigits": 4,
           "repeatAddress": "L",
           "trigger": "(?<![A-Z])M\\s*0*198(?!\\d)"

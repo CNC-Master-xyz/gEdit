@@ -861,6 +861,23 @@ class LaterVersionTest(unittest.TestCase):
                 self.assertEqual((x["max"], x["unresolved"]), ("", 1), x)
                 self.assertIn("incremental-start", reasons(report))
 
+    def test_d7_m198_is_not_followed_into_the_document(self):
+        # Wave Y skeptic D7: M198 calls a program on an external device or a data server, not
+        # the O2000 of this file. Before, the walk followed it (X max 301).
+        text = self.T110_CALLER.format(call="M198 P2000") + self.T110_SUB
+        report = helpers.run_script(SCRIPT, stdin=text, context=helpers.effective_context("fanuc-gcode")).json()
+        # X300 is O2000's own line 10, read as a line of the file; the G91 X1. after the call
+        # is not known (before: 301 at line 6, counted from the end of O2000).
+        x = row(report, "X")
+        self.assertEqual((x["max"], x["maxLine"], x["unresolved"]), ("300", 10, 1), x)
+        self.assertIn("call", reasons(report))
+        self.assertIn("incremental-start", reasons(report))
+        # The lathe profile inherits the rule: the same there.
+        lathe = text.replace("G17", "G18")
+        report = helpers.run_script(SCRIPT, stdin=lathe, context=helpers.effective_context("fanuc-lathe")).json()
+        self.assertIn("call", reasons(report))
+        self.assertEqual(row(report, "X")["unresolved"], 1)
+
     def test_t112_okuma_l_arcs(self):
         report = report_of("t112-okuma-l-arcs")
         self.assertEqual([f["reason"] for f in report["findings"]], ["arc"])  # only the CALRG arc
