@@ -17,8 +17,10 @@ import { commands } from '$lib/app/registry/commands';
 import { status } from '$lib/app/status';
 import { t } from '$lib/i18n';
 import {
+  bindingOf,
   mergeKeys,
   parseUserKeys,
+  sameEntry,
   serializeUserKeys,
   setKeyFor,
   valueFor,
@@ -81,20 +83,37 @@ const EMPTY: UserKeysState = { bindings: {}, problems: [], readOnly: false, erro
 export function createUserKeys(deps: UserKeysDeps): UserKeyService {
   const store = writable<UserKeysState>({ ...EMPTY });
   const platform: KeyPlatform = deps.isMac ? 'mac' : 'other';
+  // What the reader dropped from the file (a typo, an unknown member), and the entries it kept
+  // from the same read: `serializeUserKeys` writes the raw text back for a command the user has
+  // not changed since (CODE-6), so a hand-written entry survives an edit of another command.
+  let read: UserBindings = {};
+  let dropped: Record<string, unknown> = {};
+
+  // Every change of the file runs in this chain, one after the other, and works out its new
+  // bindings from the store when its turn comes: two quick edits are both kept (CODE-5).
+  let chain: Promise<unknown> = Promise.resolve();
+  function queued<T>(step: () => Promise<T>): Promise<T> {
+    const run = chain.then(step, step);
+    chain = run.catch(() => undefined);
+    return run;
+  }
 
   const analyse = (bindings: UserBindings = get(store).bindings): Record<KeyPlatform, MergedKeys> => {
     const defs = deps.declared();
     return { mac: mergeKeys(defs, bindings, 'mac'), other: mergeKeys(defs, bindings, 'other') };
   };
 
-  async function load(): Promise<void> {
+  async function loadNow(): Promise<void> {
     if (!deps.available) {
       store.set({ ...EMPTY, loaded: true });
       return;
     }
     try {
       const file = await deps.load();
-      const { bindings, problems } = parseUserKeys(file.keybindings);
+      const parsed = parseUserKeys(file.keybindings);
+      const { bindings, problems } = parsed;
+      read = bindings;
+      dropped = parsed.dropped;
       store.set({ bindings, problems, readOnly: file.readOnly, error: file.error, loaded: true });
       deps.apply(bindings);
       if (file.error) {
@@ -107,24 +126,32 @@ export function createUserKeys(deps: UserKeysDeps): UserKeyService {
         });
       }
     } catch (err) {
+      read = {};
+      dropped = {};
       store.set({ ...EMPTY, loaded: true, error: err instanceof Error ? err.message : String(err) });
       deps.apply({});
       deps.show(t('keyboardPage.loadFailed'), { error: true, detail: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  async function commit(next: UserBindings): Promise<boolean> {
+  const load = (): Promise<void> => queued(loadNow);
+
+  /** Must run inside `queued`: `change` gets the bindings as they are now. */
+  async function commit(change: (bindings: UserBindings) => UserBindings): Promise<boolean> {
     const current = get(store);
+    const next = change(current.bindings);
     if (current.readOnly) {
       deps.show(t('keyboardPage.readOnly'), { error: true });
       return false;
     }
     try {
-      await deps.save(serializeUserKeys(next));
+      await deps.save(serializeUserKeys(next, { read, dropped }));
     } catch (err) {
       deps.show(t('keyboardPage.saveFailed'), { error: true, detail: err instanceof Error ? err.message : String(err) });
       return false;
     }
+    // An entry the user changed is theirs now: its old raw text is not written again.
+    dropped = Object.fromEntries(Object.entries(dropped).filter(([id]) => sameEntry(bindingOf(next, id), bindingOf(read, id))));
     store.set({ ...current, bindings: next, error: null });
     deps.apply(next);
     const open = Object.values(analyse(next)).reduce((sum, merged) => sum + merged.conflicts.length, 0);
@@ -137,18 +164,21 @@ export function createUserKeys(deps: UserKeysDeps): UserKeyService {
     platform,
     load,
     analyse,
-    setKey: (id, value) => commit(setKeyFor(get(store).bindings, id, platform, value)),
-    reset: (id) => commit(setKeyFor(get(store).bindings, id, platform, undefined)),
-    resetAll: async () => {
-      const kept: UserBindings = {};
-      const other: KeyPlatform = platform === 'mac' ? 'other' : 'mac';
-      // Only the running platform's keys go: the other platform's members stay in the file.
-      for (const [id, entry] of Object.entries(get(store).bindings)) {
-        const value = valueFor(entry, other);
-        if (value !== undefined) Object.assign(kept, setKeyFor({}, id, other, value));
-      }
-      return commit(kept);
-    },
+    setKey: (id, value) => queued(() => commit((bindings) => setKeyFor(bindings, id, platform, value))),
+    reset: (id) => queued(() => commit((bindings) => setKeyFor(bindings, id, platform, undefined))),
+    resetAll: () =>
+      queued(() =>
+        commit((bindings) => {
+          const kept: UserBindings = {};
+          const other: KeyPlatform = platform === 'mac' ? 'other' : 'mac';
+          // Only the running platform's keys go: the other platform's members stay in the file.
+          for (const [id, entry] of Object.entries(bindings)) {
+            const value = valueFor(entry, other);
+            if (value !== undefined) Object.assign(kept, setKeyFor({}, id, other, value));
+          }
+          return kept;
+        }),
+      ),
   };
 }
 

@@ -47,7 +47,7 @@ describe('load', () => {
     expect(applied).toEqual([{ misc: 'Mod+K', 'script.run:gone': 'Mod+J' }]);
     expect(get(service.state).problems.map((p) => p.path)).toEqual(['bindings.file']);
     expect(shown).toHaveLength(1);
-    expect(shown[0].text).toBe('1 entry in the key file was ignored.');
+    expect(shown[0].text).toBe('1 entry in the key file was ignored. It stays in the file unless you change that command.');
     expect(shown[0].detail).toContain('bindings.file');
   });
 
@@ -169,5 +169,94 @@ describe('analyse', () => {
     await service.load();
     expect(service.analyse({ misc: 'Mod+S' }).other.conflicts).toHaveLength(1);
     expect(service.analyse().other.conflicts).toHaveLength(0);
+  });
+});
+
+// CODE-5 (P4g review): the second edit was built from the bindings of before the first one was saved.
+describe('two edits inside one save', () => {
+  it('keeps both, with a save that resolves late', async () => {
+    const releases: (() => void)[] = [];
+    const { service, saved, applied } = setup({}, {
+      save: (f) =>
+        new Promise<void>((resolve) => {
+          releases.push(() => {
+            saved.push(f);
+            resolve();
+          });
+        }),
+    });
+    await service.load();
+    const first = service.setKey('misc', 'Mod+K');
+    const second = service.setKey('other', 'Mod+J');
+    // The second edit waits for the first; the file is written once per edit, in order.
+    await Promise.resolve();
+    expect(releases).toHaveLength(1);
+    releases[0]();
+    await first;
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    releases[1]();
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+    expect(saved.at(-1)).toEqual({ bindings: { misc: { other: 'Mod+K' }, other: { other: 'Mod+J' } } });
+    expect(get(service.state).bindings).toEqual({ misc: { other: 'Mod+K' }, other: { other: 'Mod+J' } });
+    expect(applied.at(-1)).toEqual(get(service.state).bindings);
+  });
+
+  it('a reset after a set sees the set', async () => {
+    const { service, saved } = setup();
+    await service.load();
+    const results = await Promise.all([service.setKey('misc', 'Mod+K'), service.setKey('other', 'Mod+J'), service.reset('misc')]);
+    expect(results).toEqual([true, true, true]);
+    expect(saved.at(-1)).toEqual({ bindings: { other: { other: 'Mod+J' } } });
+  });
+
+  it('a failed save does not stop the edits queued behind it', async () => {
+    let calls = 0;
+    const { service, saved } = setup({}, {
+      save: async (f) => {
+        calls += 1;
+        if (calls === 1) throw new Error('disk full');
+        saved.push(f);
+      },
+    });
+    await service.load();
+    const results = await Promise.all([service.setKey('misc', 'Mod+K'), service.setKey('other', 'Mod+J')]);
+    expect(results).toEqual([false, true]);
+    expect(saved.at(-1)).toEqual({ bindings: { other: { other: 'Mod+J' } } });
+  });
+});
+
+// CODE-6 (P4g review): the first edit of any command deleted every entry the reader had dropped.
+describe('entries the reader dropped', () => {
+  const file = { keybindings: { bindings: { misc: 'Mod+K', typo: 'Mod+Shft+K', half: { mac: 'Mod+Shft+J', other: 'Mod+J' } } } };
+
+  it('stay in the file when another command is edited', async () => {
+    const { service, saved } = setup(file);
+    await service.load();
+    await service.setKey('other', 'Mod+L');
+    expect(saved.at(-1)).toEqual({
+      bindings: { misc: 'Mod+K', half: { mac: 'Mod+Shft+J', other: 'Mod+J' }, other: { other: 'Mod+L' }, typo: 'Mod+Shft+K' },
+    });
+    // The running registry gets only what is valid.
+    expect(get(service.state).bindings).toEqual({ misc: 'Mod+K', half: { other: 'Mod+J' }, other: { other: 'Mod+L' } });
+  });
+
+  it('go for good once the user changes that command', async () => {
+    const { service, saved } = setup(file);
+    await service.load();
+    await service.setKey('half', 'Mod+H');
+    expect((saved.at(-1)?.bindings as Record<string, unknown>).half).toEqual({ other: 'Mod+H' });
+    await service.reset('half');
+    expect(get(service.state).bindings).toEqual({ misc: 'Mod+K' });
+    const bindings = saved.at(-1)?.bindings as Record<string, unknown>;
+    expect(bindings).not.toHaveProperty('half');
+    expect(bindings.typo).toBe('Mod+Shft+K');
+  });
+
+  it('"reset all" removes the keys the user set but keeps an entry nothing of which could be read', async () => {
+    const { service, saved } = setup(file);
+    await service.load();
+    await service.resetAll();
+    // `misc` was bound on both systems: this one's key goes, the other system's stays.
+    expect(saved.at(-1)).toEqual({ bindings: { misc: { mac: 'Mod+K' }, typo: 'Mod+Shft+K' } });
   });
 });
