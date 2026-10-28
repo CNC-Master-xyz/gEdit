@@ -2088,13 +2088,15 @@ fn write_backup(dirs: &AppDirs, replaced: &[&Planned], secs: u64) -> Result<Stri
     };
     crate::atomic::write_atomic(&dir.join(&name), &bytes)
         .map_err(|err| crate::userfiles::why(&err).to_string())?;
-    prune_backups(&dir);
+    prune_backups(&dir, &name);
     Ok(name)
 }
 
-/// Removes all but the last [`MAX_IMPORT_BACKUPS`] backup zips; only plain files of the backup
-/// name pattern are ever removed.
-fn prune_backups(dir: &Path) {
+/// Removes the oldest backup zips so that [`MAX_IMPORT_BACKUPS`] remain, `keep` (the file just
+/// written, the undo of this import) among them whatever its date says: a clock that ran ahead
+/// and was corrected leaves newer-dated backups behind, and those must not cost the new one its
+/// place. Only plain files of the backup name pattern are ever removed.
+fn prune_backups(dir: &Path, keep: &str) {
     let Ok(read) = std::fs::read_dir(dir) else {
         return;
     };
@@ -2102,13 +2104,16 @@ fn prune_backups(dir: &Path) {
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
+            if name == keep {
+                return None;
+            }
             let key = backup_key(&name)?;
             let meta = std::fs::symlink_metadata(entry.path()).ok()?;
             (meta.is_file() && !is_link(&meta)).then(|| (key, entry.path()))
         })
         .collect();
     found.sort();
-    let excess = found.len().saturating_sub(MAX_IMPORT_BACKUPS);
+    let excess = found.len().saturating_sub(MAX_IMPORT_BACKUPS - 1);
     for (_, path) in found.into_iter().take(excess) {
         let _ = std::fs::remove_file(path);
     }
@@ -3803,7 +3808,7 @@ mod tests {
         fs::write(dir.join("before-import-20260101-000000-3.zip"), b"x").unwrap();
         fs::write(dir.join("notes.txt"), b"mine").unwrap();
         fs::write(dir.join("before-import-x.zip"), b"mine").unwrap();
-        prune_backups(&dir);
+        prune_backups(&dir, "before-import-20260109-000008.zip");
         let left = backups(&dirs);
         assert!(left.contains(&"notes.txt".to_string()));
         assert!(left.contains(&"before-import-x.zip".to_string()));
@@ -3820,6 +3825,54 @@ mod tests {
             Some(("20260101-000000".into(), 3))
         );
         assert_eq!(backup_key("before-import-2026-0101.zip"), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Ten backups a clock that ran ahead left behind, dated after any real date.
+    fn future_backups(dirs: &AppDirs) {
+        let dir = dirs.import_backups_dir();
+        fs::create_dir_all(&dir).unwrap();
+        for i in 0..MAX_IMPORT_BACKUPS {
+            fs::write(dir.join(format!("before-import-20300101-0000{i:02}.zip")), b"x").unwrap();
+        }
+    }
+
+    #[test]
+    fn the_backup_just_written_is_never_pruned_even_when_older_ones_are_dated_later() {
+        // Real clock: ten backups dated 2030 sort after today's.
+        let (root, dirs) = scratch("prune-future");
+        put(&dirs, "profiles/a.json", br#"{"id":"a"}"#);
+        future_backups(&dirs);
+        let bytes = config_zip(&[("profiles/a.json", br#"{"id":"a2"}"#)]);
+        let p = previewed(&dirs, &bytes);
+        let result = apply(&dirs, &bytes, &p.fingerprint, &all_groups(&p), true).unwrap();
+        let name = result.backup.unwrap();
+        let left = backups(&dirs);
+        assert!(left.contains(&name), "the undo of this import is gone: {left:?}");
+        assert_eq!(left.len(), MAX_IMPORT_BACKUPS);
+        let _ = fs::remove_dir_all(&root);
+
+        // A clock that went back: the same through the injected clock.
+        let (root, dirs) = scratch("prune-back");
+        put(&dirs, "profiles/a.json", br#"{"id":"a"}"#);
+        future_backups(&dirs);
+        let p = previewed(&dirs, &bytes);
+        let secs = 1_735_689_600; // 2025-01-01
+        let result = apply_with(
+            &dirs,
+            &bytes,
+            &p.fingerprint,
+            &all_groups(&p),
+            true,
+            secs,
+            &mut |path, bytes| crate::atomic::write_atomic(path, bytes),
+        )
+        .unwrap();
+        let name = result.backup.unwrap();
+        assert!(name.starts_with("before-import-20250101-"), "{name}");
+        let left = backups(&dirs);
+        assert!(left.contains(&name), "{left:?}");
+        assert_eq!(left.len(), MAX_IMPORT_BACKUPS);
         let _ = fs::remove_dir_all(&root);
     }
 
