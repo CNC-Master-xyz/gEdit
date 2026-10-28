@@ -14,6 +14,10 @@ first, so the list is the keys; tick **Show commands without a key** to see them
 under the search box says how many are hidden (*N commands without a key are hidden.*), so a
 search that finds nothing is not mistaken for a command that does not exist.
 
+The dialog shows the keys in force, so a key you changed
+([Your own keys](#your-own-keys)) appears there, marked *changed*. The tables below list the
+built-in keys.
+
 **F1** opens the command palette, which finds any command by name — including the many
 that have no shortcut at all.
 
@@ -260,7 +264,7 @@ document:
   "bindings": {
     "file.save": "Mod+Shift+S",
     "view.splitEditor": { "mac": "Mod+Alt+D", "other": "Ctrl+Alt+D" },
-    "edit.somethingElse": null
+    "view.splitEditorDown": null
   }
 }
 ```
