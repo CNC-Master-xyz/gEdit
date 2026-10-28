@@ -25,7 +25,9 @@ you.
 | [Seeing the channels](#seeing-the-channels) | The status bar, the program map, the keys |
 | [Check Wait Codes](#check-wait-codes) | What it finds, and what to do about each finding |
 | [The channel view](#the-channel-view) | One pane for each channel, lined up at the waits |
-| [Split into Channel Documents](#split-into-channel-documents) | One document for each channel, and merging them back |
+| [Split into Channel Documents](#split-into-channel-documents) | One document for each channel, merging them back, and saving them as files |
+| [Searching and comparing one channel](#searching-and-comparing-one-channel) | The Channel choice of Find All and Compare |
+| [The Siemens job list](#the-siemens-job-list) | Which program runs in which channel |
 | [In a script](#in-a-script) | |
 | [Known limits](#known-limits) | |
 
@@ -962,7 +964,70 @@ editing and merge again. If you undo a merge in the program, merge again brings 
 changes back from the documents.
 
 It is not offered for a machine with one file for each channel; they are separate documents
-already.
+already. To write the channel documents as files, see [Save Channel Files](#save-channel-files).
+
+### Save Channel Files
+
+**Save Channel Files…** (NC tab, group **Channels**; offered when the program has been split)
+saves the channel documents as files, one after the other. Each gets its own **Save As**
+dialog, in the folder of the program they came from, with a name already filled in:
+
+`{program}_{channel}{extension}` — the program `PART.MPF` split in two channels `1` and `2`
+proposes `PART_1.MPF` and `PART_2.MPF`; a channel `A` of `PART.MIN` gives `PART_A.MIN`.
+
+- The name is the machine's own file name for the channel when it has one for this
+  channel; otherwise the form above, with the channel's short name in capitals. A character a
+  file name cannot hold (`/ \ : * ? " < > |`) becomes `_`, so a channel name never changes the
+  folder. When the machine has no usable name for a channel, the status bar says that the
+  usual name was proposed.
+- If two channels would be offered the same name, gEdit asks nothing and saves nothing, and
+  says which name: change the file names of the channels in the machine settings.
+- The system's dialog is the only question: it asks before it overwrites a file. You can
+  change the name. **Cancel** in one dialog leaves that channel unsaved and goes on to the
+  next. The status bar ends with *Saved 2 of 3 channel files.*
+- When at least one file is written, it adds: *These channel files are copies for editing.
+  Send the program to the machine in the form it reads; Merge Channels Back makes it one file
+  again.* The files are for working on one channel at a time. A control that wants all
+  channels in one file, or one file for each channel in a form of its own (a Sinumerik
+  archive, say), still gets the program the way you send it today. gEdit does not send
+  anything.
+- gEdit remembers which documents it split from which program until you quit. **After a
+  restart the written files are not tied together again.** Open them as ordinary programs;
+  to bring the changes back into the program, split it again.
+- It says so if the program was closed (*Save each channel document with Save As*), if the
+  channel documents were closed, or if there is no split.
+
+## Searching and comparing one channel
+
+When the program in front of you has channels in one file, two commands can be limited to the
+lines of **one channel**:
+
+- **Find All…** gets a **Channel** choice in its form: *All channels*, then each channel
+  of the machine. The hits are the lines of that channel only, and the line numbers are the
+  program's own. The Results message says *Only the lines of Turret A.* If *Look in* is all
+  open documents, a document without lines of that channel is skipped, and the message counts
+  how many. A document of another channel's file is skipped the same way. **Replace All is
+  not limited** by the Channel choice: it works on the selection or the whole program, as
+  before.
+- **Compare** asks **Compare which lines?** before it opens, for a program that has channel
+  sections: *The whole program*, or one channel. A comparison of one channel cuts **both
+  sides** to the lines of that channel (the other side by its own sections) and says so in
+  the title (`PART.MPF · Turret A`). Line numbers are the files' own.
+
+A comparison limited to a channel shows only part of the program, so:
+
+- **nothing can be copied** from it (*Compare the whole program to copy*);
+- the **Aligned** view is not offered for it;
+- a file you pick from disk has no machine and so no channels: *A file that is not open as a
+  document has no channel rules. Open it first, or compare the whole program.*
+
+For one program for each channel, the choice is the file of that channel; a document that
+is the file of another channel is refused (*… is the file of Path 2, not of Path 1*), and one
+whose channel is not known says to assign it first. Comparing a channel file with its saved
+version works, and the channel stays the document's own.
+
+Both commands refuse in plain words a document with no channel sections, and a channel that
+has no lines in it.
 
 ---
 
@@ -983,6 +1048,13 @@ them. See [Scripts](scripts.md#channels-in-a-script). The bundled
   the reason. Take the code out of the list or use a pattern that does not match the call.
 - **A channel is compared with the channels that are open.** gEdit does not open files for
   you.
+- **The check follows only the jumps and loops listed under [what it
+  follows](#what-the-check-follows).** It does not know which way a condition goes.
+  The [channel view](#the-channel-view) still lines up waits across a loop less far than the
+  check follows it, so a pair can be *not judged* in the view and judged in the check.
+- **Channel files written to disk are not remembered.** The link between the channel
+  documents and their program lasts until you quit (see [Save Channel
+  Files](#save-channel-files)).
 - **Marks are whole numbers from 0 to 99.** A `WAITM` whose mark is a number outside that range is reported as a warning (*Mark out of range*): a negative number such as `-1` and a number with a fraction such as `1.5` too. `1.` is the whole number 1, as the control reads it. A mark written as a
   variable (`_M`) is not judged. `SETM(5,6)` and `CLEARM(5,6)` are read as the marks 5 and 6,
   and a `SETM` with several marks answers a `WAITM` of each of them.
