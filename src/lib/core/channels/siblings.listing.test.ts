@@ -57,10 +57,12 @@ describe('the path-1 file (firstFileName, T055)', () => {
     const preset = profileOf('fanuc-lathe').machineParams?.channels?.presets.find((p) => p.id === 'fanuc-3path-digits-nop12');
     expect(preset?.verify).toBe(true);
     expect(preset?.value.firstFileName).toBe('^(?<stem>[^.]+)$');
-    // No other preset has one (the owner's decision: no default anywhere else).
+    // Only these presets have one (the owner's decisions: nop12, and on 2026-10-28 (P4f NC-7)
+    // the four `.P-n` presets, whose path-1 file the Fanuc manual writes without an extension).
+    const withFirst = ['fanuc-3path-digits-nop12', 'fanuc-2path', 'fanuc-2path-digits', 'fanuc-3path-digits', 'fanuc-3path-bitmask'];
     for (const id of ['fanuc-lathe', 'sinumerik', 'okuma-osp', 'fanuc-gcode', 'sinumerik-mill', 'heidenhain-klartext']) {
       for (const p of profileOf(id).machineParams?.channels?.presets ?? []) {
-        if (p.id !== 'fanuc-3path-digits-nop12') expect(p.value.firstFileName, `${id}/${p.id}`).toBeUndefined();
+        if (!withFirst.includes(p.id)) expect(p.value.firstFileName, `${id}/${p.id}`).toBeUndefined();
       }
     }
   });

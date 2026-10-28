@@ -113,7 +113,8 @@ describe('channelFields', () => {
     expect(field?.label).toBe('File name of the first path');
     expect(field?.help).toContain('^(?<stem>[^.]+)$');
     expect(field?.help).toContain('For a control that writes the program of the first path without an extension. Verify on your machine.');
-    const p = fanuc();
+    // The shipped preset has one since P4f NC-7; start from a block without it.
+    const { firstFileName: _shipped, ...p } = fanuc();
     expect(layoutToValues(p)[CF.firstFileName]).toBe('');
     const set = applyLayoutEdit(p, CF.firstFileName, '^(?<stem>[^.]+)$')!;
     expect(set.firstFileName).toBe('^(?<stem>[^.]+)$');
