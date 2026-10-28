@@ -625,24 +625,11 @@ TURNING_PLANE_CODES = frozenset({"G18"})
 
 def turning_plane_in_force(state: Any) -> bool:
     """Wave Y (D8): whether the plane code in force (the modal ``plane`` group) is the turning
-    plane's (:data:`TURNING_PLANE_CODES`), or no plane code is in force yet (the control
-    starts in G18)."""
+    plane's (:data:`TURNING_PLANE_CODES`), or no plane code is in force (a database or a
+    profile that names none). The Okuma database holds its plane codes modal and the profile
+    starts in G18, as the control does at power-on and after a reset (Wave Y data batch)."""
     code = as_dict(as_dict(as_dict(state).get("groups")).get("plane")).get("code")
     return not isinstance(code, str) or code.strip().upper() in TURNING_PLANE_CODES
-
-
-def plane_codes_held(codes: Sequence[Any]) -> List[Any]:
-    """Wave Y (D8): ``codes`` with every code of the ``plane`` group held in force until another
-    one is written (``modal``), for the tracker of a turning database whose plane codes only
-    choose the compensation plane: the walk reads which one is in force from the modal state
-    (:func:`turning_plane_in_force`). The control keeps it until another plane code, a reset or
-    a program end (G18 again); the database itself is left as it is."""
-    out: List[Any] = []
-    for entry in codes:
-        if isinstance(entry, dict) and entry.get("group") == "plane" and entry.get("modal") is not True:
-            entry = dict(entry, modal=True)
-        out.append(entry)
-    return out
 
 
 #: The parameter units of a value that is no coordinate: a time, a count, a step, an angle.
@@ -1395,7 +1382,7 @@ class PathTracker:
         self.turning_plane = gedit_nc.machine_type_of(self.profile) == "lathe" and not any(
             isinstance(e, dict) and as_dict(e.get("sets")).get("plane") in PLANE_AXES for e in self.codes
         )
-        self.interp = gedit_nc.ModalInterpreter(cp, plane_codes_held(self.codes) if self.turning_plane else self.codes)
+        self.interp = gedit_nc.ModalInterpreter(cp, self.codes)
         self.machine = gedit_nc.machine_params(context)
         self.axes = PathAxes(self.profile)
         #: The context the tracker was made for (``_nc_geom`` shares ``readings`` with a caller of the same context).
