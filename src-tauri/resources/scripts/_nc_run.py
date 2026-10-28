@@ -131,6 +131,23 @@ def scope_of(context: Dict[str, Any]) -> Scope:
     return Scope(first, selection, fragment, preceding)
 
 
+def following_lines(context: Dict[str, Any]) -> Optional[List[str]]:
+    """v1.2.0 (FZ-5, plan section 7 #503): the document lines **below** a selection
+    (``input.followingLines``), or ``None`` when the run did not get them: a whole-document run,
+    a field that is no list of strings, or a selection whose lines below were too many to send
+    (the runner leaves the field out rather than cutting it, as it does ``precedingLines``). An
+    empty list is a selection that ends at the end of the document. A run that has to know what
+    the program does below the selection, and did not get the lines, refuses rather than
+    guesses (``selection-below``)."""
+    scope = as_dict(context.get("input"))
+    if scope.get("scope") != "selection":
+        return None
+    lines = scope.get("followingLines")
+    if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
+        return None
+    return list(lines)
+
+
 class Setup(NamedTuple):
     """What :func:`prepare` hands a script's ``main``: the context, the input lines and their
     text, the profile and its compiled form, the checked form and the code database (``[]``

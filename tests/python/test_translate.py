@@ -131,13 +131,29 @@ def run_document(text: str, profile_id: str, params: Dict[str, Any]) -> helpers.
     return run_script(SCRIPT, stdin=text, context=context)
 
 
-def run_inline(text: str, profile_id: str, params: Dict[str, Any], preceding: Optional[List[str]] = None) -> Dict[str, Any]:
-    """One run of an inline program; ``preceding`` makes it a selection below those lines."""
+def golden_context(case: helpers.GeometryCase) -> Dict[str, Any]:
+    """``helpers.geometry_context`` with the lines below a selection (FZ-5): a golden's selection
+    ends the document, so they are none."""
+    context = helpers.geometry_context(case)
+    scope = context.get("input")
+    if isinstance(scope, dict) and scope.get("scope") == "selection":
+        scope.setdefault("followingLines", [])
+    return context
+
+
+def run_inline(
+    text: str, profile_id: str, params: Dict[str, Any], preceding: Optional[List[str]] = None, following: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """One run of an inline program; ``preceding`` makes it a selection below those lines, which
+    ends the document unless ``following`` gives the lines below it (FZ-5)."""
     context = helpers.effective_context(profile_id, params=params)
     lines = text.split("\n")
     if preceding is not None:
         start = len(preceding) + 1
-        context["input"] = {"scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding}
+        context["input"] = {
+            "scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding,
+            "followingLines": list(following or []),
+        }
     out = run_script(SCRIPT, stdin=text, context=context)
     if not out.ok:
         raise AssertionError(out.stderr)
@@ -150,7 +166,7 @@ class GoldenTest(unittest.TestCase):
         self.assertGreaterEqual(len(cases), 30)
         for case in cases:
             with self.subTest(case=case.name):
-                out = run_script(SCRIPT, stdin=case.input_text(), context=helpers.geometry_context(case))
+                out = run_script(SCRIPT, stdin=case.input_text(), context=golden_context(case))
                 self.assertTrue(out.ok, out.stderr)
                 result = out.json()
                 self.assertEqual(result["text"], case.expected_text())
@@ -187,7 +203,7 @@ class IdentityAndRoundTripTest(unittest.TestCase):
     def test_a_zero_shift_gives_every_golden_back_byte_for_byte(self) -> None:
         for case in helpers.geometry_cases("translate"):
             with self.subTest(case=case.name):
-                context = helpers.geometry_context(case)
+                context = golden_context(case)
                 context["params"] = dict(ZERO)
                 out = run_script(SCRIPT, stdin=case.input_text(), context=context)
                 self.assertTrue(out.ok, out.stderr)
@@ -199,7 +215,7 @@ class IdentityAndRoundTripTest(unittest.TestCase):
             if case.refused:
                 continue
             with self.subTest(case=case.name):
-                context = helpers.geometry_context(case)
+                context = golden_context(case)
                 context["params"] = negated(case.params)
                 out = run_script(SCRIPT, stdin=case.expected_text(), context=context)
                 self.assertTrue(out.ok, out.stderr)

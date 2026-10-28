@@ -112,9 +112,7 @@ GENERATE_OPEN = os.environ.get("GEDIT_FUZZ_OPEN", "") not in ("", "0")
 
 #: The findings of the review that are still open: id -> the generator feature that shows it
 #: (left out of the random run while the finding is open; see the module docstring).
-OPEN_FINDINGS: Dict[str, str] = {
-    "FZ-5": "rotary-mid-program",  # a rotary word below a selection: the whole run refuses, the selection writes
-}
+OPEN_FINDINGS: Dict[str, str] = {}
 
 
 def feature_on(name: str) -> bool:
@@ -183,15 +181,21 @@ class Scripts:
             cls._instance = Scripts()
         return cls._instance
 
-    def run(self, name: str, text: str, context: Dict[str, Any], params: Optional[Dict[str, Any]] = None, preceding: Optional[List[str]] = None) -> Outcome:
+    def run(
+        self, name: str, text: str, context: Dict[str, Any], params: Optional[Dict[str, Any]] = None,
+        preceding: Optional[List[str]] = None, following: Optional[List[str]] = None,
+    ) -> Outcome:
         """``name``'s ``main()`` on ``text`` with ``params``: the whole document, or (with
-        ``preceding``, the lines above it) a selection that starts below those lines."""
+        ``preceding``, the lines above it) a selection that starts below those lines; ``following``
+        are the lines below it (``input.followingLines``, FZ-5), left out when ``None``."""
         run_context = dict(context)
         run_context["params"] = dict(params or {})
         run_context["input"] = {"scope": "document", "startLine": 1, "endLine": len(text.split("\n"))}
         if preceding is not None:
             start = len(preceding) + 1
             run_context["input"] = {"scope": "selection", "startLine": start, "endLine": start + len(text.split("\n")) - 1, "precedingLines": list(preceding)}
+            if following is not None:
+                run_context["input"]["followingLines"] = list(following)
         captured: List[Dict[str, Any]] = []
         nc = self.nc
         saved = (nc.load_context, nc.read_input, nc._write_json)
@@ -2163,7 +2167,7 @@ class Checker:
         end = rng.randint(start, min(len(lines), start + rng.randint(1, 12)))
         part = "\n".join(lines[start - 1:end])
         label = "%s on lines %d to %d %s" % (script, start, end, json.dumps(params, sort_keys=True))
-        out = self.scripts.run(script, part, self.context, params, preceding=lines[: start - 1])
+        out = self.scripts.run(script, part, self.context, params, preceding=lines[: start - 1], following=lines[end:])
         if out.crash:
             self.fail("crash", label, out.crash, params)
             return
@@ -2584,7 +2588,7 @@ class KnownFindingTest(unittest.TestCase):
     the behaviour the plan asks for; an open one fails today, and the batch that fixes FZ-n
     removes its ``expectedFailure`` (and the generator gate in ``OPEN_FINDINGS``, where it has
     one). Fixed in v1.2.0 (NCF-A, NCF-B; flipped at integration, NCF-C): FZ-4, FZ-6, FZ-7, FZ-9;
-    in Wave Y (BL-NC-geometry): FZ-8. Open: FZ-5."""
+    in Wave Y (BL-NC-geometry): FZ-5, FZ-8. None is open."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -2610,17 +2614,25 @@ class KnownFindingTest(unittest.TestCase):
         x = [r for r in report.get("rows", []) if r.get("scope") == "program" and r.get("axisId") == "X"][0]
         self.assertEqual((steps[3].arc, x.get("max")), (None, "20"))
 
-    @unittest.expectedFailure
     def test_fz5_a_selection_refuses_what_the_whole_run_refuses(self) -> None:
         """FZ-5: the whole run refuses the Y moves before the program first turns A (lines 3 and
-        4, ``rotary-turned``); the same lines as a selection are moved, because the rotary word
-        is below the selection."""
+        4, ``rotary-turned``); the same lines as a selection were moved, because the rotary word
+        is below the selection. Fixed in Wave Y (plan section 7 #503): the selection gets the
+        lines below it (``input.followingLines``), and without them refuses such a move."""
         lines = ["G21 G17 G90", "G0 X0. Y0. Z5.", "G1 Y10. F100.", "G1 Y20.", "G0 A10.", "G0 A0.", "M30"]
         context = self.context("fanuc-mill", "no machine")
         whole = self.scripts.run("translate", "\n".join(lines), context, {"dy": 1})
         self.assertEqual(sorted({f["line"] for f in whole.findings if f.get("severity") == "error"}), [2, 3, 4])
-        part = self.scripts.run("translate", "\n".join(lines[2:4]), context, {"dy": 1}, preceding=lines[:2])
+        part = self.scripts.run("translate", "\n".join(lines[2:4]), context, {"dy": 1}, preceding=lines[:2], following=lines[4:])
         self.assertTrue(part.refused, part.text)
+        self.assertEqual([(f["line"], f["reason"]) for f in part.findings if f.get("severity") == "error"], [(3, "rotary-turned"), (4, "rotary-turned")])
+        # Lines below that never turn A: moved, as the whole run moves them.
+        never = lines[:4] + ["G0 Z50.", "M30"]
+        self.assertFalse(self.scripts.run("translate", "\n".join(never), context, {"dy": 1}).refused)
+        self.assertFalse(self.scripts.run("translate", "\n".join(never[2:4]), context, {"dy": 1}, preceding=never[:2], following=never[4:]).refused)
+        # Without the lines below, such a move is refused rather than guessed.
+        blind = self.scripts.run("translate", "\n".join(never[2:4]), context, {"dy": 1}, preceding=never[:2])
+        self.assertEqual({f["reason"] for f in blind.findings if f.get("severity") == "error"}, {"selection-below"})
 
     def test_fz6_klartext_approach_and_departure_turn(self) -> None:
         """FZ-6: plan §5 P4a item 5 allows APPR LT, LN, CT and DEP LT under rotate and mirror (LEN

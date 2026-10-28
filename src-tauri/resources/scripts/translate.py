@@ -132,6 +132,11 @@ unmoved Z of the lines above"). A cycle that runs while the tool axis
 still stands at the level of the lines above is refused (`selection-start`): it moves to its
 holes at that level and, in `G98`, returns to it (`G98`/`G99` are no data, so both).
 
+v1.2.0 (FZ-5, plan section 7 #503): a selection is judged as the whole run judges its blocks,
+so it reads the lines below it too (`input.followingLines`) for the one rule that looks ahead:
+a move made before a rotary axis that turns it is first written, when the program turns that
+axis later (`rotary-turned`). Without those lines such a move is refused (`selection-below`).
+
 Two refusals concern the whole run rather than a block, with reasons of their own: a run
 with no code database (`no-database`: a move cannot be told from a machine position or a
 frame) and a selection whose lines above were not sent (`selection-unprimed`: the distance
@@ -200,11 +205,19 @@ REASON_TEXT = {
     "pole-unknown": ("move around a pole that is not known", "moves around a pole that is not known"),
     "resolution": ("block with a word that cannot hold the shift", "blocks with a word that cannot hold the shift"),
     "selection-start": ("first move of the selection that would miss the moved path", "first moves of the selection that would miss the moved path"),
+    "selection-below": ("move that waits on a rotary axis the lines below may turn", "moves that wait on a rotary axis the lines below may turn"),
 }
 
 #: The refusals of the run itself, beside ``_nc_geom.REASONS``: id -> the plain text after
 #: "<as written>: " (v1.2.0, NCR-3; the same id as rotate's and mirror's).
 RUN_REASONS = {
+    # v1.2.0 (FZ-5, plan section 7 #503).
+    "selection-below": (
+        "this move waits on a rotary axis the program has not written above it, and the lines "
+        "below the selection were not available, so whether the program turns that axis later "
+        "(which would make this move unsafe to shift) is not known. Run Translate on the whole "
+        "program"
+    ),
     "selection-start": (
         "the selection starts where the lines above it leave the tool, and that point is not "
         "moved with the selection. An arc, an incremental move, a turning or facing pass (which "
@@ -393,7 +406,7 @@ class Run:
 
     # -- the walk ---------------------------------------------------------------
 
-    def walk(self, preceding: Sequence[str], lines: Sequence[str], base_line: int) -> None:
+    def walk(self, preceding: Sequence[str], lines: Sequence[str], base_line: int, following: Optional[Sequence[str]] = None) -> None:
         tracker = self.tracker
         cp = self.cp
         state = None
@@ -459,7 +472,28 @@ class Run:
             # CODE-3: every selection, from line 1 too (a cycle started in it can still be in
             # force below it).
             self.selection_end(last_line, selection_continued)
+            # FZ-5 (plan section 7 #503): what the program does below the selection decides,
+            # as it does for the whole run, whether a rotary axis the selection's moves wait on
+            # is ever turned (`settle_rotary`).
+            self.walk_below(state, following, base_line + len(lines))
         self.settle_rotary()
+
+    def walk_below(self, state: Any, following: Optional[Sequence[str]], first: int) -> None:
+        """v1.2.0 (FZ-5): the lines below a selection, read for the rotary axes only (where the
+        program turns one the selection's moves wait on). Without them, a move that waits on such
+        an axis is refused (``selection-below``): the whole run might refuse it."""
+        if not self.pending_rotary:
+            return
+        if following is None:
+            for line, axes in self.pending_rotary:
+                if not any(r.reason in ("rotary-turned", "selection-below") for r in line.refusals):
+                    line.refusals.append(_nc_geom.Refusal(line.number, "selection-below", _quote(line.text), ", ".join(sorted(axes))))
+            self.pending_rotary = []
+            return
+        tracker = self.tracker
+        for offset, text in enumerate(following):
+            state, step = tracker.line(text, first + offset, state, False)
+            self.note_rotary(step, record=False)
 
     def note_last_words(self, step: _nc_path.Step) -> None:
         """The last absolute word on each axis above the selection, for the form of a word the
@@ -1203,7 +1237,7 @@ def main() -> int:
         return 0
 
     run.is_selection = selection
-    run.walk(preceding, lines, base_line)
+    run.walk(preceding, lines, base_line, _nc_run.following_lines(context))
     findings = Findings()
     refused, info, blocks_refused = collect(run, findings)
     out = lines if blocks_refused else apply_edits(lines, run)
