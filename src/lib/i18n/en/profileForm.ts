@@ -29,6 +29,7 @@ export default {
   yes: 'Yes',
   no: 'No',
   listHint: 'One entry per line',
+  rulerAtLongest: 'Ruler at the longest block ({count})',
   weightsHint: 'One per line, for example nc = 1',
   badLine: 'Line {line} cannot be read.',
   addRow: 'Add a row',
@@ -66,10 +67,12 @@ export default {
   failed: 'The profile form failed: {detail}',
   problem: {
     noParent: 'The profile {parent} that this one extends is not loaded.',
+    ownField: 'A profile built on another one needs its own name.',
   },
   leave: {
     title: 'Discard changes?',
     message: 'The changes to {name} are not saved. Leave without saving them?',
+    withSettings: 'The changes you made in Settings and the changes to {name} are not saved. Leave without saving them?',
     ok: 'Discard',
   },
 } satisfies Messages;

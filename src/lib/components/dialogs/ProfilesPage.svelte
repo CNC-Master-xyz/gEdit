@@ -26,7 +26,9 @@
       hosts the same form inline. The form's code is loaded when the button is first pressed.
 -->
 <script module lang="ts">
+  import { get } from 'svelte/store';
   import { displayName, nameProblem, parentChoices, stemOf } from '$lib/contrib/userConfig';
+  import type { ProfileFormModel } from '$lib/app/profileForm';
   import { validateFields } from '$lib/core/forms/validate';
   import type { FieldChoice, FieldSpec } from '$lib/core/forms/types';
   import type { ProfileProblem } from '$lib/core/profiles/types';
@@ -53,6 +55,25 @@
     t: Translate;
     /** Whether the file is in its folder now; `createFile` keeps the form when it is not. Unset: believe `run`. */
     exists?(kind: UserFileKind, name: string): boolean;
+  }
+
+  /**
+   * What the dialog around the page asks it: is the inline profile form holding changes that
+   * are not saved (the machines page has the same hook). `draftName` is the file's name while
+   * there are, else null.
+   */
+  export interface ProfilesModel {
+    hasDraft: () => boolean;
+    draftName: () => string | null;
+  }
+
+  /** The name of the file whose form has unsaved changes, or null (no form, nothing changed, or a built-in shown read-only). */
+  export function unsavedProfile(
+    editing: { model: Pick<ProfileFormModel, 'state'>; name: string } | null,
+  ): string | null {
+    if (editing === null) return null;
+    const s = get(editing.model.state);
+    return s.open && s.dirty && !s.readOnly ? (s.fileName ?? editing.name) : null;
   }
 
   /** The most problems, and the most notes, one row lists. */
@@ -304,10 +325,9 @@
 </script>
 
 <script lang="ts">
+  import { untrack } from 'svelte';
   import FormRenderer from '$lib/components/forms/FormRenderer.svelte';
   import ProfileForm from '$lib/components/dialogs/ProfileForm.svelte';
-  import type { ProfileFormModel } from '$lib/app/profileForm';
-  import { get } from 'svelte/store';
   import { commands } from '$lib/app/registry/commands';
   import { dialogs } from '$lib/app/dialogs';
   import { status } from '$lib/app/status';
@@ -315,6 +335,13 @@
   import { userFileDelete } from '$lib/platform/commands';
   import { profiles } from '$lib/stores/profiles';
   import { t } from '$lib/i18n';
+
+  interface Props {
+    /** The dialog around the page asks it whether the profile form has unsaved changes. */
+    model?: ProfilesModel;
+  }
+
+  let { model }: Props = $props();
 
   const deps: ProfilesDeps = {
     run: (id, arg) => commands.run(id, arg),
@@ -349,6 +376,22 @@
   let busy = $state(false);
   /** The profile form (P4.40) shown in place of the list, for one of your files; it is a modal's job elsewhere, but the Settings dialog is the open modal. */
   let editing = $state<{ model: ProfileFormModel; name: string } | null>(null);
+
+  // The dialog around the page asks whether the form holds unsaved changes (CODE-1): closing
+  // it, saving the settings or changing the tab would drop them. A clean form is not asked about.
+  untrack(() => {
+    if (model !== undefined) {
+      model.hasDraft = () => unsavedProfile(editing) !== null;
+      model.draftName = () => unsavedProfile(editing);
+    }
+  });
+  // The page is unmounted with the tab; what the form held is gone then, so it is not asked about.
+  $effect(() => () => {
+    if (model !== undefined) {
+      model.hasDraft = () => false;
+      model.draftName = () => null;
+    }
+  });
 
   /** Opens the form on one of your files. The form's code is loaded when it is first wanted. */
   async function editInForm(row: ProfileRow): Promise<void> {
