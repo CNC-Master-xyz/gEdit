@@ -1,0 +1,45 @@
+# P4h: "Profiles and machines" - the profile form, the code colours, a profile's own tab width and rulers, the machine form's table Numbers and the Siemens
+# extra axes and builder codes (plan docs/planning/phase-4-implementation.md section 5 P4h and section 6.10, H4h; P4.39 to P4.43).
+# Run with: tests/runtime/suites/m0.txt tests/runtime/suites/m1.txt tests/runtime/suites/m2.txt tests/runtime/suites/m3.txt tests/runtime/suites/m4.txt tests/runtime/suites/m5.txt tests/runtime/suites/m6.txt tests/runtime/suites/m7.txt tests/runtime/suites/m8.txt tests/runtime/suites/m9.txt tests/runtime/suites/m10.txt tests/runtime/suites/m11.txt tests/runtime/suites/m12.txt tests/runtime/suites/rp.txt tests/runtime/suites/m13.txt tests/runtime/suites/p3a.txt tests/runtime/suites/p3b.txt tests/runtime/suites/b1.txt tests/runtime/suites/p4a.txt tests/runtime/suites/p4b.txt tests/runtime/suites/p4c.txt tests/runtime/suites/p4d.txt tests/runtime/suites/p4e.txt tests/runtime/suites/p4h.txt
+# On a runner, by hand: gh workflow run harness.yml --ref <branch> -f scenarios="p4h"
+#
+# The helpers the scenarios share are in scenarios/p4-profiles-common.js. The profile files, the programs and the colours are written by the scenarios
+# at run time; the only fixture read is the golden of Translate (tests/fixtures/scripts/translate/extra-axis-sinumerik-mill) and the two schemas'
+# `$id` (schemas/*.schema.json, through the repository path the harness hands over). Every expected text is ctx.t(...) of the key. Nothing here has run
+# on a runner yet.
+#
+# What cannot be run: the drag of the colour picker is a series of `input` events on the control (a native colour panel cannot be driven), and Translate's
+# information row for a linear extra axis (the last check of p4-machines-axes) needs the golden of the fix round A (p4h/fixA): on a branch without it the
+# golden has no finding and that check, and only that one, fails.
+
+# P4.40: Edit Profile in Form from the command (a dialog on the profile of the open program, or on a file by name) with the live preview, a colour for the
+# profile, the refusal of a name left empty on a profile built on another, "Ruler at the longest block", a save that keeps the file's layout, and the
+# built-in profile read-only.
+p4-profiles-form
+
+# P4.40: the same form inline on Settings > Profiles ("Edit in form" on your own files only, no second dialog, "Use the parent's value", Save), and the
+# $schema line in the first member of a new profile file.
+p4-profiles-form-page
+
+# P4.40 (fix round CODE-1): Settings asks before the changes in the profile form are lost - Save, a tab click, Cancel and Esc - and not for a clean form.
+p4-profiles-leave
+
+# P4.41: the role colour editor of Settings > Appearance: set, refused when too faint (4.5 to 1), shown in the open editor, reset; the same colour again
+# asks nothing on Cancel (also when the roles were edited in another order); print and export use the user's colour and a profile's own wins.
+p4-profiles-colours
+
+# P4.41 (fix round CODE-4): dragging the colour picker with a program of 100,000 lines open keeps the page responsive.
+p4-profiles-colours-drag
+
+# P4.42: a profile's own tab width and rulers, in one editor and in two panes of the split view that show documents of different profiles; a settings change
+# and a profile change are applied again.
+p4-profiles-editing
+
+# P4.43a: the machine form's table Numbers: presets, five rows, the inch step emptied by a new metric step of a feed row and required before Save, "Custom",
+# every built-in preset (the Okuma 10 micron one among them) saved without a question, 0.0010 typed stays, the $schema line of the first machines file,
+# and the hover of P1500 in the second block of G76 on a lathe with IS-B.
+p4-machines-numbers
+
+# P4.43b: the Siemens extra axes and machine builder codes: the refusals at their fields (a keyword, a non-name, a known code), the hover of AA=90, AA90
+# and G810 with the machine chosen, and Translate's information row for a linear extra axis.
+p4-machines-axes
