@@ -76,6 +76,25 @@ def run_text(
     return out.json()
 
 
+def run_selection(
+    script: str, profile_id: str, params: Dict[str, Any], program: Sequence[str], start: int, end: int,
+    below: bool = True,
+) -> Dict[str, Any]:
+    """One run of ``script`` on lines ``start`` to ``end`` (1-based) of ``program`` as a
+    selection, with the lines above it and (``below``) the lines below it
+    (``input.followingLines``, which the app leaves out when there are too many)."""
+    context = helpers.effective_context(profile_id)
+    context["params"] = dict(params)
+    lines = list(program)
+    context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+    if below:
+        context["input"]["followingLines"] = lines[end:]
+    out = helpers.run_script(script, stdin="\n".join(lines[start - 1 : end]), context=context)
+    if not out.ok:
+        raise AssertionError(out.stderr)
+    return out.json()
+
+
 def errors_of(result: Dict[str, Any]) -> List[Tuple[int, str]]:
     return [(f["line"], f["reason"]) for f in result.get("findings", []) if f.get("severity") == "error"]
 
@@ -487,6 +506,51 @@ class SelectionTest(unittest.TestCase):
     def test_a_whole_turn_refuses_nothing(self) -> None:
         result = run_text(SCRIPT, "fanuc-gcode", {"angle": 360}, "G91 G1 X5. F100.", FANUC_TOP)
         self.assertFalse(refused(result), result["findings"])
+
+
+class SkepticGeometryTest(unittest.TestCase):
+    """Wave Y skeptic of BL-NC-geometry, D1: a tangential arc (CT) or a Klartext departure (DEP)
+    continues the direction of the move before it. As the first move of a selection, or right
+    after the join from the unmoved point above it, that direction is not the turned one, even
+    from a point the rotation does not move. Each test fails without the fix, except the guards."""
+
+    #: A Sinumerik CT after a line (the skeptic's t016c).
+    TANGENT = [
+        "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "N10 G17 G90 G71", "N20 G0 X10 Y0 Z5", "N30 G1 Z-2 F200", "N40 G1 X20 Y10",
+        "N50 CT X30 Y20", "N60 G1 X40 Y20", "N70 G0 Z50", "N80 M30",
+    ]
+    #: A Klartext polar approach and a departure on a tangential arc (the skeptic's t018y).
+    DEPART = [
+        "0 BEGIN PGM T MM", "1 TOOL CALL 1 Z S3000", "2 CC X+0 Y+0", "3 L X+40 Y+0 R0 FMAX", "4 L Z-2 R0 F200",
+        "5 APPR PLCT PR+20 PA+0 R5 RL F200", "6 CP IPA+90 DR+", "7 DEP LCT X+0 Y+40 R5 F800",
+        "8 L Z+50 R0 FMAX", "9 END PGM T MM",
+    ]
+
+    def test_d1_a_tangential_arc_from_the_centre_as_the_first_move(self) -> None:
+        # The tool stands on the centre X20 Y10, which does not move; the arc would still
+        # start along the old direction of N40.
+        result = run_selection(SCRIPT, "sinumerik-mill", {"angle": 90, "cx": 20, "cy": 10}, self.TANGENT, 6, 9)
+        self.assertEqual(errors_of(result), [(6, "selection-start")])
+        self.assertEqual(result["text"], "\n".join(self.TANGENT[5:9]))
+
+    def test_d1_a_tangential_arc_after_the_join(self) -> None:
+        # N40 joins the unmoved X10 Y0 to the turned path: N50 would follow the join.
+        result = run_selection(SCRIPT, "sinumerik-mill", {"angle": 90, "cx": 20, "cy": 10}, self.TANGENT, 5, 9)
+        self.assertEqual(errors_of(result), [(5, "selection-start")])
+
+    def test_d1_a_departure_as_the_first_move(self) -> None:
+        result = run_selection(SCRIPT, "heidenhain-klartext", {"angle": 90, "cx": 0, "cy": 20}, self.DEPART, 8, 10)
+        self.assertEqual(errors_of(result), [(8, "selection-start")])
+
+    def test_d1_guards_a_join_from_the_centre_and_the_whole_program(self) -> None:
+        # The join starts on the centre X10 Y0: it is the turned line, and the arc follows it.
+        result = run_selection(SCRIPT, "sinumerik-mill", {"angle": 90, "cx": 10, "cy": 0}, self.TANGENT, 5, 9)
+        self.assertFalse(refused(result), result["findings"])
+        self.assertEqual(result["text"].split("\n")[:2], ["N40 G1 X0 Y10", "N50 CT X-10 Y20"])
+        for program, profile in ((self.TANGENT, "sinumerik-mill"), (self.DEPART, "heidenhain-klartext")):
+            result = run_text(SCRIPT, profile, {"angle": 90, "cx": 20, "cy": 10}, "\n".join(program))
+            self.assertFalse(refused(result), result["findings"])
 
 
 class OwnerPublicTest(unittest.TestCase):

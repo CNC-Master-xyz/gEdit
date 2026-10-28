@@ -262,6 +262,14 @@ PLANE = ("X", "Y")
 CENTRE_WORD = {axis: word for word, axis in _nc_path.CENTRE_AXIS.items()}
 #: The most findings a run hands back; the message counts the rest (the app takes 1000).
 PLANE_MAX_FINDINGS = 1000
+#: Wave Y skeptic D1: the tangential arcs (Klartext ``CT``, ``CTP``, Sinumerik ``CT``), which
+#: start in the direction the move before them ends in; ``CIP`` passes a point it writes.
+TANGENT_ARCS = tuple(code for code in _nc_path.UNRESOLVED_ARCS if code != "CIP")
+#: Wave Y skeptic D1: the first word of the Klartext approach and departure codes (``APPR LT``,
+#: ``DEP PLCT``). A departure leaves in the direction the contour above it ends in; an approach
+#: meets the contour element after it (Klartext 2019, approaching and departing the contour).
+APPROACH = "APPR"
+DEPARTURE = "DEP"
 
 #: What the message calls a refused block, by reason: (one, several).
 REASON_LABEL = {
@@ -437,17 +445,29 @@ class PlaneRun:
         #: Wave Y (T015): the first blocks of two-block roughing cycles still waiting for their
         #: second block: (the block, its refusal if none comes, the codes it writes).
         self.first_blocks: List[Tuple["Block", Any, List[Any]]] = []
+        #: Wave Y skeptic D1: a Klartext approach (``APPR``) of a selection still waiting for the
+        #: contour element it meets; one the selection does not hold refuses at its end.
+        self.approach: Optional[Block] = None
+        #: Wave Y skeptic D1: the first move of a selection that joins the unmoved point the lines
+        #: above leave the tool at to the moved path (its direction is not the moved direction),
+        #: and its block as written, until the next move in the plane.
+        self.join: Optional[Tuple[Block, str]] = None
 
     # -- the walk ---------------------------------------------------------------
 
     def walk(self, preceding: Sequence[str], lines: Sequence[str], first: int) -> None:
         tracker = self.tracker
         state: Any = None
+        named_outside = None
         if self.lathe_z:
             # Wave Y (T015): the block numbers the scope and the lines above carry, so a roughing
-            # or finishing cycle can be told whether its contour lies in the scope.
-            scope, above = block_numbers(self.cp, preceding, lines, first)
-            _nc_geom.set_block_numbers(tracker, scope, above)
+            # or finishing cycle can be told whether its contour lies in the scope. Wave Y skeptic
+            # D2: and the lines below, and the contours the cycles above and below name; a
+            # selection whose lines below were not sent knows no contour in its scope.
+            following: Optional[List[str]] = following_lines(self.context) if self.selection else []
+            numbers = block_numbers(self.cp, preceding, lines, first, following or [], _nc_geom._data(tracker).ranges)
+            _nc_geom.set_block_numbers(tracker, numbers.scope if following is not None else {}, numbers.outside)
+            named_outside = numbers
         for number, text in enumerate(preceding, first - len(preceding)):
             state, step = tracker.line(text, number, state, False)
             _nc_geom.observe(step, tracker)
@@ -460,8 +480,27 @@ class PlaneRun:
             block = self.judge(step, index, text)
             self.blocks.append(block)
         self.end_first_blocks()
+        if named_outside is not None and named_outside.named:
+            self.end_contours(named_outside)
         if self.selection and self.blocks:
             self.end_selection(state)
+
+    def end_contours(self, numbers: Numbers) -> None:
+        """Wave Y skeptic D2: a contour that a cycle above or below the scope names, from a line
+        that carries its first number to the next line that carries its last (to the end of the
+        lines read when none does), refuses the first block of the scope inside it: that cycle,
+        which the run does not mirror, would cut the mirrored contour (``roughing-cycle``)."""
+        where: Dict[str, List[int]] = {}
+        for line, number in numbers.carried:
+            where.setdefault(number, []).append(line)
+        for start, end in set(numbers.named):
+            for line in where.get(start, []):
+                last = next((other for other in where.get(end, []) if other >= line), None)
+                # The blocks stand in line order from `self.first` on, one per line.
+                index = max(line - self.first, 0)
+                if index < len(self.blocks) and (last is None or self.blocks[index].line <= last):
+                    block = self.blocks[index]
+                    block.refuse("roughing-cycle", quote(block.text))
 
     def prime_selection(self, state: Any, first: int) -> None:
         """What the lines above a selection leave in force that the selection cannot judge:
@@ -511,7 +550,8 @@ class PlaneRun:
     def end_selection(self, state: Any) -> None:
         """A selection that ends inside a block or while a cycle it started is still in force.
         v1.2.0 (NCR-3): or while the single passes are in force and the run changed the
-        selection: a pass below it would run from a moved start point or to a moved end point."""
+        selection: a pass below it would run from a moved start point or to a moved end point.
+        Wave Y skeptic D1: or after an approach (``APPR``) whose contour element is below it."""
         last = self.blocks[-1]
         if state is not None and state.continuation:
             last.refuse("selection-inside", quote(last.text), "a block that runs on below the selection")
@@ -525,6 +565,9 @@ class PlaneRun:
         if active and isinstance(line, int) and line >= self.first:
             target = next((b for b in self.blocks if b.line == line), last)
             target.refuse("selection-inside", quote(target.text), "%s (line %d)" % (active.get("code"), line))
+        if self.approach is not None and not self.identity:
+            # Wave Y skeptic D1: its contour element lies below the selection and is not moved.
+            self.approach.refuse("selection-inside", quote(self.approach.text), "an approach to a contour below the selection")
 
     # -- one block ----------------------------------------------------------------
 
@@ -547,6 +590,8 @@ class PlaneRun:
         passes = self.selection and self.lathe_z and not self.identity and self.check_passes(step, roles, block, written)
         if self.outside and not self.identity and not passes:
             moving = self.check_outside(step, roles, block, written)
+        elif self.join is not None and not self.identity:
+            self.check_join(step, roles)
         if not block.refusals and not self.identity:
             # A rotation by whole turns changes no word (a polar angle would otherwise come
             # back as the same angle written another way, PA+30 as PA-330).
@@ -567,7 +612,18 @@ class PlaneRun:
             plane = ("Z", "X") if self.lathe_z else PLANE
             rotary = _nc_geom._data(self.tracker).rotary
             block.helix = any(axis not in plane and axis not in rotary for axis, _ in step.moves)
+        if self.selection:
+            self.note_approach(step, roles, block)
         return block
+
+    def note_approach(self, step: Any, roles: Sequence[Any], block: Block) -> None:
+        """Wave Y skeptic D1: an approach (``APPR``) meets the contour element after it, tangent
+        or at a right angle to it: the next block that moves in the plane settles it."""
+        if any(str(e.get("code")).split(" ")[0] == APPROACH for e, _, _ in step.entries):
+            self.approach = block
+            return
+        if self.approach is not None and self.plane_move(step, roles):
+            self.approach = None
 
     def settle_second(self, step: Any, refusals: Sequence[Any]) -> None:
         """Wave Y (T015): a block judged after the first block of a two-block roughing cycle. Its
@@ -639,19 +695,29 @@ class PlaneRun:
         start from there when that point moves: an arc, an incremental move (on a mill; on a
         lathe one along an axis the mirror moves) or a polar move with an incremental part, and
         on a lathe a move that does not write every axis the mirror moves. A move to an absolute
-        point is a join and is written whole (``vector``). Returns whether the block moves the
-        tool, which ends this state."""
+        point is a join and is written whole (``vector``). Wave Y skeptic D1: a tangential arc
+        (:data:`TANGENT_ARCS`) or a departure (``DEP``) refuses even from a point that does not
+        move: it continues the direction of the move above, which the run leaves as it is.
+        Returns whether the block moves the tool, which ends this state."""
         axes = ("X", "Y", "Z") if self.lathe_z else PLANE
         arc = step.arc is not None or any(isinstance(e, _nc_path.Unknown) and e.kind == "arc" for e in step.events)
         polar = [r for r in roles if r.role in ("polar-radius", "polar-radius-inc", "polar-angle", "polar-angle-inc")]
         moving = arc or step.polar is not None or bool(polar) or any(
             r.role in ("point", "point-inc", "cycle-position") and r.axis in axes for r in roles
         )
+        # Wave Y skeptic D1: a tangential arc or a departure takes its direction from the move
+        # above the selection, which the run does not turn or mirror; even from a point that
+        # does not move it would leave in the old direction.
+        if self.continues(step, moving):
+            block.refuse("selection-start", written, "a move that continues the direction of the move above the selection")
+            return True
         units = self.units_of(step)
         start = {axis: self.start(step, axis, units) for axis in axes}
         known = {axis: value for axis, value in start.items() if value is not None}
         if not self.lathe_z and len(known) != len(PLANE):
             # Where the tool stands is not known: the other rules decide (`position-unknown`).
+            if moving:
+                self.join = (block, written)
             return moving
         if self.lathe_z:
             # v1.2.0 (NCR-3): a start not known on an axis the program wrote refuses too.
@@ -673,7 +739,40 @@ class PlaneRun:
             absolute = {r.axis for r in roles if r.role in ("point", "cycle-position")}
             if any(axis not in absolute for axis in moved):
                 block.refuse("selection-start", written, "a move without %s" % "".join(sorted(moved - absolute)))
+        if moving:
+            self.join = (block, written)
         return moving
+
+    def continues(self, step: Any, moving: bool) -> bool:
+        """Wave Y skeptic D1: the block starts in the direction the move before it ends in: a
+        tangential arc (:data:`TANGENT_ARCS`, written or in force) that moves, or a departure
+        (``DEP``)."""
+        motion = as_dict(as_dict(self.tracker.interp.state.get("groups")).get("motion")).get("code")
+        if moving and motion in TANGENT_ARCS:
+            return True
+        return any(str(e.get("code")).split(" ")[0] == DEPARTURE for e, _, _ in step.entries)
+
+    def plane_move(self, step: Any, roles: Sequence[Any]) -> bool:
+        """The block moves the tool in the plane of the run (an arc, a polar move, a point)."""
+        plane = ("Z", "X") if self.lathe_z else PLANE
+        return (
+            step.arc is not None
+            or any(isinstance(e, _nc_path.Unknown) and e.kind == "arc" for e in step.events)
+            or step.polar is not None
+            or any(r.role.startswith("polar-") or (r.role in ("point", "point-inc", "cycle-position") and r.axis in plane) for r in roles)
+        )
+
+    def check_join(self, step: Any, roles: Sequence[Any]) -> None:
+        """Wave Y skeptic D1: the move after the join (:attr:`join`). A tangential arc or a
+        departure would continue the join's direction, not the moved one: the join refuses
+        (``selection-start``). Any other move in the plane ends the check."""
+        moving = self.plane_move(step, roles)
+        if self.continues(step, moving):
+            block, written = self.join  # type: ignore[misc]
+            block.refuse("selection-start", written, "a move that the next block continues in its direction")
+            self.join = None
+        elif moving:
+            self.join = None
 
     def note_computed(self, step: Any) -> None:
         """Which axes stand at a position the tracker computed after this block."""
@@ -1073,13 +1172,42 @@ class PlaneRun:
         return out
 
 
-def block_numbers(cp: Any, preceding: Sequence[str], lines: Sequence[str], first: int) -> Tuple[Dict[str, List[int]], List[str]]:
-    """Wave Y (T015): the block numbers of the scope (number -> the lines that carry it) and
-    those of the lines above it, read from the tokens (``blockNumber``)."""
+class Numbers(NamedTuple):
+    """Wave Y (T015, skeptic D2): the block numbers :func:`block_numbers` reads."""
+
+    #: Number -> the lines of the scope that carry it.
+    scope: Dict[str, List[int]]
+    #: The numbers no contour of the scope may use: those the lines above and below the scope
+    #: carry, and the first and last numbers of each contour a cycle there names.
+    outside: List[str]
+    #: The contours the cycles above and below the scope name: (first number, last number).
+    named: List[Tuple[str, str]]
+    #: Every line read that carries a number: (its line, the number), in line order.
+    carried: List[Tuple[int, str]]
+
+
+def block_numbers(
+    cp: Any,
+    preceding: Sequence[str],
+    lines: Sequence[str],
+    first: int,
+    following: Sequence[str] = (),
+    ranges: Sequence[Tuple[Any, List[str]]] = (),
+) -> Numbers:
+    """Wave Y (T015): the block numbers of the scope and those of the lines above it, read from
+    the tokens (``blockNumber``). Wave Y skeptic D2: and those of the lines below it
+    (``following``), and the contours a cycle above or below the scope names (``ranges``: the
+    profile's ``numbering.references`` rules that name two addresses, ``G70``-``G73`` ``P``/``Q``,
+    as ``_nc_geom`` reads them), so a cycle of the scope whose contour another cycle uses too, or a
+    contour of the scope a cycle outside it uses, is not mirrored on its own."""
     scope: Dict[str, List[int]] = {}
-    above: List[str] = []
+    outside: List[str] = []
+    named: List[Tuple[str, str]] = []
+    carried: List[Tuple[int, str]] = []
     state: Any = None
-    for index, text in enumerate(list(preceding) + list(lines)):
+    inside = range(len(preceding), len(preceding) + len(lines))
+    for index, text in enumerate(list(preceding) + list(lines) + list(following)):
+        line = first + index - len(preceding)
         tokens, state = gedit_nc.tokenize_line(text, cp, state)
         for token in tokens:
             if token.kind != "blockNumber":
@@ -1087,11 +1215,35 @@ def block_numbers(cp: Any, preceding: Sequence[str], lines: Sequence[str], first
             number = _nc_geom.number_of(token.value_text if token.value_text is not None else token.text)
             if number is None:
                 continue
-            if index < len(preceding):
-                above.append(number)
+            carried.append((line, number))
+            if index in inside:
+                scope.setdefault(number, []).append(line)
             else:
-                scope.setdefault(number, []).append(first + index - len(preceding))
-    return scope, above
+                outside.append(number)
+        if index in inside or not ranges:
+            continue
+        contour = contour_named(gedit_nc.mask_comments(text, cp), tokens, ranges)
+        if contour is not None:
+            named.append(contour)
+            outside.extend(contour)
+    return Numbers(scope, outside, named, carried)
+
+
+def contour_named(masked: str, tokens: Sequence[Any], ranges: Sequence[Tuple[Any, List[str]]]) -> Optional[Tuple[str, str]]:
+    """Wave Y skeptic D2: the first and last block number of the contour a line outside the scope
+    names (as ``_nc_geom._contour_range`` reads a block of the scope), or ``None``."""
+    words: Dict[str, Any] = {}
+    for token in tokens:
+        if token.kind == "word" and token.address and token.index is None:
+            words[token.address.upper()] = token
+    for regex, (start, end) in ranges:
+        if regex.search(masked) is None:
+            continue
+        a = _nc_geom.number_of(getattr(words.get(start), "value_text", None))
+        b = _nc_geom.number_of(getattr(words.get(end), "value_text", None))
+        if a is not None and b is not None:
+            return a, b
+    return None
 
 
 #: Below this a computed value counts as the value itself (the double precision of a turn).
