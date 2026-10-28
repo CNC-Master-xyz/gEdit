@@ -125,6 +125,7 @@ export function compileProfile(p: Profile): CompiledProfile {
         // P4d review NC-1 and NC-2: the local call and the interrupt.
         localAddress: typeof rule?.localAddress === 'string' && rule.localAddress !== '' ? rule.localAddress : null,
         interrupt: rule?.interrupt === true,
+        external: rule?.external === true,
       })),
       commentFilter: compileOptional(p.toolList?.commentFilter, 'toolList.commentFilter', flags),
     },

@@ -165,6 +165,17 @@ describe('the profile members of P4d (§6.6)', () => {
         numberingOf(p).calls = [{ trigger: 'M98', address: 'P', localAddress: 'Q Q', interrupt: 'yes' }];
       }),
     ).toEqual(['numbering.calls[0].localAddress', 'numbering.calls[0].interrupt']);
+    // Wave Y G5: the flag of a call on an external device is a yes or no too.
+    expect(
+      pathsOf((p) => {
+        numberingOf(p).calls = [{ trigger: 'M198', address: 'P', external: 'yes' }];
+      }),
+    ).toEqual(['numbering.calls[0].external']);
+    expect(
+      pathsOf((p) => {
+        numberingOf(p).calls = [{ trigger: 'M198', address: 'P', external: true }];
+      }),
+    ).toEqual([]);
   });
 
   it('compile the local word and the interrupt of the shipped M98 and M96 rules (P4d review NC-1, NC-2)', () => {
@@ -393,6 +404,33 @@ describe('the program a line calls (§6.6 rule 9)', () => {
     expect([...index.interrupted]).toEqual([[2000, [0]]]);
     expect(index.unknownInterrupts).toEqual([0]);
     expect(index.unknownCallers).toEqual([]);
+  });
+
+  // Wave Y geometry fix G5 (skeptic D7): M198 runs a program from an external device, not the
+  // program of the file that happens to have the same number.
+  it('reads M198 as an external call, which still counts as a caller for the returns (owner 2026-10-20)', () => {
+    for (const id of ['fanuc-gcode', 'fanuc-lathe']) {
+      const c = builtin(id);
+      expect(callOf(c, 'M198 P2000'), id).toEqual({ key: 2000, text: 'P2000', external: true });
+      expect(callOf(c, 'M98 P2000')?.external, id).toBeUndefined();
+      const lines = ['O0001', 'N10 M198 P2000', 'N20 M98 P3000', 'N30 M198 P#1', 'N40 M30', 'O2000', 'N50 M99', 'O3000', 'N50 M99'];
+      const index = indexPrograms(scanProgram(lines, context(c, lines)), c);
+      expect([...index.callers], id).toEqual([
+        [2000, [0]],
+        [3000, [0]],
+      ]);
+      expect(index.unknownCallers, id).toEqual([0]);
+      expect(index.interrupted.size, id).toBe(0);
+    }
+  });
+
+  it('resolves no block reference of an external call to the program of the file with that number', () => {
+    const raw = fanuc();
+    numberingOf(raw).calls = [{ trigger: '(?<![A-Z])M\\s*0*198(?!\\d)', address: 'P', external: true }];
+    numberingOf(raw).references = [{ trigger: '(?<![A-Z])M\\s*0*198(?!\\d)', addresses: ['Q'], program: 'called' }];
+    const external = compiledFrom(raw);
+    const lines = ['O0001', 'N10 M198 P2000 Q50', 'N20 M30', 'O2000', 'N50 M99'];
+    expect(targetsOf(external, lines)).toEqual([[2, 'Q', { refused: 'notInFile', key: 2000 }]]);
   });
 
   it('indexes every call by row, the callers of each program once, and the programs with an unknown call', () => {

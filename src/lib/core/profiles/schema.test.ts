@@ -674,7 +674,7 @@ const MEMBER_LISTS: [string, readonly string[]][] = [
     'references', 'calls',
   ])],
   ['numbering.references[]', members<ReferenceRule>()(['trigger', 'addresses', 'rewrite', 'program'])],
-  ['numbering.calls[]', members<CallRule>()(['trigger', 'address', 'maxDigits', 'repeatAddress', 'localAddress', 'interrupt'])],
+  ['numbering.calls[]', members<CallRule>()(['trigger', 'address', 'maxDigits', 'repeatAddress', 'localAddress', 'interrupt', 'external'])],
   ['numberFormat', members<NumberFormatOptions>()(['decimals', 'trailingZeros', 'keepPoint', 'plusSign'])],
   // `units`, `diameter` and `sources` are the machine's: the schema refuses them (rule 1).
   ['modal', members<Omit<Modal, 'units' | 'diameter' | 'sources'>>()(['initial'])],

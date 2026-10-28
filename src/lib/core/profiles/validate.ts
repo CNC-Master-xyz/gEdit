@@ -1083,6 +1083,8 @@ function checkNumbering(value: unknown, p: Problems, at = 'numbering', complete 
       // P4d review NC-1 and NC-2: the word of a local call, and a call that is an interrupt.
       optStr(rule.localAddress, `${at}.calls[${i}].localAddress`, p, ADDRESS);
       optBool(rule.interrupt, `${at}.calls[${i}].interrupt`, p);
+      // Wave Y G5: a call of a program on an external device (Fanuc `M198`).
+      optBool(rule.external, `${at}.calls[${i}].external`, p);
     });
   }
 }

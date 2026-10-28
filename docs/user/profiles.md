@@ -236,6 +236,7 @@ replaces the parent's whole.
 | `calls[].maxDigits` | Up to this many digits the value is the program number; a longer value without the repeat word is a repeat count followed by a program number of this many digits (Fanuc `M98 P21010` is `O1010` twice, with `4`) |
 | `calls[].repeatAddress` | The address that holds the repeat count (`L`); with it, a longer program number is read whole |
 | `calls[].localAddress` | The address that makes a line without the program word a **local call** (Fanuc `M98 Q30`: the program runs its own blocks from `N30` up to the next return). A local call proves the caller only of a `caller` reference inside the part it runs. A rule without it calls nothing on a line that lacks its program word (a bare `M96` or `G65`) |
+| `calls[].external` | `true`: the called program runs from an external device or a data server (Fanuc `M198 P2000`), not from this file. A program of the same number in the open file is not what a block word on that line names, so Renumber and Update References do not follow the call into it. The call still counts as a caller for the returns (`M99`) of that program |
 | `calls[].interrupt` | `true`: the called program is started by an interrupt (Fanuc `M96 P2000`) and returns into whichever program it interrupted, so this call never proves the caller of a `caller` reference |
 
 If two rules fire on one word and name different programs, the word is reported and left

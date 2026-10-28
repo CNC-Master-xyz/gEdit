@@ -168,6 +168,13 @@ export interface CallRule {
    * interrupted, so this call never proves which program an `M99 P` in it returns to.
    */
   interrupt?: boolean;
+  /**
+   * Wave Y geometry fix G5 (§7 row): the rule runs a program from an external device or a data
+   * server (Fanuc `M198 P…`), not a program of the open document that happens to have the same
+   * number. Such a call is read (its word is a program number), but no program of the document
+   * is its target: it proves no caller and no reference resolves to it.
+   */
+  external?: boolean;
 }
 
 /** `profile.numberFormat`, read by `formatNumber` (WP3.2) and the M4 transforms. */
@@ -992,6 +999,8 @@ export interface CompiledProfile {
       localAddress?: string | null;
       /** P4d review NC-2: `CallRule.interrupt`; optional for a hand-built profile. */
       interrupt?: boolean;
+      /** Wave Y G5: `CallRule.external`; optional for a hand-built profile. */
+      external?: boolean;
     }[];
     commentFilter?: RegExp;
   };

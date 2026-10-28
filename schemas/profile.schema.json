@@ -1462,6 +1462,11 @@
           "title": "Interrupt",
           "description": "True when the line starts a program that runs on a signal and returns to whatever it interrupted, for example M96 P… on Fanuc.",
           "type": "boolean"
+        },
+        "external": {
+          "title": "Program on an external device",
+          "description": "True when the line runs a program from an external device or a data server, not a program of the open file, for example M198 P… on Fanuc. A program of the same number in the file is not what a block word on that line names, so Renumber and Update References do not follow the call into it. The call still counts as a caller for the returns (M99) of that program.",
+          "type": "boolean"
         }
       }
     },
