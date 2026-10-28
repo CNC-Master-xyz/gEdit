@@ -226,6 +226,8 @@ moves with a shift of that axis when every word of its block is classified (v1.2
 a warning (B1 fix NC, NC-03), so the FK contour has to be checked. On a selection they move only
 when the whole FK contour lies in it (Wave Y, D4): the FPOL in force at its first FK block, its
 first to its last FK block, and every block a relative reference names; else they are left so too.
+The points of a contour move together or not at all (a word nobody classified in one of its
+blocks leaves them all), and the `FPOL` the contour reads stays with them.
 
 Selections
 ----------
@@ -245,6 +247,7 @@ is handed back byte for byte: the only edits are the value spans of tokens.
 
 from __future__ import annotations
 
+import re
 import sys
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -348,10 +351,12 @@ FK_OTHER = frozenset(("F", "M", "RL", "RR", "R0"))
 #: and the relative references, each followed by the number of the block it names (TNC 640
 #: Klartext manual 2019, p.175-189). A selection moves the FK points of a contour only when the
 #: whole contour lies in it: its FPOL, its first to its last FK block, and every block a
-#: reference names (`Run.fk_movable`).
+#: reference names (`Run.fk_contours`).
 FK_ELEMENTS = frozenset(("FL", "FLT", "FC", "FCT", "FSELECT"))
 FK_POLE = "FPOL"
 FK_REFERENCES = frozenset(("RX", "RY", "RPR", "RPA", "RAN", "PAR", "RCCX", "RCCY", "RCCPR", "RCCPA"))
+#: A quick look whether lines may hold an FK block or an FPOL at all (``Run.fk_contours``).
+FK_TEXT = re.compile(r"\bF(?:L|LT|C|CT|SELECT|POL)\b", re.IGNORECASE)
 
 #: What the summary calls a count of each reason (singular, plural).
 REASON_TEXT = {
@@ -1108,6 +1113,11 @@ def number_of(text: Optional[str]) -> Optional[int]:
         return None
 
 
+def block_addresses(block: Block) -> set:
+    """The addresses of a block's value words, upper case."""
+    return {(token.address or "").upper() for token, _ in block.words}
+
+
 def klartext_number(block: Block) -> Optional[int]:
     """D4: the number a block is written with (Klartext `12 FL …`), or ``None``."""
     for token in block.first.tokens:
@@ -1228,8 +1238,8 @@ class Run:
         self.selection_lines: List[str] = []
         self.selection_first = 1
         self.selection_state: Optional[gedit_nc.LineState] = None
-        #: The line numbers of the FK blocks whose points may move (``fk_movable``).
-        self._fk_movable: Optional[frozenset] = None
+        #: The FK contours of the run's lines (``fk_contours``), once read.
+        self._fk: Optional[Tuple[Dict[int, Optional[str]], Dict[int, bool]]] = None
 
     def entry(self, code: str) -> Optional[Dict[str, Any]]:
         """The database entry of a written code, remembered per spelling."""
@@ -1879,11 +1889,12 @@ class Run:
                 geometry.append(outcome)
                 continue
             fk_axis = FK_POINT_AXES.get(address)
-            if fk_axis is not None and fk_axis in setup.chosen and self.params.additive and self.fk_classified(block):
-                if self.fk_movable(block):
-                    # T121: the absolute points of an FK contour move with the shift of their axis.
-                    outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis)))
-                    continue
+            fk_why = self.fk_points_kept(block) if fk_axis is not None and fk_axis in setup.chosen and self.params.additive else "scale"
+            if fk_axis is not None and fk_axis in setup.chosen and fk_why is None:
+                # T121: the absolute points of an FK contour move with the shift of their axis.
+                outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis)))
+                continue
+            if fk_axis is not None and fk_axis in setup.chosen and fk_why == "outside":
                 # D4: a contour that runs past the selection would be moved only in part.
                 written = quote(token.text)
                 outcomes.append(
@@ -1910,6 +1921,20 @@ class Run:
                 )
                 continue
             if address not in setup.words and not is_cycle:
+                continue
+            if self.params.additive and address in setup.chosen and FK_POLE in block_addresses(block) and not self.fk_pole_moves(block):
+                # D4 follow-up: the pole of an FK contour stays with the contour's points.
+                written = quote(token.text)
+                outcomes.append(
+                    (
+                        "skip",
+                        line,
+                        "fk-point",
+                        "%s: the pole (FPOL) of an FK contour whose points are not moved (the contour does not lie wholly in the selection, or a block of it has a word gEdit does not classify); gEdit does not move it either. Check the FK contour"
+                        % written,
+                        written,
+                    )
+                )
                 continue
             word_data = None if id(token) in pole_words else cycle_data.get(id(token), data)
             outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, word_data, is_cycle))
@@ -2781,66 +2806,119 @@ class Run:
         elif kind == "end":
             self.fk_open_above = False
 
-    def fk_movable(self, block: Block) -> bool:
-        """D4 (the skeptic of T121): whether the FK points of this block may move. A whole run
-        moves them all. A selection moves them only when the FK contour of the block lies wholly
-        in it: the FPOL in force at its first FK block, every block from the first FK block to
-        the last one, and every block a relative reference (`RX 3`, `PAR 5`) names. The contour
-        may run on below the selection, which only the lines below show
-        (``input.followingLines``); without them a contour still open at the selection's end is
-        taken to run on."""
-        if not self.is_selection:
-            return True
-        if self._fk_movable is None:
-            self._fk_movable = self.fk_sections()
-        return block.number in self._fk_movable
+    def fk_points_kept(self, block: Block) -> Optional[str]:
+        """D4 (the skeptic of T121) and its follow-up: why the FK points of this block are left
+        under a shift, or ``None`` when they move. They move with their FK contour or not at all:
+        ``'outside'`` when the contour does not lie wholly in a selection (the FPOL in force at its
+        first FK block, every block from the first FK block to the last one, every block a
+        relative reference such as `RX 3` or `PAR 5` names; the lines below show where a contour
+        open at the selection's end goes on, and without them it is taken to go on);
+        ``'unclassified'`` when a block of the contour, or its FPOL, writes a word nobody
+        classified (:meth:`fk_classified`)."""
+        points, _ = self.fk_contours()
+        return points.get(block.number, "unclassified")
 
-    def fk_sections(self) -> frozenset:
-        """D4: the line numbers of the FK blocks of the selection whose contour lies wholly in
-        it, read from the selection's lines (and those below, for where the last contour ends)."""
+    def fk_pole_moves(self, block: Block) -> bool:
+        """D4 follow-up: whether the axis words of an `FPOL` block move under a shift. The pole
+        stays with the FK contours that read it: it moves only when every one of them moves
+        (:meth:`fk_points_kept`), and, on a selection, when no contour below it reads it (the
+        lines below show that; without them it is taken to)."""
+        _, poles = self.fk_contours()
+        return poles.get(block.number, True)
+
+    def fk_contours(self) -> Tuple[Dict[int, Optional[str]], Dict[int, bool]]:
+        """D4: the FK contours of the run's lines (the selection, or the whole program), read
+        before their blocks are judged: for every FK block, by line number, why its points are
+        left (``None``: they move); for every `FPOL` block, whether its axis words move."""
+        if self._fk is not None:
+            return self._fk
+        points: Dict[int, Optional[str]] = {}
+        poles: Dict[int, bool] = {}
+        self._fk = (points, poles)
+        if not any(FK_TEXT.search(text) for text in self.selection_lines):
+            return self._fk
         blocks = blocks_of(self.selection_lines, self.selection_first, self.selection_state, self.cp, self.entry, self.setup.letters)
         inside_numbers: set = set()
         for block in blocks:
             number = klartext_number(block)
             if number is not None:
                 inside_numbers.add(number)
-        # [members, partial, references] of each contour.
-        sections: List[List[Any]] = []
-        current: Optional[List[Any]] = [[], True, []] if self.fk_open_above else None
-        fpol = "above" if self.fpol_above else None
+        # A contour: its FK blocks, whether it runs outside the scope, the block numbers its
+        # references name, and whether every word of its blocks is classified.
+        sections: List[Dict[str, Any]] = []
+        # A pole: its line, whether its words are classified, the contours that read it, and
+        # whether one outside the scope reads it.
+        pole_list: List[Dict[str, Any]] = []
+        current: Optional[Dict[str, Any]] = None
+        if self.fk_open_above:
+            current = {"members": [], "outside": True, "refs": [], "classified": True}
+            sections.append(current)
+        last_pole: Optional[Dict[str, Any]] = None
+        pole_above = self.fpol_above
         for block in blocks:
             kind = self.fk_kind(block)
             if kind == "pole":
-                fpol = "inside"
+                last_pole = {"number": block.number, "classified": self.fk_classified(block), "sections": [], "outside": False}
+                pole_list.append(last_pole)
+                pole_above = False
+                if current is not None:
+                    last_pole["sections"].append(current)
             elif kind == "element":
                 if current is None:
-                    current = [[], fpol == "above", []]
-                current[0].append(block.number)
-                current[2].extend(fk_references(block))
-            elif kind == "end" and current is not None:
-                sections.append(current)
+                    current = {"members": [], "outside": pole_above, "refs": [], "classified": True}
+                    sections.append(current)
+                    if last_pole is not None:
+                        last_pole["sections"].append(current)
+                current["members"].append(block.number)
+                current["refs"].extend(fk_references(block))
+                if not self.fk_classified(block):
+                    current["classified"] = False
+            elif kind == "end":
                 current = None
-        if current is not None:
+        if self.is_selection and (current is not None or last_pole is not None):
             if self.following is None:
-                current[1] = True
+                if current is not None:
+                    current["outside"] = True
+                if last_pole is not None:
+                    last_pole["outside"] = True
             else:
-                below = blocks_of(self.following, 0, None, self.cp, self.entry, self.setup.letters)
-                for block in below:
+                still_open = current is not None
+                pole_below = False
+                for block in blocks_of(self.following, 0, None, self.cp, self.entry, self.setup.letters):
                     kind = self.fk_kind(block)
                     if kind == "element":
-                        current[1] = True
+                        if still_open:
+                            current["outside"] = True
+                        if last_pole is not None and not pole_below:
+                            last_pole["outside"] = True
                         break
-                    if kind == "end":
-                        break
-            sections.append(current)
-        movable: set = set()
-        for members, partial, references in sections:
-            if partial:
-                continue
-            if any(ref is None or ref not in inside_numbers or ref in self.numbers_above for ref in references):
-                continue
-            movable.update(members)
-        return frozenset(movable)
+                    if kind == "pole":
+                        pole_below = True
+                        if not still_open:
+                            break
+                    elif kind == "end":
+                        still_open = False
+                        if pole_below or last_pole is None:
+                            break
+        for section in sections:
+            section["moves"] = None
+            # A whole run holds every block a reference can name.
+            if section["outside"] or (
+                self.is_selection and any(ref is None or ref not in inside_numbers or ref in self.numbers_above for ref in section["refs"])
+            ):
+                section["moves"] = "outside"
+            elif not section["classified"]:
+                section["moves"] = "unclassified"
+        for pole in pole_list:
+            for section in pole["sections"]:
+                if not pole["classified"] and section["moves"] is None:
+                    section["moves"] = "unclassified"
+        for section in sections:
+            for number in section["members"]:
+                points[number] = section["moves"]
+        for pole in pole_list:
+            poles[pole["number"]] = pole["classified"] and not pole["outside"] and all(section["moves"] is None for section in pole["sections"])
+        return self._fk
 
     def word_outcome(
         self,

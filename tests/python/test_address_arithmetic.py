@@ -297,10 +297,11 @@ class TestFkContourInASelectionD4(unittest.TestCase):
     def test_a_contour_that_runs_on_below_the_selection_is_left(self):
         payload = self.run_on(8, 11)
         self.assertEqual(lines_of(payload)[2], "9 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60")
-        self.assertEqual([p[0] for p in self.fk_points(payload)], [10, 10])
+        # The FPOL on line 8 stays with its contour (D4 follow-up).
+        self.assertEqual([p[0] for p in self.fk_points(payload)], [8, 10, 10])
         # Without the lines below, a contour still open at the selection's end may run on.
         payload = self.run_on(8, 12, below=False)
-        self.assertEqual([p[0] for p in self.fk_points(payload)], [10, 10, 12])
+        self.assertEqual([p[0] for p in self.fk_points(payload)], [8, 10, 10, 12])
 
     def test_a_reference_to_a_block_above_the_selection_leaves_the_contour(self):
         program = "\n".join([
@@ -308,11 +309,35 @@ class TestFkContourInASelectionD4(unittest.TestCase):
             "5 FC DR+ R10 CCX+60 CCY+50 RX 2", "6 FLT P1X+40 P1Y+70", "7 L X+0 Y+0", "8 END PGM FK MM",
         ])
         payload = self.run_on(4, 8, program)
-        self.assertEqual([p[:2] for p in self.fk_points(payload)], [(6, "CCX+60"), (7, "P1X+40")])
+        self.assertEqual([p[:2] for p in self.fk_points(payload)], [(4, "X+50"), (6, "CCX+60"), (7, "P1X+40")])
         # The same contour with the block it names in the selection moves.
         payload = self.run_on(3, 8, program)
         self.assertEqual(lines_of(payload)[3], "5 FC DR+ R10 CCX+65 CCY+50 RX 2")
         self.assertEqual(self.fk_points(payload), [])
+
+    def test_the_fpol_stays_with_a_contour_that_is_left(self):
+        # D4 follow-up: moving the pole alone would move the polar values about it.
+        payload = self.run_on(8, 11)
+        self.assertEqual(lines_of(payload)[0], "7 FPOL X+50 Y+50")
+        self.assertEqual(self.fk_points(payload)[0], (8, "X+50", "warning"))
+        # A pole whose contour lies below the selection, or may (no lines below).
+        for below in (True, False):
+            payload = self.run_on(8, 8, below=below)
+            self.assertEqual((payload["text"], self.fk_points(payload)), ("7 FPOL X+50 Y+50", [(8, "X+50", "warning")]))
+        # The whole contour: the pole moves with it.
+        self.assertEqual(lines_of(self.run_on(8, 12))[0], "7 FPOL X+55 Y+50")
+
+    def test_a_word_nobody_classified_leaves_the_whole_contour(self):
+        # D4 follow-up: the points of a contour move together or not at all, in a whole run too.
+        program = self.PROGRAM.replace("11 FLT P1X+20 P1Y+80", "11 FLT P1X+20 P1Y+80 XYZ5")
+        payload = run(program, profile="heidenhain-klartext", operation="add", operand=5, addresses=["X"])
+        text = lines_of(payload)
+        self.assertEqual(text[7:12], program.split("\n")[7:12])
+        self.assertEqual(
+            [p[:2] for p in self.fk_points(payload)],
+            [(8, "X+50"), (10, "CCX+50"), (10, "P1X+70"), (12, "P1X+20")],
+        )
+        self.assertEqual(text[12], "12 L X+25 Y+20")
 
 
 def lines_of(payload):
