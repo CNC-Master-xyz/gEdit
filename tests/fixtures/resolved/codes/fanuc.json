@@ -254,7 +254,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -1610,7 +1611,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1660,7 +1662,8 @@
           "label": "Feed from the thread pitch",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -1724,7 +1727,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -1817,7 +1821,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1906,7 +1911,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1996,7 +2002,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2046,7 +2053,8 @@
           "label": "Feed from the thread pitch",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -2110,7 +2118,8 @@
           "label": "Feed from the thread pitch",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -2167,7 +2176,8 @@
           "label": "Feed from the thread pitch",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -2255,7 +2265,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2338,7 +2349,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2395,7 +2407,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -2457,7 +2470,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2548,7 +2562,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",

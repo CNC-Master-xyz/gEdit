@@ -372,6 +372,10 @@ def _declared_unit(codes: "Sequence[Dict[str, Any]]", word: str) -> Any:
     B1: a two-block cycle (``G71``, ``G76``) may declare an address once per block, with its
     own label in each; the two declarations have the same ``unit`` (the loader refuses a
     database where they differ), so they never conflict.
+
+    T210: the feed marker ``unit: 'feed'`` declares nothing here: it says the parameter is a
+    feed rate in the unit in force, which is how the word is read without it (TS twin:
+    ``declaredUnit`` in ``numbers.ts``).
     """
     found = None
     for entry in codes:
@@ -380,7 +384,7 @@ def _declared_unit(codes: "Sequence[Dict[str, Any]]", word: str) -> Any:
             if not isinstance(param, dict):
                 continue
             param_address = param.get("address")
-            if not isinstance(param_address, str) or param_address.upper() != word or param.get("unit") is None:
+            if not isinstance(param_address, str) or param_address.upper() != word or param.get("unit") in (None, "feed"):
                 continue
             if found is not None and found != param["unit"]:
                 return _CONFLICT

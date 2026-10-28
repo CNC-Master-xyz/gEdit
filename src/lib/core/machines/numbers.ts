@@ -235,6 +235,9 @@ function feedClassOf(unit: FeedUnit | string | undefined): NumberClass | Undecla
 /** Two codes of one block (or two codes in force) declare one address with different units. */
 const CONFLICT = Symbol('conflict');
 
+/** A `CodeParam.unit` that decides how a word is read: every one but the feed marker. */
+type DeclaredUnit = Exclude<NonNullable<CodeParam['unit']>, 'feed'>;
+
 /**
  * The `unit` the codes of `codes` declare for `word` among their parameters: undefined when
  * none does, `CONFLICT` when two of them say different things.
@@ -245,12 +248,16 @@ const CONFLICT = Symbol('conflict');
  * write such a pair. A disagreement is "cannot tell", which gets no class and so no value.
  * The two declarations of one two-block cycle (`G71`, `G76`) have the same unit — the loader
  * refuses a database where they differ — so they never conflict.
+ *
+ * T210: the feed marker `unit: 'feed'` declares nothing here. It says the parameter is a feed
+ * rate in the unit in force, which is how the word is read without it (Python twin:
+ * `_nc_machine._declared_unit`).
  */
-function declaredUnit(codes: readonly CodeEntry[], word: string): CodeParam['unit'] | typeof CONFLICT | undefined {
-  let found: CodeParam['unit'] | undefined;
+function declaredUnit(codes: readonly CodeEntry[], word: string): DeclaredUnit | typeof CONFLICT | undefined {
+  let found: DeclaredUnit | undefined;
   for (const entry of codes) {
     for (const param of paramsOf(entry)) {
-      if (upper(param?.address ?? '') !== word || param?.unit === undefined) continue;
+      if (upper(param?.address ?? '') !== word || param?.unit === undefined || param.unit === 'feed') continue;
       if (found !== undefined && found !== param.unit) return CONFLICT;
       found = param.unit;
     }

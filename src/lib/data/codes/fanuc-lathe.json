@@ -341,6 +341,7 @@
           "position": "none",
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
           "min": 0,
+          "unit": "feed",
           "block": 2
         },
         { "address": "S", "position": "none", "label": "Spindle speed for the roughing (an S inside the profile blocks applies to the finishing with G70 only)", "block": 2 },
@@ -372,6 +373,7 @@
           "position": "none",
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
           "min": 0,
+          "unit": "feed",
           "block": 2
         },
         { "address": "S", "position": "none", "label": "Spindle speed for the roughing (an S inside the profile blocks applies to the finishing with G70 only)", "block": 2 },
@@ -412,6 +414,7 @@
           "position": "none",
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
           "min": 0,
+          "unit": "feed",
           "block": 2
         },
         { "address": "S", "position": "none", "label": "Spindle speed for the roughing (an S inside the profile blocks applies to the finishing with G70 only)", "block": 2 },
@@ -456,7 +459,7 @@
           "label": "Relief at the bottom of the cut, a radius value; normally positive, with X and P left out its sign gives the direction",
           "block": 2
         },
-        { "address": "F", "position": "none", "label": "Feed", "min": 0, "block": 2 }
+        { "address": "F", "position": "none", "label": "Feed", "min": 0, "unit": "feed", "block": 2 }
       ]
     },
     {
@@ -495,7 +498,7 @@
           "label": "Relief at the bottom of the cut, a radius value; normally positive, with Z and Q left out its sign gives the direction",
           "block": 2
         },
-        { "address": "F", "position": "none", "label": "Feed", "min": 0, "block": 2 }
+        { "address": "F", "position": "none", "label": "Feed", "min": 0, "unit": "feed", "block": 2 }
       ]
     },
     {
@@ -588,7 +591,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -659,7 +663,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -710,7 +715,8 @@
           "position": "none",
           "label": "Drilling feed",
           "required": true,
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -807,7 +813,8 @@
           "position": "none",
           "label": "Boring feed",
           "required": true,
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -857,7 +864,8 @@
           "position": "none",
           "label": "Drilling feed",
           "required": true,
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -944,7 +952,8 @@
           "position": "none",
           "label": "Boring feed",
           "required": true,
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -980,7 +989,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -1049,7 +1059,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },

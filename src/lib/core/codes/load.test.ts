@@ -505,6 +505,8 @@ describe('loadCodeDb', () => {
             { address: 'F', label: 'Feed', unit: 'feedPerRev' },
             { address: 'R', label: 'Plane' },
             { address: 'K', label: 'Repeat', unit: 'times' },
+            // T210: the feed marker, a feed rate in the unit in force.
+            { address: 'E', label: 'Feed', unit: 'feed' },
           ],
         },
       ],
@@ -516,6 +518,7 @@ describe('loadCodeDb', () => {
       'feedPerRev',
       undefined,
       undefined,
+      'feed',
     ]);
     expect(problems.map((p) => p.path)).toEqual(['codes[0].params[5].unit']);
   });

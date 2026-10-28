@@ -41,8 +41,19 @@ export interface CodeParam {
    *
    * The complete list per code is the table in §8.2 of the plan, which WP6.2 writes from
    * and the G10 review reads first.
+   *
+   * `'feed'` (T210, owner rule of 2026-10-27: "a value is treated as a feed only when the data
+   * marks it"): the parameter is a **feed rate** whose unit is not fixed by the code — the
+   * feed unit in force, or the control's own unit for a cycle feed (`F` of Fanuc `G81`,
+   * Klartext `Q206`, Sinumerik `_FFP1`). It is a marker only: every number reader reads such a
+   * parameter as if it declared no unit (`numberClassOf`, `gedit_nc.number_class_of`), so the
+   * value is read exactly as before. What reads it is the feed question of the scripts (Scale
+   * feed rates lists a marked cycle feed it leaves alone). A parameter whose unit is fixed says
+   * so with `'feedPerMin'` (Okuma `G101`) and is a feed too; `'feedPerRev'` is the thread
+   * **lead** and no feed. A parameter that only speaks of a feed (a feed factor, a percentage
+   * of a feed, the point where a feed starts) is not marked.
    */
-  unit?: NumberClass | 'increment' | 'count';
+  unit?: NumberClass | 'increment' | 'count' | 'feed';
   /**
    * B1 (NC-06). Only with `unit: 'count'`: the value is read as written like a count, never
    * converted, but it is a **real number**, not a whole one (the Euler angles `I`/`J`/`K` of

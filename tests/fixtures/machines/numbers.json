@@ -234,6 +234,39 @@
       "expected": "increment"
     },
     {
+      "note": "T210: the feed marker unit 'feed' declares no class: the F of a roughing cycle is read in the feed unit in force, per revolution here",
+      "profile": "lathe",
+      "address": "F",
+      "feedUnit": "per-rev",
+      "codes": [{ "code": "G71", "group": "cycle", "params": [{ "address": "F", "label": "Roughing feed", "unit": "feed" }] }],
+      "expected": "feedPerRev"
+    },
+    {
+      "note": "T210: the same F under a feed per minute is a feed per minute",
+      "profile": "lathe",
+      "address": "F",
+      "feedUnit": "per-minute",
+      "codes": [{ "code": "G71", "group": "cycle", "params": [{ "address": "F", "label": "Roughing feed", "unit": "feed" }] }],
+      "expected": "feedPerMin"
+    },
+    {
+      "note": "T210: the marker never conflicts with a unit another code declares; the lead of a code in force keeps its reading",
+      "profile": "lathe",
+      "address": "F",
+      "feedUnit": "per-minute",
+      "codes": [{ "code": "G71", "group": "cycle", "params": [{ "address": "F", "label": "Roughing feed", "unit": "feed" }] }],
+      "inForce": [{ "code": "G32", "group": "motion", "modal": true, "params": [{ "address": "F", "label": "Thread lead", "unit": "feedPerRev" }] }],
+      "expected": "feedPerRev"
+    },
+    {
+      "note": "T210: a marked cycle feed under an address with no class of its own (a Q parameter) still has none, as without the marker",
+      "profile": "mill",
+      "address": "Q",
+      "feedUnit": "per-minute",
+      "codes": [{ "code": "G900", "group": "cycle", "params": [{ "address": "Q", "label": "Plunging feed", "unit": "feed" }] }],
+      "expected": null
+    },
+    {
       "note": "M9 review F9: an incremental twin is the kind of number of the axis it moves. H of C is an angle, not a length",
       "profile": "lathe-uwvh",
       "address": "H",

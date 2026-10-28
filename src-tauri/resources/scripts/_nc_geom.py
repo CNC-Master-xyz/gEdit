@@ -1538,8 +1538,9 @@ def _kept_role(number_class: Optional[str]) -> str:
 
 
 def _class_of_param(param: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The number class a parameter declares; the feed marker ``'feed'`` (T210) is none."""
     unit = _dict(param).get("unit")
-    return unit if isinstance(unit, str) else None
+    return unit if isinstance(unit, str) and unit != "feed" else None
 
 
 def _classify(block: _Block, token: Any) -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
