@@ -1154,6 +1154,30 @@ fn merge_settings(zip: &Map<String, Value>, current: &CurrentJson) -> (Merged, V
     )
 }
 
+/// One command's binding after an import: a string or `null` of the zip replaces the whole
+/// value (both platforms); an object `{"mac":…,"other":…}` of the zip is laid member by member
+/// over this computer's value, so a platform the zip does not name keeps the user's key (a
+/// string here counts as both members, `null` as both unbound).
+fn merge_binding(local: Option<&Value>, zip: &Value) -> Value {
+    let Value::Object(theirs) = zip else {
+        return zip.clone();
+    };
+    let mut merged = match local {
+        Some(Value::Object(ours)) => ours.clone(),
+        Some(single @ (Value::String(_) | Value::Null)) => {
+            let mut both = Map::new();
+            both.insert("mac".into(), single.clone());
+            both.insert("other".into(), single.clone());
+            both
+        }
+        _ => Map::new(),
+    };
+    for (member, value) in theirs {
+        merged.insert(member.clone(), value.clone());
+    }
+    Value::Object(merged)
+}
+
 /// `keybindings.json` by command id: the zip's binding wins, the user's other bindings stay.
 /// `Err` is a skip reason.
 fn merge_keybindings(
@@ -1184,7 +1208,7 @@ fn merge_keybindings(
             let mut ids: Vec<&String> = theirs.keys().collect();
             ids.sort();
             for id in ids {
-                let value = &theirs[id];
+                let value = &merge_binding(bindings.get(id), &theirs[id]);
                 if bindings.get(id) != Some(value) {
                     items.push(item(id, bindings.get(id), Some(value)));
                     bindings.insert(id.clone(), value.clone());
@@ -2292,6 +2316,8 @@ fn apply_with(
     };
     // 7. Swap, in order; a failure puts back what was already written.
     let mut done: Vec<&Planned> = Vec::new();
+    // The folders this apply created on the way to a new file, parents first.
+    let mut created: Vec<PathBuf> = Vec::new();
     for file in &to_write {
         let segments: Vec<&str> = file.path.split('/').collect();
         let path = join_segments(&dirs.config, &segments);
@@ -2302,12 +2328,13 @@ fn apply_with(
             OnDisk::Missing
         };
         let result = if state == expected_state {
+            note_new_folders(&dirs.config, &segments, &mut created);
             write(&path, &file.bytes).map_err(|err| crate::userfiles::why(&err).to_string())
         } else {
             Err("changed on disk during the import".to_string())
         };
         if let Err(why) = result {
-            let failed = rollback(dirs, &done, write);
+            let failed = rollback(dirs, &done, &created, write);
             let mut message = format!("{} could not be written ({why})", file.path);
             if failed.is_empty() {
                 message.push_str("; the files already written were put back");
@@ -2331,9 +2358,28 @@ fn apply_with(
     })
 }
 
+/// Adds to `created` the folders on the way to the file `segments` (below `base`) that do not
+/// exist yet, parents first, before the writer makes them.
+fn note_new_folders(base: &Path, segments: &[&str], created: &mut Vec<PathBuf>) {
+    let mut path = base.to_path_buf();
+    for segment in &segments[..segments.len().saturating_sub(1)] {
+        path.push(segment);
+        if std::fs::symlink_metadata(&path).is_err() && !created.contains(&path) {
+            created.push(path.clone());
+        }
+    }
+}
+
 /// Puts back the files of `done`, newest first: a replaced file gets its old bytes, a new file
-/// is removed again (it did not exist before this import). Answers what could not be put back.
-fn rollback(dirs: &AppDirs, done: &[&Planned], write: &mut Writer<'_>) -> Vec<String> {
+/// is removed again (it did not exist before this import). Then the folders in `created` (made
+/// by this import) go, deepest first and only while empty: a folder that was there before, or
+/// holds anything else, stays. Answers what could not be put back.
+fn rollback(
+    dirs: &AppDirs,
+    done: &[&Planned],
+    created: &[PathBuf],
+    write: &mut Writer<'_>,
+) -> Vec<String> {
     let mut failed = Vec::new();
     for file in done.iter().rev() {
         let segments: Vec<&str> = file.path.split('/').collect();
@@ -2345,6 +2391,9 @@ fn rollback(dirs: &AppDirs, done: &[&Planned], write: &mut Writer<'_>) -> Vec<St
         if result.is_err() {
             failed.push(file.path.clone());
         }
+    }
+    for folder in created.iter().rev() {
+        let _ = std::fs::remove_dir(folder);
     }
     failed
 }
@@ -3718,6 +3767,34 @@ mod tests {
     }
 
     #[test]
+    fn a_key_with_a_member_per_platform_is_merged_member_by_member() {
+        let (root, dirs) = scratch("keys-members");
+        put(
+            &dirs,
+            "keybindings.json",
+            br#"{"$version":1,"bindings":{"a":{"mac":"Mod+L"},"b":"Mod+B","c":{"mac":"Mod+C","other":"Ctrl+C"},"d":"Mod+D","e":null}}"#,
+        );
+        let bytes = config_zip(&[(
+            "keybindings.json",
+            br#"{"$version":1,"bindings":{"a":{"other":"Mod+K"},"b":{"other":"Alt+B"},"c":"Mod+Z","d":null,"e":{"mac":"Mod+E"},"f":{"other":"F2"}}}"#,
+        )]);
+        let p = previewed(&dirs, &bytes);
+        apply(&dirs, &bytes, &p.fingerprint, &["keys".into()], false).unwrap();
+        assert_eq!(
+            json_of(&dirs, "keybindings.json")["bindings"],
+            serde_json::json!({
+                "a": {"mac": "Mod+L", "other": "Mod+K"},
+                "b": {"mac": "Mod+B", "other": "Alt+B"},
+                "c": "Mod+Z",
+                "d": null,
+                "e": {"mac": "Mod+E", "other": null},
+                "f": {"other": "F2"}
+            })
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_file_on_this_computer_from_a_newer_gedit_is_left_alone() {
         let (root, dirs) = scratch("newer-here");
         put(&dirs, "machines.json", br#"{"$version":99,"machines":[]}"#);
@@ -3959,6 +4036,52 @@ mod tests {
         assert_eq!(
             backups(&dirs),
             vec!["before-import-19700101-000000.zip".to_string()]
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failing_write_also_removes_the_folders_the_import_made_and_only_those() {
+        let (root, dirs) = scratch("rollback-folders");
+        put(&dirs, "settings.json", br#"{"editor.tabWidth":4}"#);
+        // A folder that is there before the import, empty.
+        fs::create_dir_all(dirs.config.join("packages/oldpkg/profiles")).unwrap();
+        let bytes = config_zip(&[
+            ("packages/newpkg/profiles/a.json", br#"{"id":"a"}"#),
+            ("packages/oldpkg/profiles/b.json", br#"{"id":"b"}"#),
+            ("settings.json", br#"{"editor.tabWidth":2}"#),
+        ]);
+        let p = previewed(&dirs, &bytes);
+        let before = snapshot(&dirs.config);
+        assert!(before.contains_key("packages/oldpkg/profiles/"));
+        // The order is packages, then settings: the third write fails.
+        let mut calls = 0usize;
+        let mut writer = |path: &Path, bytes: &[u8]| -> std::io::Result<()> {
+            calls += 1;
+            if calls == 3 {
+                return Err(std::io::Error::other("disk full"));
+            }
+            crate::atomic::write_atomic(path, bytes)
+        };
+        let err = apply_with(
+            &dirs,
+            &bytes,
+            &p.fingerprint,
+            &all_groups(&p),
+            true,
+            0,
+            &mut writer,
+        )
+        .unwrap_err();
+        assert!(err.contains("put back"), "{err}");
+        assert!(
+            !dirs.config.join("packages/newpkg").exists(),
+            "a folder this import made is removed again"
+        );
+        assert_eq!(
+            snapshot(&dirs.config),
+            before,
+            "the config folder is as it was, the old empty folder included"
         );
         let _ = fs::remove_dir_all(&root);
     }
