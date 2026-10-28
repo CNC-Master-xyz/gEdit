@@ -32,11 +32,13 @@
 //      segment, case-insensitive, the extension (`.MPF`, `.SPF`) and a leading `_N_` with a
 //      trailing `_MPF` / `_SPF` (the archive spelling `_N_SHAFT1_MPF`) dropped. `programKey`
 //      is that form. A document's base name matching two entries of different channels
-//      answers no channel (ambiguous, a problem).
+//      answers no channel (ambiguous, a problem). SELECT selects a **main program** (SHA p.73):
+//      an entry without an extension, or with `.MPF`, never gives a channel to a `.SPF`
+//      subprogram of the same name (`programKind`), and an `.SPF` entry none to a main program.
 //  J5. **Where it sits in the order of sources** (`documentChannel`): the user's own assignment,
 //      then the header `marker`, then the file name (`fileName` pattern or template), then the
 //      job list; `by: 'jobList'`. A job list that disagrees with a name or a marker is a
-//      problem (`channels.problems.jobListDisagrees`), the stronger source wins, as for
+//      problem (`channelFiles.problems.jobListDisagrees`), the stronger source wins, as for
 //      `marker` against the file name today.
 //  J6. **Only for machines with `layout: 'multi-file'`**; for any other the job list is ignored.
 //  J7. **Bounds.** At most `MAX_JOB_ENTRIES` entries and `MAX_JOB_LINES` lines are read; a line
@@ -157,6 +159,16 @@ export function programKey(name: string): string {
   return plain.toUpperCase();
 }
 
+/**
+ * J4: `sub` for a subprogram name (`.SPF`, `_N_.._SPF`), else `main` (`.MPF`, `_N_.._MPF`, no
+ * extension: SELECT selects a main program). Two names are one program only when their keys and
+ * their kinds are equal.
+ */
+export function programKind(name: string): 'main' | 'sub' {
+  const last = name.trim().split(/[\\/]/).pop() ?? '';
+  return /(?:\.SPF|^_N_.+_SPF)$/i.test(last) ? 'sub' : 'main';
+}
+
 /** J3 to J6: which channel the job list gives the file `baseName`, and the `SELECT` line that says so. */
 export function jobListChannel(
   job: JobList,
@@ -166,7 +178,8 @@ export function jobListChannel(
   if (p.layout !== 'multi-file' || !job.isJobList) return null;
   const key = programKey(baseName);
   if (key === '') return null;
-  const matching = job.entries.filter((e) => programKey(e.program) === key);
+  const kind = programKind(baseName);
+  const matching = job.entries.filter((e) => programKey(e.program) === key && programKind(e.program) === kind);
   if (matching.length === 0) return null;
   const found = new Map<string, { channel: ChannelRef; line: number }>();
   let unknown = false;
