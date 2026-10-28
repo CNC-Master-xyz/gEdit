@@ -1,0 +1,11 @@
+O1234
+{n10} {note:SAMPLE POCKET}
+{n20} G00 X0. Y0. Z50. T01
+{n30} G50 S1800
+{n40} M06
+{n50} G01 Z-3. F250.
+{n60} G02 X20. Y0. I10. J0.
+{n70} V1 = 12.5
+{n80} IF V1 GT 10. GOTO 100
+{skip}{n90} G00 Z100.
+{n100} M02

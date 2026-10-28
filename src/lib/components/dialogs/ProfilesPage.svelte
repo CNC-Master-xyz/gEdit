@@ -20,6 +20,10 @@
       broken or count in `data-problems`.
    6. **A list is bounded.** A row lists at most [`MAX_ROW_LINES`] problems and as many notes,
       then says how many more there are.
+   7. **The profile form is shown here, in place of the list** (P4.40, "Edit in form" on a row of
+      your own profiles). It is the one exception to rule 1: the command that opens the form
+      (`profile.editInForm`) opens a dialog, and a dialog cannot open over this one, so the page
+      hosts the same form inline. The form's code is loaded when the button is first pressed.
 -->
 <script module lang="ts">
   import { displayName, nameProblem, parentChoices, stemOf } from '$lib/contrib/userConfig';
@@ -301,6 +305,8 @@
 
 <script lang="ts">
   import FormRenderer from '$lib/components/forms/FormRenderer.svelte';
+  import ProfileForm from '$lib/components/dialogs/ProfileForm.svelte';
+  import type { ProfileFormModel } from '$lib/app/profileForm';
   import { get } from 'svelte/store';
   import { commands } from '$lib/app/registry/commands';
   import { dialogs } from '$lib/app/dialogs';
@@ -341,6 +347,28 @@
 
   let draft = $state<NewDraft | null>(null);
   let busy = $state(false);
+  /** The profile form (P4.40) shown in place of the list, for one of your files; it is a modal's job elsewhere, but the Settings dialog is the open modal. */
+  let editing = $state<{ model: ProfileFormModel; name: string } | null>(null);
+
+  /** Opens the form on one of your files. The form's code is loaded when it is first wanted. */
+  async function editInForm(row: ProfileRow): Promise<void> {
+    if (row.file === null || busy) return;
+    busy = true;
+    try {
+      const { realProfileForm } = await import('$lib/contrib/profileForm');
+      const model = realProfileForm();
+      await model.load({ kind: 'user', name: row.file });
+      editing = { model, name: row.file };
+    } finally {
+      busy = false;
+    }
+  }
+
+  function openJson(): void {
+    const current = editing;
+    if (current === null) return;
+    void run(() => deps.run('profile.open', { kind: 'profiles', name: current.name }));
+  }
 
   const fields = $derived(draft ? newFields(draft, t) : []);
   const errors = $derived(draft ? newErrors(draft, fields) : {});
@@ -453,6 +481,16 @@
           onclick={() => startNew('profiles', row.id)}>{t('userConfig.page.newFromThis')}</button
         >
       {:else}
+        {#if row.kind === 'profile'}
+          <button
+            type="button"
+            class="action"
+            data-testid="profile-action"
+            data-action="form"
+            data-disabled="0"
+            onclick={() => void editInForm(row)}>{t('profileForm.editButton')}</button
+          >
+        {/if}
         <button
           type="button"
           class="action"
@@ -505,7 +543,9 @@
     <p class="note-line" data-testid="profiles-note">{t('userConfig.page.note', { message: note })}</p>
   {/each}
 
-  {#if draft}
+  {#if editing}
+    <ProfileForm model={editing.model} onclose={() => (editing = null)} onopenjson={openJson} />
+  {:else if draft}
     <div class="form" bind:this={form} data-testid="profile-form" data-kind={draft.kind}>
       <h3 class="form-title">{t(draft.kind === 'profiles' ? 'userConfig.page.newProfileTitle' : 'userConfig.page.newCodesTitle')}</h3>
       <FormRenderer {fields} values={draft.values} {errors} onChange={set} />

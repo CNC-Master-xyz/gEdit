@@ -188,15 +188,28 @@ describe('the list', () => {
     expect(html).toContain('the folder could not be read');
   });
 
-  it('offers Open, Export and Remove on your own rows only', () => {
+  it('offers Edit in form, Open, Export and Remove on your own profile rows only', () => {
     extra.push(SHOP);
     filesStore.set([{ kind: 'profiles', name: 'shop-lathe.json', error: null }]);
     const html = page();
     const start = html.indexOf('data-file="shop-lathe.json"');
     const row = html.slice(start, html.indexOf('</li>', start));
-    expect(actions(row)).toEqual(['test', 'open', 'export', 'remove']);
+    expect(actions(row)).toEqual(['test', 'form', 'open', 'export', 'remove']);
+    expect(row).toContain(t('profileForm.editButton'));
     const builtin = html.slice(html.indexOf('data-profile-id="fanuc-gcode"'));
     expect(actions(builtin.slice(0, builtin.indexOf('</li>')))).toEqual(['test', 'new:profiles']);
+  });
+
+  it('offers the form for a profile file that did not load (that is when it helps), and not for a code file', () => {
+    filesStore.set([
+      { kind: 'profiles', name: 'broken.json', error: null },
+      { kind: 'codes', name: 'my-codes.json', error: null },
+    ]);
+    const html = page();
+    const broken = html.slice(html.indexOf('data-file="broken.json"'));
+    expect(actions(broken.slice(0, broken.indexOf('</li>')))).toContain('form');
+    const codes = html.slice(html.indexOf('data-file="my-codes.json"'));
+    expect(actions(codes.slice(0, codes.indexOf('</li>')))).not.toContain('form');
   });
 });
 

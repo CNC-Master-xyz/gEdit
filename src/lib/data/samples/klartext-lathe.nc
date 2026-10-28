@@ -1,0 +1,11 @@
+0 BEGIN PGM SAMPLE MM
+1 {note:Sample turned part}
+2 * - Roughing
+3 TOOL CALL "TURN1" Z S1500
+4 L X+0 Y+0 Z+50 R0 FMAX M3
+5 L Z-2 F250
+6 CC X+0 Y+0
+7 C X+20 Y+0 DR+
+8 Q10 = 12.5
+/9 CALL LBL 1
+10 END PGM SAMPLE MM
