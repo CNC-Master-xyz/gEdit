@@ -113,7 +113,8 @@ function world(): World {
     channelSet: (id, lines) => {
       if (lines === undefined) return sets.get(id) ?? toySet([]);
       savedSets.push([...lines]);
-      return toySet(lines);
+      // As the real `setOfLines`: only a one-file program is read for sections; a program of one file per channel answers none.
+      return sets.get(id)?.layout === 'multi-file' ? { ...toySet([]), layout: 'none' } : toySet(lines);
     },
     memory: { read: () => memory.value, write: (m) => void (memory.value = m) },
     focusEditorWhenBack: () => {},
@@ -182,6 +183,26 @@ describe('a comparison limited to a channel', () => {
     expect(await w.service.open(w.a, { kind: 'saved' }, { channel: '2' })).toBe(true);
     expect(w.savedSets).toEqual([BEFORE]);
     expect(get(w.service.sides)?.original).toEqual({ kind: 'text', text: ['$2', 'B1', '$2', 'B2'].join('\n'), languageId: 'fanuc-gcode' });
+  });
+
+  it('CODE-2: a document of one file per channel against its saved version, limited to its own channel, opens with the whole text', async () => {
+    w.sets.set(w.a, {
+      layout: 'multi-file',
+      self: { id: '2', name: 'Channel 2', index: 1 },
+      members: [],
+      missing: [],
+      outside: [],
+      marks: [],
+      problems: [],
+      truncated: false,
+    });
+    w.texts.set(w.a, ['$2', 'B1', 'B2 Y'].join('\n'));
+    expect(await w.service.open(w.a, { kind: 'saved' }, { channel: '2' })).toBe(true);
+    expect(get(w.service.sides)?.original).toEqual({ kind: 'text', text: BEFORE.join('\n'), languageId: 'fanuc-gcode' });
+    expect(get(w.service.sides)?.modified).toEqual({ kind: 'text', text: ['$2', 'B1', 'B2 Y'].join('\n'), languageId: 'fanuc-gcode' });
+    // ...and against another channel it still refuses, in the words for the document's own channel.
+    expect(await w.service.open(w.a, { kind: 'saved' }, { channel: '1' })).toBe(false);
+    expect(w.messages.at(-1)).toBe('!prog.nc is the file of Channel 2, not of 1.');
   });
 
   it('refuses a file that is not open as a document: it has no machine, so no channels', async () => {
