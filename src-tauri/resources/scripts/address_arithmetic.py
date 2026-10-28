@@ -223,7 +223,11 @@ count parameters reached only through the arc-centre option (`G83 … K3`). An a
 (`P1X` … `P3Y`, the centre `CCX`/`CCY`, a point beside the contour `PDX`/`PDY`) on a chosen axis
 moves with a shift of that axis when every word of its block is classified (v1.2.0 Wave Y, T121:
 `FK_KEPT`); under a scale, or in a block with a word nobody classified, it is left and listed as
-a warning (B1 fix NC, NC-03), so the FK contour has to be checked.
+a warning (B1 fix NC, NC-03), so the FK contour has to be checked. On a selection they move only
+when the whole FK contour lies in it (Wave Y, D4): the FPOL in force at its first FK block, its
+first to its last FK block, and every block a relative reference names; else they are left so too.
+The points of a contour move together or not at all (a word nobody classified in one of its
+blocks leaves them all), and the `FPOL` the contour reads stays with them.
 
 Selections
 ----------
@@ -232,6 +236,10 @@ distance mode, the plane, a frame and a cycle in force there are known. A cycle 
 started above the selection and is moved there cannot be moved here, so the blocks in the
 selection that run it are refused. Without the lines above, the run says so at its first
 line and reads the selection from the top-of-program state, which leaves most words alone.
+The lines below the selection (`input.followingLines`, FZ-5) are read for the rotary axes only
+(Wave Y, D5): a move made before the program first writes a rotary axis that turns it is
+refused when the program turns that axis later, below the selection too, as the whole run
+refuses it; without those lines such a move is left with a warning.
 
 Everything outside the values it changes — line endings, spacing, block numbers, comments —
 is handed back byte for byte: the only edits are the value spans of tokens.
@@ -239,6 +247,7 @@ is handed back byte for byte: the only edits are the value spans of tokens.
 
 from __future__ import annotations
 
+import re
 import sys
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -337,6 +346,17 @@ FK_KEPT = frozenset((
 ))
 #: The words besides them an FK block may write.
 FK_OTHER = frozenset(("F", "M", "RL", "RR", "R0"))
+#: v1.2.0 Wave Y (D4, the skeptic of T121): the words that make a block an element of an FK
+#: contour (with ``FSELECT``, which picks one of its solutions), the pole of its polar values,
+#: and the relative references, each followed by the number of the block it names (TNC 640
+#: Klartext manual 2019, p.175-189). A selection moves the FK points of a contour only when the
+#: whole contour lies in it: its FPOL, its first to its last FK block, and every block a
+#: reference names (`Run.fk_contours`).
+FK_ELEMENTS = frozenset(("FL", "FLT", "FC", "FCT", "FSELECT"))
+FK_POLE = "FPOL"
+FK_REFERENCES = frozenset(("RX", "RY", "RPR", "RPA", "RAN", "PAR", "RCCX", "RCCY", "RCCPR", "RCCPA"))
+#: A quick look whether lines may hold an FK block or an FPOL at all (``Run.fk_contours``).
+FK_TEXT = re.compile(r"\bF(?:L|LT|C|CT|SELECT|POL)\b", re.IGNORECASE)
 
 #: What the summary calls a count of each reason (singular, plural).
 REASON_TEXT = {
@@ -1063,6 +1083,69 @@ def read_block(block: Block, entry_of: Any, letters: frozenset) -> None:
             i += 1
 
 
+def blocks_of(
+    lines: Sequence[str], first_number: int, state: Optional[gedit_nc.LineState], cp: gedit_nc.CompiledProfile, entry_of: Any, letters: frozenset
+) -> List[Block]:
+    """D4: the blocks of ``lines`` as `read_block` reads them, without the modal state (the FK
+    contours of a selection, read before its blocks are judged)."""
+    out: List[Block] = []
+    pending: List[Line] = []
+    for index, text in enumerate(lines):
+        head = gedit_nc.continues_block(text, cp)
+        continued = (state.continuation if state is not None else False) or head
+        if pending and not continued:
+            out.append(Block(pending))
+            pending = []
+        tokens, state = gedit_nc.tokenize_line(text, cp, state)
+        pending.append(Line(index, first_number + index, text, tokens, True))
+    if pending:
+        out.append(Block(pending))
+    for block in out:
+        read_block(block, entry_of, letters)
+    return out
+
+
+def number_of(text: Optional[str]) -> Optional[int]:
+    """A block number as written (`12`, `+12`), or ``None``."""
+    try:
+        return int((text or "").strip())
+    except ValueError:
+        return None
+
+
+def block_addresses(block: Block) -> set:
+    """The addresses of a block's value words, upper case."""
+    return {(token.address or "").upper() for token, _ in block.words}
+
+
+def klartext_number(block: Block) -> Optional[int]:
+    """D4: the number a block is written with (Klartext `12 FL …`), or ``None``."""
+    for token in block.first.tokens:
+        if token.kind == "blockNumber":
+            return number_of(token.value_text)
+    return None
+
+
+def fk_references(block: Block) -> List[Optional[int]]:
+    """D4: the block numbers the relative references of an FK block name (`RX 3`, `RCCX12`);
+    ``None`` for a reference whose number cannot be read."""
+    out: List[Optional[int]] = []
+    for line in block.lines:
+        tokens = [t for t in line.tokens if t.kind != "whitespace"]
+        for i, token in enumerate(tokens):
+            if token.kind != "word" or (token.address or "").upper() not in FK_REFERENCES:
+                continue
+            if (token.value_text or "") != "":
+                out.append(number_of(token.value_text))
+                continue
+            nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+            if nxt is not None and nxt.kind == "word" and nxt.address is None and (nxt.value_text or "") != "":
+                out.append(number_of(nxt.value_text))
+            else:
+                out.append(None)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------
@@ -1139,6 +1222,24 @@ class Run:
         #: tool-axis word the run changed): until then a cycle starts at the unmoved level.
         self.level_above = False
         self.level_inside = False
+        #: v1.2.0 Wave Y (D4): what a selection needs to tell whether an FK contour lies wholly
+        #: in it. Whether the run is on a selection, and the lines below it
+        #: (``input.followingLines``; ``None`` when they were not sent).
+        self.is_selection = False
+        self.following: Optional[List[str]] = None
+        #: Above the selection: whether an FK contour is still open where it starts, whether
+        #: an FPOL was written, and the block numbers written there.
+        self.fk_open_above = False
+        self.fpol_above = False
+        self.numbers_above: set = set()
+        #: The selection's lines, their first line number and the tokenizer state they start in.
+        #: The tokenizer state the walk ends in (``walk_below`` reads on from it).
+        self.end_state: Optional[gedit_nc.LineState] = None
+        self.selection_lines: List[str] = []
+        self.selection_first = 1
+        self.selection_state: Optional[gedit_nc.LineState] = None
+        #: The FK contours of the run's lines (``fk_contours``), once read.
+        self._fk: Optional[Tuple[Dict[int, Optional[str]], Dict[int, bool]]] = None
 
     def entry(self, code: str) -> Optional[Dict[str, Any]]:
         """The database entry of a written code, remembered per spelling."""
@@ -1155,7 +1256,11 @@ class Run:
         cp = self.cp
         state: Optional[gedit_nc.LineState] = None
         pending: List[Line] = []
+        self.selection_lines = list(lines[inside_from:])
+        self.selection_first = first_number + inside_from
         for index, text in enumerate(lines):
+            if index == inside_from:
+                self.selection_state = state
             head = gedit_nc.continues_block(text, cp)
             continued = (state.continuation if state is not None else False) or head
             if pending and not continued:
@@ -1166,6 +1271,44 @@ class Run:
             pending.append(Line(index, first_number + index, text, tokens, index >= inside_from))
         if pending:
             self.finish(pending)
+        self.end_state = state
+
+    def walk_below(self, following: Optional[Sequence[str]], first_number: int) -> None:
+        """v1.2.0 Wave Y (D5, FZ-5): the lines below a selection, read for the rotary axes only:
+        whether the program turns, later, an axis a changed block of the selection waits on
+        (`settle_rotary`), as the whole run would. Without them (``None``) such a block is left
+        (`settle_rotary`)."""
+        if not self.rotary.rotary or following is None:
+            return
+        waiting = set()
+        for block in self.blocks:
+            if block.inside and block.refusal is None and block.edits and block.tilt_pending:
+                waiting |= block.tilt_pending
+        waiting -= set(self.rotary.first_written)
+        if not waiting:
+            return
+        cp = self.cp
+        state = self.end_state
+        pending: List[Line] = []
+        for index, text in enumerate(following):
+            head = gedit_nc.continues_block(text, cp)
+            continued = (state.continuation if state is not None else False) or head
+            if pending and not continued:
+                self.note_below(pending)
+                pending = []
+                if waiting <= set(self.rotary.first_written):
+                    return
+            tokens, state = gedit_nc.tokenize_line(text, cp, state)
+            self.interp.update(tokens, first_number + index, "", continued=head)
+            pending.append(Line(index, first_number + index, text, tokens, False))
+        if pending:
+            self.note_below(pending)
+
+    def note_below(self, lines: List[Line]) -> None:
+        """D5: one block below the selection: its rotary words only."""
+        block = Block(lines)
+        read_block(block, self.entry, self.setup.letters)
+        self.note_rotary(block)
 
     def finish(self, lines: List[Line]) -> None:
         """One whole block has been read: judge it in the state it leaves behind."""
@@ -1181,6 +1324,7 @@ class Run:
         block.opens_frame = frame is not None and any(line.number == frame["line"] for line in lines)
         if not block.inside:
             self.note_level_above(block)
+            self.note_fk_above(block)
         if not self.relevant(block, group):
             if block.unknown is not None and block.inside:
                 seen = self.unknown_seen.setdefault(block.unknown, [block.number, 0])
@@ -1254,6 +1398,39 @@ class Run:
             return
         setup = self.setup
         codes = block.codes()
+        before, writes = self.note_rotary(block)
+        if self.interp.tcp is not None:
+            return
+        after = rotary.state
+        if TOOL_AXIS in setup.linear:
+            block.tilt_tool = rotary.blocking(TOOL_AXIS, before, after)
+        turned = set()
+        pending = set()
+        moved: List[str] = []
+        for token, _ in block.words:
+            address = (token.address or "").upper()
+            if (token.value_text or "") == "" or address not in setup.words:
+                continue
+            linear = self.linear_of(address, codes)
+            if linear is None:
+                continue
+            hit, unwritten = rotary.blocking(linear, before, after)
+            if hit or unwritten:
+                if address not in moved:
+                    moved.append(address)
+                turned |= hit
+                pending |= unwritten
+                if hit & writes:
+                    block.tilt_moves = True
+        block.tilt_words = moved
+        block.tilt_turned = frozenset(turned)
+        block.tilt_pending = frozenset(pending)
+
+    def note_rotary(self, block: Block) -> Tuple[Dict[str, str], set]:
+        """NC-4: the rotary words of a block, into :attr:`rotary`: where the axes stood before it,
+        and the axes it writes."""
+        rotary = self.rotary
+        codes = block.codes()
         distance = self.interp.state.get("distance")
         words: List[Tuple[str, Any, Optional[bool]]] = []
         writes = set()
@@ -1282,32 +1459,7 @@ class Run:
         # machine position does, to a place the program's frame does not state.
         if words and "data" not in flags:
             rotary.update(words, block.number, "machine" in flags)
-        if self.interp.tcp is not None:
-            return
-        after = rotary.state
-        if TOOL_AXIS in setup.linear:
-            block.tilt_tool = rotary.blocking(TOOL_AXIS, before, after)
-        turned = set()
-        pending = set()
-        moved: List[str] = []
-        for token, _ in block.words:
-            address = (token.address or "").upper()
-            if (token.value_text or "") == "" or address not in setup.words:
-                continue
-            linear = self.linear_of(address, codes)
-            if linear is None:
-                continue
-            hit, unwritten = rotary.blocking(linear, before, after)
-            if hit or unwritten:
-                if address not in moved:
-                    moved.append(address)
-                turned |= hit
-                pending |= unwritten
-                if hit & writes:
-                    block.tilt_moves = True
-        block.tilt_words = moved
-        block.tilt_turned = frozenset(turned)
-        block.tilt_pending = frozenset(pending)
+        return before, writes
 
     def pass_lengths(self, entry: Optional[Dict[str, Any]]) -> Dict[str, str]:
         """T009: the length parameters of a code and the axis each lies along (`lengthAlong`)."""
@@ -1737,9 +1889,24 @@ class Run:
                 geometry.append(outcome)
                 continue
             fk_axis = FK_POINT_AXES.get(address)
-            if fk_axis is not None and fk_axis in setup.chosen and self.params.additive and self.fk_classified(block):
+            fk_why = self.fk_points_kept(block) if fk_axis is not None and fk_axis in setup.chosen and self.params.additive else "scale"
+            if fk_axis is not None and fk_axis in setup.chosen and fk_why is None:
                 # T121: the absolute points of an FK contour move with the shift of their axis.
                 outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis)))
+                continue
+            if fk_axis is not None and fk_axis in setup.chosen and fk_why == "outside":
+                # D4: a contour that runs past the selection would be moved only in part.
+                written = quote(token.text)
+                outcomes.append(
+                    (
+                        "skip",
+                        line,
+                        "fk-point",
+                        "%s: a point of an FK contour that does not lie wholly in the selection (its FPOL, a block it refers to, or more of its blocks are outside it); gEdit does not move it. Select the whole FK contour, or check it"
+                        % written,
+                        written,
+                    )
+                )
                 continue
             if fk_axis is not None and fk_axis in setup.chosen:
                 written = quote(token.text)
@@ -1754,6 +1921,20 @@ class Run:
                 )
                 continue
             if address not in setup.words and not is_cycle:
+                continue
+            if self.params.additive and address in setup.chosen and FK_POLE in block_addresses(block) and not self.fk_pole_moves(block):
+                # D4 follow-up: the pole of an FK contour stays with the contour's points.
+                written = quote(token.text)
+                outcomes.append(
+                    (
+                        "skip",
+                        line,
+                        "fk-point",
+                        "%s: the pole (FPOL) of an FK contour whose points are not moved (the contour does not lie wholly in the selection, or a block of it has a word gEdit does not classify); gEdit does not move it either. Check the FK contour"
+                        % written,
+                        written,
+                    )
+                )
                 continue
             word_data = None if id(token) in pole_words else cycle_data.get(id(token), data)
             outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, word_data, is_cycle))
@@ -2596,6 +2777,149 @@ class Run:
             return False
         return True
 
+    def fk_kind(self, block: Block) -> Optional[str]:
+        """D4: what a block is to an FK contour: ``'element'`` (an FK block, `FSELECT` among
+        them), ``'pole'`` (`FPOL`), ``'end'`` (a move of another kind to a written position,
+        which ends the contour: `L X+20 Y+20`) or ``None`` (anything else, which neither starts
+        nor ends one: a comment, `RND`, `CC`, a polar or approach block without an axis word; read
+        so, a contour runs on further, which only makes a selection refuse more)."""
+        addresses = {(token.address or "").upper() for token, _ in block.words}
+        if addresses & FK_ELEMENTS:
+            return "element"
+        if FK_POLE in addresses:
+            return "pole"
+        if any(sets_of(entry).get("motion") for entry in block.codes()) and self.positions(block):
+            return "end"
+        return None
+
+    def note_fk_above(self, block: Block) -> None:
+        """D4: a block above the selection: whether an FK contour is open where the selection
+        starts, whether an FPOL was written, and the block numbers written there."""
+        number = klartext_number(block)
+        if number is not None:
+            self.numbers_above.add(number)
+        kind = self.fk_kind(block)
+        if kind == "element":
+            self.fk_open_above = True
+        elif kind == "pole":
+            self.fpol_above = True
+        elif kind == "end":
+            self.fk_open_above = False
+
+    def fk_points_kept(self, block: Block) -> Optional[str]:
+        """D4 (the skeptic of T121) and its follow-up: why the FK points of this block are left
+        under a shift, or ``None`` when they move. They move with their FK contour or not at all:
+        ``'outside'`` when the contour does not lie wholly in a selection (the FPOL in force at its
+        first FK block, every block from the first FK block to the last one, every block a
+        relative reference such as `RX 3` or `PAR 5` names; the lines below show where a contour
+        open at the selection's end goes on, and without them it is taken to go on);
+        ``'unclassified'`` when a block of the contour, or its FPOL, writes a word nobody
+        classified (:meth:`fk_classified`)."""
+        points, _ = self.fk_contours()
+        return points.get(block.number, "unclassified")
+
+    def fk_pole_moves(self, block: Block) -> bool:
+        """D4 follow-up: whether the axis words of an `FPOL` block move under a shift. The pole
+        stays with the FK contours that read it: it moves only when every one of them moves
+        (:meth:`fk_points_kept`), and, on a selection, when no contour below it reads it (the
+        lines below show that; without them it is taken to)."""
+        _, poles = self.fk_contours()
+        return poles.get(block.number, True)
+
+    def fk_contours(self) -> Tuple[Dict[int, Optional[str]], Dict[int, bool]]:
+        """D4: the FK contours of the run's lines (the selection, or the whole program), read
+        before their blocks are judged: for every FK block, by line number, why its points are
+        left (``None``: they move); for every `FPOL` block, whether its axis words move."""
+        if self._fk is not None:
+            return self._fk
+        points: Dict[int, Optional[str]] = {}
+        poles: Dict[int, bool] = {}
+        self._fk = (points, poles)
+        if not any(FK_TEXT.search(text) for text in self.selection_lines):
+            return self._fk
+        blocks = blocks_of(self.selection_lines, self.selection_first, self.selection_state, self.cp, self.entry, self.setup.letters)
+        inside_numbers: set = set()
+        for block in blocks:
+            number = klartext_number(block)
+            if number is not None:
+                inside_numbers.add(number)
+        # A contour: its FK blocks, whether it runs outside the scope, the block numbers its
+        # references name, and whether every word of its blocks is classified.
+        sections: List[Dict[str, Any]] = []
+        # A pole: its line, whether its words are classified, the contours that read it, and
+        # whether one outside the scope reads it.
+        pole_list: List[Dict[str, Any]] = []
+        current: Optional[Dict[str, Any]] = None
+        if self.fk_open_above:
+            current = {"members": [], "outside": True, "refs": [], "classified": True}
+            sections.append(current)
+        last_pole: Optional[Dict[str, Any]] = None
+        pole_above = self.fpol_above
+        for block in blocks:
+            kind = self.fk_kind(block)
+            if kind == "pole":
+                last_pole = {"number": block.number, "classified": self.fk_classified(block), "sections": [], "outside": False}
+                pole_list.append(last_pole)
+                pole_above = False
+                if current is not None:
+                    last_pole["sections"].append(current)
+            elif kind == "element":
+                if current is None:
+                    current = {"members": [], "outside": pole_above, "refs": [], "classified": True}
+                    sections.append(current)
+                    if last_pole is not None:
+                        last_pole["sections"].append(current)
+                current["members"].append(block.number)
+                current["refs"].extend(fk_references(block))
+                if not self.fk_classified(block):
+                    current["classified"] = False
+            elif kind == "end":
+                current = None
+        if self.is_selection and (current is not None or last_pole is not None):
+            if self.following is None:
+                if current is not None:
+                    current["outside"] = True
+                if last_pole is not None:
+                    last_pole["outside"] = True
+            else:
+                still_open = current is not None
+                pole_below = False
+                for block in blocks_of(self.following, 0, None, self.cp, self.entry, self.setup.letters):
+                    kind = self.fk_kind(block)
+                    if kind == "element":
+                        if still_open:
+                            current["outside"] = True
+                        if last_pole is not None and not pole_below:
+                            last_pole["outside"] = True
+                        break
+                    if kind == "pole":
+                        pole_below = True
+                        if not still_open:
+                            break
+                    elif kind == "end":
+                        still_open = False
+                        if pole_below or last_pole is None:
+                            break
+        for section in sections:
+            section["moves"] = None
+            # A whole run holds every block a reference can name.
+            if section["outside"] or (
+                self.is_selection and any(ref is None or ref not in inside_numbers or ref in self.numbers_above for ref in section["refs"])
+            ):
+                section["moves"] = "outside"
+            elif not section["classified"]:
+                section["moves"] = "unclassified"
+        for pole in pole_list:
+            for section in pole["sections"]:
+                if not pole["classified"] and section["moves"] is None:
+                    section["moves"] = "unclassified"
+        for section in sections:
+            for number in section["members"]:
+                points[number] = section["moves"]
+        for pole in pole_list:
+            poles[pole["number"]] = pole["classified"] and not pole["outside"] and all(section["moves"] is None for section in pole["sections"])
+        return self._fk
+
     def word_outcome(
         self,
         token: gedit_nc.Token,
@@ -2865,6 +3189,22 @@ class Run:
             if block.refusal is not None or not block.edits or not block.tilt_pending:
                 continue
             later = self.rotary.known_later(block.tilt_pending)
+            unseen = sorted(a for a in block.tilt_pending if a not in first)
+            if not later and unseen and self.is_selection and self.following is None:
+                # D5: the lines below were not sent, so whether the program turns the axis
+                # there (which the whole run refuses) is not known: left, as the whole run may.
+                block.refusal = (
+                    "rotary-without-tcp",
+                    "writes %s before the program has written %s, and the lines below the selection were not available: whether the program turns %s later, which would make %s angle here unknown while tool centre point control is off, cannot be told. Run Address arithmetic on the whole program"
+                    % (
+                        and_list(block.tilt_words),
+                        and_list(unseen),
+                        "it" if len(unseen) == 1 else "them",
+                        "its" if len(unseen) == 1 else "their",
+                    ),
+                )
+                block.clear()
+                continue
             if not later:
                 continue
             block.refusal = (
@@ -3159,6 +3499,21 @@ def apply_edits(lines: Sequence[str], run: Run) -> List[str]:
     return out
 
 
+def following_lines(context: Dict[str, Any]) -> Optional[List[str]]:
+    """v1.2.0 Wave Y (D4, D5): the document lines below a selection (``input.followingLines``,
+    FZ-5), or ``None`` when the run did not get them (a whole-document run, a field that is no
+    list of strings, a selection whose lines below were too many to send). The same reading as
+    ``_nc_run.following_lines``, which this script does not import (it would load the geometry
+    modules)."""
+    scope = as_dict(context.get("input"))
+    if scope.get("scope") != "selection":
+        return None
+    lines = scope.get("followingLines")
+    if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
+        return None
+    return list(lines)
+
+
 def main() -> int:
     context = gedit_nc.load_context()
     lines = gedit_nc.read_input()
@@ -3213,7 +3568,13 @@ def main() -> int:
         )
 
     run = Run(setup, cp)
+    run.is_selection = scope.get("scope") == "selection"
+    run.following = following_lines(context)
     run.walk(list(preceding) + lines, base_line - len(preceding), len(preceding))
+    if run.is_selection:
+        end = scope.get("endLine")
+        below = end + 1 if isinstance(end, int) and not isinstance(end, bool) and end >= base_line else base_line + len(lines)
+        run.walk_below(run.following, below)
     run.settle()
     out = apply_edits(list(preceding) + lines, run)[len(preceding):]
     collect_findings(run, findings)

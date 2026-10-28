@@ -123,6 +123,11 @@ def context_of(case):
         context["machine"]["id"] = name.lower().replace(" ", "-")
         context["machine"]["name"] = name
     context.pop("machineName", None)
+    scope = context.get("input")
+    if isinstance(scope, dict) and scope.get("scope") == "selection" and "followingLines" not in scope:
+        # v1.2.0 Wave Y (D5): a selection case runs to the end of its document (README), and
+        # the app sends the lines below a selection, here none (FZ-5).
+        context["input"] = dict(scope, followingLines=[])
     return context
 
 
@@ -234,6 +239,105 @@ class TestFkContour(unittest.TestCase):
     def test_a_z_shift_touches_no_fk_point(self):
         payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="add", operand=5, addresses=["Z"])
         self.assertEqual([f for f in payload["findings"] if f["reason"] == "fk-point"], [])
+
+
+class TestFkContourInASelectionD4(unittest.TestCase):
+    """v1.2.0 Wave Y, D4 (the skeptic of T121): a selection moves the FK points of a contour only
+    when the whole contour lies in it: the FPOL in force at its first FK block, its first to its
+    last FK block, and every block a relative reference names. Otherwise its points are left with
+    the `fk-point` warning, as before T121: `FL PR+30 PA+0` and `CCPR+20 CCPA+90` stay about the
+    unmoved FPOL, and moving `CCX`/`P1X` alone would bend the contour (probe t121a)."""
+
+    PROGRAM = "\n".join([
+        "0 BEGIN PGM FK MM",
+        "1 ; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "2 TOOL CALL 1 Z S2000",
+        "3 L Z+100 R0 FMAX",
+        "4 L X+10 Y+10 R0 FMAX",
+        "5 L Z-5 R0 F500",
+        "6 APPR CT X+20 Y+20 CCA90 R+5 RL F300",
+        "7 FPOL X+50 Y+50",
+        "8 FL PR+30 PA+0",
+        "9 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60",
+        "10 FCT DR- R15 CCPR+20 CCPA+90",
+        "11 FLT P1X+20 P1Y+80",
+        "12 L X+20 Y+20",
+        "13 DEP CT CCA90 R+5 F1000",
+        "14 L Z+100 R0 FMAX",
+        "15 END PGM FK MM",
+    ])
+
+    def run_on(self, start, end, program=None, below=True):
+        lines = (program or self.PROGRAM).split("\n")
+        context = helpers.effective_context("heidenhain-klartext")
+        context["params"] = {"operation": "add", "operand": 5, "addresses": ["X"]}
+        context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+        if below:
+            context["input"]["followingLines"] = lines[end:]
+        result = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
+        if not result.ok:
+            raise AssertionError(result.stderr)
+        return result.json()
+
+    def fk_points(self, payload):
+        return [(f["line"], f["message"].split(":")[0], f["severity"]) for f in payload["findings"] if f["reason"] == "fk-point"]
+
+    def test_the_fpol_above_the_selection_leaves_every_fk_point(self):
+        payload = self.run_on(9, 12)
+        self.assertEqual(payload["text"], "\n".join(self.PROGRAM.split("\n")[8:12]))
+        self.assertEqual(self.fk_points(payload), [(10, "CCX+50", "warning"), (10, "P1X+70", "warning"), (12, "P1X+20", "warning")])
+
+    def test_a_selection_with_the_whole_contour_moves_it(self):
+        for end in (12, 13):
+            payload = self.run_on(8, end)
+            text = lines_of(payload)
+            self.assertEqual((text[0], text[2], text[4]), ("7 FPOL X+55 Y+50", "9 FC DR+ R30 CCX+55 CCY+50 P1X+75 P1Y+60", "11 FLT P1X+25 P1Y+80"))
+            self.assertEqual(self.fk_points(payload), [])
+
+    def test_a_contour_that_runs_on_below_the_selection_is_left(self):
+        payload = self.run_on(8, 11)
+        self.assertEqual(lines_of(payload)[2], "9 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60")
+        # The FPOL on line 8 stays with its contour (D4 follow-up).
+        self.assertEqual([p[0] for p in self.fk_points(payload)], [8, 10, 10])
+        # Without the lines below, a contour still open at the selection's end may run on.
+        payload = self.run_on(8, 12, below=False)
+        self.assertEqual([p[0] for p in self.fk_points(payload)], [8, 10, 10, 12])
+
+    def test_a_reference_to_a_block_above_the_selection_leaves_the_contour(self):
+        program = "\n".join([
+            "0 BEGIN PGM FK MM", "1 L X+10 Y+10 R0 FMAX", "2 L X+30 Y+10", "3 FPOL X+50 Y+50", "4 FL PR+20 PA+20",
+            "5 FC DR+ R10 CCX+60 CCY+50 RX 2", "6 FLT P1X+40 P1Y+70", "7 L X+0 Y+0", "8 END PGM FK MM",
+        ])
+        payload = self.run_on(4, 8, program)
+        self.assertEqual([p[:2] for p in self.fk_points(payload)], [(4, "X+50"), (6, "CCX+60"), (7, "P1X+40")])
+        # The same contour with the block it names in the selection moves.
+        payload = self.run_on(3, 8, program)
+        self.assertEqual(lines_of(payload)[3], "5 FC DR+ R10 CCX+65 CCY+50 RX 2")
+        self.assertEqual(self.fk_points(payload), [])
+
+    def test_the_fpol_stays_with_a_contour_that_is_left(self):
+        # D4 follow-up: moving the pole alone would move the polar values about it.
+        payload = self.run_on(8, 11)
+        self.assertEqual(lines_of(payload)[0], "7 FPOL X+50 Y+50")
+        self.assertEqual(self.fk_points(payload)[0], (8, "X+50", "warning"))
+        # A pole whose contour lies below the selection, or may (no lines below).
+        for below in (True, False):
+            payload = self.run_on(8, 8, below=below)
+            self.assertEqual((payload["text"], self.fk_points(payload)), ("7 FPOL X+50 Y+50", [(8, "X+50", "warning")]))
+        # The whole contour: the pole moves with it.
+        self.assertEqual(lines_of(self.run_on(8, 12))[0], "7 FPOL X+55 Y+50")
+
+    def test_a_word_nobody_classified_leaves_the_whole_contour(self):
+        # D4 follow-up: the points of a contour move together or not at all, in a whole run too.
+        program = self.PROGRAM.replace("11 FLT P1X+20 P1Y+80", "11 FLT P1X+20 P1Y+80 XYZ5")
+        payload = run(program, profile="heidenhain-klartext", operation="add", operand=5, addresses=["X"])
+        text = lines_of(payload)
+        self.assertEqual(text[7:12], program.split("\n")[7:12])
+        self.assertEqual(
+            [p[:2] for p in self.fk_points(payload)],
+            [(8, "X+50"), (10, "CCX+50"), (10, "P1X+70"), (12, "P1X+20")],
+        )
+        self.assertEqual(text[12], "12 L X+25 Y+20")
 
 
 def lines_of(payload):
@@ -1551,16 +1655,58 @@ class TestNcfcFanucArcRadius(unittest.TestCase):
                 self.assertEqual(payload["findings"], [])
 
 
-def run_selection(text, start, end, profile="fanuc-gcode", **params):
-    """A selection of an inline program (lines ``start`` to ``end``), primed with the lines above."""
+def run_selection(text, start, end, profile="fanuc-gcode", below=True, **params):
+    """A selection of an inline program (lines ``start`` to ``end``), primed with the lines above
+    and, unless ``below`` is false, given the lines below."""
     lines = text.split("\n")
     context = helpers.effective_context(profile)
     context["params"] = dict({"operation": "add", "operand": 0.5}, **params)
     context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+    if below:
+        # The app sends the lines below a selection too (FZ-5; v1.2.0 Wave Y, D5).
+        context["input"]["followingLines"] = lines[end:]
     result = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
     if not result.ok:
         raise AssertionError(result.stderr)
     return result.json()
+
+
+class TestRotaryBelowTheSelectionD5(unittest.TestCase):
+    """v1.2.0 Wave Y, D5 (the skeptic of FZ-5): a move made before the program first writes a
+    rotary axis that turns it is refused when the program turns that axis later (NC-4). A
+    selection reads the lines below it for that (``input.followingLines``), so it refuses exactly
+    what the whole run refuses; without them such a move is left with a warning (probe fz5a)."""
+
+    PROGRAM = "\n".join([
+        "%", "O1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G21 G17 G90",
+        "G0 X0. Y0. Z50.", "G1 X10. Y10. F100.", "G1 X20. Y10.", "G0 Z50.", "G0 B90.", "G1 X5. Y5.", "M30", "%",
+    ])
+
+    def test_a_selection_refuses_what_the_whole_run_refuses(self):
+        whole = run(self.PROGRAM, operand=1, addresses=["X"])
+        self.assertEqual([(f["line"], f["reason"]) for f in whole["findings"]], [(n, "rotary-without-tcp") for n in (4, 5, 6, 9)])
+        payload = run_selection(self.PROGRAM, 5, 6, operand=1, addresses=["X"])
+        self.assertEqual(lines_of(payload), ["G1 X10. Y10. F100.", "G1 X20. Y10."])
+        self.assertEqual(
+            [(f["line"], f["reason"], f["message"]) for f in payload["findings"]],
+            [(n, "rotary-without-tcp", m["message"]) for n, m in ((5, finding_at(whole, 5)), (6, finding_at(whole, 6)))],
+        )
+
+    def test_without_the_lines_below_such_a_move_is_left_with_a_warning(self):
+        payload = run_selection(self.PROGRAM, 5, 6, below=False, operand=1, addresses=["X"])
+        self.assertEqual(lines_of(payload), ["G1 X10. Y10. F100.", "G1 X20. Y10."])
+        self.assertEqual(finding_at(payload, 5)["severity"], "warning")
+        self.assertEqual(finding_at(payload, 5)["reason"], "rotary-without-tcp")
+        self.assertIn("the lines below the selection were not available", finding_at(payload, 5)["message"])
+
+    def test_a_program_that_never_turns_the_axis_below_is_shifted(self):
+        program = self.PROGRAM.replace("G0 B90.", "G0 B0.")
+        payload = run_selection(program, 5, 6, operand=1, addresses=["X"])
+        self.assertEqual(lines_of(payload), ["G1 X11. Y10. F100.", "G1 X21. Y10."])
+        self.assertEqual(payload["findings"], [])
+        # A selection that ends at the end of the document has nothing below it.
+        payload = run_selection("G21 G17 G90\nG1 X10. Y10. F100.", 2, 2, operand=1, addresses=["X"])
+        self.assertEqual((lines_of(payload), payload["findings"]), (["G1 X11. Y10. F100."], []))
 
 
 class TestNcr1DrillingCycleAfterAnArc(unittest.TestCase):
