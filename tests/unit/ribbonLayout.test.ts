@@ -87,7 +87,15 @@ describe('the ribbon layout', () => {
       'view.toggleBookmarks',
     ]);
     expect(inGroup('ranges.group')).toEqual(['edit.selectBlockRange', 'edit.deleteBlockRange']);
-    expect(inGroup('search.group')).toEqual(['search.findAll', 'search.replace', 'search.wholeAddressInFind']);
+    // P4.28: Find in Folder joins the group (plan §6.8 table: Edit tab, Search group, order 133). `inGroup` lists
+    // by contribution file name, the ribbon by `order`: the orders are read out of the sources.
+    expect(inGroup('search.group').sort()).toEqual(['search.findAll', 'search.findInFolder', 'search.replace', 'search.wholeAddressInFind']);
+    const searchOrder = (id: string): number => {
+      const file = placed.find((p) => p.what === id)?.file ?? '';
+      const m = readFileSync(join(CONTRIB, file), 'utf8').match(new RegExp(`command:\\s*'${id.replace('.', '\\.')}',\\s*order:\\s*(\\d+)`));
+      return m === null ? -1 : Number(m[1]);
+    };
+    expect(['search.findAll', 'search.replace', 'search.wholeAddressInFind', 'search.findInFolder'].map(searchOrder)).toEqual([130, 131, 132, 133]);
   });
 
   it('Insert: the template groups, Edit Cycle and Manage Templates', () => {

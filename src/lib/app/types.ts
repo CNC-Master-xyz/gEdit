@@ -1112,6 +1112,14 @@ export interface ReportData {
    * transforms never set it — their findings are bounded by the document.
    */
   dropped?: number;
+  /**
+   * Phase 4 (P4f prelude, Find in Folder; plan section 6.8): what a click on a row does when the
+   * rows are not lines of open documents. When set, the panel calls it for a row that carries a
+   * `path` (and a `line`, if the hit has one) instead of revealing a line of an open document.
+   * It lives in memory with the report; an exported report (CSV, text) never holds it. The
+   * folder search's opener grants the one file (`folder_grant`), opens it and reveals the line.
+   */
+  openRow?: (row: Record<string, unknown>) => void | Promise<void>;
 }
 
 /** stores/results.ts → `export const results: ResultsService` (owner: WP4.1) */

@@ -6,7 +6,10 @@
 //  - `search.findAll` (`Mod+Shift+F`) asks the form, finds in the active document or in
 //    every open one, and puts the hits in the Results panel. A row carries the id of its
 //    own document (§7.16 #139), because two documents can have the same name. The panel
-//    shows at most `SEARCH_MAX_HITS` rows and says how many more there were.
+//    shows at most `SEARCH_MAX_HITS` rows and says how many more there were. For a program
+//    with channel sections the form also offers a **Channel** (P4.31, plan §6.8.6): only the
+//    lines of that channel are read; the rows keep the document's line numbers. Replace All
+//    is not limited to a channel.
 //  - `search.replace` is the `replace` transform: this file asks the form (so it can offer
 //    "in a new tab" next to the text) and hands the answers to the runner, which does the
 //    rest of the sequence (scope, lock, one undo step, summary).
@@ -26,13 +29,15 @@ import { status } from '$lib/app/status';
 import { transforms } from '$lib/app/transforms';
 import type { FieldSpec } from '$lib/core/forms/types';
 import { initialValues } from '$lib/core/forms/values';
+import { scopableChannels, scopeOf } from '$lib/core/channels/scope';
 import { findInLines, parseQuery, SEARCH_MAX_HITS, wholeAddressRegex } from '$lib/core/search';
-import type { SearchHit } from '$lib/core/search';
+import type { LineRange, SearchHit } from '$lib/core/search';
 import { findInLinesGuarded, guardQuery } from '$lib/core/search/guard';
 import { appGuardRunner } from '$lib/core/regexGuard/app';
 import { flagsOf, replace, searchFields, searchLive } from '$lib/core/search/replace';
 import { t } from '$lib/i18n';
 import { editor } from '$lib/monaco/editorService';
+import { channels } from '$lib/stores/channels';
 import { docs } from '$lib/stores/documents';
 import { machines } from '$lib/stores/machines';
 import { results } from '$lib/stores/results';
@@ -81,7 +86,10 @@ async function askQuery(
   }
 }
 
-function findAllFields(): FieldSpec[] {
+/** The value of the Channel choice that means no limit; a channel id never holds `*`. */
+export const ALL_CHANNELS = '*';
+
+export function findAllFields(channelChoices: readonly { id: string; name: string }[] = []): FieldSpec[] {
   return [
     ...searchFields(),
     {
@@ -94,7 +102,42 @@ function findAllFields(): FieldSpec[] {
         { label: t('search.scopeOpen'), value: 'open' },
       ],
     },
+    ...(channelChoices.length === 0
+      ? []
+      : [
+          {
+            id: 'channel',
+            type: 'choice' as const,
+            label: t('channelScope.find.label'),
+            help: t('channelScope.find.help'),
+            default: ALL_CHANNELS,
+            choices: [
+              { label: t('channelScope.find.all'), value: ALL_CHANNELS },
+              ...channelChoices.map((c) => ({ label: c.name, value: c.id })),
+            ],
+          },
+        ]),
   ];
+}
+
+/** The channel the form's answer names, or null for all of them (and for a remembered channel this program does not have). */
+export function chosenChannel(answers: Record<string, unknown>, choices: readonly { id: string }[]): string | null {
+  const value = answers.channel;
+  return typeof value === 'string' && choices.some((c) => c.id === value) ? value : null;
+}
+
+/**
+ * The lines of `target` the search reads: all of them (`ranges` undefined), those of the channel,
+ * or none of the document (`skipped`: it has no such channel, P4.31).
+ */
+export function scopeFor(
+  target: { id: DocId; title: string },
+  channelId: string | null,
+): { ranges?: LineRange[]; skipped?: true } {
+  if (channelId === null) return {};
+  const scope = scopeOf(channels.fresh(target.id), channelId, target.title);
+  if (!scope.ok) return { skipped: true };
+  return scope.ranges === null ? {} : { ranges: scope.ranges };
 }
 
 /** How many hits `lines` holds in all, for the "dropped" count of a capped search. */
@@ -106,8 +149,10 @@ function countHits(...args: Parameters<typeof findInLines>): number {
 async function findAll(context: CommandContext): Promise<void> {
   const activeId = context.activeDocId;
   if (activeId === null) return;
-  const answers = await askQuery(t('search.findAll'), findAllFields(), FIND_KEY, activeId);
+  const offered = scopableChannels(channels.fresh(activeId), channels.params(activeId));
+  const answers = await askQuery(t('search.findAll'), findAllFields(offered), FIND_KEY, activeId);
   if (answers === undefined) return;
+  const channelId = chosenChannel(answers, offered);
 
   const flags = flagsOf(answers);
   const text = String(answers.query);
@@ -123,20 +168,26 @@ async function findAll(context: CommandContext): Promise<void> {
   const runner = await appGuardRunner();
   const rows: Record<string, unknown>[] = [];
   let dropped = 0;
+  let skipped = 0;
   for (const target of targets) {
+    const scope = scopeFor(target, channelId);
+    if (scope.skipped) {
+      skipped++;
+      continue;
+    }
     const view = machines.effective(target.id);
     const query = parseQuery(text, view.cp, flags);
     if ('error' in query) continue; // the active document parsed it; a word parses the same everywhere
     const lines = editor.getLines(target.id, 1, editor.getLineCount(target.id));
     const room = SEARCH_MAX_HITS - rows.length;
-    const found = await findInLinesGuarded(runner, lines, view.cp, query, { max: Math.max(room, 0), codes: view.codes });
+    const found = await findInLinesGuarded(runner, lines, view.cp, query, { max: Math.max(room, 0), codes: view.codes, ranges: scope.ranges });
     if ('refused' in found) {
       // T227: the pattern ran away and was stopped in the background reader; nothing is listed.
       say(found.refused, true);
       return;
     }
     for (const hit of found.hits) rows.push(rowOf(hit, target));
-    if (found.truncated) dropped += countHits(lines, view.cp, query, { codes: view.codes }) - found.hits.length;
+    if (found.truncated) dropped += countHits(lines, view.cp, query, { codes: view.codes, ranges: scope.ranges }) - found.hits.length;
   }
 
   const report: ReportData = {
@@ -149,9 +200,18 @@ async function findAll(context: CommandContext): Promise<void> {
     rows,
     docId: activeId,
     ...(dropped > 0 ? { dropped } : {}),
+    ...(channelId === null ? {} : { message: scopeMessage(channelId, offered, skipped) }),
   };
   results.show(report);
   status.show(rows.length === 0 ? t('search.foundNone') : t('search.found', { count: rows.length + dropped }));
+}
+
+/** The Results message of a search limited to a channel: which one, and the documents that had none of it. */
+function scopeMessage(channelId: string, offered: readonly { id: string; name: string }[], skipped: number): string {
+  const name = offered.find((c) => c.id === channelId)?.name ?? channelId;
+  const parts = [t('channelScope.find.message', { channel: name })];
+  if (skipped > 0) parts.push(t('channelScope.find.skipped', { count: skipped }));
+  return parts.join(' ');
 }
 
 /** Characters of a line a Results row shows; the rest is one click away in the editor. */

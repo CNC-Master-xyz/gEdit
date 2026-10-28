@@ -9,7 +9,9 @@
 //
 // Three rules it keeps (they are the contract in `app/types.ts`):
 //  - It never opens a file (standing rule 14). Siblings are asked about through
-//    `channelSiblings` (metadata only), once per document and on demand, never on a timer.
+//    `channelSiblings` (metadata only), once per document and on demand, never on a timer;
+//    a name that cannot be derived is looked for in the folder's listing (`folderSiblings`,
+//    names only, P4.30b). A Siemens job list counts only when the user has it open (J1).
 //  - `forDoc` always answers, synchronously, from its cache. The expensive part (sections
 //    and marks) is re-run after the outline's 150 ms aggregation, on a machine change, an
 //    assignment or a changed path, never on the keystroke path; the cheap part (which
@@ -42,9 +44,10 @@ import { channelAt, channelRefs, resolveChannelToken } from '$lib/core/channels/
 import { sameChannelSet } from '$lib/core/channels/sameSet';
 import { mergeDirty, patchResolution, type DirtySpan } from '$lib/core/channels/incremental';
 import { findMarks, guardChannelPatterns, macroCallCodes, maskForMarks, resolveDocument, sectionOwners, userPatterns, type MacroCalls } from '$lib/core/channels/marks';
-import { documentChannel, fileChannel, siblingNames } from '$lib/core/channels/siblings';
+import { documentChannel, fileChannel, listingPattern, siblingNames, siblingsFromListing, type ListedSiblings } from '$lib/core/channels/siblings';
+import { jobListNames, MAX_JOB_LINES, readJobList, startsLikeJobList, type JobList } from '$lib/core/channels/jobList';
 import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE } from '$lib/core/channels/types';
-import type { ChannelBudget, ChannelMember, ChannelParams, ChannelProblem, ChannelRef, ChannelSet, SyncFinding, SyncHit } from '$lib/core/channels/types';
+import type { ChannelBudget, ChannelFlow, ChannelMember, ChannelParams, ChannelProblem, ChannelRef, ChannelSet, SyncFinding, SyncHit } from '$lib/core/channels/types';
 import { channelBlock, type ChannelBlock } from '$lib/core/machines/validate';
 import { appGuardRunner } from '$lib/core/regexGuard/app';
 import { GUARD_BUDGET_MS } from '$lib/core/regexGuard/guard';
@@ -52,12 +55,14 @@ import type { GuardRunner } from '$lib/core/regexGuard/runner';
 import type { MachineConfig } from '$lib/core/machines/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import { editor as appEditor } from '$lib/monaco/editorService';
-import { channelSiblings, type SiblingInfo } from '$lib/platform/commands';
+import { channelSiblings, folderSiblings, type FolderSiblings, type SiblingInfo } from '$lib/platform/commands';
+import { status as appStatus } from '$lib/app/status';
+import { t } from '$lib/i18n';
 import { docs as appDocs } from '$lib/stores/documents';
 import { fileMemory as appMemory } from '$lib/stores/fileMemory';
 import { machines as appMachines } from '$lib/stores/machines';
 import { baseName, isMacPlatform, isWindowsPlatform } from '$lib/utils/platform';
-import type { ChannelService, ContentChange, Disposable, DocId, DocMeta, DocumentStore, EditorService, FileMemoryStore } from '$lib/app/types';
+import type { ChannelService, ContentChange, Disposable, DocId, DocMeta, DocumentStore, EditorService, FileMemoryStore, Msg } from '$lib/app/types';
 
 /** The answer for a document without channels: nothing found, nothing missing. */
 export function noChannels(): ChannelSet {
@@ -79,6 +84,8 @@ export interface EffectiveView {
 
 /** Lines the written order may not be carried across, per channel (WP12.5 computes them, see `outlineService`). */
 export type JumpLinesProvider = (docId: DocId, cp: CompiledProfile, channelOf: (line: number) => string | readonly string[]) => Record<string, number[]>;
+/** P4.32: what the check may follow per channel (`computeFlow`, plan section 6.8.7). */
+export type FlowProvider = (docId: DocId, cp: CompiledProfile, channelOf: (line: number) => string | readonly string[]) => Record<string, ChannelFlow>;
 
 export interface ChannelServiceDeps {
   docs: Pick<DocumentStore, 'get' | 'all' | 'list'>;
@@ -89,6 +96,14 @@ export interface ChannelServiceDeps {
   machineRevision?: Readable<number>;
   memory: Pick<FileMemoryStore, 'get' | 'remember'>;
   siblingInfo(path: string, names: string[]): Promise<SiblingInfo[]>;
+  /**
+   * P4.30b (L1 to L3): the plain names in the folder of the open document `path` that fit a
+   * glob (`folder_siblings`). Absent: no listing is asked, and a name that cannot be derived
+   * stays missing, as before.
+   */
+  folderSiblings?(path: string, pattern: string): Promise<FolderSiblings>;
+  /** P4.30b (J1): a message in the status bar ("This folder has a job list."). Absent: nothing is said. */
+  say?(msg: Msg): void;
   schedule(fn: () => void, ms: number): Disposable;
   now(): number;
   /** T171: the background reader of the user's patterns (`appGuardRunner`); absent or null: patterns are read in place, as before. */
@@ -112,13 +127,15 @@ export type ChannelServiceInternals = ChannelService & {
   assigned(id: DocId): string | null;
   /** WP12.5's `contrib/channels.ts` hands the check its jump-line provider. */
   useJumpLines(fn: JumpLinesProvider | null): void;
+  /** P4.32: `contrib/channels.ts` hands the check its flow provider (`computeFlow`); without one the check reads the jump lines only. */
+  useFlow(fn: FlowProvider | null): void;
 };
 
 interface Base {
   params: ChannelParams;
   cp: CompiledProfile;
   /** `multi-file`: how this document is tied to its channel; null when it is not. */
-  self: { ref: ChannelRef; by: 'fileName' | 'marker' | 'assigned'; stem: string | null; named: boolean } | null;
+  self: { ref: ChannelRef; by: SelfBy; stem: string | null; named: boolean } | null;
   sections: { channel: ChannelRef; ranges: { startLine: number; endLine: number }[] }[];
   outside: { startLine: number; endLine: number }[];
   marks: SyncHit[];
@@ -129,6 +146,14 @@ interface Base {
   /** The document's line count when this was resolved. */
   lineCount: number;
 }
+
+/** P4.30b (T055): the machine names the file of its first channel by `firstFileName`. */
+function hasFirstFileName(p: ChannelParams): boolean {
+  return typeof p.firstFileName === 'string' && p.firstFileName !== '';
+}
+
+/** How a `multi-file` document is tied to its channel (P4.30b adds the job list, J5). */
+type SelfBy = 'fileName' | 'marker' | 'assigned' | 'jobList';
 
 /** The lines of a document read once, and the masked-line memo, for the background reader and the reading after it (T171). */
 interface SharedLines {
@@ -169,6 +194,10 @@ interface Entry {
   edits: number;
   /** A user pattern was stopped in the background reader (T171); edits wait longer before the next try. */
   stopped: boolean;
+  /** P4.30b: the machine's block is valid and `multi-file`, so an open job list of the folder counts. */
+  multi?: boolean;
+  /** P4.30b: the job lists of the folder this was resolved with (`jobKeyOf`); another key means "make it again". */
+  jobKey?: string;
 }
 
 /** How long a program whose pattern was stopped waits after an edit before the reader tries again. */
@@ -192,14 +221,23 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
   const revision = writable(0);
   const entries = new Map<DocId, Entry>();
   const session = new Map<DocId, string>(); // assignments of documents without a path
-  const siblingCache = new Map<DocId, { path: string; info: Map<string, SiblingInfo> }>();
+  const siblingCache = new Map<DocId, { path: string; info: Map<string, SiblingInfo>; listed: ListedSiblings | 'unavailable' | null }>();
   const siblingAsked = new Set<DocId>();
+  // P4.30b: open documents that are job lists (J1, J2), read once per edit pause; the version
+  // counts the readings that changed, so a program resolved with an older one is read again.
+  const jobCache = new Map<DocId, JobList | null>();
+  const jobVersion = new Map<DocId, number>();
+  const jobPending = new Set<DocId>();
+  let jobTimer: Disposable | null = null;
+  const jobHinted = new Set<DocId>();
+  const heads = new Map<DocId, string[]>();
   let epoch = 0; // machine revisions
   let world = 0; // documents opening, closing, being assigned or saved elsewhere
   let worldKey = '';
   let stops: Disposable[] = [];
   let installed = false;
   let jumpProvider: JumpLinesProvider | null = null;
+  let flowProvider: FlowProvider | null = null;
 
   const same = (a: string, b: string): boolean => (deps.caseInsensitive ? a.toLowerCase() === b.toLowerCase() : a === b);
   const bump = (): void => revision.update((n) => n + 1);
@@ -242,23 +280,117 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     return count < 1 ? [] : deps.editor.getLines(id, 1, count);
   }
 
-  /** The head of a document, as many lines as the marker reads (`CHANNEL_CAPS.markerLines`), never the whole text. */
+  /**
+   * The head of a document, as many lines as the marker reads (`CHANNEL_CAPS.markerLines`), never
+   * the whole text. P4.30b: kept until the document is edited or closed, so the marker and the
+   * job-list test (J2) read each other document once, not once each (CODE-6).
+   */
   function headOf(id: DocId): string[] {
+    const memo = heads.get(id);
+    if (memo !== undefined) return memo;
     const count = Math.min(deps.editor.getLineCount(id), CHANNEL_CAPS.markerLines);
-    return count < 1 ? [] : deps.editor.getLines(id, 1, count);
+    const head = count < 1 ? [] : deps.editor.getLines(id, 1, count);
+    heads.set(id, head);
+    return head;
+  }
+
+  // --- the job lists (P4.30b, J1 to J7) -----------------------------------------------
+
+  /** J1, J2: whether the open document `id` is a job list, and its entries; read once until it is edited. */
+  function jobOf(id: DocId): JobList | null {
+    const cached = jobCache.get(id);
+    if (cached !== undefined) return cached;
+    if (!deps.editor.hasModel(id)) return null;
+    const count = deps.editor.getLineCount(id);
+    let job: JobList | null = null;
+    if (count > 0) {
+      const looks = startsLikeJobList(headOf(id));
+      if (looks === true || (looks === null && count > CHANNEL_CAPS.markerLines)) {
+        // One line past the limit, so `readJobList` can say it stopped (J7).
+        const read = readJobList(deps.editor.getLines(id, 1, Math.min(count, MAX_JOB_LINES + 1)));
+        job = read.isJobList ? read : null;
+      }
+    }
+    jobCache.set(id, job);
+    return job;
+  }
+
+  /** The open job lists in `doc`'s folder (never `doc` itself), as one list; null when there is none. */
+  function jobFor(doc: DocMeta): JobList | null {
+    if (doc.path === null) return null;
+    const here = dirOf(doc.path).dir;
+    const lists: JobList[] = [];
+    for (const d of deps.docs.all()) {
+      if (d.id === doc.id || d.path === null || !same(dirOf(d.path).dir, here)) continue;
+      const job = jobOf(d.id);
+      if (job !== null) lists.push(job);
+    }
+    if (lists.length <= 1) return lists[0] ?? null;
+    return { isJobList: true, entries: lists.flatMap((l) => l.entries), problems: [] };
+  }
+
+  /** Which job lists of `doc`'s folder a resolution used, and in which reading. */
+  function jobKeyOf(doc: DocMeta): string {
+    if (doc.path === null) return '';
+    const here = dirOf(doc.path).dir;
+    let key = '';
+    for (const d of deps.docs.all()) {
+      if (d.id === doc.id || d.path === null || !same(dirOf(d.path).dir, here) || jobOf(d.id) === null) continue;
+      key += `${d.id}:${jobVersion.get(d.id) ?? 0};`;
+    }
+    return key;
+  }
+
+  /** After an edit pause: the edited documents are read again; one that is or was a job list re-resolves the programs. */
+  function jobTick(): void {
+    jobTimer = null;
+    let changed = false;
+    for (const id of jobPending) {
+      const was = jobCache.get(id) ?? null;
+      jobCache.delete(id);
+      const now = jobOf(id);
+      if (was !== null || now !== null) {
+        jobVersion.set(id, (jobVersion.get(id) ?? 0) + 1);
+        changed = true;
+      }
+    }
+    jobPending.clear();
+    if (changed) {
+      world++;
+      bump();
+    }
+  }
+
+  /** J1: once per program, say that its folder holds a job list that is not open. Names only; nothing is read. */
+  function hintJobList(id: DocId, entry: Entry, doc: DocMeta): void {
+    const list = deps.folderSiblings;
+    const say = deps.say;
+    if (entry.multi !== true || doc.path === null || list === undefined || say === undefined || jobHinted.has(id)) return;
+    jobHinted.add(id);
+    if (jobOf(id) !== null || jobFor(doc) !== null) return;
+    const path = doc.path;
+    deps.schedule(() => {
+      void list(path, '*.JOB')
+        .then((answer) => {
+          const now = deps.docs.get(id);
+          if (answer.names.length > 0 && now !== undefined && jobFor(now) === null) say({ key: 'channelFiles.jobListInFolder' });
+        })
+        .catch(() => undefined); // the folder could not be listed: nothing to say
+    }, 0);
   }
 
   /**
    * The channel a document is, by the user's assignment, then the header marker, then the
-   * file name (`documentChannel`, the one rule `resolveDocument` also uses).
+   * file name, then an open job list of its folder (`documentChannel`, the one rule
+   * `resolveDocument` also uses).
    */
   function docChannel(
     doc: DocMeta,
     p: ChannelParams,
     cp: CompiledProfile,
     lines: (() => string[]) | null,
-  ): { ref: ChannelRef; by: 'fileName' | 'marker' | 'assigned'; stem: string | null } | null {
-    const found = documentChannel(doc.path !== null ? baseName(doc.path) : '', lines === null ? [] : lines(), cp, p);
+  ): { ref: ChannelRef; by: SelfBy; stem: string | null } | null {
+    const found = documentChannel(doc.path !== null ? baseName(doc.path) : '', lines === null ? [] : lines(), cp, p, { job: jobFor(doc) });
     const stem = found.stem === '' ? null : found.stem;
     const assigned = assignedOf(doc);
     if (assigned !== null) {
@@ -274,6 +406,8 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
    */
   function patched(id: DocId, prev: Entry | undefined, key: string, budget: ChannelBudget & MacroCalls): Base | null {
     if (prev === undefined || prev.key !== key || prev.base === null || prev.dirty === null || prev.dirty === 'full') return null;
+    const doc = deps.docs.get(id);
+    if (prev.multi === true && (doc === undefined || prev.jobKey !== jobKeyOf(doc))) return null;
     const base = prev.base;
     const next = patchResolution(
       {
@@ -307,6 +441,8 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     const quick = patched(id, prev, key, budget);
     if (quick !== null) {
       entry.base = quick;
+      entry.multi = prev?.multi;
+      entry.jobKey = prev?.jobKey;
       return finish(entry, id);
     }
     const found = blockOf(id);
@@ -329,7 +465,13 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     const cp = view.cp;
     const lines = shared?.lines ?? linesOf(id);
     const base: Base = { params: p, cp, self: null, sections: [], outside: [], marks: [], problems: [], truncated: false, boundaries: [], lineCount: lines.length };
-    const res = resolveDocument(doc.path !== null ? baseName(doc.path) : '', lines, cp, p, { ...budget, assigned: assignedOf(doc), masked: shared?.masked });
+    const multi = p.layout === 'multi-file';
+    if (multi) {
+      entry.multi = true;
+      entry.jobKey = jobKeyOf(doc);
+    }
+    const job = multi ? jobFor(doc) : null;
+    const res = resolveDocument(doc.path !== null ? baseName(doc.path) : '', lines, cp, p, { ...budget, assigned: assignedOf(doc), masked: shared?.masked, job });
     if (res.abandoned) {
       entry.set = { ...noChannels(), truncated: true, problems: [{ path: '', message: { key: 'channels.problems.tooSlow' } }] };
       // M12 fix F4: said (the status item reads the problem), and tried once more a moment
@@ -410,9 +552,11 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
       if (!channelOfDoc.has(d.id)) channelOfDoc.set(d.id, docChannel(d, p, base.cp, deps.editor.hasModel(d.id) ? () => headOf(d.id) : null));
       return channelOfDoc.get(d.id) ?? null;
     };
-    const names = self.named && doc?.path ? siblingNames(baseName(doc.path), p, self.ref.id) : null;
+    const names = doc?.path ? derivedNames(doc, base) : null;
     const cached = doc?.path ? siblingCache.get(id) : undefined;
-    const known = cached && doc?.path && cached.path === doc.path ? cached.info : null;
+    const fresh = cached && doc?.path && cached.path === doc.path ? cached : null;
+    const known = fresh?.info ?? null;
+    const listed = fresh?.listed ?? null;
     const location = doc?.path ? dirOf(doc.path) : null;
     for (const ref of refs) {
       if (ref.id === self.ref.id) continue;
@@ -421,13 +565,32 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
         members.push({ kind: 'file', channel: ref, name: open.doc.title, path: open.doc.path, exists: true, docId: open.doc.id, by: open.by });
         continue;
       }
-      const name = names?.find((n) => n.channel.id === ref.id)?.name ?? null;
+      const name = names?.get(ref.id) ?? null;
+      // P4.30b (L2): a name that could not be derived, and the first channel's file of a machine
+      // with `firstFileName` (written either way), are looked for in the folder's listing first.
+      const byListing = listed !== null && (name === null || (ref.index === 0 && hasFirstFileName(p)));
+      if (byListing && listed !== 'unavailable') {
+        const hit = listed.found.find((f) => f.channel.id === ref.id);
+        if (hit !== undefined && location !== null) {
+          members.push({ kind: 'file', channel: ref, name: hit.name, path: `${location.dir}${location.sep}${hit.name}`, exists: true, docId: null, by: 'fileName' });
+          continue;
+        }
+        const two = listed.ambiguous.find((a) => a.channel.id === ref.id);
+        if (two !== undefined) {
+          // Two files could be this channel: none is taken (refuse rather than guess).
+          problems.push({ path: `list[${ref.index}]`, message: { key: 'channelFiles.problems.siblingAmbiguous', params: { channel: ref.name, names: two.names.join(', ') } } });
+          missing.push(ref);
+          continue;
+        }
+      }
       const info = name !== null && known !== null ? known.get(name) : undefined;
       if (name !== null && info?.exists === true && location !== null) {
         members.push({ kind: 'file', channel: ref, name, path: `${location.dir}${location.sep}${name}`, exists: true, docId: null, by: 'fileName' });
         continue;
       }
-      if (info?.error === 'unavailable') {
+      // The listing was refused, cut off or unavailable (and a derived name, if any, is not there):
+      // "could not be checked", never "not found".
+      if (info?.error === 'unavailable' || (byListing && listed === 'unavailable')) {
         // "unavailable" (WP12.4): the stat failed or timed out. That is unknown, not "not there".
         problems.push({ path: `list[${ref.index}]`, message: { key: 'channels.problems.siblingUnknown', params: { channel: ref.name } } });
       }
@@ -437,15 +600,40 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     return { layout: 'multi-file', self: self.ref, members, missing, outside: [], marks: base.marks, problems, truncated: base.truncated };
   }
 
+  /**
+   * The file name of each other channel of `doc`'s set, by channel id: from the machine's name
+   * rules (`siblingNames`), and (P4.30b, J5) where they give none, from an open job list of the
+   * folder (`jobListNames`). `null`: not derived (the folder's listing may still find it).
+   */
+  function derivedNames(doc: DocMeta, base: Base): Map<string, string | null> {
+    const out = new Map<string, string | null>();
+    const self = base.self;
+    if (self === null || doc.path === null) return out;
+    const own = baseName(doc.path);
+    if (self.named) for (const n of siblingNames(own, base.params, self.ref.id) ?? []) out.set(n.channel.id, n.name);
+    const job = jobFor(doc);
+    if (job !== null) {
+      for (const [channel, name] of jobListNames(job, base.params)) {
+        if (channel === self.ref.id || name === null || same(name, own) || (out.get(channel) ?? null) !== null) continue;
+        out.set(channel, name);
+      }
+    }
+    return out;
+  }
+
   function findOpenSibling(
     id: DocId,
     self: NonNullable<Base['self']>,
     ref: ChannelRef,
     asChannel: (d: DocMeta) => ReturnType<typeof docChannel>,
-  ): { doc: DocMeta; by: 'fileName' | 'marker' | 'assigned' } | null {
-    let best: { doc: DocMeta; by: 'fileName' | 'marker' | 'assigned'; score: number } | null = null;
+  ): { doc: DocMeta; by: SelfBy } | null {
+    // Siblings are files of one folder (P4f fix E): an untitled document, or one of another folder, is none.
+    const own = deps.docs.get(id)?.path ?? null;
+    if (own === null) return null;
+    const here = dirOf(own).dir;
+    let best: { doc: DocMeta; by: SelfBy; score: number } | null = null;
     for (const d of deps.docs.all()) {
-      if (d.id === id) continue;
+      if (d.id === id || d.path === null || !same(dirOf(d.path).dir, here)) continue;
       const found = asChannel(d);
       if (found === null || found.ref.id !== ref.id) continue;
       let score = 1;
@@ -465,7 +653,9 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     if (doc === undefined) return null;
     install();
     let entry = entries.get(id);
-    if (entry === undefined || entry.key !== baseKey(id, doc)) {
+    // P4.30b: a program resolved before a job list of its folder was opened, edited or closed is read again.
+    const jobsMoved = entry !== undefined && entry.multi === true && entry.jobKey !== jobKeyOf(doc);
+    if (entry === undefined || entry.key !== baseKey(id, doc) || jobsMoved) {
       entry?.timer?.();
       if (guardedParams(id) !== null) {
         // T171: no pattern of the user's runs on this thread before the background reader has
@@ -486,6 +676,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
 
   /** Once per document: ask which sibling files exist (never on a timer, never by opening). */
   function afterCompute(id: DocId, entry: Entry, doc: DocMeta): void {
+    hintJobList(id, entry, doc);
     if (entry.base?.params.layout !== 'multi-file' || entry.base.self === null || doc.path === null) return;
     const cached = siblingCache.get(id);
     if (cached !== undefined && cached.path === doc.path) return;
@@ -503,11 +694,25 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
       const asked = doc.path;
       const base = entry.base;
       const self = base.self;
-      if (self === null || !self.named) return;
-      const names = (siblingNames(baseName(asked), base.params, self.ref.id) ?? [])
-        .map((n) => n.name)
-        .filter((n): n is string => n !== null)
-        .slice(0, CHANNEL_CAPS.siblingNames);
+      if (self === null) return;
+      const derived = derivedNames(doc, base);
+      const names = [...new Set([...derived.values()].filter((n): n is string => n !== null))].slice(0, CHANNEL_CAPS.siblingNames);
+      // P4.30b (L1 to L3): a channel whose name cannot be derived is looked for in the folder's
+      // listing, names only, with the stem and `*`; nothing is opened.
+      let listed: ListedSiblings | 'unavailable' | null = null;
+      const underived = channelRefs(base.params).some(
+        (ref) => ref.id !== self.ref.id && ((derived.get(ref.id) ?? null) === null || (ref.index === 0 && hasFirstFileName(base.params))),
+      );
+      const pattern = self.named && underived && deps.folderSiblings !== undefined ? listingPattern(baseName(asked), base.params) : null;
+      if (pattern !== null && deps.folderSiblings !== undefined) {
+        try {
+          const answer = await deps.folderSiblings(asked, pattern);
+          // A cut-off listing may hide a second name for a channel: that is "could not be checked".
+          listed = answer.unavailable || answer.truncated ? 'unavailable' : siblingsFromListing(baseName(asked), answer.names, base.params, self.ref.id);
+        } catch {
+          listed = 'unavailable';
+        }
+      }
       let info = new Map<string, SiblingInfo>();
       if (names.length > 0) {
         try {
@@ -518,7 +723,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
           info = new Map(names.map((name) => [name, { name, exists: false, bytes: 0, modified: null, error: 'unavailable' }]));
         }
       }
-      siblingCache.set(id, { path: asked, info });
+      siblingCache.set(id, { path: asked, info, listed });
       world++;
       bump();
       // Saved under another name while the call was out: the answer is for the old path.
@@ -613,6 +818,14 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
   }
 
   function onContentChange(id: DocId, change: ContentChange): void {
+    heads.delete(id);
+    // P4.30b: a document already read as a job list or as none (it lies in a channel program's
+    // folder) is read again after the pause (J2; the head only, unless it is a job list). One
+    // that was never read is read when a program of its folder asks, with what it holds then.
+    if (jobCache.has(id)) {
+      jobPending.add(id);
+      if (jobTimer === null) jobTimer = deps.schedule(jobTick, deps.delayMs);
+    }
     const entry = entries.get(id);
     if (entry === undefined) return;
     // The lines this edit touched, added to those since the last resolution (F2).
@@ -632,6 +845,14 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
       deps.docs.list.subscribe(() => {
         if (!refreshWorld()) return;
         const open = new Set(deps.docs.all().map((d) => d.id));
+        for (const id of [...jobCache.keys(), ...jobHinted, ...heads.keys()]) {
+          if (open.has(id)) continue;
+          heads.delete(id);
+          jobCache.delete(id);
+          jobVersion.delete(id);
+          jobPending.delete(id);
+          jobHinted.delete(id);
+        }
         for (const id of [...entries.keys()]) {
           if (!open.has(id)) {
             entries.get(id)?.timer?.();
@@ -697,6 +918,10 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
         stops = [];
         for (const e of entries.values()) e.timer?.();
         entries.clear();
+        jobTimer?.();
+        jobTimer = null;
+        heads.clear();
+        jobCache.clear();
       };
     },
 
@@ -760,6 +985,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
       const set = entry.set;
       const perChannel: Record<string, SyncHit[]> = {};
       const jumpLines: Record<string, number[]> = {};
+      const flow: Record<string, ChannelFlow> = {};
       const checked: string[] = [];
       const otherMachines = empty.otherMachines;
       const documents: Record<string, string> = {};
@@ -788,6 +1014,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
         }
         // A line of a shared section is in each of its channels' lists.
         if (jumpProvider !== null) Object.assign(jumpLines, jumpProvider(id, cp, sectionOwners(own.sections)));
+        if (flowProvider !== null) Object.assign(flow, flowProvider(id, cp, sectionOwners(own.sections)));
       } else {
         for (const m of set.members) {
           if (m.kind !== 'file' || m.docId === null) continue;
@@ -805,6 +1032,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
             const found = jumpProvider(m.docId, cp, () => ch)[ch];
             if (found) jumpLines[ch] = found;
           }
+          if (flowProvider !== null) flow[ch] = flowProvider(m.docId, cp, () => ch)[ch] ?? { jumps: [], loops: [], opaque: [] };
           if (m.docId !== id) {
             const view = deps.effective(m.docId);
             if ((view?.machineId ?? null) !== initiating) otherMachines.push({ channel: ch, docId: m.docId, machineName: view?.machineName ?? null });
@@ -812,7 +1040,7 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
         }
       }
       const notChecked = channelRefs(p).filter((r) => !checked.includes(r.id));
-      const report = checkSyncMarksReport(perChannel, p, { jumpLines, documents, deadline: deps.now() + CHANNEL_CAPS.checkMs, now: deps.now });
+      const report = checkSyncMarksReport(perChannel, p, { jumpLines, ...(flowProvider !== null ? { flow } : {}), documents, deadline: deps.now() + CHANNEL_CAPS.checkMs, now: deps.now });
       return { findings: report.findings, truncated: report.truncated || own.dropped > 0 || siblingsLate, checked, notChecked, otherMachines, longLines };
     },
 
@@ -835,6 +1063,10 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
 
     useJumpLines(fn: JumpLinesProvider | null): void {
       jumpProvider = fn;
+    },
+
+    useFlow(fn: FlowProvider | null): void {
+      flowProvider = fn;
     },
   };
 }
@@ -860,6 +1092,8 @@ export const channels: ChannelServiceInternals = createChannelService({
   machineRevision: appMachines.revision,
   memory: appMemory,
   siblingInfo: channelSiblings,
+  folderSiblings,
+  say: (msg) => appStatus.show(t(msg.key, msg.params)),
   schedule: (fn, ms) => {
     const handle = setTimeout(fn, ms);
     return () => clearTimeout(handle);

@@ -10,13 +10,17 @@ import { hasKey } from '$lib/i18n';
 /** The machine's channel block `channels.params` answers (`markName`, M13 review NC-10). */
 let machineParams: ChannelParams | null = null;
 
+const wired: Record<string, unknown> = {};
 vi.mock('$lib/stores/channels', () => ({
-  channels: { ruleLabel: (_id: string, ruleId: string) => (ruleId === 'stops' ? 'Stops and ends' : ''), params: () => machineParams },
+  channels: {
+    useJumpLines: (fn: unknown) => { wired.jump = fn; },
+    useFlow: (fn: unknown) => { wired.flow = fn; },
+    ruleLabel: (_id: string, ruleId: string) => (ruleId === 'stops' ? 'Stops and ends' : ''), params: () => machineParams },
 }));
 vi.mock('$lib/app/dialogs', () => ({ dialogs: {} }));
 vi.mock('$lib/app/fileOps', () => ({ files: {} }));
 vi.mock('$lib/app/modals', () => ({ modals: {} }));
-vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}) }));
+vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}), computeFlow: () => ({}) }));
 vi.mock('$lib/app/status', () => ({ status: { show: () => {} } }));
 vi.mock('$lib/monaco/editorService', () => ({ editor: {} }));
 vi.mock('$lib/stores/documents', () => ({ docs: { getActiveId: () => 'd1', get: () => ({ title: 'x.nc' }) } }));
@@ -29,10 +33,10 @@ const hit = (line: number, mark: string, channel: string, ruleId = 'w', partners
 const ref = (id: string, index: number) => ({ id, name: `Channel ${id}`, index });
 
 describe('the contribution', () => {
-  it('declares the nine pinned commands with their keys', () => {
+  it('declares the ten pinned commands with their keys', () => {
     const cmds = Object.fromEntries((contribution.commands ?? []).map((c) => [c.id, c]));
     expect(Object.keys(cmds).sort()).toEqual(
-      ['channels.assign', 'channels.checkSync', 'channels.gotoPartner', 'channels.mergeBack', 'channels.nextSyncPoint', 'channels.prevSyncPoint', 'channels.select', 'channels.splitToDocuments', 'channels.testOnDocument'],
+      ['channels.assign', 'channels.checkSync', 'channels.gotoPartner', 'channels.mergeBack', 'channels.nextSyncPoint', 'channels.prevSyncPoint', 'channels.saveChannelFiles', 'channels.select', 'channels.splitToDocuments', 'channels.testOnDocument'],
     );
     expect(cmds['channels.nextSyncPoint'].keys).toBe('Alt+F7');
     expect(cmds['channels.prevSyncPoint'].keys).toBe('Shift+Alt+F7');
@@ -41,6 +45,15 @@ describe('the contribution', () => {
       expect(hasKey(c.title), c.title).toBe(true);
       expect(c.category).toBe('channels.category');
     }
+  });
+
+  it('hands the check its jump lines and its flow (P4.32), and takes both back', () => {
+    const stop = contribution.activate();
+    expect(typeof wired.jump).toBe('function');
+    expect(typeof wired.flow).toBe('function');
+    stop();
+    expect(wired.jump).toBeNull();
+    expect(wired.flow).toBeNull();
   });
 
   it('frees Mod+Alt+P from the editor\'s toggle-preserve-case', () => {
@@ -55,6 +68,7 @@ describe('the contribution', () => {
       'channels.gotoPartner': 'nc/channels.group',
       'channels.splitToDocuments': 'nc/channels.group',
       'channels.mergeBack': 'nc/channels.group',
+      'channels.saveChannelFiles': 'nc/channels.group',
       'channels.checkSync': 'tools/channels.toolsGroup',
     });
   });

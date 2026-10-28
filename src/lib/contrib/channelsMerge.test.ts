@@ -14,7 +14,7 @@ vi.mock('$lib/stores/channels', () => ({ channels: {} }));
 vi.mock('$lib/app/dialogs', () => ({ dialogs: {} }));
 vi.mock('$lib/app/fileOps', () => ({ files: {} }));
 vi.mock('$lib/app/modals', () => ({ modals: {} }));
-vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}) }));
+vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}), computeFlow: () => ({}) }));
 vi.mock('$lib/app/status', () => ({ status: { show: () => {} } }));
 vi.mock('$lib/monaco/editorService', () => ({ editor: {} }));
 vi.mock('$lib/stores/documents', () => ({ docs: { getActiveId: () => 'c1', get: () => undefined, activate: () => {} } }));
@@ -35,8 +35,8 @@ function world(o: { readOnly?: boolean } = {}) {
   ]);
   const meta = new Map<string, Partial<DocMeta>>([
     ['toy', { id: 'toy', title: 'prog.nc', readOnly: o.readOnly === true }],
-    ['c1', { id: 'c1', title: 'prog — Channel 1.nc' }],
-    ['c2', { id: 'c2', title: 'prog — Channel 2.nc' }],
+    ['c1', { id: 'c1', title: 'prog_1.nc' }],
+    ['c2', { id: 'c2', title: 'prog_2.nc' }],
   ]);
   const said: { msg: Msg; error: boolean }[] = [];
   const writes: { id: string; start: number; end: number; lines: string[] }[] = [];

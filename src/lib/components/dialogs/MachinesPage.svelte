@@ -561,6 +561,7 @@
   import ChannelsForm from '$lib/components/dialogs/ChannelsForm.svelte';
   import ChannelsTester from '$lib/components/dialogs/ChannelsTester.svelte';
   import MachineMotionForm from '$lib/components/dialogs/MachineMotionForm.svelte';
+  import MachineFolders from '$lib/components/dialogs/MachineFolders.svelte';
   import { REPOSITORY_URL } from '$lib/components/dialogs/AboutDialog.svelte';
   import { editor } from '$lib/monaco/editorService';
   import { commands } from '$lib/app/registry/commands';
@@ -944,6 +945,7 @@
                 {/each}
               </ul>
             {/if}
+            {#if row.usable}<MachineFolders machineId={row.id} disabled={view.blocked} />{/if}
           </li>
         {/each}
       </ul>

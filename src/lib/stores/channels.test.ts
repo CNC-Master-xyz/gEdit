@@ -5,7 +5,7 @@
 import { writable } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cpOf } from '../../../tests/unit/helpers/profiles';
-import type { ChannelParams, SyncHit } from '$lib/core/channels/types';
+import type { ChannelFlow, ChannelParams, SyncHit } from '$lib/core/channels/types';
 import { createInlineRunner, type GuardRunner } from '$lib/core/regexGuard/runner';
 import type { GuardJob } from '$lib/core/regexGuard/job';
 import type { MachineConfig } from '$lib/core/machines/types';
@@ -13,10 +13,10 @@ import type { ChannelBlock } from '$lib/core/machines/validate';
 import type { SiblingInfo } from '$lib/platform/commands';
 import type { DocId, DocMeta, FileMemo } from '$lib/app/types';
 
-const seen: { perChannel: Record<string, SyncHit[]>; jump: Record<string, number[]> | undefined; documents?: Record<string, string>; deadline?: number }[] = [];
+const seen: { perChannel: Record<string, SyncHit[]>; jump: Record<string, number[]> | undefined; flow?: Record<string, ChannelFlow>; documents?: Record<string, string>; deadline?: number }[] = [];
 vi.mock('$lib/core/channels/check', () => ({
-  checkSyncMarksReport: (perChannel: Record<string, SyncHit[]>, _p: unknown, o: { jumpLines?: Record<string, number[]>; documents?: Record<string, string>; deadline?: number } = {}) => {
-    seen.push({ perChannel, jump: o.jumpLines, documents: o.documents, deadline: o.deadline });
+  checkSyncMarksReport: (perChannel: Record<string, SyncHit[]>, _p: unknown, o: { jumpLines?: Record<string, number[]>; flow?: Record<string, ChannelFlow>; documents?: Record<string, string>; deadline?: number } = {}) => {
+    seen.push({ perChannel, jump: o.jumpLines, flow: o.flow, documents: o.documents, deadline: o.deadline });
     return { findings: [], truncated: false };
   },
   checkSyncMarks: (perChannel: Record<string, SyncHit[]>, _p: unknown, o: { jumpLines?: Record<string, number[]> } = {}) => {
@@ -428,6 +428,16 @@ describe('one file per channel', () => {
     expect(w.svc.forDoc(a).members).toHaveLength(1);
   });
 
+  it('does not pair two open sets of the same name in different folders (P4f fix E)', () => {
+    const a = w.open('part_CH1.nc', MARKS, '/jobs/a/part_CH1.nc');
+    w.open('part_CH2.nc', ['O2', 'M901 P12'], '/jobs/b/part_CH2.nc');
+    expect(w.svc.forDoc(a).members).toHaveLength(1);
+    // The same folder still pairs, and an untitled document never does.
+    const same = w.open('part_CH2.nc', ['O2', 'M901 P12'], '/jobs/a/part_CH2.nc');
+    w.open('part_CH2.nc', ['O2', 'M901 P12'], null);
+    expect(w.svc.forDoc(a).members.map((m) => (m.kind === 'file' ? m.docId : null))).toEqual([a, same]);
+  });
+
   it('an assignment ties a document no pattern claims, and survives in the file memory', () => {
     const odd = w.open('odd.nc', MARKS, '/jobs/odd.nc');
     expect(w.svc.forDoc(odd).layout).toBe('none');
@@ -524,6 +534,31 @@ describe('check', () => {
     w.svc.useJumpLines((_id, _cp, channelOf) => ({ [String(channelOf(4))]: [4] }));
     w.svc.check(w.open('a.nc', PROGRAM));
     expect(seen[0].jump).toEqual({ '1': [4] });
+    // P4.32: no flow provider, no flow: the check reads the jump lines only.
+    expect(seen[0].flow).toBeUndefined();
+  });
+
+  it('P4.32: hands the flow of the provider to the check, per section and per channel file', () => {
+    const flowAt = (line: number) => ({ jumps: [], loops: [], opaque: [line] });
+    w.machinesById.set('m1', machine('m1'));
+    w.blocks.set('m1', valid(single));
+    w.svc.useFlow((_id, _cp, channelOf) => ({ [String(channelOf(4))]: flowAt(4) }));
+    w.svc.check(w.open('a.nc', PROGRAM));
+    expect(seen[0].flow).toEqual({ '1': flowAt(4) });
+
+    seen.length = 0;
+    w.blocks.set('m1', valid(multi));
+    const one = w.open('p_CH1.nc', ['M901 P12'], '/j/p_CH1.nc');
+    w.open('p_CH2.nc', ['M901 P12'], '/j/p_CH2.nc');
+    w.svc.useFlow((id, _cp, channelOf) => (id === one ? { [String(channelOf(1))]: flowAt(1) } : {}));
+    w.svc.check(one);
+    // A channel file the provider says nothing of gets an empty flow (nothing to follow, nothing opaque).
+    expect(seen[0].flow).toEqual({ '1': flowAt(1), '2': { jumps: [], loops: [], opaque: [] } });
+
+    seen.length = 0;
+    w.svc.useFlow(null);
+    w.svc.check(one);
+    expect(seen[0].flow).toBeUndefined();
   });
 
   it('answers nothing for a document without channels', () => {

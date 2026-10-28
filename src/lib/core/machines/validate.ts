@@ -28,6 +28,7 @@ import { parseWaitCodes } from '$lib/core/channels/codes';
 import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE, type ChannelParams } from '$lib/core/channels/types';
 import { t } from '$lib/i18n';
 import { patternSubsetProblem } from '$lib/core/profiles/validate';
+import { foldersOf } from './folderRules';
 import type { MachineConfig, MachineProblem, NumberClass, NumberReading } from './types';
 
 /** `MachineConfig.id`, in characters; [`MACHINE_ID_RE`] is written from it. */
@@ -95,6 +96,10 @@ export interface ReadMachineOptions {
 export interface ReadMachineResult {
   /** The record, or `null` when it cannot even be identified. */
   machine: MachineConfig | null;
+  /**
+   * Why the record is `null`; or, for a record that is kept, what is wrong with its `folders`
+   * list (P4f): the record is still usable, only the list is not.
+   */
   problems: MachineProblem[];
 }
 
@@ -157,7 +162,10 @@ export function readMachine(raw: unknown, o: ReadMachineOptions): ReadMachineRes
   // re-assigned, which in JavaScript leaves their position alone.
   const machine = { ...raw } as unknown as MachineConfig;
   machine.params = isRecord(raw.params) ? ({ ...raw.params } as MachineConfig['params']) : {};
-  return { machine, problems: [] };
+  // P4f (plan 6.8.4, R5): `folders` rides along as written, so a hand edit survives a save of
+  // the record. A wrong list is reported with its JSON paths and costs the list (the rule reads
+  // it through `foldersOf` and gets no folder), never the record: the machine stays usable.
+  return { machine, problems: foldersOf(machine, o.path).problems.map((p) => problem(known, p.path, p.message)) };
 }
 
 export interface ValidateMachineOptions {
@@ -578,7 +586,7 @@ export function validateChannels(
   const present = (key: string): boolean => raw[key] !== undefined && raw[key] !== null;
   if (single) {
     if (!present('sectionStart')) add(`${path}.sectionStart`, 'say which line starts a channel section, for example the line with G13 or G14');
-    for (const key of ['fileName', 'fileNameFor', 'marker'])
+    for (const key of ['fileName', 'fileNameFor', 'marker', 'firstFileName'])
       if (present(key)) add(`${path}.${key}`, `"${key}" belongs to a layout with one program per channel, not to one program with sections`);
   }
   if (multi) {
@@ -614,6 +622,13 @@ export function validateChannels(
     if (present('marker')) {
       const src = patternProblems(raw.marker, 'the channel marker', `${path}.marker`, id, out);
       if (src !== null && !hasGroup(src, 'channel')) add(`${path}.marker`, 'the channel marker has to capture the channel as (?<channel>…)');
+    }
+    // P4.30b (T055, plan section 6.8.5): the file of the first channel, written without the
+    // channel in its name. No default: a machine has none until the user writes one.
+    if (present('firstFileName')) {
+      const src = patternProblems(raw.firstFileName, 'the file name of the first channel', `${path}.firstFileName`, id, out);
+      if (src !== null && !hasGroup(src, 'stem')) add(`${path}.firstFileName`, 'the file name of the first channel has to capture the common part of the name as (?<stem>…)');
+      if (src !== null && hasGroup(src, 'channel')) add(`${path}.firstFileName`, 'the file name of the first channel names no channel: leave out (?<channel>…), the file is always the first channel');
     }
   }
 

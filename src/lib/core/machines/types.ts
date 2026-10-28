@@ -181,10 +181,11 @@ export interface EffectiveMachine {
   name: string | null;
   /**
    * Why this machine: `document` = chosen for this document or remembered for its file
-   * (`id` null = an explicit "none"); `default` = the profile's default machine; `none` =
-   * nothing chosen and no default.
+   * (`id` null = an explicit "none"); `folder` = no choice of its own, and the document's file
+   * lies in a folder of a machine (P4f, `MachineConfig.folders`); `default` = the profile's
+   * default machine; `none` = nothing chosen and no default.
    */
-  choice: 'document' | 'default' | 'none';
+  choice: 'document' | 'folder' | 'default' | 'none';
   params: MachineParams;
   source: {
     numberInput: ParamSource;
@@ -222,6 +223,22 @@ export interface MachineConfig {
   params: Partial<MachineParams>;
   /** ≤ 500 characters. */
   notes?: string;
+  /**
+   * Phase 4 (P4f prelude; plan section 6.8, D53): the folders whose programs this machine runs,
+   * for example the DNC folder of the machine. A document opened from a file in one of them
+   * (and with no choice of its own) uses this machine. Additive: `MACHINES_VERSION` stays 1; an
+   * older build keeps the member as an unknown one. A broken list costs the list, never the
+   * record (`foldersOf`, `core/machines/folderRules.ts`).
+   */
+  folders?: MachineFolder[];
+}
+
+/** One folder of `MachineConfig.folders`. */
+export interface MachineFolder {
+  /** An absolute folder path as the user wrote or picked it (1–1,024 characters). */
+  path: string;
+  /** Also the folders below it. Default true. */
+  subfolders?: boolean;
 }
 
 /** `<config>/machines.json` (AD-31, D50). Rust owns the file; this is its shape. */

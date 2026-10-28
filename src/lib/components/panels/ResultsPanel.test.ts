@@ -316,6 +316,42 @@ describe('ResultsPanel markup', () => {
     expect(html).not.toContain('<button type="button" class="row link"');
   });
 
+  // P4.28: the rows of Find in Folder point at files, not at lines of open documents.
+  describe('rows that open a file (Find in Folder)', () => {
+    const FOLDER: ReportData = {
+      title: '2 hits for T17 in lathe1',
+      columns: [
+        { key: 'file', label: 'File' },
+        { key: 'line', label: 'Line' },
+      ],
+      rows: [
+        { file: 'a/part.nc', path: '/nc/lathe1/a/part.nc', root: '/nc/lathe1', line: 12 },
+        { file: 'b.nc', path: '/nc/lathe1/b.nc', root: '/nc/lathe1' },
+      ],
+    };
+
+    it('are buttons with the absolute path and the folder, with or without a line, when the report can open them', () => {
+      results.show({ ...FOLDER, openRow: () => undefined });
+      const html = render(ResultsPanel).body;
+      expect(html.match(/<button type="button" class="row link[ "]/g)).toHaveLength(2);
+      expect(html).toContain('data-path="/nc/lathe1/a/part.nc"');
+      expect(html).toContain('data-root="/nc/lathe1"');
+      expect(html).toContain('data-path="/nc/lathe1/b.nc"');
+      expect(html).toContain('data-line="12"');
+    });
+
+    it('stay plain rows when the report cannot open them', () => {
+      results.show(FOLDER);
+      const html = render(ResultsPanel).body;
+      expect(html).not.toMatch(/<button type="button" class="row link[ "]/);
+      expect(html).not.toContain('data-path=');
+    });
+
+    it('are not exported with the folder paths (the CSV holds the columns only)', () => {
+      expect(reportToCsv({ ...FOLDER, openRow: () => undefined })).toBe('File,Line\r\na/part.nc,12\r\nb.nc,\r\n');
+    });
+  });
+
   it('lists the findings with their severity', () => {
     const docId = docs.add(newDoc());
     results.show({

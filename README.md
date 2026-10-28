@@ -55,7 +55,7 @@ Installers for macOS, Windows and Linux are on the
 [GitHub Releases page](https://github.com/CNC-Master-xyz/gEdit/releases): a `.dmg` for macOS (Apple
 Silicon and Intel), an `.msi` and a setup `.exe` for Windows, and a `.deb`, an `.rpm` and an
 `.AppImage` for Linux, with a `SHA256SUMS` file to check them against. On Linux the installed
-program is called `gedit-nc`, so it does not clash with the GNOME text editor `gedit`. What each
+program is called `gedit-nc`, so it does not clash with the GNOME text editor `gedit`. On Linux, double-clicking an NC file does not start gEdit in this version (no file association is registered); use File > Open or drop the file on the window. What each
 release contains is in the [CHANGELOG](CHANGELOG.md).
 
 **The installers are not signed.** macOS and Windows warn you the first time you start
@@ -200,6 +200,7 @@ Showing the channels of a program side by side is planned for Phase 4.
   [dialects](docs/user/dialects.md), [machines](docs/user/machines.md),
   [your own profiles and code files](docs/user/profiles.md),
   [channels](docs/user/channels.md),
+  [folders and files from the system](docs/user/folders.md) (Find in Folder, double-click, one window),
   [understanding a block](docs/user/inspector.md) (the inspector, the hover and the motion colours),
   [writing with templates](docs/user/templates.md) (the Insert tab, Edit Cycle, formulas and the template manager),
   [transformations](docs/user/transformations.md), [scripts](docs/user/scripts.md) (with script packages),

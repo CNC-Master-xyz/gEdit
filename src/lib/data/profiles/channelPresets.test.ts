@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { findMarks } from '$lib/core/channels/marks';
 import { findSections } from '$lib/core/channels/resolve';
-import { siblingNames } from '$lib/core/channels/siblings';
+import { fileChannel, siblingNames } from '$lib/core/channels/siblings';
 import { parseWaitCodes } from '$lib/core/channels/codes';
 import type { ChannelParams } from '$lib/core/channels/types';
 import { channelBlock, validateChannels } from '$lib/core/machines/validate';
@@ -256,7 +256,34 @@ describe('channel presets (§8.9)', () => {
     expect(profileOf('fanuc-lathe').machineParams?.channels?.presets.find((x) => x.id === 'fanuc-3path-digits-nop12')?.label).toMatch(/version file/);
   });
 
-  it('M12.5: fanuc-2head-m100 — M100 to M197 are waits for both heads, M198 is not one, and the label says why', () => {
+  it('P4.30b: the label of fanuc-3path-digits-nop12 says path 1 may be written without an extension, which is what its firstFileName reads', () => {
+    const p = preset('fanuc-lathe', 'fanuc-3path-digits-nop12');
+    expect(profileOf('fanuc-lathe').machineParams?.channels?.presets.find((x) => x.id === 'fanuc-3path-digits-nop12')?.label).toContain(
+      'path 1 may also be written without an extension (PART)',
+    );
+    expect(new RegExp(p.firstFileName ?? '$^').test('PART')).toBe(true);
+    expect(new RegExp(p.firstFileName ?? '$^').test('PART.ISO')).toBe(false);
+  });
+
+  it('P4f fix NC-7: the four .P-n presets read an extensionless file as path 1 (the control default with MDP = 1), .P-2 as path 2, and .P-1 still as path 1', () => {
+    const fanuc = profileOf('fanuc-lathe').machineParams?.channels?.presets ?? [];
+    for (const id of ['fanuc-2path', 'fanuc-2path-digits', 'fanuc-3path-digits', 'fanuc-3path-bitmask']) {
+      const p = preset('fanuc-lathe', id);
+      expect(p.firstFileName, id).toBe('^(?<stem>[^.]+)$');
+      expect(fileChannel('O0001', p), id).toMatchObject({ channel: { id: '1' }, stem: 'O0001', by: 'first' });
+      expect(fileChannel('O0001.P-2', p), id).toMatchObject({ channel: { id: '2' }, stem: 'O0001', by: 'pattern' });
+      expect(fileChannel('O0001.P-1', p), id).toMatchObject({ channel: { id: '1' }, stem: 'O0001', by: 'pattern' });
+      // A name with an extension the path pattern does not read is still no path file.
+      expect(fileChannel('O0001.TXT', p), id).toBeNull();
+      const entry = fanuc.find((x) => x.id === id);
+      expect(entry?.verify, id).toBe(true);
+      expect(entry?.label, id).toContain('path 1 may also be written without an extension (O0001, with O0001.P-2 for path 2)');
+      expect(entry?.label, id).toContain('every file without an extension in the machine');
+      expect(entry?.source, id).toMatch(/parameter 138 bit 0 \(MDP\)/);
+    }
+  });
+
+  it('M12.5: fanuc-2head-m100 —M100 to M197 are waits for both heads, M198 is not one, and the label says why', () => {
     const p = preset('fanuc-lathe', 'fanuc-2head-m100');
     expect(p.fileName).toBeUndefined();
     const marks = findMarks(['M100', 'N20 M150', 'M197', 'M198 P1234', 'M199', 'M99'], cpOf('fanuc-lathe'), p, { channelOf: () => '2' }).marks;

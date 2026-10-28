@@ -55,6 +55,17 @@
 // a copied word `G91`): the state after the copied text against the state the line below ran
 // in before (`modalStatesAroundEdit`, from the same snapshot of the target's index). Front and end make one status message.
 //
+// P4.31 (plan §6.8.6): a comparison can be **limited to a channel** (`open(..., { channel })`).
+// Both sides are cut to that channel's lines before they are compared: a document by its own
+// channel sections (or the whole document when it is that channel's file), the saved version by
+// the sections of the same program, a file that is not open as a document not at all (it has no
+// machine, so the open is refused in plain words). The panes then show the cut as read-only
+// text, whatever the mode: raw shows the cut as written, review normalizes the cut. The line
+// maps name the lines of the files, so go to line and the export keep the files' numbers.
+// Nothing is copied from a cut (the panes are copies) and the aligned view, which shows whole
+// programs, is refused while a cut is open; the aligned preference is held and put back when
+// the session ends.
+//
 // Closing is funnelled through one place. The overlay's own ✕ (PanelHost) and anything
 // else that changes `layout.overlay` go through the layout subscription below, so the
 // session ends no matter who closed the view. The editor's own view state (cursor, scroll,
@@ -114,6 +125,9 @@ import type { LineState, ModalState } from '$lib/core/nc/types';
 import type { CodeDb } from '$lib/core/codes/types';
 import type { CompiledProfile } from '$lib/core/profiles/types';
 import type { EffectiveMachine, EffectiveProfile } from '$lib/core/machines/types';
+import { channelNameOf, cutLines, scopeOf, setOfLines, type Cut } from '$lib/core/channels/scope';
+import type { ChannelSet } from '$lib/core/channels/types';
+import { channels as appChannels } from '$lib/stores/channels';
 import type {
   CompareService,
   CompareSource,
@@ -149,6 +163,8 @@ export interface CompareSession {
 /** A session plus the prepared original side; `CompareView` reads this one. */
 export interface CompareContent extends CompareSession {
   original: DiffOriginal;
+  /** P4.31: the channel both sides are cut to (`id`, and the machine's `name` for it), or absent for the whole program. */
+  channel?: { id: string; name: string };
 }
 
 /** The raw view's two live options (the P1 toolbar). Not the review toggles of §7.7. */
@@ -198,6 +214,12 @@ export interface ReviewInfo {
 
 /** The §7.3 service plus what the view and the contribution need. Not part of §7.3. */
 export interface CompareController extends CompareService {
+  /**
+   * `compare.open`, optionally **limited to a channel** (P4.31): `o.channel` is a channel id of
+   * the compared document's machine. False, with the reason in the status bar, when a side has
+   * no such channel.
+   */
+  open(docId: DocId, source: CompareSource, o?: { channel?: string }): Promise<boolean>;
   readonly content: Readable<CompareContent | null>;
   /** P1's `options`, renamed in M11 (§7.16 #138). */
   readonly view: Readable<DiffViewOptions>;
@@ -285,6 +307,11 @@ export interface CompareDeps {
   versionOf?(docId: DocId): number;
   /** The code database of a profile, for a file that is not open as a document (review NC-6). Optional. */
   codesFor?(profileId: string): CodeDb;
+  /**
+   * P4.31: the channel set of an open document, or of `lines` read with that document's machine
+   * (the saved version of a program). Optional: without it a comparison cannot be limited to a channel.
+   */
+  channelSet?(docId: DocId, lines?: readonly string[]): ChannelSet;
   /** `ui.lastParams.compare`, untrusted (§7.11). */
   memory: {
     read(): unknown;
@@ -421,6 +448,8 @@ export interface ReviewInput {
    * key of the snapshots the checks at a copy keep for it (`SideSnapshots`, WX-CODE-1).
    */
   staticText?: string;
+  /** P4.31: `lines` is a cut; `fileLines[i]` is the file's line of `lines[i]`, so the maps name file lines. */
+  fileLines?: Int32Array;
 }
 
 function machineName(machine: EffectiveMachine): string {
@@ -436,8 +465,19 @@ function sideOf(
   return {
     normalized,
     // An empty side has no lines at all, which is the empty text and not one empty line.
-    side: { text: normalized.text, lineMap: normalized.lineMap, languageId: input.profileId },
+    side: { text: normalized.text, lineMap: inFileLines(normalized.lineMap, input.fileLines), languageId: input.profileId },
   };
+}
+
+/** A line map of a cut's lines, put through the cut's own map: it then names lines of the file (P4.31). */
+function inFileLines(lineMap: Int32Array, fileLines: Int32Array | undefined): Int32Array {
+  if (fileLines === undefined) return lineMap;
+  return Int32Array.from(lineMap, (line) => fileLines[line - 1] ?? line);
+}
+
+/** P4.31: a cut as the panes show it in raw mode: the lines as written, with the file's line numbers behind them. */
+function cutSide(input: ReviewInput): ReviewSide {
+  return { text: input.lines.join('\n'), lineMap: input.fileLines ?? Int32Array.from(input.lines, (_, i) => i + 1), languageId: input.profileId };
 }
 
 /**
@@ -846,6 +886,14 @@ export function createCompareService(deps: CompareDeps): CompareController {
   const reviewView = writable<ReviewView | null>(null);
   /** M11 CODE-18: the cursor of the diff on screen is in a change (see `followCursor`). */
   const atChange = writable(true);
+  /**
+   * P4.31: the cuts of the two sides while the open comparison is limited to a channel; null
+   * for a whole-program comparison. Read when the comparison opens: the panes are read-only
+   * copies, and the overlay covers the editors, so the text does not change under them.
+   */
+  let cuts: { modified: Cut; original: Cut } | null = null;
+  /** The aligned view's preference while a cut is open (it is switched off for the session; see `setAligned`). */
+  let heldAligned: boolean | null = null;
 
   // The saved options (§7.11): read on first use, because the UI state is loaded after
   // this module is created.
@@ -872,7 +920,7 @@ export function createCompareService(deps: CompareDeps): CompareController {
       inline: get(view).inline,
       ignoreTrimWhitespace: get(view).ignoreTrimWhitespace,
     };
-    if (get(aligned)) memo.aligned = true;
+    if (heldAligned ?? get(aligned)) memo.aligned = true;
     if (Object.keys(savedReview).length > 0) memo.review = savedReview;
     deps.memory.write(memo);
   }
@@ -897,6 +945,11 @@ export function createCompareService(deps: CompareDeps): CompareController {
   function finish(): void {
     if (get(content) === null) return;
     content.set(null);
+    cuts = null;
+    if (heldAligned !== null) {
+      aligned.set(heldAligned);
+      heldAligned = null;
+    }
     snapshots.clear();
     info.set(null);
     reviewView.set(null);
@@ -991,12 +1044,22 @@ export function createCompareService(deps: CompareDeps): CompareController {
   function currentInputs(): { modified: ReviewInput; original: ReviewInput } | null {
     const session = get(content);
     if (!session) return null;
-    return { modified: modifiedInput(session.docId), original: originalInput(session, session.docId) };
+    const modified = modifiedInput(session.docId);
+    const original = originalInput(session, session.docId);
+    if (cuts === null) return { modified, original };
+    // P4.31: the cut replaces the lines; the machine, the profile and the codes stay the side's own.
+    return {
+      modified: { ...modified, lines: cuts.modified.lines, fileLines: cuts.modified.fileLines },
+      original: { ...original, lines: cuts.original.lines, fileLines: cuts.original.fileLines },
+    };
   }
 
-  function buildCurrentReview(): ReviewView | null {
+  /** `normalize` false (a cut shown in raw mode): the cut as written, with the files' line numbers. */
+  function buildCurrentReview(normalize = true): ReviewView | null {
     const inputs = currentInputs();
-    return inputs ? buildReview(inputs.modified, inputs.original, get(reviewOptions)) : null;
+    if (!inputs) return null;
+    if (!normalize) return { original: cutSide(inputs.original), modified: cutSide(inputs.modified), notes: [] };
+    return buildReview(inputs.modified, inputs.original, get(reviewOptions));
   }
 
   /**
@@ -1004,7 +1067,13 @@ export function createCompareService(deps: CompareDeps): CompareController {
    * is showing (it needs the same normalization, and the review bar's notes).
    */
   function rebuild(): void {
-    reviewView.set(get(content) !== null && (get(mode) === 'review' || get(aligned)) ? buildCurrentReview() : null);
+    if (get(content) === null) {
+      reviewView.set(null);
+      return;
+    }
+    // A cut is always shown as text: raw mode as written, review mode normalized (P4.31).
+    if (cuts !== null) reviewView.set(buildCurrentReview(get(mode) === 'review'));
+    else reviewView.set(get(mode) === 'review' || get(aligned) ? buildCurrentReview() : null);
   }
 
   /** The toggles of the compared document's profile: its defaults, with what the user saved. */
@@ -1057,7 +1126,46 @@ export function createCompareService(deps: CompareDeps): CompareController {
   /** The newest `open()`: an older one that is still reading gives way (CODE-10). */
   let openSeq = 0;
 
-  async function open(docId: DocId, source: CompareSource): Promise<boolean> {
+  /**
+   * P4.31: both sides of a comparison cut to channel `channelId`, or the reason in the status
+   * bar (false). A document is cut by its own channel set, the saved version by the sections of
+   * the same program; a file that is not open as a document has no machine and is refused.
+   */
+  function cutSides(
+    doc: DocMeta,
+    source: CompareSource,
+    original: DiffOriginal,
+    channelId: string,
+  ): { cuts: { modified: Cut; original: Cut }; name: string } | false {
+    const channelSet = deps.channelSet;
+    if (channelSet === undefined) return fail('channelScope.noChannels', { document: doc.title });
+    const modifiedSet = channelSet(doc.id);
+    const name = channelNameOf(modifiedSet, channelId);
+    const cutOne = (set: ChannelSet, lines: readonly string[], title: string): Cut | false => {
+      const scope = scopeOf(set, channelId, title, name);
+      if (!scope.ok) return fail(scope.why.key, scope.why.params);
+      return cutLines(lines, scope.ranges);
+    };
+    const modified = cutOne(modifiedSet, linesOf(deps.textOf(doc.id)), doc.title);
+    if (modified === false) return false;
+    let cutOriginal: Cut | false;
+    if (original.kind === 'document') {
+      const other = deps.docs.get(original.docId);
+      cutOriginal = cutOne(channelSet(original.docId), linesOf(deps.textOf(original.docId)), other?.title ?? '');
+    } else if (source.kind === 'saved') {
+      const lines = linesOf(original.text);
+      // A program of one file per channel has no sections to cut by (`setOfLines` reads only
+      // `single-file`): its saved version is the same channel's file, the whole text (P4f CODE-2).
+      const savedSet = modifiedSet.layout === 'multi-file' ? modifiedSet : channelSet(doc.id, lines);
+      cutOriginal = cutOne(savedSet, lines, fileName(doc.path ?? doc.title));
+    } else {
+      return fail('channelScope.compare.fileSide');
+    }
+    if (cutOriginal === false) return false;
+    return { cuts: { modified, original: cutOriginal }, name };
+  }
+
+  async function open(docId: DocId, source: CompareSource, o?: { channel?: string }): Promise<boolean> {
     const mine = ++openSeq;
     const doc = deps.docs.get(docId);
     if (!doc) return fail('compare.noDocument');
@@ -1086,6 +1194,14 @@ export function createCompareService(deps: CompareDeps): CompareController {
     if (mine !== openSeq) return false;
     if (!deps.docs.get(docId)) return fail('compare.noDocument');
 
+    // P4.31: the cut is worked out before anything on screen changes, so a refusal leaves the editor as it was.
+    let scoped: { cuts: { modified: Cut; original: Cut }; name: string } | null = null;
+    if (o?.channel !== undefined) {
+      const made = cutSides(doc, source, original, o.channel);
+      if (made === false) return false;
+      scoped = made;
+    }
+
     // The modified side is the document on screen, so it has to be the active tab.
     if (deps.docs.getActiveId() !== docId) deps.docs.activate(docId);
 
@@ -1093,7 +1209,23 @@ export function createCompareService(deps: CompareDeps): CompareController {
     // A new comparison: nothing is known about its cursor yet (M11 CODE-18).
     atChange.set(true);
     snapshots.clear();
-    content.set({ docId, source, title: compareTitle(doc.title, source, other), original });
+    cuts = scoped === null ? null : scoped.cuts;
+    // The aligned view shows whole programs: it is put aside for a cut and back for the next whole comparison.
+    if (cuts !== null && get(aligned)) {
+      heldAligned = true;
+      aligned.set(false);
+    } else if (cuts === null && heldAligned !== null) {
+      aligned.set(heldAligned);
+      heldAligned = null;
+    }
+    const title = compareTitle(doc.title, source, other);
+    content.set({
+      docId,
+      source,
+      title: scoped === null ? title : t('channelScope.compare.title', { title, channel: scoped.name }),
+      original,
+      ...(scoped === null || o?.channel === undefined ? {} : { channel: { id: o.channel, name: scoped.name } }),
+    });
     applyProfile(docId);
     rebuild();
     deps.layout.openOverlay(COMPARE_PANEL_ID);
@@ -1115,6 +1247,10 @@ export function createCompareService(deps: CompareDeps): CompareController {
 
   function setAligned(on: boolean): void {
     ensureLoaded();
+    if (on && cuts !== null) {
+      fail('channelScope.compare.alignedRefused');
+      return;
+    }
     if (get(aligned) === on) return;
     aligned.set(on);
     persist();
@@ -1168,7 +1304,8 @@ export function createCompareService(deps: CompareDeps): CompareController {
     const target = targetDoc(direction);
     return copyBlocker(direction, {
       // The aligned view shows the programs as written, so it copies like the raw view.
-      mode: get(aligned) ? 'raw' : get(mode),
+      // A cut is a read-only copy of part of the program (P4.31): it counts as review mode, which copies nothing.
+      mode: cuts !== null ? 'review' : get(aligned) ? 'raw' : get(mode),
       originalIsDocument: session?.original.kind === 'document',
       targetLocked: target !== null && deps.docs.get(target)?.readOnly === true,
     });
@@ -1331,7 +1468,7 @@ export function createCompareService(deps: CompareDeps): CompareController {
   ): Promise<boolean> {
     if (get(content) === null) return fail('compare.noDocument');
     const blocked = blockOf(direction);
-    if (blocked === 'review') return fail('compare.copyReview');
+    if (blocked === 'review') return fail(cuts !== null ? 'channelScope.compare.copyRefused' : 'compare.copyReview');
     if (blocked === 'notDocument') return fail('compare.copyNotDocument');
     if (blocked === 'locked') return fail('compare.copyLocked');
 
@@ -1430,6 +1567,7 @@ export function createCompareService(deps: CompareDeps): CompareController {
 
   async function copyWord(direction: CopyDirection): Promise<boolean> {
     if (get(content) === null) return fail('compare.noDocument');
+    if (cuts !== null) return fail('channelScope.compare.copyRefused');
     const blocked = blockOf(direction);
     if (blocked === 'notDocument') return fail('compare.copyNotDocument');
     if (blocked === 'locked') return fail('compare.copyLocked');
@@ -1491,8 +1629,9 @@ export function createCompareService(deps: CompareDeps): CompareController {
 
     let originalLines: string[];
     let modifiedLines: string[];
-    if (o.normalized) {
-      const built = get(reviewView) ?? buildCurrentReview();
+    if (o.normalized || cuts !== null) {
+      // A cut is exported as the panes show it, normalized when that is asked for.
+      const built = cuts !== null ? buildCurrentReview(o.normalized) : (get(reviewView) ?? buildCurrentReview());
       if (!built) return null;
       originalLines = reviewLines(built.original);
       modifiedLines = reviewLines(built.modified);
@@ -1634,6 +1773,11 @@ export const compareController: CompareController = createCompareService({
   modalSnapshotAt: (docId, line, expect) => appModal.snapshotAt(docId, line, expect),
   versionOf: (docId) => appEditor.versionId(docId),
   codesFor: (profileId) => appCodes.forProfile(profileId),
+  channelSet: (docId, lines) => {
+    if (lines === undefined) return appChannels.fresh(docId);
+    const view = appMachines.effective(docId);
+    return setOfLines(lines, view.cp, appChannels.params(docId), view.codes);
+  },
   memory: {
     read: () => appUiState.getLastParams(COMPARE_MEMO_KEY),
     write: (memo) => appUiState.setLastParams(COMPARE_MEMO_KEY, memo as Record<string, unknown>),

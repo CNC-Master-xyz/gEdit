@@ -25,7 +25,9 @@ you.
 | [Seeing the channels](#seeing-the-channels) | The status bar, the program map, the keys |
 | [Check Wait Codes](#check-wait-codes) | What it finds, and what to do about each finding |
 | [The channel view](#the-channel-view) | One pane for each channel, lined up at the waits |
-| [Split into Channel Documents](#split-into-channel-documents) | One document for each channel, and merging them back |
+| [Split into Channel Documents](#split-into-channel-documents) | One document for each channel, merging them back, and saving them as files |
+| [Searching and comparing one channel](#searching-and-comparing-one-channel) | The Channel choice of Find All and Compare |
+| [The Siemens job list](#the-siemens-job-list) | Which program runs in which channel |
 | [In a script](#in-a-script) | |
 | [Known limits](#known-limits) | |
 
@@ -221,9 +223,59 @@ Not every post names the files alike. Three more ways:
   file, like the machine of a file, also after a restart. *Remove the assignment* goes back
   to what the name and the program say. Your assignment beats the marker and the name.
 
+- **The first path has no extension.** Some controls write the program of the first path as
+  `SHAFT` and the others as `SHAFT.P-2`. Give a pattern for the first path's name under
+  Advanced, *File name of the first path*, such as `^(?<stem>[^.]+)$` (the shared part, and no
+  channel). Then a file without an extension in the folder reads as path 1. The Fanuc presets
+  with the `.P-n` names carry this pattern, marked *verify*: check that your machine writes
+  it, because every file without an extension in that machine's folder then reads as path 1.
+- **A job list.** A Siemens job list says which program runs in which channel
+  ([below](#the-siemens-job-list)). It is the last source, after the file name.
+
+When a file name cannot be built from the pattern (an alias in the name, a path-1 file without
+a marker), gEdit looks at the **names** of the files in the folder that start like the
+program's (`SHAFT`, from at least two characters on) and offers those that fit as the other
+channels. It reads no file and opens none: it takes the names, and you still pick the files.
+If two files could be the same channel, gEdit gives neither and says *More than one file in
+the folder could be Path 2: … Open the right one.*
+
 If a machine has several files and nothing that tells them apart, the Channels step says:
 *Nothing here tells gEdit which file is which channel. Open the files and assign each one to
 its channel by hand.* That is how the Sinumerik preset starts.
+
+### The Siemens job list
+
+A Siemens control can run several programs in several channels from a **job list**, a text
+file (`.JOB`) with one line for each program:
+
+```
+SELECT SHAFT1.MPF CH=1
+SELECT SHAFT2.MPF CH=2
+```
+
+For a machine with one program for each channel, gEdit can use that list to tell which
+channel a program is. It is read in these ways only:
+
+- **The job list has to be open.** gEdit reads no file you did not open. If a `*.JOB` file
+  is in the folder and not open, the status bar says once: *This folder has a job list. Open
+  it to use it for the channels.* A document is a job list when its first line is a `SELECT`,
+  `LOAD` or `COPY` and at least one `SELECT` reads; the name does not matter.
+- **Only `SELECT` counts.** `LOAD` and `COPY` are in the same file and say nothing about the
+  channel. The channel must be a number (`CH=2`). A channel written as a name (`CH=Station5`)
+  or `CH=ncu_b,1` is shown as a problem and gives no channel, because the name is defined in a
+  file gEdit does not read.
+- **Only main programs.** `SELECT` runs a main program. `SELECT SHAFT1` and `SELECT SHAFT1.MPF`
+  name `SHAFT1.MPF`, never the subprogram `SHAFT1.SPF`; an entry `SHAFT1.SPF` gives no channel
+  to the main program. The archive spelling `_N_SHAFT1_MPF` is the same program, and capitals
+  do not matter.
+- **It comes last.** The order is: the channel you assigned by hand, the marker in the
+  program, the file name, the job list. If the job list says one thing and the name or the
+  marker another, gEdit uses the name or the marker and tells you the list disagrees. If the
+  list names a program for two channels, no channel is set (*The job list runs this program
+  in more than one channel*).
+- Only the entries of the first 2,000 lines, 64 programs, are read.
+
+The status bar then says the channel was *found in the job list*.
 
 ---
 
@@ -618,6 +670,40 @@ Say path 1 and path 2, with `M901 P3`-style waits.
 A finding that is only a warning begins with *Warning:*. The others are things the control
 would refuse or would not wait for.
 
+### What the check follows
+
+The check does not only read the waits top to bottom. It follows the jumps and the loops it
+can be sure of, so that it compares the waits in the order the channel **runs** them:
+
+- **A jump forward that always happens.** `GOTO`, `GOTOF` or `GOTOC` alone in its block (a
+  block number or a label in front is fine) to a target that is exactly one line of the same
+  channel, further down. The waits between the jump and its target do not run, so they are
+  not compared.
+- **A counted loop.** A Sinumerik `FOR R1=1 TO 3` … `ENDFOR` with whole numbers, and `REPEAT
+  LABEL P=3` (the lines from the label to there run once, and three more times). The waits in
+  it count once for every pass. `FOR` needs the first number below the last.
+- **Each finding once.** A finding of one kind is reported once, not for every pass.
+
+It follows a jump **only at the top level of the program**:
+
+- A jump **inside an `IF` block** (a Sinumerik `IF` … `ENDIF`, a Fanuc `IF [ … ] THEN` …
+  `ENDIF`), or to a target inside one, is not followed: whether the block runs depends on
+  the condition. A jump over a whole `IF` block, from outside it to outside it, is followed.
+  A block whose `IF` and `ENDIF` do not match is not followed at all in that channel.
+- A jump over a **program end or the start of the next program** in the same file (`M02`,
+  `M30`, `M99`, `M17`, `RET`, `RTS`, a `%` line, an `O` number) would land in another program.
+  It is not followed.
+
+Everything else that jumps or loops is **not followed**, and the pairs of waits it lies
+between stay *not judged*, as before: a jump with a condition (`IF … GOTO`), `GOTOB`
+and any jump backward (an endless loop), a computed target, a target that is not exactly one
+line, `WHILE` … `DO`, `LOOP`, `REPEAT … UNTIL`, a counted loop with a variable in its count,
+and a jump into another channel. A wait on a line that a followed
+jump skips does not run, so the check does not use it as an answer: if the other channel
+waits for it, that wait is reported as *Missing*.
+
+A line with `/` (block skip) in front is not followed either: it may or may not run.
+
 ### What the check cannot tell you
 
 - **It reads written numbers and written order, not what the machine does.** It does not
@@ -628,11 +714,14 @@ would refuse or would not wait for.
   The paths can still wait in a way that blocks each other for reasons the text does not
   show.
 - It does not follow a call into another file, and it cannot judge the order across a
-  jump target or a backward jump. It says so for each pair.
-- It cannot count the passes of a loop. A wait inside a loop (between a jump target and a
-  backward jump in its channel) is compared by its number only: if the counts differ it
-  says *Count not checked*, and a wait that a loop runs a different number of times in
-  each channel than written is not seen.
+  jump it does not follow (see [what the check follows](#what-the-check-follows)). It says so
+  for each pair.
+- It counts the passes of a loop only when the program writes the count as a plain number. A
+  wait inside any other loop (between a jump target and a backward jump in its channel) is
+  compared by its number only: if the counts differ it says *Count not checked*, and a wait
+  that such a loop runs a different number of times in each channel than written is not seen.
+- It does not know which way a condition goes. An `IF` that decides whether a wait runs is
+  read as if the wait were always there.
 - It does not compare a channel whose file is not open.
 - A number is **allowed to repeat**. A post that writes the same `M902` ten times in both
   channels is normal and is not reported as long as both have it ten times.
@@ -875,7 +964,70 @@ editing and merge again. If you undo a merge in the program, merge again brings 
 changes back from the documents.
 
 It is not offered for a machine with one file for each channel; they are separate documents
-already.
+already. To write the channel documents as files, see [Save Channel Files](#save-channel-files).
+
+### Save Channel Files
+
+**Save Channel Files…** (NC tab, group **Channels**; offered when the program has been split)
+saves the channel documents as files, one after the other. Each gets its own **Save As**
+dialog, in the folder of the program they came from, with a name already filled in:
+
+the program name, an underscore, the channel and the extension. The program `PART.MPF` split in two channels `1` and `2`
+proposes `PART_1.MPF` and `PART_2.MPF`; a channel `A` of `PART.MIN` gives `PART_A.MIN`.
+
+- The name is the machine's own file name for the channel when it has one for this
+  channel; otherwise the form above, with the channel's short name in capitals. A character a
+  file name cannot hold (`/ \ : * ? " < > |`) becomes `_`, so a channel name never changes the
+  folder. When the machine has no usable name for a channel, the status bar says that the
+  usual name was proposed.
+- If two channels would be offered the same name, gEdit asks nothing and saves nothing, and
+  says which name: change the file names of the channels in the machine settings.
+- The system's dialog is the only question: it asks before it overwrites a file. You can
+  change the name. **Cancel** in one dialog leaves that channel unsaved and goes on to the
+  next. The status bar ends with *Saved 2 of 3 channel files.*
+- When at least one file is written, it adds: *These channel files are copies for editing.
+  Send the program to the machine in the form it reads; Merge Channels Back makes it one file
+  again.* The files are for working on one channel at a time. A control that wants all
+  channels in one file, or one file for each channel in a form of its own (a Sinumerik
+  archive, say), still gets the program the way you send it today. gEdit does not send
+  anything.
+- gEdit remembers which documents it split from which program until you quit. **After a
+  restart the written files are not tied together again.** Open them as ordinary programs;
+  to bring the changes back into the program, split it again.
+- It says so if the program was closed (*Save each channel document with Save As*), if the
+  channel documents were closed, or if there is no split.
+
+## Searching and comparing one channel
+
+When the program in front of you has channels in one file, two commands can be limited to the
+lines of **one channel**:
+
+- **Find All…** gets a **Channel** choice in its form: *All channels*, then each channel
+  of the machine. The hits are the lines of that channel only, and the line numbers are the
+  program's own. The Results message says *Only the lines of Turret A.* If *Look in* is all
+  open documents, a document without lines of that channel is skipped, and the message counts
+  how many. A document of another channel's file is skipped the same way. **Replace All is
+  not limited** by the Channel choice: it works on the selection or the whole program, as
+  before.
+- **Compare** asks **Compare which lines?** before it opens, for a program that has channel
+  sections: *The whole program*, or one channel. A comparison of one channel cuts **both
+  sides** to the lines of that channel (the other side by its own sections) and says so in
+  the title (`PART.MPF · Turret A`). Line numbers are the files' own.
+
+A comparison limited to a channel shows only part of the program, so:
+
+- **nothing can be copied** from it (*Compare the whole program to copy*);
+- the **Aligned** view is not offered for it;
+- a file you pick from disk has no machine and so no channels: *A file that is not open as a
+  document has no channel rules. Open it first, or compare the whole program.*
+
+For one program for each channel, the choice is the file of that channel; a document that
+is the file of another channel is refused (*… is the file of Path 2, not of Path 1*), and one
+whose channel is not known says to assign it first. Comparing a channel file with its saved
+version works, and the channel stays the document's own.
+
+Both commands refuse in plain words a document with no channel sections, and a channel that
+has no lines in it.
 
 ---
 
@@ -896,6 +1048,13 @@ them. See [Scripts](scripts.md#channels-in-a-script). The bundled
   the reason. Take the code out of the list or use a pattern that does not match the call.
 - **A channel is compared with the channels that are open.** gEdit does not open files for
   you.
+- **The check follows only the jumps and loops listed under [what it
+  follows](#what-the-check-follows).** It does not know which way a condition goes.
+  The [channel view](#the-channel-view) still lines up waits across a loop less far than the
+  check follows it, so a pair can be *not judged* in the view and judged in the check.
+- **Channel files written to disk are not remembered.** The link between the channel
+  documents and their program lasts until you quit (see [Save Channel
+  Files](#save-channel-files)).
 - **Marks are whole numbers from 0 to 99.** A `WAITM` whose mark is a number outside that range is reported as a warning (*Mark out of range*): a negative number such as `-1` and a number with a fraction such as `1.5` too. `1.` is the whole number 1, as the control reads it. A mark written as a
   variable (`_M`) is not judged. `SETM(5,6)` and `CLEARM(5,6)` are read as the marks 5 and 6,
   and a `SETM` with several marks answers a `WAITM` of each of them.

@@ -269,6 +269,18 @@ export interface ChannelParams {
    *  over the file name; a disagreement is a problem, never a silent choice. A marker naming an
    *  undeclared channel, or two markers naming different channels, name none. */
   marker?: Pattern;
+  /**
+   * Phase 4 (P4f prelude, T055, plan section 6.8): matched on the BASE NAME, case-insensitively,
+   * with a named group `stem` and **no** `channel` group. A file whose name matches is the file
+   * of the FIRST declared channel (`list[0]`) of the set whose stem it captured. For a control
+   * whose path-1 program is written without the channel marker and without an extension
+   * (`^(?<stem>[^.]+)$`), while the other paths' files carry one. With it,
+   * `siblingsFromListing` finds the other channels' files in the folder by the `fileName`
+   * pattern and the same stem. Absent (the default): a file name that no `fileName` pattern or
+   * template explains is no channel file, as before. A pattern that does not compile or has no
+   * `stem` group is a problem of the machine's channel block (`firstFileName`).
+   */
+  firstFileName?: Pattern;
 
   // --- sync marks --------------------------------------------------------------------
   syncMarks: SyncRule[];
@@ -348,8 +360,9 @@ export type ChannelMember =
       exists: boolean;
       docId: DocId | null;
       /** How this document was tied to the channel: a pattern, or the user's own assignment
-       *  (`channels.assign`, remembered by M7's per-file memory). The status item says which. */
-      by: 'fileName' | 'marker' | 'assigned';
+       *  (`channels.assign`, remembered by M7's per-file memory), or (P4.30b) an open Siemens
+       *  job list of the folder. The status item says which. */
+      by: 'fileName' | 'marker' | 'assigned' | 'jobList';
     };
 
 /**
@@ -481,4 +494,43 @@ export interface ChannelBudget {
   /** An absolute time in `now()`'s units; absent = no deadline. */
   deadline?: number;
   now?: () => number;
+}
+
+// ---------------------------------------------------------------------------------------
+// Phase 4 (P4f prelude; plan section 6.8): what the check follows (P4.32)
+// ---------------------------------------------------------------------------------------
+
+/**
+ * A jump of one channel the check can follow: an **unconditional** `GOTO` (a label or a block
+ * number) whose target is exactly one line of the same channel. Lines are 1-based, in the
+ * program's own line numbers (as `jumpLines`).
+ */
+export interface FlowJump {
+  line: number;
+  target: number;
+}
+
+/**
+ * A structured or counted loop whose body runs `count` times: a literal count the program
+ * writes (`REPEAT label P=3`, `FOR R1=1 TO 3`). A `WHILE` or `DO` whose condition reads a
+ * variable, and a backward `GOTO`, are `opaque`, never a loop with a count.
+ */
+export interface FlowLoop {
+  /** The line that opens the loop body (the label, `FOR`, `LOOP`). */
+  start: number;
+  /** The line that closes it (the backward jump, `ENDFOR`, `ENDLOOP`). */
+  end: number;
+  count: number;
+}
+
+/**
+ * What `computeFlow` (P4.32, `app/outlineService.ts`) knows of one channel. A line that holds a
+ * jump or a loop the check cannot follow (a condition, a computed target, a target in another
+ * channel or in two places, a variable count) is in `opaque`; every pair of marks spanned by an
+ * opaque line stays "not judged", exactly as with `jumpLines` today.
+ */
+export interface ChannelFlow {
+  jumps: FlowJump[];
+  loops: FlowLoop[];
+  opaque: number[];
 }

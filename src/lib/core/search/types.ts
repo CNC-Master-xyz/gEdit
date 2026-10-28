@@ -17,6 +17,7 @@
 //    (`maskComments` from `core/nc/mask.ts` blanks comments and keeps strings).
 
 import type { Msg } from '$lib/app/types';
+import type { CodeDb } from '$lib/core/codes/types';
 
 export type WordOp = '=' | '!=' | '<' | '<=' | '>' | '>=';
 
@@ -40,6 +41,25 @@ export interface SearchFlags {
   regex: boolean;
   caseSensitive: boolean;
   inComments: boolean;
+}
+
+/** A span of whole lines, 1-based and inclusive: the shape of `ChannelSet` ranges. */
+export interface LineRange {
+  startLine: number;
+  endLine: number;
+}
+
+/**
+ * What `findInLines` takes besides the query. `codes` is the document's effective code
+ * database; `max` caps the hits. **`ranges`** (P4.31, channel scope): only these lines are read,
+ * in line order whatever order the ranges come in; a line in two ranges is read once; a range
+ * outside the document is clipped. The hits keep the document's line numbers. Absent: every
+ * line. An empty list reads no line at all.
+ */
+export interface SearchOptions {
+  max?: number;
+  codes?: CodeDb;
+  ranges?: readonly LineRange[];
 }
 
 /** The cap of find-all (AD-25): beyond it the panel shows a "dropped" count. */

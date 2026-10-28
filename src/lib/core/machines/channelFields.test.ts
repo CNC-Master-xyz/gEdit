@@ -104,8 +104,24 @@ describe('channelFields', () => {
 
   it('shows the patterns of the layout in use, and only those', () => {
     expect(layoutAdvancedFor(okuma()).map((f) => f.id)).toEqual([CF.sectionStart, CF.sectionEnd, CF.sectionSeparator]);
-    expect(layoutAdvancedFor(fanuc()).map((f) => f.id)).toEqual([CF.fileName, CF.fileNameFor, CF.marker]);
+    expect(layoutAdvancedFor(fanuc()).map((f) => f.id)).toEqual([CF.fileName, CF.fileNameFor, CF.marker, CF.firstFileName]);
     expect(layoutAdvancedFor(undefined)).toEqual([]);
+  });
+
+  it('P4.30b: the file name of the first path, with the example and "verify", kept and dropped like the other patterns', () => {
+    const field = layoutAdvancedFor(fanuc()).find((f) => f.id === CF.firstFileName);
+    expect(field?.label).toBe('File name of the first path');
+    expect(field?.help).toContain('^(?<stem>[^.]+)$');
+    expect(field?.help).toContain('For a control that writes the program of the first path without an extension. Verify on your machine.');
+    // The shipped preset has one since P4f NC-7; start from a block without it.
+    const { firstFileName: _shipped, ...p } = fanuc();
+    expect(layoutToValues(p)[CF.firstFileName]).toBe('');
+    const set = applyLayoutEdit(p, CF.firstFileName, '^(?<stem>[^.]+)$')!;
+    expect(set.firstFileName).toBe('^(?<stem>[^.]+)$');
+    expect(layoutFromValues(layoutToValues(set), set)).toEqual(set);
+    expect(applyLayoutEdit(set, CF.firstFileName, '')!.firstFileName).toBeUndefined();
+    // Leaving one program per channel drops it with the other file-name members.
+    expect(applyLayoutEdit(set, CF.layout, 'single-file')!.firstFileName).toBeUndefined();
   });
 
   it('shows a rule’s fields by what it holds', () => {

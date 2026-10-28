@@ -1,0 +1,65 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "As sinumerik-if-block-goto, with the GOTOF L1 in the ELSE part of an IF R1==1 … ELSE … ENDIF block: it runs only when R1 is not 1. Not followed; the missing partner of mark 2 is reported, before and after.",
+  "rule": "F1 F4",
+  "profile": "sinumerik",
+  "preset": "sinumerik-2channel",
+  "program": {
+    "1": [
+      "%_N_FLOWC1_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "WAITM(1,1,2)",
+      "IF R1==1",
+      "G0 X10",
+      "ELSE",
+      "GOTOF L1",
+      "ENDIF",
+      "WAITM(2,1,2)",
+      "L1: G0 X100",
+      "WAITM(3,1,2)",
+      "M30"
+    ],
+    "2": [
+      "%_N_FLOWC2_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "WAITM(1,1,2)",
+      "G0 X50",
+      "WAITM(3,1,2)",
+      "M30"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [],
+        "loops": [],
+        "opaque": [
+          10
+        ]
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "missing",
+        "channel": "1",
+        "line": 9,
+        "mark": "2",
+        "other": "2"
+      }
+    ],
+    "after": [
+      {
+        "kind": "missing",
+        "channel": "1",
+        "line": 9,
+        "mark": "2",
+        "other": "2"
+      }
+    ]
+  }
+}

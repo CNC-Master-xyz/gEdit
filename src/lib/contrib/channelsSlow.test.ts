@@ -26,7 +26,7 @@ vi.mock('$lib/stores/channels', () => ({
 vi.mock('$lib/app/dialogs', () => ({ dialogs: {} }));
 vi.mock('$lib/app/fileOps', () => ({ files: {} }));
 vi.mock('$lib/app/modals', () => ({ modals: {} }));
-vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}) }));
+vi.mock('$lib/app/outlineService', () => ({ computeJumpLines: () => ({}), computeFlow: () => ({}) }));
 vi.mock('$lib/app/status', () => ({ status: { show: (text: string, o?: { error?: boolean }) => shown.push({ text, error: o?.error === true }) } }));
 vi.mock('$lib/monaco/editorService', () => ({ editor: { cursor: () => ({ line: 3 }), getLines: () => [], getLineCount: () => 0 } }));
 vi.mock('$lib/stores/documents', () => ({ docs: { getActiveId: () => 'd1', get: () => ({ title: 'x.nc', path: null }) } }));

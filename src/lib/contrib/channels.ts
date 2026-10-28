@@ -16,21 +16,30 @@
 // Back" (P4.23) turns the record and the documents' current text into the program's new text
 // with `core/channels/merge.ts` and writes it as one undo step.
 //
+// "Save Channel Files" (P4.31, plan §6.8.6) writes the channel documents of a split to disk, one
+// at a time through the Save As dialog, each proposed the name the machine's file-name rules
+// give it (`core/channels/fileNames.ts`) in the folder of the program; the split's usual name
+// where the machine has none. The system's dialog is the one question that asks before an
+// overwrite.
+//
 // Channel names are the machine's own text and stay untranslated (README rule 3).
 
 import ArrowLeftRight from 'lucide-svelte/icons/arrow-left-right';
 import Columns2 from 'lucide-svelte/icons/columns-2';
 import Hourglass from 'lucide-svelte/icons/hourglass';
 import Merge from 'lucide-svelte/icons/merge';
+import Save from 'lucide-svelte/icons/save';
 import Split from 'lucide-svelte/icons/split';
 import ChannelStatus from '$lib/components/status/ChannelStatus.svelte';
 import { asIcon } from '$lib/app/icons';
 import { dialogs } from '$lib/app/dialogs';
 import { files } from '$lib/app/fileOps';
 import { modals } from '$lib/app/modals';
-import { computeJumpLines } from '$lib/app/outlineService';
+import { computeFlow, computeJumpLines } from '$lib/app/outlineService';
+import { channelFileName, extensionOf, stemOf } from '$lib/core/channels/fileNames';
 import { channelRefs, channelsAt } from '$lib/core/channels/resolve';
-import { macroCallCodes, resolveDocument, shownMark } from '$lib/core/channels/marks';
+import { setOfLines } from '$lib/core/channels/scope';
+import { shownMark } from '$lib/core/channels/marks';
 import { planMerge, splitRecord, type SplitRecord } from '$lib/core/channels/merge';
 import { answersWait, markIdOf, pairsByList, waitKey } from '$lib/core/channels/panes';
 import { status } from '$lib/app/status';
@@ -547,6 +556,25 @@ function testOnDocument(): void {
 
 let splitConfirmed = false;
 
+/**
+ * A text made fit for one file name: the characters a file name cannot hold (and `/` and `\`,
+ * which would point into another folder) become `_` (P4f fix B, CODE-4).
+ */
+export function plainFileText(text: string): string {
+  return text.replace(/[/\\:*?"<>|\u0000-\u001f]/g, '_');
+}
+
+/**
+ * The name a split gives a channel document when the machine has no file name for it (N1, owner
+ * decision of 2026-10-28): `{stem}_{CHANNEL ID}{ext}`, `PART_1.MPF` or `PART_A.MIN`. No blank
+ * and no dash, which neither a Fanuc nor a Sinumerik program name allows. The id is the machine's
+ * own short id (`[a-z0-9_-]`), never its free-text name; whatever else reaches the name is
+ * made plain, so the name can never point into another folder.
+ */
+export function usualChannelName(stem: string, ext: string, channelId: string): string {
+  return `${plainFileText(stem)}_${plainFileText(channelId).toUpperCase()}${plainFileText(ext)}`;
+}
+
 async function splitToDocuments(): Promise<void> {
   const id = docs.getActiveId();
   const doc = id === null ? undefined : docs.get(id);
@@ -576,14 +604,13 @@ async function splitToDocuments(): Promise<void> {
     if (!ok) return;
     splitConfirmed = true;
   }
-  const dot = doc.title.lastIndexOf('.');
-  const stem = dot > 0 ? doc.title.slice(0, dot) : doc.title;
-  const ext = dot > 0 ? doc.title.slice(dot) : '';
+  const stem = stemOf(doc.title);
+  const ext = extensionOf(doc.title);
   const machineId = machines.effective(id).machine.id;
   const made: DocId[] = [];
   for (const { channel, text } of texts) {
     const next = files.newUntitled({ profileId: doc.profileId, text, activate: false });
-    docs.update(next, { proposedPath: `${t('channels.split.name', { title: stem, channel: channel.name })}${ext}` });
+    docs.update(next, { proposedPath: usualChannelName(stem, ext, channel.id) });
     if (machineId !== null) machines.setForDoc(next, machineId);
     made.push(next);
   }
@@ -644,24 +671,8 @@ export interface MergeBackDeps {
 
 /** `lines` read for channels the way the service reads the document (`single-file` only). */
 function resolveLines(id: DocId, lines: readonly string[]): ChannelSet {
-  const empty: ChannelSet = { layout: 'none', self: null, members: [], missing: [], outside: [], marks: [], problems: [], truncated: false };
-  const params: ChannelParams | null = channels.params(id);
-  if (params === null || params.layout !== 'single-file') return empty;
-  const now = () => Date.now();
   const view = machines.effective(id);
-  const read = resolveDocument('', lines, view.cp, params, { deadline: now() + CHANNEL_CAPS.resolveMs, now, calls: macroCallCodes(view.codes) });
-  if (read.layout !== 'single-file') return { ...empty, problems: read.problems, truncated: read.abandoned };
-  const found = new Set(read.sections.map((section) => section.channel.id));
-  return {
-    layout: 'single-file',
-    self: null,
-    members: read.sections.map((section) => ({ kind: 'section' as const, channel: section.channel, docId: id, ranges: section.ranges })),
-    missing: channelRefs(params).filter((ref) => !found.has(ref.id)),
-    outside: read.outside,
-    marks: read.marks,
-    problems: read.problems,
-    truncated: read.dropped > 0,
-  };
+  return setOfLines(lines, view.cp, channels.params(id), view.codes, id);
 }
 
 /**
@@ -731,6 +742,98 @@ export function mergeBack(deps: MergeBackDeps, activeId: DocId): void {
   splitRecords.renew(answer.record);
   deps.docs.activate(sourceId);
   deps.say({ key: 'channels.merge.done', params: { count: answer.merged.length } });
+}
+
+// --- the channel files on disk (P4.31) ------------------------------------------------
+
+/** Everything `saveChannelFiles` touches, so a test can drive it without the app. */
+export interface SaveFilesDeps {
+  docs: { get(id: DocId): DocMeta | undefined; update(id: DocId, patch: { proposedPath: string | null }): void };
+  /** The document's save: a document without a path goes to the Save As dialog. True when it was written. */
+  save(id: DocId): Promise<boolean>;
+  params(id: DocId): ChannelParams | null;
+  show(text: string, error?: boolean): void;
+}
+
+/** The folder of a path and its separator, or null for a name with no folder. */
+function folderOf(path: string | null): { folder: string; sep: string } | null {
+  if (path === null) return null;
+  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return slash > 0 ? { folder: path.slice(0, slash), sep: path[slash] } : null;
+}
+
+/**
+ * What `saveChannelFiles` proposes for each open channel document of `activeId`'s split: the
+ * machine's name (`channelFileName`), else the usual one; and the names of the channels that
+ * got the usual one although the machine has a template (N3, N4) or none (not said: that is
+ * the normal case of a one-program machine). Pure, exported for the tests.
+ */
+export function proposedNames(
+  source: { title: string; path: string | null },
+  record: SplitRecord,
+  params: ChannelParams | null,
+): { channelId: string; docId: DocId; name: string; usual: boolean; template: boolean }[] {
+  const stem = stemOf(source.title);
+  const ext = extensionOf(source.title);
+  const refs = params === null ? [] : channelRefs(params);
+  const place = folderOf(source.path);
+  return record.channels.map((c) => {
+    const ref = refs.find((r) => r.id === c.channelId);
+    const given = ref !== undefined && params !== null ? channelFileName(stem, ref, params) : null;
+    const name = given ?? usualChannelName(stem, ext, c.channelId);
+    const template = params !== null && Array.isArray(params.list) && (typeof params.fileNameFor === 'string' || typeof params.list.find((x) => x?.id === c.channelId)?.fileName === 'string');
+    return { channelId: c.channelId, docId: c.docId, name: place === null ? name : `${place.folder}${place.sep}${name}`, usual: given === null, template };
+  });
+}
+
+/**
+ * `channels.saveChannelFiles` for the program `activeId` is, or a channel document of: refused in
+ * plain words without a split record, a closed program, or two files with one name; else each
+ * open channel document is proposed its name and saved, one Save As dialog after the other. A
+ * cancelled dialog leaves that document unsaved and goes on; the status line says how many
+ * were written.
+ */
+export async function saveChannelFiles(deps: SaveFilesDeps, activeId: DocId): Promise<void> {
+  const records = splitRecords.forDoc(activeId);
+  if (records.length === 0) {
+    deps.show(t('channelScope.files.noRecord'), true);
+    return;
+  }
+  const record = records[0];
+  const source = deps.docs.get(record.sourceId);
+  if (source === undefined) {
+    deps.show(t('channelScope.files.sourceClosed'), true);
+    return;
+  }
+  const params = deps.params(record.sourceId);
+  const names = new Map((params?.list ?? []).map((c) => [c.id, c.name]));
+  const open = proposedNames(source, record, params).filter((p) => deps.docs.get(p.docId) !== undefined);
+  if (open.length === 0) {
+    deps.show(t('channelScope.files.nothingOpen'), true);
+    return;
+  }
+  // Two files with one name: asked before any dialog, so nothing is half done.
+  const seen = new Set<string>();
+  for (const p of open) {
+    const key = p.name.toLowerCase();
+    if (seen.has(key)) {
+      deps.show(t('channelScope.files.sameName', { names: p.name.slice(p.name.search(/[^/\\]*$/)) }), true);
+      return;
+    }
+    seen.add(key);
+  }
+  let saved = 0;
+  for (const p of open) {
+    // A document that already has a file is saved to it, as Save does; a new one goes to Save As with its proposed name.
+    if (deps.docs.get(p.docId)?.path === null) deps.docs.update(p.docId, { proposedPath: p.name });
+    if (await deps.save(p.docId)) saved++;
+  }
+  const parts = [t('channelScope.files.saved', { count: saved, total: open.length })];
+  const usual = open.filter((p) => p.usual && p.template).map((p) => names.get(p.channelId) ?? p.channelId);
+  if (usual.length > 0) parts.push(t('channelScope.files.usualName', { channels: usual.join(', ') }));
+  // Q4 (2026-10-28): every source of a split is a one-file program (Okuma G13/G14, a Sinumerik archive).
+  if (saved > 0) parts.push(t('channelScope.files.copies'));
+  deps.show(parts.join(' '));
 }
 
 export default {
@@ -824,6 +927,27 @@ export default {
       },
     },
     {
+      id: 'channels.saveChannelFiles',
+      title: 'channelScope.saveFiles',
+      category: 'channels.category',
+      icon: asIcon(Save),
+      global: true,
+      enabled: (c) => c.activeDocId !== null && splitRecords.forDoc(c.activeDocId).length > 0,
+      run: () => {
+        const id = docs.getActiveId();
+        if (id === null) return;
+        return saveChannelFiles(
+          {
+            docs,
+            save: (docId) => files.save(docId),
+            params: (docId) => channels.params(docId),
+            show: (text, error) => status.show(text, error ? { error: true } : undefined),
+          },
+          id,
+        );
+      },
+    },
+    {
       id: 'channels.testOnDocument',
       title: 'channels.testOnDocument',
       category: 'channels.category',
@@ -839,6 +963,7 @@ export default {
     { tab: 'nc', group: 'channels.group', command: 'channels.gotoPartner', order: 92 },
     { tab: 'nc', group: 'channels.group', command: 'channels.splitToDocuments', order: 93 },
     { tab: 'nc', group: 'channels.group', command: 'channels.mergeBack', order: 95 },
+    { tab: 'nc', group: 'channels.group', command: 'channels.saveChannelFiles', order: 96 },
     { tab: 'tools', group: 'channels.toolsGroup', command: 'channels.checkSync', order: 60 },
   ],
   // Next to the machine item (15): the machine says how the control reads the program, the
@@ -847,6 +972,11 @@ export default {
   keybindingRemovals: [{ keys: 'Mod+Alt+P', command: 'togglePreserveCase' }],
   activate(): Disposable {
     channels.useJumpLines((id, cp, channelOf) => computeJumpLines(editor.getLines(id, 1, editor.getLineCount(id)), cp, channelOf));
-    return () => channels.useJumpLines(null);
+    // P4.32 (section 6.8.7): the check follows the jumps it can prove, per channel.
+    channels.useFlow((id, cp, channelOf) => computeFlow(editor.getLines(id, 1, editor.getLineCount(id)), cp, channelOf));
+    return () => {
+      channels.useJumpLines(null);
+      channels.useFlow(null);
+    };
   },
 } satisfies Contribution;

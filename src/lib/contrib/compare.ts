@@ -13,6 +13,12 @@
 // one, and an argument `{ lineOnly: true }` copies the one line. `compare.exportDiff` takes
 // `{ normalized }` (default: review mode's). `compare.files` needs no document.
 //
+// P4.31 (plan §6.8.6): a program with channel sections is compared whole or limited to one
+// channel. The question (`askChannel`) comes after the other side is chosen, for a document or
+// the saved version (a file that is not open has no machine, so it has no channel to cut);
+// the first answer is the whole program. A command given its document as an argument (the
+// external-change banner) is never asked.
+//
 // `compare.withSaved` takes `{ docId }`, which is how the external-change banner (WP2.3)
 // reaches it for the document the banner belongs to.
 
@@ -25,10 +31,13 @@ import { currentDiff } from '$lib/monaco/diff';
 import { dialogs } from '$lib/app/dialogs';
 import { modals } from '$lib/app/modals';
 import { status } from '$lib/app/status';
+import { scopableChannels } from '$lib/core/channels/scope';
+import { channels } from '$lib/stores/channels';
 import { docs } from '$lib/stores/documents';
 import { t } from '$lib/i18n';
 import type {
   CommandContext,
+  CompareSource,
   Contribution,
   DocId,
   QuickPickItem,
@@ -71,11 +80,34 @@ function sourceItem(kind: CompareSourceKind): QuickPickItem<CompareSourceKind> {
   return { label: t('compare.sourceFile'), detail: t('compare.sourceFileDetail'), value: kind };
 }
 
-async function withDocument(docId: DocId): Promise<void> {
+/**
+ * The question of P4.31: whole program or one channel. `{}` is the whole program, `{ channel }` a
+ * channel id, undefined a cancelled question. A program without channel sections is not asked.
+ */
+export async function askChannel(docId: DocId): Promise<{ channel?: string } | undefined> {
+  const offered = scopableChannels(channels.fresh(docId), channels.params(docId));
+  if (offered.length === 0) return {};
+  const items: QuickPickItem<string | null>[] = [
+    { label: t('channelScope.compare.whole'), detail: t('channelScope.compare.wholeDetail'), value: null },
+    ...offered.map((c) => ({ label: c.name, detail: t('channelScope.compare.channelDetail'), value: c.id })),
+  ];
+  const picked = await modals.quickPick(items, { placeholder: t('channelScope.compare.placeholder') });
+  if (picked === undefined) return undefined;
+  return picked === null ? {} : { channel: picked };
+}
+
+/** Opens the comparison, after the channel question when `ask` (a command run by hand). */
+async function openCompare(docId: DocId, source: CompareSource, ask: boolean): Promise<void> {
+  const scope = ask && source.kind !== 'file' ? await askChannel(docId) : {};
+  if (scope === undefined) return;
+  await compareController.open(docId, source, scope);
+}
+
+async function withDocument(docId: DocId, ask = true): Promise<void> {
   const all = docs.all();
   const auto = autoTarget(all, docId);
   if (auto !== null) {
-    await compareController.open(docId, { kind: 'document', docId: auto });
+    await openCompare(docId, { kind: 'document', docId: auto }, ask);
     return;
   }
   const targets = documentTargets(all, docId);
@@ -90,7 +122,7 @@ async function withDocument(docId: DocId): Promise<void> {
   }));
   const picked = await modals.quickPick(items, { placeholder: t('compare.pickDocument') });
   if (picked === undefined) return;
-  await compareController.open(docId, { kind: 'document', docId: picked });
+  await openCompare(docId, { kind: 'document', docId: picked }, ask);
 }
 
 async function withFile(docId: DocId): Promise<void> {
@@ -101,8 +133,8 @@ async function withFile(docId: DocId): Promise<void> {
   await compareController.open(docId, { kind: 'file', path });
 }
 
-async function withSaved(docId: DocId): Promise<void> {
-  await compareController.open(docId, { kind: 'saved' });
+async function withSaved(docId: DocId, ask = true): Promise<void> {
+  await openCompare(docId, { kind: 'saved' }, ask);
 }
 
 /** `{ lineOnly, thenNext }` from a command argument; the keys go on to the next change. */
@@ -112,7 +144,7 @@ function copyOptions(arg: unknown): { lineOnly: boolean; thenNext: boolean } {
   return { lineOnly, thenNext: typeof given.thenNext === 'boolean' ? given.thenNext : !lineOnly };
 }
 
-async function withAny(docId: DocId): Promise<void> {
+async function withAny(docId: DocId, ask = true): Promise<void> {
   const kinds = availableSources(docs.get(docId), docs.all().length);
   if (kinds.length === 0) {
     status.show(t('compare.noDocument'), { error: true });
@@ -122,8 +154,8 @@ async function withAny(docId: DocId): Promise<void> {
     placeholder: t('compare.pickSource'),
   });
   if (picked === undefined) return;
-  if (picked === 'saved') await withSaved(docId);
-  else if (picked === 'document') await withDocument(docId);
+  if (picked === 'saved') await withSaved(docId, ask);
+  else if (picked === 'document') await withDocument(docId, ask);
   else await withFile(docId);
 }
 
@@ -149,7 +181,7 @@ export default {
       enabled: hasDocument,
       run: (context, arg) => {
         const id = targetDoc(context, arg);
-        return id === null ? undefined : withAny(id);
+        return id === null ? undefined : withAny(id, arg === undefined);
       },
     },
     {
@@ -160,7 +192,7 @@ export default {
       enabled: hasOtherDocument,
       run: (context, arg) => {
         const id = targetDoc(context, arg);
-        return id === null ? undefined : withDocument(id);
+        return id === null ? undefined : withDocument(id, arg === undefined);
       },
     },
     {
@@ -184,7 +216,7 @@ export default {
       enabled: activeHasPath,
       run: (context, arg) => {
         const id = targetDoc(context, arg);
-        return id === null ? undefined : withSaved(id);
+        return id === null ? undefined : withSaved(id, arg === undefined);
       },
     },
     {

@@ -1,0 +1,49 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Okuma two turrets in one program: turret A jumps with GOTO N100 over its P30. Read by jump lines, the target N100 lies between P30 and P20, so the order was not judged; followed, turret A runs P10 then P20: correct, no finding.",
+  "rule": "F1 F2",
+  "profile": "okuma-osp",
+  "preset": "okuma-2turret",
+  "program": [
+    "$FLOWG.MIN%",
+    "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+    "G13",
+    "N1 P10",
+    "GOTO N100",
+    "N2 P30",
+    "N100 G0 X200 Z200",
+    "N3 P20",
+    "G14",
+    "N11 P10",
+    "N12 P20",
+    "N13 M02"
+  ],
+  "expect": {
+    "flow": {
+      "a": {
+        "jumps": [
+          {
+            "line": 5,
+            "target": 7
+          }
+        ],
+        "loops": [],
+        "opaque": []
+      },
+      "b": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "order-not-checked",
+        "channel": "a",
+        "line": 8,
+        "mark": "P20"
+      }
+    ],
+    "after": []
+  }
+}
