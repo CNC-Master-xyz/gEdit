@@ -803,3 +803,34 @@ class T108Test(unittest.TestCase):
         program = "G18 G21\nG0 X0. Z5.\nG83 X0. Z-20. R-3. Q5. F0.1\nG80\nM30"
         w = walk(program, "fanuc-lathe")
         self.assertFalse(w.holes_on)
+
+
+class LaterVersionTest(unittest.TestCase):
+    """Wave Y, BL-NC-geometry (T110, T112): each test fails without its change."""
+
+    def test_t110_a_subprogram_of_the_document_is_followed(self):
+        report = report_of("t110-fanuc-subprogram-call")
+        # M98 P2000 at line 5 runs O2000 from X0 Y0: X100 and Y-20, then G91 X10. reaches X110.
+        self.assertEqual((row(report, "X")["max"], row(report, "X")["maxLine"]), ("110", 6))
+        self.assertEqual(row(report, "Y")["min"], "-20")
+        # M98 P3000 (not in the document) and M98 P2000 L2 (a repeat) are not followed.
+        found = [f for f in report["findings"] if f["reason"] == "call"]
+        self.assertEqual(len(found), 1)
+        self.assertIn("2 subprogram calls, first M98 P3000 (line 8)", found[0]["message"])
+
+    def test_t110_a_call_not_followed_leaves_the_axes_not_known(self):
+        text = "G21 G17 G90\nG0 X0. Y0. Z50.\nM98 P3000\nG91 G1 X10. F100.\nM30"
+        context = helpers.effective_context("fanuc-gcode")
+        out = helpers.run_script(SCRIPT, stdin=text, context=context)
+        report = out.json()
+        self.assertEqual(row(report, "X")["max"], "0")
+        self.assertIn("incremental-start", reasons(report))
+        # A Klartext label call is not followed either.
+        klartext = "0 BEGIN PGM K MM\n1 TOOL CALL 1 Z S3000\n2 L X+0 Y+0 Z+5 R0 FMAX\n3 CALL LBL 1\n4 L IX+10 R0 FMAX\n5 M30\n6 LBL 1\n7 L X+50 R0 FMAX\n8 LBL 0\n9 END PGM K MM"
+        report = helpers.run_script(SCRIPT, stdin=klartext, context=helpers.effective_context("heidenhain-klartext")).json()
+        self.assertIn("call", reasons(report))
+
+    def test_t112_okuma_l_arcs(self):
+        report = report_of("t112-okuma-l-arcs")
+        self.assertEqual([f["reason"] for f in report["findings"]], ["arc"])  # only the CALRG arc
+
