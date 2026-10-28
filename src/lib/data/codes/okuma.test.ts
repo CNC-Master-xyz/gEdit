@@ -416,6 +416,8 @@ describe('the words a script must not scale', () => {
 type Unit = NonNullable<CodeParam['unit']>;
 
 const DRIVEN_TOOL: Record<string, Unit> = { Q: 'count', E: 'dwell' };
+/** T210: the feed marker on a driven-tool cycle's feed (its F is a feed rate in the unit in force). */
+const DRIVEN_TOOL_FEED: Record<string, Unit> = { ...DRIVEN_TOOL, F: 'feed' };
 
 const PARAM_UNITS: Record<string, Record<string, Unit>> = {
   G2: { L: 'length' },
@@ -434,13 +436,16 @@ const PARAM_UNITS: Record<string, Record<string, Unit>> = {
   G35: { F: 'feedPerRev', E: 'feedPerRev', J: 'count' },
   G71: { A: 'angle', B: 'angle', D: 'length', U: 'length', H: 'length', L: 'length', E: 'feedPerRev', F: 'feedPerRev', J: 'count', Q: 'count' },
   G72: { A: 'angle', B: 'angle', D: 'length', W: 'length', H: 'length', L: 'length', E: 'feedPerRev', F: 'feedPerRev', J: 'count', Q: 'count' },
-  G73: { D: 'length', L: 'length', DA: 'length', E: 'dwell' },
-  G74: { D: 'length', L: 'length', DA: 'length', E: 'dwell' },
+  // T210: the feed marker on every feed rate whose unit is the one in force (a tap's F too).
+  G73: { D: 'length', L: 'length', DA: 'length', E: 'dwell', F: 'feed' },
+  G74: { D: 'length', L: 'length', DA: 'length', E: 'dwell', F: 'feed' },
   G75: { L: 'length' },
   G76: { L: 'length' },
-  G84: { XA: 'length', ZA: 'length', DA: 'length', XB: 'length', ZB: 'length', DB: 'length' },
-  G85: { D: 'length', U: 'length', W: 'length' },
-  G86: { D: 'length', U: 'length', W: 'length' },
+  G77: { F: 'feed' },
+  G78: { F: 'feed' },
+  G84: { XA: 'length', ZA: 'length', DA: 'length', XB: 'length', ZB: 'length', DB: 'length', FA: 'feed', FB: 'feed' },
+  G85: { D: 'length', U: 'length', W: 'length', F: 'feed' },
+  G86: { D: 'length', U: 'length', W: 'length', F: 'feed' },
   G87: { U: 'length', W: 'length' },
   G88: { D: 'length', H: 'length', B: 'angle', U: 'length', W: 'length' },
   // M9 (WP9.5a): the contour moves of a driven tool cut at a feed per minute whatever the
@@ -453,15 +458,15 @@ const PARAM_UNITS: Record<string, Record<string, Unit>> = {
   // B1: the side contour arcs, whose format gives F in mm/min (LG33-019 chapter 9).
   G132: { L: 'length', F: 'feedPerMin' },
   G133: { L: 'length', F: 'feedPerMin' },
-  G181: DRIVEN_TOOL,
-  G182: DRIVEN_TOOL,
-  G183: { ...DRIVEN_TOOL, D: 'length', L: 'length' },
-  G184: DRIVEN_TOOL,
+  G181: DRIVEN_TOOL_FEED,
+  G182: DRIVEN_TOOL_FEED,
+  G183: { ...DRIVEN_TOOL_FEED, D: 'length', L: 'length' },
+  G184: DRIVEN_TOOL_FEED,
   G185: { F: 'feedPerRev' },
   G186: { F: 'feedPerRev' },
   G187: { F: 'feedPerRev' },
   G188: { F: 'feedPerRev' },
-  G189: DRIVEN_TOOL,
+  G189: DRIVEN_TOOL_FEED,
   CALL: { Q: 'count' },
   MODIN: { Q: 'count' },
 };
