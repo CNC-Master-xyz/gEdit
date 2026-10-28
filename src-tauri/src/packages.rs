@@ -219,12 +219,22 @@ struct Folder {
     error: Option<String>,
 }
 
+/// The one problem a `packages` folder that is a link lists.
+const PACKAGES_LINK_PROBLEM: &str =
+    "the packages folder is a link; it is not followed (copy the packages in)";
+
 /// The package folders of `dir` by name in byte order, at most [`MAX_PACKAGES`], and the problems
 /// that belong to no folder (§6.9 rule 8). A name starting with `.` and a plain file are skipped;
 /// a link is listed with an error and never followed; a name that fails the rule is listed with
-/// the reason. A missing `dir` lists none.
+/// the reason. A missing `dir` lists none, and a `dir` that is a link lists none and says so.
 fn scan(dir: &std::path::Path) -> (Vec<Folder>, Vec<String>) {
     let mut problems = Vec::new();
+    // Q4g-4, no link is followed: a `packages` folder that is itself a link lists nothing (the
+    // list, the files and the script roots all go through here).
+    if std::fs::symlink_metadata(dir).is_ok_and(|meta| crate::userfiles::is_link(&meta)) {
+        problems.push(PACKAGES_LINK_PROBLEM.to_string());
+        return (Vec::new(), problems);
+    }
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return (Vec::new(), problems),
@@ -744,6 +754,33 @@ mod tests {
             .all(|f| f.package == "real"));
         assert!(script_roots(&dir, &[]).is_empty());
         for d in [&dir, &outside] {
+            let _ = fs::remove_dir_all(d);
+        }
+    }
+
+    /// The `packages` folder itself may be a link too: nothing under it is listed, loaded or run.
+    #[cfg(unix)]
+    #[test]
+    fn a_packages_folder_that_is_a_link_lists_nothing_and_says_why() {
+        let real = scratch(
+            "rootlink-real",
+            &[
+                ("shop/profiles/p.json", PROFILE),
+                ("shop/scripts/x.py", "# x"),
+                ("shop/package.json", r#"{"name":"Shop"}"#),
+            ],
+        );
+        let holder = scratch("rootlink-holder", &[]);
+        let dir = holder.join("packages");
+        std::os::unix::fs::symlink(&real, &dir).unwrap();
+        let list = list_in(&dir, &[]);
+        assert!(list.packages.is_empty(), "{:?}", names(&list));
+        assert_eq!(list.problems, [PACKAGES_LINK_PROBLEM]);
+        assert!(files_in(&dir, crate::userfiles::Kind::Profiles, &[]).is_empty());
+        assert!(script_roots(&dir, &[]).is_empty());
+        // The folder behind the link is a fine packages folder.
+        assert_eq!(names(&list_in(&real, &[])), ["shop"]);
+        for d in [&real, &holder] {
             let _ = fs::remove_dir_all(d);
         }
     }
