@@ -972,7 +972,7 @@ already. To write the channel documents as files, see [Save Channel Files](#save
 saves the channel documents as files, one after the other. Each gets its own **Save As**
 dialog, in the folder of the program they came from, with a name already filled in:
 
-`{program}_{channel}{extension}` — the program `PART.MPF` split in two channels `1` and `2`
+the program name, an underscore, the channel and the extension. The program `PART.MPF` split in two channels `1` and `2`
 proposes `PART_1.MPF` and `PART_2.MPF`; a channel `A` of `PART.MIN` gives `PART_A.MIN`.
 
 - The name is the machine's own file name for the channel when it has one for this
