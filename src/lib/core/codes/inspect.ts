@@ -52,7 +52,7 @@ import { tokenizeLine } from '$lib/core/nc/tokenizer';
 import type { CompiledProfile, NumberFormatOptions, Profile } from '$lib/core/profiles/types';
 import type { LineState, ModalState, ModalValue, NcToken } from '$lib/core/nc/types';
 import { cycleBlockOf, paramOfBlock, paramsOfBlock, type CycleBlock } from './blocks';
-import { codeAddressesOf } from './hoverText';
+import { codeAddressesOf, extraAxisOf, isBuilderCode } from './hoverText';
 import { axisWordsOf, isAssignmentWord, lookupCode, lookupWord } from './lookup';
 import type { CodeDb, CodeEntry, CodeParam } from './types';
 import {
@@ -987,6 +987,13 @@ export function inspectBlock(
             push(line, token, described ? 'code' : 'unknown', described?.label ?? null, null);
             return;
           }
+          if (looksLikeCodeNumber(token) && isBuilderCode(token, view.machine)) {
+            // P4h (§6.10 rule 14): a code of the machine builder stays a code gEdit does not
+            // know (not edited here); its note says where its meaning is.
+            push(line, token, 'unknown', null, null);
+            words[words.length - 1].notes = [{ key: 'machines.extra.builderCode' }];
+            return;
+          }
           if (codeAddresses.has(upper(token.address)) && looksLikeCodeNumber(token)) {
             push(line, token, 'unknown', null, null);
             return;
@@ -999,6 +1006,12 @@ export function inspectBlock(
           }
           if (token.valueText !== undefined && token.value === null) {
             push(line, token, 'variable', lookup?.address?.label ?? null, null);
+            return;
+          }
+          if (extraAxisOf(token, view.machine)) {
+            // P4h (§6.10 rule 13): an extra axis of the machine is an axis word, read through
+            // the effective profile's addresses (a length, or an angle for a rotary one).
+            push(line, token, 'address', null, null);
             return;
           }
           const cycleParam = paramOfBlock(cycleEntry, token.address, cycleBlock);

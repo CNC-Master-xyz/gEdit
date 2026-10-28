@@ -65,7 +65,9 @@ import {
 } from './wordValue';
 import type { CompiledProfile, Profile } from '$lib/core/profiles/types';
 import type { LineState, ModalState, ModalValue, NcToken } from '$lib/core/nc/types';
-import type { EffectiveMachine, ParamSource, ResolvedClass } from '$lib/core/machines/types';
+import type { EffectiveMachine, ExtraAxis, ParamSource, ResolvedClass } from '$lib/core/machines/types';
+import { isWaitCode, parseWaitCodes } from '$lib/core/channels/codes';
+import type { WaitCodeRange } from '$lib/core/channels/types';
 import type { Translate } from '$lib/app/types';
 import type { CodeDb, CodeEntry, CodeLookup, CodeParam } from './types';
 
@@ -150,6 +152,12 @@ export interface HoverOptions {
    * reads it: of a two-block code it lists the words of this block. Absent, as null.
    */
   cycleBlock?: CycleBlock | null;
+  /**
+   * P4h (plan §6.10 rules 13, 14; T123): the document's effective machine. Its builder codes
+   * (`params.builderCodes`) are named as the builder's instead of "unknown", and a word of one
+   * of its extra axes (`params.extraAxes`) says it is that axis. Absent: as before.
+   */
+  machine?: EffectiveMachine | null;
 }
 
 /** Characters markdown would read as formatting. */
@@ -341,6 +349,7 @@ export function hoverAt(
     codeAddresses: codeAddressesOf(db),
     extendedAddresses: extendedAddressesOf(cp),
     waitCode: o.waitCode,
+    machine: o.context?.machine ?? null,
   };
   const cycleBlock = writtenBlock(line, cp, db, prev, token, lookup);
   if (cycleBlock !== undefined) o2.cycleBlock = cycleBlock;
@@ -445,6 +454,50 @@ function addressHover(address: NonNullable<CodeLookup['address']>, t: Translate,
     address.description ? escapeMarkdown(address.description) : null,
     incremental ? escapeMarkdown(t('assistant.hover.incremental')) : null,
   ]);
+}
+
+/** P4h (§6.10 rule 14): a code of the machine builder, which the machine's documentation explains. */
+function builderCodeHover(display: string, t: Translate, address?: CodeLookup['address']): string {
+  return paragraphs([
+    heading(display),
+    escapeMarkdown(t('machines.extra.builderCode')),
+    address ? `_${escapeMarkdown(`${address.letter} — ${address.label}`)}_` : null,
+  ]);
+}
+
+/** The parsed builder lists, by their text: a hover asks on every mouse move. */
+const BUILDER_RANGES = new Map<string, readonly WaitCodeRange[]>();
+
+/**
+ * P4h (plan §6.10 rule 14; T123): true when `token` is a code word (one letter, a whole number
+ * without sign or point) of the builder codes of `machine` (`params.builderCodes`, the wait
+ * codes' list form). A list that cannot be read names nothing. Read by hover and the inspector
+ * only; every script and both modal interpreters keep reading such a code as unknown.
+ */
+export function isBuilderCode(token: NcToken, machine: EffectiveMachine | null | undefined): boolean {
+  const text = machine?.params?.builderCodes;
+  if (typeof text !== 'string' || text.trim() === '') return false;
+  const word = waitCodeWord(token);
+  if (word === null) return false;
+  let ranges = BUILDER_RANGES.get(text);
+  if (ranges === undefined) {
+    const parsed = parseWaitCodes(text);
+    ranges = parsed.errors.length > 0 ? [] : parsed.ranges;
+    if (BUILDER_RANGES.size >= 64) BUILDER_RANGES.clear();
+    BUILDER_RANGES.set(text, ranges);
+  }
+  return isWaitCode(ranges, word.letter, word.value);
+}
+
+/**
+ * P4h (plan §6.10 rule 13; T123): the extra axis of `machine` a word is written with (`AA90`,
+ * `AA=10`), or null. The tokenizer reads such a word only on the machine's effective profile.
+ */
+export function extraAxisOf(token: NcToken, machine: EffectiveMachine | null | undefined): ExtraAxis | null {
+  const axes = machine?.params?.extraAxes;
+  if (!Array.isArray(axes) || token.kind !== 'word' || token.address === undefined) return null;
+  const address = token.address.toUpperCase();
+  return axes.find((axis) => typeof axis?.name === 'string' && axis.name.toUpperCase() === address) ?? null;
 }
 
 /** A word the database does not describe, with the address as context when it knows it. */
@@ -566,6 +619,11 @@ export function hoverText(
       if (described) return codeHover(display, described, t, o.cycleBlock);
       const address = lookup?.address;
       if (entry) return unknownHover(display, t, address); // an unverified entry
+      // P4h (§6.10 rules 13, 14): what the document's machine says about a word the database
+      // does not describe: a code of the machine builder, or one of its extra axes.
+      if (looksLikeCodeNumber(token) && isBuilderCode(token, o.machine)) return builderCodeHover(display, t, address);
+      const axis = extraAxisOf(token, o.machine);
+      if (axis) return heading(display, t(axis.kind === 'rotary' ? 'machines.extra.axisRotary' : 'machines.extra.axisLinear'));
       if (address) {
         const isCode = o.codeAddresses?.has(address.letter) === true && looksLikeCodeNumber(token);
         return isCode ? unknownHover(display, t, address) : addressHover(address, t, token.incremental);
