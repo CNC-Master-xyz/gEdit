@@ -393,26 +393,46 @@ export function computeJumpLines(
     // A line of a shared section is in each of its channels; outside every section it is in ''.
     const channelsHere = channelsOf(i + 1);
     const loopLine = isLoopLine(tokens);
+    const masked = maskedOf(line, tokens);
+    // The label that defines this line (`LAB1:`, the Okuma `NLAB1` at the head); one behind a jump names its target.
+    let headLabel: string | null = null;
+    for (const tok of tokens) {
+      if (tok.kind === 'label' && tok.address !== undefined) {
+        headLabel = tok.address.toUpperCase();
+        break;
+      }
+      if (tok.kind !== 'whitespace' && tok.kind !== 'blockNumber' && tok.kind !== 'skip') break;
+    }
     for (const channel of channelsHere) {
       if (loopLine) put(channel, i + 1);
       for (const tok of tokens) {
         if (tok.kind === 'blockNumber' && tok.valueText !== undefined) {
           const key = blockKeyOf(tok.valueText, byText);
           if (key !== null) add(numbers, `${channel}\t${String(key)}`, i + 1);
-        } else if (tok.kind === 'label' && tok.address !== undefined) {
-          add(names, `${channel}\t${tok.address.toUpperCase()}`, i + 1);
         }
       }
+      if (headLabel !== null) add(names, `${channel}\t${headLabel}`, i + 1);
       for (const w of referencesOn(tokens, line, cp, addresses, labels)) jumps.push({ line: i + 1, channel, key: w.key, name: null });
       // A jump to a label of the file: `referencesOn` leaves those out on purpose.
-      const masked = maskedOf(line, tokens);
+      let named = false;
       for (let k = 0; k < tokens.length; k++) {
         const tok = tokens[k];
         if ((tok.kind !== 'keyword' && tok.kind !== 'word') || tok.address === undefined || !addresses.has(tok.address)) continue;
         const next = tokens[k + 1]?.kind === 'whitespace' ? tokens[k + 2] : tokens[k + 1];
-        if (next === undefined || next.kind !== 'unknown' || !IDENT.test(next.text) || !labels.has(next.text.toUpperCase())) continue;
+        // The target as a `label` token (Sinumerik `GOTOF L1`, Okuma `GOTO NLAB1`) or as a plain name the file defines.
+        let name: string | null = null;
+        if (next !== undefined && next.kind === 'label' && next.address !== undefined) name = next.address.toUpperCase();
+        else if (next !== undefined && next.kind === 'unknown' && IDENT.test(next.text) && labels.has(next.text.toUpperCase())) name = next.text.toUpperCase();
+        if (name === null) continue;
         if (!cp.re.references.some((r) => r.addresses.includes(tok.address as string) && r.trigger.test(masked))) continue;
-        jumps.push({ line: i + 1, channel, key: null, name: next.text.toUpperCase() });
+        jumps.push({ line: i + 1, channel, key: null, name });
+        named = true;
+      }
+      // A named target behind a reference trigger without a jump keyword (the Okuma `IF [V1 EQ 1] NLAB1`), as computeFlow reads it.
+      if (!named && cp.re.references.some((r) => r.trigger.test(masked))) {
+        for (const tok of tokens) {
+          if (tok.kind === 'label' && tok.address !== undefined && tok.address.toUpperCase() !== headLabel) jumps.push({ line: i + 1, channel, key: null, name: tok.address.toUpperCase() });
+        }
       }
     }
   }

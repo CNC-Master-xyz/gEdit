@@ -1,6 +1,6 @@
 {
   "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
-  "description": "Siemens two channels: channel 1 jumps with GOTOF SKIP1 over its WAITM(2,1,2); channel 2 waits on mark 3 before mark 2. The jump lines do not read a jump to a label (computeJumpLines takes no label target), so the written order was out of order. Followed, channel 1 never runs mark 2: channel 2 waits for it for ever, reported as missing.",
+  "description": "Siemens two channels: channel 1 jumps with GOTOF SKIP1 over its WAITM(2,1,2); channel 2 waits on mark 3 before mark 2. The jump lines read the label SKIP1, so the order of mark 2 was not judged. Followed, channel 1 never runs mark 2: channel 2 waits for it for ever, reported as missing.",
   "rule": "F1 F2",
   "profile": "sinumerik",
   "preset": "sinumerik-2channel",
@@ -44,7 +44,7 @@
     },
     "before": [
       {
-        "kind": "out-of-order",
+        "kind": "order-not-checked",
         "channel": "1",
         "line": 5,
         "mark": "2",

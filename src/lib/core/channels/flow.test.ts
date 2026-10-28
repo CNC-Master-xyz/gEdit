@@ -198,6 +198,19 @@ describe('computeFlow: Okuma (GOTO, sequence names, IF)', () => {
   });
 });
 
+describe('computeJumpLines: label targets (NC-3)', () => {
+  const jl = (src: string[], profile: string) => computeJumpLines(src, cpOf(profile), () => 'a').a;
+  it('names the target of a jump to a label, as computeFlow reads it', () => {
+    expect(jl(['GOTOF L1', 'X1', 'L1: X2'], 'sinumerik')).toEqual([3]);
+    expect(jl(['IF R1==1 GOTOF L1', 'X1', 'L1: X2'], 'sinumerik')).toEqual([3]);
+    expect(jl(['L1: X1', 'GOTOB L1'], 'sinumerik')).toEqual([1, 2]);
+    expect(jl(['GOTO NLAB1', 'X1', 'NLAB1 X2'], 'okuma-osp')).toEqual([3]);
+    expect(jl(['IF [V1 EQ 1] NLAB1', 'X1', 'NLAB1 X2'], 'okuma-osp')).toEqual([3]);
+    // The label that defines the line is no target.
+    expect(jl(['NLAB2 IF [V1 EQ 1] NLAB1', 'X1', 'NLAB1 X2'], 'okuma-osp')).toEqual([3]);
+  });
+});
+
 describe('computeFlow: channels', () => {
   it('reads a line of a shared section in each of its channels, and gives every channel an entry', () => {
     const flow = computeFlow(['GOTO 30', 'M902', 'N30 M903', 'M30'], cpOf('fanuc-lathe'), (line) => (line === 4 ? 'b' : ['a', 'b']));
@@ -210,12 +223,17 @@ describe('computeFlow: channels', () => {
       ['fanuc-lathe', ['N10 M901', 'IF[#1LT2]GOTO10', 'GOTO 40', 'M902', 'N40 M903', 'WHILE[#1LT2]DO1', 'M904', 'END1', 'M99 P10']],
       ['sinumerik', ['REPEAT', 'WAITM(1,1,2)', 'UNTIL R1>3', 'N10 WHILE R1<3', 'R1=R1+1', 'ENDWHILE', 'LOOP', 'ENDLOOP', 'FOR R1=1 TO 3', 'ENDFOR', 'GOTOF N10']],
       ['okuma-osp', ['N1 P10', 'IF [V1 EQ 1] N100', 'N2 P30', 'N100 G0 X10', 'GOTO N1']],
+      ['sinumerik', ['GOTOF L1', 'X1', 'L1: X2', 'IF R1==1 GOTOF L2', 'X3', 'L2: X4', 'L3: X5', 'GOTOB L3']],
+      ['okuma-osp', ['GOTO NLAB1', 'P30', 'NLAB1 X2', 'IF [V1 EQ 1] NLAB2', 'P40', 'NLAB2 X3']],
     ];
     for (const [profile, src] of progs) {
       const jl = computeJumpLines(src, cpOf(profile), () => 'a').a ?? [];
       const f = one(src, profile);
       const followed = new Set([...f.jumps.flatMap((j) => [j.line, j.target]), ...f.loops.flatMap((l) => [l.start, l.end])]);
       for (const line of jl) expect(f.opaque.includes(line) || followed.has(line), `${profile} line ${line}`).toBe(true);
+      // The other way (NC-3): a jump target the flow knows, followed or not, is a jump line of the view too.
+      for (const j of f.jumps) expect(jl, `${profile} target ${j.target}`).toContain(j.target);
+      for (const line of f.opaque) expect(jl, `${profile} opaque ${line}`).toContain(line);
     }
   });
 });
