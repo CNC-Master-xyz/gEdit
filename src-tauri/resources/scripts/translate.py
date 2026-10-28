@@ -78,6 +78,12 @@ Settled defaults (the owner's answers of 2026-10-12, plan §9; the same as `_nc_
   Series 15 format (`syntax.cycleRAbsoluteWith` names the point-less-feeds choices), the `R`
   of a drilling cycle is left as written with an information row (`cycle-r-left`): there R
   can be an absolute position (parameter 5102 bit 6).
+* **The machine's extra axes** (P4h fix round, Q-5; plan section 6.10 rule 13). A linear axis
+  of more than one letter that the machine lists (`extraAxes`, read into
+  `syntax.extraAxisNames`: `AA`) is no X, Y or Z, so its words are left as written; the run
+  does not refuse for them. One information row per such axis, at its first word, names it and
+  how many of its words were left (`extra-axis`), so a user whose `AA` runs along X sees that it
+  did not move. A rotary extra axis is left as silently as `C` is.
 
 What moves and what stays
 -------------------------
@@ -246,6 +252,16 @@ INFO_TEXT = {
     "cycle-r-left": ("drilling R point (Series 15 format)", "drilling R points (Series 15 format)"),
     "tcp-table": ("block under tool centre point control", "blocks under tool centre point control"),
 }
+#: P4h fix round (Q-5): the information row of a linear extra axis of the machine.
+EXTRA_AXIS_TEXT = (
+    "%s is an extra axis of the machine, and Translate moves only X, Y and Z, so it left %s as written. "
+    "If %s moves along X, Y or Z on this machine, change %s by hand"
+)
+#: The words of a linear extra axis, an information row of this script's own (`OWN_INFO`).
+OWN_INFO["extra-axis"] = (("word of an extra axis of the machine", "words of an extra axis of the machine"), EXTRA_AXIS_TEXT)
+INFO_TEXT["extra-axis"] = OWN_INFO["extra-axis"][0]
+#: At most this many words of one extra axis are named in its row; the rest are counted.
+EXTRA_AXIS_NAMED = 5
 #: Review round (D6-4): the run's sentence when a block it moved stands under tool centre point
 #: control on a profile whose control can read those coordinates in two ways.
 TCP_SENTENCE = (
@@ -310,7 +326,7 @@ class Params:
 class Line:
     """One line of the selection or the document, and what the run makes of it."""
 
-    __slots__ = ("index", "number", "text", "block", "edits", "refusals", "notes", "added", "tool_edits")
+    __slots__ = ("index", "number", "text", "block", "edits", "refusals", "notes", "added", "tool_edits", "extra")
 
     def __init__(self, index: int, number: int, text: str, block: int) -> None:
         self.index = index
@@ -328,6 +344,23 @@ class Line:
         #: which a run whose every call of that definition is a call at a position takes back out
         #: (``settle_called_at``).
         self.tool_edits: List[Tuple[int, int, str]] = []
+        #: P4h fix round (Q-5): the words of a linear extra axis of the machine on this line, as
+        #: (the axis name as listed, the word as written).
+        self.extra: List[Tuple[str, str]] = []
+
+
+def linear_extra_axes(profile: Dict[str, Any]) -> Dict[str, str]:
+    """The linear extra axes of the machine (P4h, plan section 6.10 rule 13): the names of
+    ``syntax.extraAxisNames`` that ``addresses.angular`` does not list, by their upper-case
+    spelling (as listed). A rotary one is left as any rotary axis is."""
+    syntax = as_dict(profile.get("syntax"))
+    names = syntax.get("extraAxisNames")
+    angular = {str(a).upper() for a in (as_dict(profile.get("addresses")).get("angular") or []) if isinstance(a, str)}
+    out: Dict[str, str] = {}
+    for name in names if isinstance(names, list) else []:
+        if isinstance(name, str) and name != "" and name.upper() not in angular and name.upper() not in out:
+            out[name.upper()] = name
+    return out
 
 
 class Run:
@@ -390,6 +423,20 @@ class Run:
         #: first move is written in; ``None`` after a subprogram or macro call.
         self.last_word: Dict[str, Any] = {}
         self._macro_seen = False
+        #: P4h fix round (Q-5): the machine's linear extra axes (`linear_extra_axes`).
+        self.extra_axes = linear_extra_axes(profile)
+
+    def note_extra_axes(self, line: Line, step: _nc_path.Step) -> None:
+        """P4h fix round (Q-5): the words of a linear extra axis of the machine on the line,
+        which the run leaves as written (`collect` lists them)."""
+        if not self.extra_axes:
+            return
+        for token in step.tokens:
+            if token.kind != "word" or not token.address or token.value_text is None:
+                continue
+            name = self.extra_axes.get(token.address.upper())
+            if name is not None:
+                line.extra.append((name, token.text.strip()))
 
     def op_for(self, units: Optional[str]) -> _nc_geom.Translate:
         """The shift in the units of a block: the form's shift is in the program's units (the
@@ -449,6 +496,7 @@ class Run:
                 if token.kind == "label":
                     self.labels.setdefault((token.address or "").upper(), []).append(number)
             self.note_rotary(step, record=True, line=line)
+            self.note_extra_axes(line, step)
             self.selection_start(line, step)
             if self.is_selection:
                 self.check_outside(line, step)
@@ -1089,6 +1137,7 @@ def collect(run: Run, findings: Findings) -> Tuple[Dict[str, int], Dict[str, int
     rows: List[Tuple[int, int, Dict[str, Any]]] = []
     refused: Dict[str, int] = {}
     info: Dict[str, int] = {}
+    extra_words: Dict[str, List[Tuple[int, str]]] = {}
     # One finding per refused block (a block written over several lines is one block): its
     # first reason in the order of `_nc_geom.REASONS`, at the line that has it.
     by_block: Dict[int, List[_nc_geom.Refusal]] = {}
@@ -1116,6 +1165,10 @@ def collect(run: Run, findings: Findings) -> Tuple[Dict[str, int], Dict[str, int
                 note = note._replace(written=_quote(note.detail))
             item = _nc_geom.finding_of(note)
             rows.append((line.number, SEVERITY_ORDER[item["severity"]], item))
+        for name, word in [] if refused_blocks else line.extra:
+            # Counted here, listed once per axis below.
+            info["extra-axis"] = info.get("extra-axis", 0) + 1
+            extra_words.setdefault(name, []).append((line.number, word))
         if line.added and not refused_blocks:
             # Only in a run that writes: a refused run adds nothing.
             info["word-added"] = info.get("word-added", 0) + len(line.added)
@@ -1123,6 +1176,16 @@ def collect(run: Run, findings: Findings) -> Tuple[Dict[str, int], Dict[str, int
             words = " ".join(text for _, text in line.added)
             message = "%s added: %s." % (words, OWN_INFO["word-added"][1] % axes)
             rows.append((line.number, SEVERITY_ORDER["info"], {"line": line.number, "severity": "info", "message": message, "reason": "word-added"}))
+    for name, words in extra_words.items():
+        first_line, first_word = words[0]
+        named = [word for _, word in words[:EXTRA_AXIS_NAMED]]
+        rest = len(words) - len(named)
+        if rest:
+            left = "%s and %s more %s" % (", ".join(named), "{:,}".format(rest), "word" if rest == 1 else "words")
+        else:
+            left = named[0] if len(named) == 1 else "%s and %s" % (", ".join(named[:-1]), named[-1])
+        message = "%s: %s." % (_quote(first_word), EXTRA_AXIS_TEXT % (name, left, name, "it" if len(words) == 1 else "them"))
+        rows.append((first_line, SEVERITY_ORDER["info"], {"line": first_line, "severity": "info", "message": message, "reason": "extra-axis"}))
     rows.sort(key=lambda row: (row[0], row[1]))
     for _, _, item in rows:
         findings.add(item)
@@ -1150,7 +1213,7 @@ def machine_note(run: Run) -> str:
 
 def info_sentence(info: Dict[str, int]) -> Optional[str]:
     blocks = info.get("return", 0) + info.get("machine-position", 0)
-    words = info.get("word-left", 0) + info.get("cycle-r-left", 0)
+    words = info.get("word-left", 0) + info.get("cycle-r-left", 0) + info.get("extra-axis", 0)
     if not blocks and not words:
         return None
     what = []
@@ -1158,7 +1221,7 @@ def info_sentence(info: Dict[str, int]) -> Optional[str]:
         what.append(count_text(blocks, "block"))
     if words:
         what.append(count_text(words, "word"))
-    parts = [count_text(info[key], *INFO_TEXT[key]) for key in ("return", "machine-position", "word-left", "cycle-r-left") if info.get(key)]
+    parts = [count_text(info[key], *INFO_TEXT[key]) for key in ("return", "machine-position", "word-left", "cycle-r-left", "extra-axis") if info.get(key)]
     return "Left %s as written: %s." % (" and ".join(what), ", ".join(parts))
 
 

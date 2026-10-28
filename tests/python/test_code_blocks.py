@@ -143,5 +143,60 @@ class BlockAwareUnitTest(unittest.TestCase):
         self.assertEqual(units, {1: "count", 2: "increment"})
 
 
+
+def cycle(code, first, second):
+    """A two-block cycle written by hand, as ``cycle`` in ``wordValue.test.ts``."""
+    return {
+        "code": code,
+        "label": code,
+        "group": "nonmodal",
+        "blocks": 2,
+        "params": [{"address": a, "label": a, "block": 1} for a in first] + [{"address": a, "label": a, "block": 2} for a in second],
+    }
+
+
+class BlockCycleOfTest(unittest.TestCase):
+    """P4h (plan section 6.10 rule 11; T118): ``block_cycle_of``, the twin of ``blockCycleOf`` in
+    ``src/lib/core/codes/wordValue.ts``, held to the cases of ``wordValue.test.ts``."""
+
+    def setUp(self) -> None:
+        self.cp = gedit_nc.compile_profile(helpers.load_profile("fanuc-lathe"))
+
+    def tokens(self, text):
+        tokens, _ = gedit_nc.tokenize_line(text, self.cp, None)
+        return tokens
+
+    def test_the_block_of_the_one_two_block_cycle_from_the_words_it_writes(self) -> None:
+        g76 = cycle("G76", ["P", "Q", "R"], ["X", "Z", "P", "Q", "F"])
+        self.assertEqual(gedit_nc.block_cycle_of([g76], self.tokens("G76 X27.6 Z-30. P1500 Q300 F1.5")), 2)
+        self.assertEqual(gedit_nc.block_cycle_of([g76], self.tokens("G76 P020060 Q50 R0.02")), 1)
+        # Nothing the entry declares: not known.
+        self.assertIsNone(gedit_nc.block_cycle_of([g76], self.tokens("G76 S500")))
+
+    def test_none_without_a_two_block_cycle_and_when_two_of_them_disagree(self) -> None:
+        self.assertIsNone(gedit_nc.block_cycle_of([], self.tokens("G0 X10. P5")))
+        dwell = {"code": "G4", "label": "Dwell", "group": "nonmodal", "params": [{"address": "P", "label": "p", "block": 2}]}
+        self.assertIsNone(gedit_nc.block_cycle_of([dwell], self.tokens("G4 P5")))
+        a = cycle("G900", ["P"], ["X"])
+        b = cycle("G901", ["X"], ["P"])
+        self.assertIsNone(gedit_nc.block_cycle_of([a, b], self.tokens("G900 P5")))
+        self.assertEqual(gedit_nc.block_cycle_of([a, a], self.tokens("G900 X5.")), 2)
+
+    def test_the_tokens_of_every_line_of_the_block_count(self) -> None:
+        g76 = cycle("G76", ["P", "Q", "R"], ["X", "Z", "P", "Q", "F"])
+        self.assertEqual(gedit_nc.block_cycle_of([g76], self.tokens("G76 P1500") + self.tokens("X20.")), 2)
+        # A word without a value and a comment tell nothing.
+        self.assertIsNone(gedit_nc.block_cycle_of([g76], self.tokens("G76 (X20. Z-30.)")))
+
+    def test_the_shipped_g76_by_its_tokens(self) -> None:
+        g76 = with_t118(entry_of("fanuc-lathe", "G76"))
+        profile = helpers.load_profile("fanuc-lathe")
+        first = gedit_nc.block_cycle_of([g76], self.tokens("G76 P010060 Q100 R0.05"))
+        second = gedit_nc.block_cycle_of([g76], self.tokens("G76 X20. Z-30. P1500 Q300 F2."))
+        self.assertEqual((first, second), (1, 2))
+        self.assertEqual(gedit_nc.number_class_of("P", profile, "per-rev", [g76], True, None, first), "count")
+        self.assertEqual(gedit_nc.number_class_of("P", profile, "per-rev", [g76], True, None, second), "increment")
+
+
 if __name__ == "__main__":
     unittest.main()

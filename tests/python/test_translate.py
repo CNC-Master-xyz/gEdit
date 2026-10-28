@@ -1116,5 +1116,64 @@ class LaterVersionTest(unittest.TestCase):
         self.assertIn((5, "cycle-position"), found)
 
 
+
+class ExtraAxisRowTest(unittest.TestCase):
+    """P4h fix round, Q-5 (plan section 6.10 rule 13): Translate leaves the words of a machine's
+    linear extra axis as written, and says so in one information row per axis (no refusal), so a
+    user whose AA runs along X sees that it did not move. A rotary extra axis gets no row."""
+
+    HEAD = ["; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE", "N10 G17 G90 G71 G54", "N20 T1 D1", "N30 M6"]
+
+    def run_on(self, body: List[str], params: Dict[str, Any]) -> Dict[str, Any]:
+        case = next(c for c in helpers.geometry_cases("translate") if c.name == "extra-axis-sinumerik-mill")
+        context = golden_context(case)
+        context["params"] = dict(params)
+        lines = self.HEAD + body
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(lines)}
+        out = run_script(SCRIPT, stdin="\n".join(lines), context=context)
+        self.assertTrue(out.ok, out.stderr)
+        return out.json()
+
+    @staticmethod
+    def rows(result: Dict[str, Any]) -> List[Tuple[int, str, str]]:
+        return [(f["line"], f["severity"], f["message"]) for f in result["findings"] if f["reason"] == "extra-axis"]
+
+    def test_one_row_names_the_words_of_the_linear_extra_axis(self) -> None:
+        result = self.run_on(["N40 G0 X0 Y0 Z50 AA0 QQ0", "N50 G1 X20 AA15.5 F200", "N60 G1 Y10 QQ90", "N70 M30"], {"dx": 1})
+        self.assertEqual(result["text"].split("\n")[4:6], ["N40 G0 X1 Y0 Z50 AA0 QQ0", "N50 G1 X21 AA15.5 F200"])
+        self.assertEqual(
+            self.rows(result),
+            [(5, "info", "AA0: AA is an extra axis of the machine, and Translate moves only X, Y and Z, so it left AA0 and AA15.5 as written. If AA moves along X, Y or Z on this machine, change them by hand.")],
+        )
+        self.assertIn("Left 2 words as written: 2 words of an extra axis of the machine.", result["message"])
+        self.assertFalse(any(f["severity"] == "error" for f in result["findings"]))
+
+    def test_one_word_and_many_words(self) -> None:
+        one = self.run_on(["N40 G0 X0 Y0 Z50 AA=7", "N50 M30"], {"dz": 1})
+        self.assertEqual([m for _, _, m in self.rows(one)], [
+            "AA=7: AA is an extra axis of the machine, and Translate moves only X, Y and Z, so it left AA=7 as written. If AA moves along X, Y or Z on this machine, change it by hand."
+        ])
+        many = self.run_on(["N40 G0 X0 Y0 Z50"] + ["G1 X%d AA%d F100" % (i, i) for i in range(1, 9)] + ["M30"], {"dx": 1})
+        rows = self.rows(many)
+        self.assertEqual(len(rows), 1)
+        self.assertIn("so it left AA1, AA2, AA3, AA4, AA5 and 3 more words as written", rows[0][2])
+
+    def test_a_rotary_extra_axis_and_a_program_without_one_get_no_row(self) -> None:
+        self.assertEqual(self.rows(self.run_on(["N40 G0 X0 Y0 Z50 QQ90", "N50 M30"], {"dx": 1})), [])
+        result = self.run_on(["N40 G0 X0 Y0 Z50", "N50 M30"], {"dx": 1})
+        self.assertEqual(self.rows(result), [])
+        self.assertNotIn("extra axis", result["message"])
+
+    def test_a_refused_run_lists_only_its_refusals(self) -> None:
+        result = self.run_on(["N40 G0 X0 Y0 Z50 AA0", "N50 G1 X=R1 AA5 F100", "N60 M30"], {"dx": 1})
+        self.assertTrue(refused(result))
+        self.assertEqual(self.rows(result), [])
+
+    def test_without_the_machine_no_word_is_an_extra_axis(self) -> None:
+        lines = self.HEAD + ["N40 G0 X0 Y0 Z50 AA=7", "N50 M30"]
+        result = run_inline("\n".join(lines), "sinumerik-mill", {"dx": 1})
+        self.assertEqual(self.rows(result), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -130,6 +130,12 @@
       "note": "an increment that is not a power of ten, so the write-back division does not terminate",
       "mode": "increment",
       "incrementMm": "0.003"
+    },
+    "odd-scale": {
+      "note": "P4h parity D2: not a shipped preset; a scale with increments that are not powers of ten, so a write-back quotient of 28 or more digits has to keep all of them",
+      "mode": "scale",
+      "incrementMm": "0.0003",
+      "incrementInch": "0.00007"
     }
   },
 
@@ -923,7 +929,10 @@
     {"note": "T084: the point-less-feeds choice 'per-rev' on IS-C: a point-less feed per revolution counts in 0.001 mm/rev, F25 is 0.025 mm/rev", "literal": "25", "class": "feedPerRev", "input": "is-c-per-rev", "units": "mm", "expected": "0.025"},
     {"note": "T084: and in 0.00001 in/rev in an inch program", "literal": "2500", "class": "feedPerRev", "input": "is-c-per-rev", "units": "inch", "expected": "0.025"},
     {"note": "T084: the feed per minute of that machine keeps its 1 mm/min", "literal": "200", "class": "feedPerMin", "input": "is-c-per-rev", "units": "mm", "expected": "200"},
-    {"note": "T084: and its lengths their 0.0001 mm", "literal": "50", "class": "length", "input": "is-c-per-rev", "units": "mm", "expected": "0.005"}
+    {"note": "T084: and its lengths their 0.0001 mm", "literal": "50", "class": "length", "input": "is-c-per-rev", "units": "mm", "expected": "0.005"},
+    {"note": "P4h parity D2: a 31-digit literal keeps every digit as written (the 28-digit default precision rounded it)", "literal": "1234567890123456789012345678901", "class": "length", "input": "calculator", "units": "mm", "expected": "1234567890123456789012345678901"},
+    {"note": "P4h parity D2: and as a count of 0.001 mm the point moves, no digit is lost", "literal": "1234567890123456789012345678901", "class": "length", "input": "is-b", "units": "mm", "expected": "1234567890123456789012345678.901"},
+    {"note": "P4h parity D2: 32 digits around a point, as written", "literal": "12345678901234567890.123456789012", "class": "length", "input": "calculator", "units": "mm", "expected": "12345678901234567890.123456789012"}
   ],
 
   "writeBack": [
@@ -959,7 +968,9 @@
     {"note": "T084: 0.2005 mm/min into a point-less F200 on that machine is 200.5 counts, written back as 201 and flagged", "value": "0.2005", "original": "200", "class": "feedPerMin", "input": "fine-feeds", "units": "mm", "expected": {"text": "201", "rounded": true}},
     {"note": "T084: 0.18 mm/rev into a point-less F250 is 180 counts, exact", "value": "0.18", "original": "250", "class": "feedPerRev", "input": "fine-feeds", "units": "mm", "expected": {"text": "180", "rounded": false}},
     {"note": "T083: IS-A: 0.005 mm does not fit a point-less length counted in 0.01 mm; it goes back rounded and flagged", "value": "0.005", "original": "50", "class": "length", "input": "is-a", "units": "mm", "expected": {"text": "1", "rounded": true}},
-    {"note": "T083: IS-A: 0.37 mm is 37 counts, exact", "value": "0.37", "original": "50", "class": "length", "input": "is-a", "units": "mm", "expected": {"text": "37", "rounded": false}}
+    {"note": "T083: IS-A: 0.37 mm is 37 counts, exact", "value": "0.37", "original": "50", "class": "length", "input": "is-a", "units": "mm", "expected": {"text": "37", "rounded": false}},
+    {"note": "P4h parity D2: a 28-digit quotient that does not terminate is rounded, and the rounding is reported", "value": "100000000000000000000000.5", "original": "1500", "class": "length", "input": "odd-scale", "units": "inch", "expected": {"text": "1428571428571428571428578571", "rounded": true}},
+    {"note": "P4h parity D2: and the inspector refuses that rounding", "value": "100000000000000000000000.5", "original": "1500", "class": "length", "input": "odd-scale", "units": "inch", "refuseRounding": true, "expected": {"error": "rounded"}}
   ],
 
   "readings": [

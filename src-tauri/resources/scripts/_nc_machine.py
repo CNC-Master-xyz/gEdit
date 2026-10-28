@@ -270,7 +270,11 @@ def _dec_text(value: Decimal) -> str:
     """
     if value == _ZERO:
         return "0"
-    return format(value.normalize(), "f")
+    # P4h parity D2: `normalize` rounds to the context's precision (28 digits by default),
+    # so a value of 29 or more digits needs room for every one of them.
+    with localcontext() as context:
+        context.prec = max(context.prec, len(value.as_tuple().digits))
+        return format(value.normalize(), "f")
 
 
 def _multiply(left: Decimal, right: Decimal) -> Decimal:
@@ -300,7 +304,12 @@ def _divide(left: Decimal, right: Decimal) -> Decimal:
 def _tenth_of(text: Any) -> Optional[str]:
     """``text`` divided by ten, exactly: the digits stay, the point moves."""
     value = _decimal(text)
-    return None if value is None else _dec_text(value.scaleb(-1))
+    if value is None:
+        return None
+    # P4h parity D2: `scaleb` rounds to the context's precision too.
+    with localcontext() as context:
+        context.prec = max(context.prec, len(value.as_tuple().digits))
+        return _dec_text(value.scaleb(-1))
 
 
 # --- the literal -------------------------------------------------------------
@@ -423,8 +432,8 @@ def number_class_of(
     force that the block does not write — the modal cycle, the motion code, a mode such as
     ``G63``; a caller without them passes nothing, and a pitch it flags is then one it
     could not name (rule 3). ``cycle_block`` (P4h, plan §6.10 rule 11; T118) is the block of
-    a two-block cycle of ``block_codes`` this block is (``_nc_modal.cycle_block_of`` of the
-    cycle's entry with the addresses the block writes), or ``None`` when that cannot be told:
+    a two-block cycle of ``block_codes`` this block is (``_nc_modal.block_cycle_of`` of the
+    block's entries and the tokens of the whole block), or ``None`` when that cannot be told:
     a parameter declared with another unit per block (the ``G76`` ``P``) is read with this
     block's unit, and gets no class while the block is not known. The codes in force are
     always read as if the block were not known (the two-block cycles are not modal).

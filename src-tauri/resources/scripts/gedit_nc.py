@@ -177,6 +177,7 @@ from _nc_modal import (
     arc_direction_of,
     arc_direction_words_of,
     axis_words_of,
+    block_cycle_of,
     comp_side_of,
     cycle_block_of,
     declares_blocks,
@@ -263,6 +264,7 @@ __all__ = [
     "arc_direction_words_of",
     # B1: the two blocks of a lathe roughing or threading cycle (`CodeParam.block`).
     "cycle_block_of",
+    "block_cycle_of",
     "declares_blocks",
     "params_of_block",
     "names_main_spindle",
