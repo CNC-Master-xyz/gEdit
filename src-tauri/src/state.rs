@@ -537,9 +537,15 @@ pub fn recent_list(app: AppHandle) -> Vec<RecentEntry> {
 /// Whether `path` is this build's own `state.json` (T135), however it is spelled: the
 /// recent list and the session are Rust's, and a file the webview can write through the
 /// fs scope would let it rewrite them behind this module's lock and its size and shape
-/// rules. Compared by the resolved path when both resolve, so a link to it counts too.
+/// rules. Compared by the resolved path when both resolve, so a link to it counts too. On
+/// Unix a hard link counts as well (same device and inode): it has a path of its own, but it is
+/// the same file. (Windows has no check for a hard link yet: plan section 6.8.2, S10.)
 pub fn is_state_file(path: &Path, state_file: &Path) -> bool {
     if path == state_file {
+        return true;
+    }
+    #[cfg(unix)]
+    if same_file_on_disk(path, state_file) {
         return true;
     }
     match (
@@ -547,6 +553,16 @@ pub fn is_state_file(path: &Path, state_file: &Path) -> bool {
         std::fs::canonicalize(state_file),
     ) {
         (Ok(path), Ok(state)) => path == state,
+        _ => false,
+    }
+}
+
+/// Whether both paths lead to one file on disk: the same device and inode. Follows links.
+#[cfg(unix)]
+fn same_file_on_disk(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
         _ => false,
     }
 }
@@ -1091,6 +1107,26 @@ mod tests {
             assert!(is_state_file(&link, &state_file));
             assert!(recent_candidate(link.to_str().unwrap(), &state_file).is_err());
         }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// SEC-3: a hard link has a path of its own, so the resolved paths differ; it is still the
+    /// state file (same device and inode).
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_link_to_the_state_file_is_the_state_file() {
+        let (root, dirs) = scratch_dirs("hard-link-state");
+        let state_file = dirs.state_file();
+        touch_recent(&dirs, "/x.nc", 15).unwrap();
+        let hard = root.join("hard.json");
+        fs::hard_link(&state_file, &hard).unwrap();
+        assert!(is_state_file(&hard, &state_file));
+        assert!(recent_candidate(hard.to_str().unwrap(), &state_file).is_err());
+        // A copy is another file, and a missing path is not the state file.
+        let copy = root.join("copy.json");
+        fs::copy(&state_file, &copy).unwrap();
+        assert!(!is_state_file(&copy, &state_file));
+        assert!(!is_state_file(&root.join("gone.json"), &state_file));
         let _ = fs::remove_dir_all(&root);
     }
 
