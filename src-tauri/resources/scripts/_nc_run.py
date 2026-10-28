@@ -417,12 +417,20 @@ class PlaneRun:
         #: The axes whose position the tracker computed (after a polar move, Klartext ``LP``,
         #: ``CP``): a word written from it is an approximation and counts as rounded.
         self.computed: set = set()
+        #: Wave Y (T015): the first blocks of two-block roughing cycles still waiting for their
+        #: second block: (the block, its refusal if none comes, the codes it writes).
+        self.first_blocks: List[Tuple["Block", Any, List[Any]]] = []
 
     # -- the walk ---------------------------------------------------------------
 
     def walk(self, preceding: Sequence[str], lines: Sequence[str], first: int) -> None:
         tracker = self.tracker
         state: Any = None
+        if self.lathe_z:
+            # Wave Y (T015): the block numbers the scope and the lines above carry, so a roughing
+            # or finishing cycle can be told whether its contour lies in the scope.
+            scope, above = block_numbers(self.cp, preceding, lines, first)
+            _nc_geom.set_block_numbers(tracker, scope, above)
         for number, text in enumerate(preceding, first - len(preceding)):
             state, step = tracker.line(text, number, state, False)
             _nc_geom.observe(step, tracker)
@@ -434,6 +442,7 @@ class PlaneRun:
             state, step = tracker.line(text, number, state, True)
             block = self.judge(step, index, text)
             self.blocks.append(block)
+        self.end_first_blocks()
         if self.selection and self.blocks:
             self.end_selection(state)
 
@@ -508,6 +517,10 @@ class PlaneRun:
         roles = _nc_geom.roles_of(step, tracker)
         refusals = _nc_geom.refusals_of(step, roles, tracker, self.op, self.context)
         _nc_geom.observe(step, tracker)
+        # Wave Y (T015): the first block of a two-block roughing cycle waits for its second.
+        waiting = [r for r in refusals if r.reason == "roughing-cycle" and r.detail == _nc_geom.SECOND_BLOCK]
+        refusals = [r for r in refusals if r not in waiting]
+        self.settle_second(step, refusals)
         block.refusals.extend(refusals)
         block.notes.extend(_nc_geom.notes_of(step, roles, tracker, self.op, self.context))
         written = quote("".join(t.text for t in step.tokens))
@@ -523,6 +536,8 @@ class PlaneRun:
             self.rewrite(step, roles, block)
         if moving:
             self.outside = False
+        if waiting:
+            self.first_blocks.append((block, waiting[0]._replace(detail=""), [e.get("code") for e, _, _ in step.entries]))
         self.note_computed(step)
         block.refusals.sort(key=lambda r: reason_order(r.reason))
         arc = step.arc
@@ -536,6 +551,26 @@ class PlaneRun:
             rotary = _nc_geom._data(self.tracker).rotary
             block.helix = any(axis not in plane and axis not in rotary for axis, _ in step.moves)
         return block
+
+    def settle_second(self, step: Any, refusals: Sequence[Any]) -> None:
+        """Wave Y (T015): a block judged after the first block of a two-block roughing cycle. Its
+        second block (the same code, naming the contour) that is not refused for the cycle settles
+        it; any other block that writes something refuses the first one."""
+        if not self.first_blocks:
+            return
+        codes = [e.get("code") for e, _, _ in step.entries]
+        if not codes and not any(t.kind not in ("whitespace", "comment", "blockNumber") for t in step.tokens):
+            return  # an empty line or a comment between the two blocks
+        block, refusal, wanted = self.first_blocks.pop()
+        second = any(code in wanted for code in codes) and not any(r.reason in ("roughing-cycle", "lathe-cycle") for r in refusals)
+        if not second:
+            block.refuse(refusal.reason, refusal.written, refusal.detail)
+
+    def end_first_blocks(self) -> None:
+        """Wave Y (T015): a first block whose second block the scope does not hold is refused."""
+        for block, refusal, _ in self.first_blocks:
+            block.refuse(refusal.reason, refusal.written, refusal.detail)
+        self.first_blocks = []
 
     def pass_runs(self, step: Any) -> bool:
         """The block runs a single pass (`sets.path: 'cycle'`: the lathe `G90`, `G92`, `G94`,
@@ -752,6 +787,13 @@ class PlaneRun:
                         continue
                     new, exact = _nc_geom.transform(role.role, {role.axis: old}, self.op)
                     self.put(block, role, old, new[role.axis], exact, units)
+            # Wave Y (T015): the allowances and reliefs of a roughing cycle along Z change sign.
+            for role in _nc_geom.contour_flips(_nc_geom._block_of(step, self.tracker), roles, self.op) or []:
+                old = self.read(role, units)
+                if old is None:
+                    block.refuse("machine-dependent", quote(role.token.text))
+                    continue
+                self.put(block, role, old, -old, True, units)
         else:
             points = [r for r in roles if r.role in ("point", "cycle-position", "point-inc") and r.axis in PLANE]
             self.vector(block, step, points, ("point", "cycle-position"), units)
@@ -1012,6 +1054,27 @@ class PlaneRun:
                 continue
             out[block.index] = splice(out[block.index], block.edits)
         return out
+
+
+def block_numbers(cp: Any, preceding: Sequence[str], lines: Sequence[str], first: int) -> Tuple[Dict[str, List[int]], List[str]]:
+    """Wave Y (T015): the block numbers of the scope (number -> the lines that carry it) and
+    those of the lines above it, read from the tokens (``blockNumber``)."""
+    scope: Dict[str, List[int]] = {}
+    above: List[str] = []
+    state: Any = None
+    for index, text in enumerate(list(preceding) + list(lines)):
+        tokens, state = gedit_nc.tokenize_line(text, cp, state)
+        for token in tokens:
+            if token.kind != "blockNumber":
+                continue
+            number = _nc_geom.number_of(token.value_text if token.value_text is not None else token.text)
+            if number is None:
+                continue
+            if index < len(preceding):
+                above.append(number)
+            else:
+                scope.setdefault(number, []).append(first + index - len(preceding))
+    return scope, above
 
 
 #: Below this a computed value counts as the value itself (the double precision of a turn).

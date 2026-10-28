@@ -4,7 +4,7 @@
     {
       "line": 6,
       "severity": "error",
-      "message": "N40 G85 NLAP1 D2. F0.3 U0.4 W0.1: a roughing cycle that works from a contour (its finishing allowance along Z has a direction); gEdit does not mirror it yet.",
+      "message": "N40 G85 NLAP1 D2. F0.3 U0.4 W0.1: a roughing cycle that works from a contour (its finishing allowance along Z has a direction): gEdit mirrors G70 to G73 only together with both their blocks and their whole contour, and does not mirror the Okuma LAP.",
       "reason": "roughing-cycle"
     },
     {

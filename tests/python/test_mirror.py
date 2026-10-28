@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import unittest
 from decimal import Decimal
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
 
 from tests.python import helpers
 from tests.python.test_rotate import (
@@ -551,6 +551,57 @@ class WalkCountTest(unittest.TestCase):
             result = in_process(mirror, "fanuc-gcode", self.PARAMS, text)
         self.assertEqual([made for made in trackers.made][1:], [{"reach": False, "flow": False}])
         self.assertIn("G2 ", result["text"])
+
+
+class LaterVersionTest(unittest.TestCase):
+    """Wave Y, BL-NC-geometry: the later-version transforms under the mirror. Each test fails
+    without its change."""
+
+    Z = {"about": "z"}
+    HEAD = ["%", "O0071 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G18 G21 G40 G99", "T0101", "G0 X60. Z2."]
+    G71 = ["G71 U2. R0.5", "G71 P10 Q20 U0.4 W0.1 F0.25", "N10 G0 X20.", "G1 Z-15. F0.15", "X30. W-10.", "N20 G1 X60.", "G70 P10 Q20"]
+    TAIL = ["G0 X100. Z50.", "M30", "%"]
+
+    def errors(self, result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def test_t015_a_roughing_cycle_with_its_contour_is_mirrored(self) -> None:
+        # The P4a prelude's case list (FANUC 0i-F lathe manual, the stock removal cycles): the
+        # contour is points, W of the second block of G71 and G72 and both W of G73 change sign,
+        # the depth of cut and the retract stay.
+        result = run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(self.HEAD + self.G71 + self.TAIL))
+        self.assertEqual(self.errors(result), [])
+        lines = result["text"].split("\n")
+        self.assertEqual(lines[5:12], ["G71 U2. R0.5", "G71 P10 Q20 U0.4 W-0.1 F0.25", "N10 G0 X20.", "G1 Z15. F0.15", "X30. W10.", "N20 G1 X60.", "G70 P10 Q20"])
+        g72 = ["G72 W1.5 R0.5", "G72 P10 Q20 U0.2 W0.1 F0.2", "N10 G0 Z-25.", "G1 X20.", "N20 Z0."]
+        lines = run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(self.HEAD + g72 + self.TAIL))["text"].split("\n")
+        self.assertEqual(lines[5:7], ["G72 W1.5 R0.5", "G72 P10 Q20 U0.2 W-0.1 F0.2"])
+        g73 = ["G73 U3. W-2. R3", "G73 P10 Q20 U0.4 W0.2 F0.25", "N10 G0 X20. Z0.", "G1 Z-20.", "N20 X60."]
+        lines = run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(self.HEAD + g73 + self.TAIL))["text"].split("\n")
+        self.assertEqual(lines[5:7], ["G73 U3. W2. R3", "G73 P10 Q20 U0.4 W-0.2 F0.25"])
+
+    def test_t015_a_contour_outside_the_scope_is_still_refused(self) -> None:
+        program = self.HEAD + self.G71 + self.TAIL
+        # The selection holds the cycle and G70 but not the whole contour.
+        found = self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(program[5:9]), preceding=program[:5]))
+        self.assertIn((6, "roughing-cycle"), found)
+        self.assertIn((7, "roughing-cycle"), found)
+        # The first block alone, its second below the selection.
+        found = self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(program[5:6]), preceding=program[:5]))
+        self.assertEqual(found, [(6, "roughing-cycle")])
+        # G70 whose contour lies above the selection.
+        found = self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(program[11:13]), preceding=program[:11]))
+        self.assertIn((12, "lathe-cycle"), found)
+        # A block number that stands twice: which contour the control takes is not certain.
+        twice = self.HEAD + self.G71 + ["N10 G0 X100. Z50."] + self.TAIL
+        self.assertIn((7, "roughing-cycle"), self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(twice))))
+
+    def test_t015_d5_10_the_taper_passes_stay_refused(self) -> None:
+        # Manual check D5-10: a pass with a taper stays refused under the Z mirror in v1.2.0.
+        text = "\n".join(self.HEAD + ["G90 X50. Z-20. R-2. F0.2", "G94 X20. Z-2. R-1. F0.2"] + self.TAIL)
+        found = self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, text))
+        self.assertIn((6, "single-pass-taper"), found)
+        self.assertIn((7, "single-pass-taper"), found)
 
 
 if __name__ == "__main__":
