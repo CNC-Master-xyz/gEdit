@@ -1,6 +1,6 @@
 {
   "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
-  "description": "Okuma two turrets: turret A jumps with GOTO NSKP1 (a sequence name) over its P30. The jump lines do not read a jump to a sequence name, so P20 after P30 was 'not increasing'; followed, the P30 never runs and turret A runs P10 then P20: correct, no finding.",
+  "description": "Okuma two turrets: turret A jumps with GOTO NSKP1 (a sequence name) over its P30. The jump lines read the sequence name, so the order of P30 and P20 was not judged; followed, the P30 never runs and turret A runs P10 then P20: correct, no finding.",
   "rule": "F1 F2",
   "profile": "okuma-osp",
   "preset": "okuma-2turret",
@@ -38,7 +38,7 @@
     },
     "before": [
       {
-        "kind": "not-increasing",
+        "kind": "order-not-checked",
         "channel": "a",
         "line": 8,
         "mark": "P20"
