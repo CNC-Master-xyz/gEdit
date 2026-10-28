@@ -236,6 +236,80 @@ class TestFkContour(unittest.TestCase):
         self.assertEqual([f for f in payload["findings"] if f["reason"] == "fk-point"], [])
 
 
+class TestFkContourInASelectionD4(unittest.TestCase):
+    """v1.2.0 Wave Y, D4 (the skeptic of T121): a selection moves the FK points of a contour only
+    when the whole contour lies in it: the FPOL in force at its first FK block, its first to its
+    last FK block, and every block a relative reference names. Otherwise its points are left with
+    the `fk-point` warning, as before T121: `FL PR+30 PA+0` and `CCPR+20 CCPA+90` stay about the
+    unmoved FPOL, and moving `CCX`/`P1X` alone would bend the contour (probe t121a)."""
+
+    PROGRAM = "\n".join([
+        "0 BEGIN PGM FK MM",
+        "1 ; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "2 TOOL CALL 1 Z S2000",
+        "3 L Z+100 R0 FMAX",
+        "4 L X+10 Y+10 R0 FMAX",
+        "5 L Z-5 R0 F500",
+        "6 APPR CT X+20 Y+20 CCA90 R+5 RL F300",
+        "7 FPOL X+50 Y+50",
+        "8 FL PR+30 PA+0",
+        "9 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60",
+        "10 FCT DR- R15 CCPR+20 CCPA+90",
+        "11 FLT P1X+20 P1Y+80",
+        "12 L X+20 Y+20",
+        "13 DEP CT CCA90 R+5 F1000",
+        "14 L Z+100 R0 FMAX",
+        "15 END PGM FK MM",
+    ])
+
+    def run_on(self, start, end, program=None, below=True):
+        lines = (program or self.PROGRAM).split("\n")
+        context = helpers.effective_context("heidenhain-klartext")
+        context["params"] = {"operation": "add", "operand": 5, "addresses": ["X"]}
+        context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+        if below:
+            context["input"]["followingLines"] = lines[end:]
+        result = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
+        if not result.ok:
+            raise AssertionError(result.stderr)
+        return result.json()
+
+    def fk_points(self, payload):
+        return [(f["line"], f["message"].split(":")[0], f["severity"]) for f in payload["findings"] if f["reason"] == "fk-point"]
+
+    def test_the_fpol_above_the_selection_leaves_every_fk_point(self):
+        payload = self.run_on(9, 12)
+        self.assertEqual(payload["text"], "\n".join(self.PROGRAM.split("\n")[8:12]))
+        self.assertEqual(self.fk_points(payload), [(10, "CCX+50", "warning"), (10, "P1X+70", "warning"), (12, "P1X+20", "warning")])
+
+    def test_a_selection_with_the_whole_contour_moves_it(self):
+        for end in (12, 13):
+            payload = self.run_on(8, end)
+            text = lines_of(payload)
+            self.assertEqual((text[0], text[2], text[4]), ("7 FPOL X+55 Y+50", "9 FC DR+ R30 CCX+55 CCY+50 P1X+75 P1Y+60", "11 FLT P1X+25 P1Y+80"))
+            self.assertEqual(self.fk_points(payload), [])
+
+    def test_a_contour_that_runs_on_below_the_selection_is_left(self):
+        payload = self.run_on(8, 11)
+        self.assertEqual(lines_of(payload)[2], "9 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60")
+        self.assertEqual([p[0] for p in self.fk_points(payload)], [10, 10])
+        # Without the lines below, a contour still open at the selection's end may run on.
+        payload = self.run_on(8, 12, below=False)
+        self.assertEqual([p[0] for p in self.fk_points(payload)], [10, 10, 12])
+
+    def test_a_reference_to_a_block_above_the_selection_leaves_the_contour(self):
+        program = "\n".join([
+            "0 BEGIN PGM FK MM", "1 L X+10 Y+10 R0 FMAX", "2 L X+30 Y+10", "3 FPOL X+50 Y+50", "4 FL PR+20 PA+20",
+            "5 FC DR+ R10 CCX+60 CCY+50 RX 2", "6 FLT P1X+40 P1Y+70", "7 L X+0 Y+0", "8 END PGM FK MM",
+        ])
+        payload = self.run_on(4, 8, program)
+        self.assertEqual([p[:2] for p in self.fk_points(payload)], [(6, "CCX+60"), (7, "P1X+40")])
+        # The same contour with the block it names in the selection moves.
+        payload = self.run_on(3, 8, program)
+        self.assertEqual(lines_of(payload)[3], "5 FC DR+ R10 CCX+65 CCY+50 RX 2")
+        self.assertEqual(self.fk_points(payload), [])
+
+
 def lines_of(payload):
     return payload["text"].split("\n")
 

@@ -223,7 +223,9 @@ count parameters reached only through the arc-centre option (`G83 … K3`). An a
 (`P1X` … `P3Y`, the centre `CCX`/`CCY`, a point beside the contour `PDX`/`PDY`) on a chosen axis
 moves with a shift of that axis when every word of its block is classified (v1.2.0 Wave Y, T121:
 `FK_KEPT`); under a scale, or in a block with a word nobody classified, it is left and listed as
-a warning (B1 fix NC, NC-03), so the FK contour has to be checked.
+a warning (B1 fix NC, NC-03), so the FK contour has to be checked. On a selection they move only
+when the whole FK contour lies in it (Wave Y, D4): the FPOL in force at its first FK block, its
+first to its last FK block, and every block a relative reference names; else they are left so too.
 
 Selections
 ----------
@@ -337,6 +339,15 @@ FK_KEPT = frozenset((
 ))
 #: The words besides them an FK block may write.
 FK_OTHER = frozenset(("F", "M", "RL", "RR", "R0"))
+#: v1.2.0 Wave Y (D4, the skeptic of T121): the words that make a block an element of an FK
+#: contour (with ``FSELECT``, which picks one of its solutions), the pole of its polar values,
+#: and the relative references, each followed by the number of the block it names (TNC 640
+#: Klartext manual 2019, p.175-189). A selection moves the FK points of a contour only when the
+#: whole contour lies in it: its FPOL, its first to its last FK block, and every block a
+#: reference names (`Run.fk_movable`).
+FK_ELEMENTS = frozenset(("FL", "FLT", "FC", "FCT", "FSELECT"))
+FK_POLE = "FPOL"
+FK_REFERENCES = frozenset(("RX", "RY", "RPR", "RPA", "RAN", "PAR", "RCCX", "RCCY", "RCCPR", "RCCPA"))
 
 #: What the summary calls a count of each reason (singular, plural).
 REASON_TEXT = {
@@ -1063,6 +1074,64 @@ def read_block(block: Block, entry_of: Any, letters: frozenset) -> None:
             i += 1
 
 
+def blocks_of(
+    lines: Sequence[str], first_number: int, state: Optional[gedit_nc.LineState], cp: gedit_nc.CompiledProfile, entry_of: Any, letters: frozenset
+) -> List[Block]:
+    """D4: the blocks of ``lines`` as `read_block` reads them, without the modal state (the FK
+    contours of a selection, read before its blocks are judged)."""
+    out: List[Block] = []
+    pending: List[Line] = []
+    for index, text in enumerate(lines):
+        head = gedit_nc.continues_block(text, cp)
+        continued = (state.continuation if state is not None else False) or head
+        if pending and not continued:
+            out.append(Block(pending))
+            pending = []
+        tokens, state = gedit_nc.tokenize_line(text, cp, state)
+        pending.append(Line(index, first_number + index, text, tokens, True))
+    if pending:
+        out.append(Block(pending))
+    for block in out:
+        read_block(block, entry_of, letters)
+    return out
+
+
+def number_of(text: Optional[str]) -> Optional[int]:
+    """A block number as written (`12`, `+12`), or ``None``."""
+    try:
+        return int((text or "").strip())
+    except ValueError:
+        return None
+
+
+def klartext_number(block: Block) -> Optional[int]:
+    """D4: the number a block is written with (Klartext `12 FL …`), or ``None``."""
+    for token in block.first.tokens:
+        if token.kind == "blockNumber":
+            return number_of(token.value_text)
+    return None
+
+
+def fk_references(block: Block) -> List[Optional[int]]:
+    """D4: the block numbers the relative references of an FK block name (`RX 3`, `RCCX12`);
+    ``None`` for a reference whose number cannot be read."""
+    out: List[Optional[int]] = []
+    for line in block.lines:
+        tokens = [t for t in line.tokens if t.kind != "whitespace"]
+        for i, token in enumerate(tokens):
+            if token.kind != "word" or (token.address or "").upper() not in FK_REFERENCES:
+                continue
+            if (token.value_text or "") != "":
+                out.append(number_of(token.value_text))
+                continue
+            nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+            if nxt is not None and nxt.kind == "word" and nxt.address is None and (nxt.value_text or "") != "":
+                out.append(number_of(nxt.value_text))
+            else:
+                out.append(None)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------
@@ -1139,6 +1208,22 @@ class Run:
         #: tool-axis word the run changed): until then a cycle starts at the unmoved level.
         self.level_above = False
         self.level_inside = False
+        #: v1.2.0 Wave Y (D4): what a selection needs to tell whether an FK contour lies wholly
+        #: in it. Whether the run is on a selection, and the lines below it
+        #: (``input.followingLines``; ``None`` when they were not sent).
+        self.is_selection = False
+        self.following: Optional[List[str]] = None
+        #: Above the selection: whether an FK contour is still open where it starts, whether
+        #: an FPOL was written, and the block numbers written there.
+        self.fk_open_above = False
+        self.fpol_above = False
+        self.numbers_above: set = set()
+        #: The selection's lines, their first line number and the tokenizer state they start in.
+        self.selection_lines: List[str] = []
+        self.selection_first = 1
+        self.selection_state: Optional[gedit_nc.LineState] = None
+        #: The line numbers of the FK blocks whose points may move (``fk_movable``).
+        self._fk_movable: Optional[frozenset] = None
 
     def entry(self, code: str) -> Optional[Dict[str, Any]]:
         """The database entry of a written code, remembered per spelling."""
@@ -1155,7 +1240,11 @@ class Run:
         cp = self.cp
         state: Optional[gedit_nc.LineState] = None
         pending: List[Line] = []
+        self.selection_lines = list(lines[inside_from:])
+        self.selection_first = first_number + inside_from
         for index, text in enumerate(lines):
+            if index == inside_from:
+                self.selection_state = state
             head = gedit_nc.continues_block(text, cp)
             continued = (state.continuation if state is not None else False) or head
             if pending and not continued:
@@ -1181,6 +1270,7 @@ class Run:
         block.opens_frame = frame is not None and any(line.number == frame["line"] for line in lines)
         if not block.inside:
             self.note_level_above(block)
+            self.note_fk_above(block)
         if not self.relevant(block, group):
             if block.unknown is not None and block.inside:
                 seen = self.unknown_seen.setdefault(block.unknown, [block.number, 0])
@@ -1738,8 +1828,22 @@ class Run:
                 continue
             fk_axis = FK_POINT_AXES.get(address)
             if fk_axis is not None and fk_axis in setup.chosen and self.params.additive and self.fk_classified(block):
-                # T121: the absolute points of an FK contour move with the shift of their axis.
-                outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis)))
+                if self.fk_movable(block):
+                    # T121: the absolute points of an FK contour move with the shift of their axis.
+                    outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis)))
+                    continue
+                # D4: a contour that runs past the selection would be moved only in part.
+                written = quote(token.text)
+                outcomes.append(
+                    (
+                        "skip",
+                        line,
+                        "fk-point",
+                        "%s: a point of an FK contour that does not lie wholly in the selection (its FPOL, a block it refers to, or more of its blocks are outside it); gEdit does not move it. Select the whole FK contour, or check it"
+                        % written,
+                        written,
+                    )
+                )
                 continue
             if fk_axis is not None and fk_axis in setup.chosen:
                 written = quote(token.text)
@@ -2596,6 +2700,96 @@ class Run:
             return False
         return True
 
+    def fk_kind(self, block: Block) -> Optional[str]:
+        """D4: what a block is to an FK contour: ``'element'`` (an FK block, `FSELECT` among
+        them), ``'pole'`` (`FPOL`), ``'end'`` (a move of another kind to a written position,
+        which ends the contour: `L X+20 Y+20`) or ``None`` (anything else, which neither starts
+        nor ends one: a comment, `RND`, `CC`, a polar or approach block without an axis word; read
+        so, a contour runs on further, which only makes a selection refuse more)."""
+        addresses = {(token.address or "").upper() for token, _ in block.words}
+        if addresses & FK_ELEMENTS:
+            return "element"
+        if FK_POLE in addresses:
+            return "pole"
+        if any(sets_of(entry).get("motion") for entry in block.codes()) and self.positions(block):
+            return "end"
+        return None
+
+    def note_fk_above(self, block: Block) -> None:
+        """D4: a block above the selection: whether an FK contour is open where the selection
+        starts, whether an FPOL was written, and the block numbers written there."""
+        number = klartext_number(block)
+        if number is not None:
+            self.numbers_above.add(number)
+        kind = self.fk_kind(block)
+        if kind == "element":
+            self.fk_open_above = True
+        elif kind == "pole":
+            self.fpol_above = True
+        elif kind == "end":
+            self.fk_open_above = False
+
+    def fk_movable(self, block: Block) -> bool:
+        """D4 (the skeptic of T121): whether the FK points of this block may move. A whole run
+        moves them all. A selection moves them only when the FK contour of the block lies wholly
+        in it: the FPOL in force at its first FK block, every block from the first FK block to
+        the last one, and every block a relative reference (`RX 3`, `PAR 5`) names. The contour
+        may run on below the selection, which only the lines below show
+        (``input.followingLines``); without them a contour still open at the selection's end is
+        taken to run on."""
+        if not self.is_selection:
+            return True
+        if self._fk_movable is None:
+            self._fk_movable = self.fk_sections()
+        return block.number in self._fk_movable
+
+    def fk_sections(self) -> frozenset:
+        """D4: the line numbers of the FK blocks of the selection whose contour lies wholly in
+        it, read from the selection's lines (and those below, for where the last contour ends)."""
+        blocks = blocks_of(self.selection_lines, self.selection_first, self.selection_state, self.cp, self.entry, self.setup.letters)
+        inside_numbers: set = set()
+        for block in blocks:
+            number = klartext_number(block)
+            if number is not None:
+                inside_numbers.add(number)
+        # [members, partial, references] of each contour.
+        sections: List[List[Any]] = []
+        current: Optional[List[Any]] = [[], True, []] if self.fk_open_above else None
+        fpol = "above" if self.fpol_above else None
+        for block in blocks:
+            kind = self.fk_kind(block)
+            if kind == "pole":
+                fpol = "inside"
+            elif kind == "element":
+                if current is None:
+                    current = [[], fpol == "above", []]
+                current[0].append(block.number)
+                current[2].extend(fk_references(block))
+            elif kind == "end" and current is not None:
+                sections.append(current)
+                current = None
+        if current is not None:
+            if self.following is None:
+                current[1] = True
+            else:
+                below = blocks_of(self.following, 0, None, self.cp, self.entry, self.setup.letters)
+                for block in below:
+                    kind = self.fk_kind(block)
+                    if kind == "element":
+                        current[1] = True
+                        break
+                    if kind == "end":
+                        break
+            sections.append(current)
+        movable: set = set()
+        for members, partial, references in sections:
+            if partial:
+                continue
+            if any(ref is None or ref not in inside_numbers or ref in self.numbers_above for ref in references):
+                continue
+            movable.update(members)
+        return frozenset(movable)
+
     def word_outcome(
         self,
         token: gedit_nc.Token,
@@ -3159,6 +3353,21 @@ def apply_edits(lines: Sequence[str], run: Run) -> List[str]:
     return out
 
 
+def following_lines(context: Dict[str, Any]) -> Optional[List[str]]:
+    """v1.2.0 Wave Y (D4, D5): the document lines below a selection (``input.followingLines``,
+    FZ-5), or ``None`` when the run did not get them (a whole-document run, a field that is no
+    list of strings, a selection whose lines below were too many to send). The same reading as
+    ``_nc_run.following_lines``, which this script does not import (it would load the geometry
+    modules)."""
+    scope = as_dict(context.get("input"))
+    if scope.get("scope") != "selection":
+        return None
+    lines = scope.get("followingLines")
+    if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
+        return None
+    return list(lines)
+
+
 def main() -> int:
     context = gedit_nc.load_context()
     lines = gedit_nc.read_input()
@@ -3213,6 +3422,8 @@ def main() -> int:
         )
 
     run = Run(setup, cp)
+    run.is_selection = scope.get("scope") == "selection"
+    run.following = following_lines(context)
     run.walk(list(preceding) + lines, base_line - len(preceding), len(preceding))
     run.settle()
     out = apply_edits(list(preceding) + lines, run)[len(preceding):]
