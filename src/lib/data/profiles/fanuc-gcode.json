@@ -203,7 +203,7 @@
       }
     ]
   },
-  "editing": { "forceUppercase": true, "preventLineJoin": true, "tabWidth": 4 },
+  "editing": { "forceUppercase": true, "preventLineJoin": true },
   "onLoad": { "stripNul": true },
   "compare": {
     "ignoreBlockNumbers": true,

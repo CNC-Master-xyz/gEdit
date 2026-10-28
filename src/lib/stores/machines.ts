@@ -32,6 +32,7 @@
 import { writable, type Readable } from 'svelte/store';
 import { applyMachine, compatible, effectiveMachine } from '$lib/core/machines/effective';
 import {
+  defaultProblems,
   emptyMachinesFile,
   keepPosition,
   parseMachinesFile,
@@ -708,6 +709,7 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
       if (fileError !== null) out.push({ machineId: null, path: '', message: fileError });
       if (readOnly) out.push({ machineId: null, path: '$version', message: t('machines.fileReadOnly') });
       for (const entry of file.invalid) out.push(...entry.problems);
+      out.push(...defaultProblems(file.defaults));
       for (const machine of file.machines) out.push(...(checks.get(machine.id) ?? []));
       return out;
     },

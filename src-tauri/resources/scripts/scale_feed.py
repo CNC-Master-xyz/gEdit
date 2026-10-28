@@ -581,12 +581,15 @@ class Reading:
         token: gedit_nc.Token,
         tracker: Tracker,
         entries: Sequence[Dict[str, Any]],
-        in_force: Sequence[Dict[str, Any]] = (),
+        in_force: Sequence[Dict[str, Any]],
+        block_tokens: Sequence[gedit_nc.Token],
     ) -> Optional[str]:
         """The §7.15 number class of this feed word in this block, or ``None``.
 
         ``in_force`` are the entries of the move, the cycle and the mode in force that the
         block does not write (M9): what they declare for the feed word holds here too.
+        ``block_tokens`` are the tokens of the whole block, which tell the block of a two-block
+        cycle (``gedit_nc.block_cycle_of``; P4h, plan §6.10 rule 11).
         """
         return gedit_nc.number_class_of(
             token.address or "",
@@ -595,6 +598,7 @@ class Reading:
             entries,
             tracker.pitch_feed,
             list(in_force),
+            cycle_block=gedit_nc.block_cycle_of(entries, block_tokens),
         )
 
     def resolve(
@@ -1420,7 +1424,7 @@ def scale_token(
     number_class = None
     effective: Optional[Decimal] = None
     if params.has_limits:
-        number_class = reading.number_class(token, tracker, entries, in_force)
+        number_class = reading.number_class(token, tracker, entries, in_force, tokens if block_tokens is None else block_tokens)
         if number_class in CLASS_TEXT and number_class != params.limit_class:
             # M9: the limits are in one feed unit; a feed in another one is never compared
             # with them, whatever its number looks like.

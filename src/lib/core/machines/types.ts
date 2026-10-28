@@ -137,6 +137,28 @@ export interface MachineParams {
   motion?: MachineMotion;
   /** Phase 4 (P4b prelude; plan §6.4, AD-46): top spindle speeds and axis travel; as `motion`. */
   limits?: MachineLimits;
+  /**
+   * P4h (plan §6.10 rule 13; T123). The machine builder's axis names of more than one letter,
+   * at most 16, each with its kind. Unlike `motion` it changes how a program is read, so it is
+   * part of `EffectiveMachine.params` and of `effectiveKey` — **present only when the machine
+   * sets at least one**, so the key of every other machine stays as it was. `applyMachine`
+   * writes the names into `syntax.extraAxisNames` and `addresses.axes` (a rotary one also into
+   * `addresses.angular`). Only from the machine: no profile default, no detection.
+   */
+  extraAxes?: ExtraAxis[];
+  /**
+   * P4h (§6.10 rule 14; T123). The machine builder's own codes, in the plain list form of the wait
+   * codes (`"G810-G829"`, `channels/codes.ts` `parseWaitCodes`). Hover and the inspector name such
+   * a code as the builder's; every script and both modal interpreters keep reading it as a code
+   * gEdit does not know. Present only when set (as `extraAxes`).
+   */
+  builderCodes?: string;
+}
+
+/** P4h (§6.10 rule 13). One extra axis: `AA`, `QQ` (2–8 letters, upper case) and whether it moves in degrees. */
+export interface ExtraAxis {
+  name: string;
+  kind: 'linear' | 'rotary';
 }
 
 /**

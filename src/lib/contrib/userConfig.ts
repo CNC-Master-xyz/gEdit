@@ -148,7 +148,20 @@ function shortNameOf(stem: string): string {
 }
 
 /**
+ * Where the schemas of gEdit's files live on the web (Phase 4 plan §6.10 rule 1; the owner's
+ * answer Q4h-2): the public repository, so an editor such as VS Code finds them from the
+ * `$schema` line of a file. gEdit itself never reads that line (the loaders drop it).
+ */
+export const SCHEMA_URL = {
+  profiles: 'https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json',
+  codes: 'https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/codes.schema.json',
+} as const satisfies Record<UserFileKind, string>;
+
+/**
  * The text of a new file.
+ *
+ * Every kind starts with a `$schema` line that points at its schema (Q4h-2), so the file is
+ * checked while it is typed in an editor that reads it; an existing file is never changed.
  *
  * A profile extends `parent` and says nothing else but its identity; its `detect.content` is
  * empty so it does not outscore its parent on every program (a user profile wins a *tie*,
@@ -157,12 +170,13 @@ function shortNameOf(stem: string): string {
  * name it is a database of its own and has to say what it extends.
  */
 export function newFileText(kind: UserFileKind, parent: string, stem: string): string {
+  const $schema = SCHEMA_URL[kind];
   const body =
     kind === 'profiles'
-      ? { id: stem, name: stem, shortName: shortNameOf(stem), version: 1, extends: parent, detect: { content: [] } }
+      ? { $schema, id: stem, name: stem, shortName: shortNameOf(stem), version: 1, extends: parent, detect: { content: [] } }
       : stem === parent
-        ? { dialect: stem, version: 1, codes: [] }
-        : { dialect: stem, version: 1, extends: parent, codes: [] };
+        ? { $schema, dialect: stem, version: 1, codes: [] }
+        : { $schema, dialect: stem, version: 1, extends: parent, codes: [] };
   return `${JSON.stringify(body, null, 2)}\n`;
 }
 

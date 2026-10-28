@@ -40,6 +40,7 @@
   } from '$lib/core/settings/schema';
   import type { FieldChoice, FieldSpec } from '$lib/core/forms/types';
   import type { SearchEntry } from '$lib/core/settings/search';
+  import type { ProfileColors } from '$lib/core/profiles/types';
   import { resolveLocale, type LocaleInfo } from '$lib/i18n/locale';
   import type { ModalOptions, Translate } from '$lib/app/types';
 
@@ -149,6 +150,8 @@
   export interface LeaveState {
     values: boolean;
     draft: boolean;
+    /** The file of a profile form that has unsaved changes (Profiles page), else null or left out. */
+    profile?: string | null;
   }
 
   /** The question to ask for `state`, or null when nothing would be lost. Wording after the template manager's. */
@@ -156,14 +159,18 @@
     state: LeaveState,
     translate: Translate,
   ): { title: string; message: string; ok: string } | null {
-    if (!state.values && !state.draft) return null;
+    const profile = state.profile ?? null;
+    if (!state.values && !state.draft && profile === null) return null;
     return {
       title: translate('settings.leave.title'),
-      message: state.values
-        ? state.draft
-          ? translate('settings.leave.bothMessage')
-          : translate('settings.leave.valuesMessage')
-        : translate('settings.leave.draftMessage'),
+      message:
+        profile !== null
+          ? translate(state.values ? 'profileForm.leave.withSettings' : 'profileForm.leave.message', { name: profile })
+          : state.values
+            ? state.draft
+              ? translate('settings.leave.bothMessage')
+              : translate('settings.leave.valuesMessage')
+            : translate('settings.leave.draftMessage'),
       ok: translate('settings.leave.ok'),
     };
   }
@@ -191,9 +198,34 @@
     draft: boolean,
     confirm: (o: { title: string; message: string; ok: string; kind: 'warning' }) => Promise<boolean>,
     translate: Translate,
+    profile: string | null = null,
   ): Promise<boolean> {
-    if (from !== MACHINES_TAB || to === from || !draft) return true;
+    if (to === from) return true;
+    // The Profiles page holds the same kind of thing: an inline form with changes not saved.
+    if (from === PROFILES_TAB && profile !== null) return mayLeave({ values: false, draft: false, profile }, confirm, translate);
+    if (from !== MACHINES_TAB || !draft) return true;
     return mayLeave({ values: false, draft: true }, confirm, translate);
+  }
+
+  /**
+   * Whether two palettes (`appearance.roleColors`) hold the same colours. The dialog's palette
+   * keeps the order the roles were edited in and the saved one is in the order of the roles, so
+   * the comparison goes role by role (and ignores a theme with no colours).
+   */
+  export function samePalette(a: unknown, b: unknown): boolean {
+    const canonical = (palette: unknown): string => {
+      const out: [string, [string, unknown][]][] = [];
+      if (typeof palette === 'object' && palette !== null) {
+        for (const mode of Object.keys(palette).sort()) {
+          const roles = (palette as Record<string, unknown>)[mode];
+          if (typeof roles !== 'object' || roles === null) continue;
+          const entries = Object.entries(roles).filter(([, value]) => value !== undefined).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0));
+          if (entries.length > 0) out.push([mode, entries]);
+        }
+      }
+      return JSON.stringify(out);
+    };
+    return canonical(a) === canonical(b);
   }
 
   /** The pages that have something to show, in `CATEGORY_ORDER`. */
@@ -296,6 +328,18 @@
     return next ?? current;
   }
 
+  /**
+   * The pending code colours after the live settings moved from `before` to `after` (a
+   * configuration import, a reset): untouched colours follow the live ones, edited colours stay.
+   * Returns `colors` itself when nothing moves.
+   */
+  export function rebasePalette(colors: ProfileColors, before: Settings, after: Settings): ProfileColors {
+    const was = before['appearance.roleColors'];
+    const now = after['appearance.roleColors'];
+    if (samePalette(was, now) || !samePalette(colors, was)) return colors;
+    return structuredClone(now);
+  }
+
   /** The keys of `metas` put back to their defaults, as a patch for the pending values. */
   export function defaultValues(metas: readonly SettingFieldMeta[]): Record<string, unknown> {
     const values: Record<string, unknown> = {};
@@ -392,7 +436,7 @@
   import { get } from 'svelte/store';
   import Modal from '$lib/components/common/Modal.svelte';
   import MachinesPage, { type MachinesModel } from '$lib/components/dialogs/MachinesPage.svelte';
-  import ProfilesPage from '$lib/components/dialogs/ProfilesPage.svelte';
+  import ProfilesPage, { type ProfilesModel } from '$lib/components/dialogs/ProfilesPage.svelte';
   import KeyboardPage from '$lib/components/dialogs/KeyboardPage.svelte';
   import PackagesPage from '$lib/components/dialogs/PackagesPage.svelte';
   import ConfigurationPage from '$lib/components/dialogs/ConfigurationPage.svelte';
@@ -404,6 +448,8 @@
   import { searchSettings, type SearchHit } from '$lib/core/settings/search';
   import { availableLocales } from '$lib/i18n/locale';
   import { settingsOpenFile } from '$lib/platform/commands';
+  import RoleColorRows from '$lib/components/dialogs/RoleColorRows.svelte';
+  import { effectiveTheme } from '$lib/app/theme';
   import { profiles } from '$lib/stores/profiles';
   import { settings } from '$lib/stores/settings';
   import { hasKey, t } from '$lib/i18n';
@@ -497,17 +543,25 @@
       initialTab !== undefined && tabs.includes(initialTab) ? initialTab : (pages[0]?.category ?? 'appearance'),
     ),
   );
+  // The code colours (P4.41) are a palette, not a form field: the dialog keeps the pending
+  // palette here, `RoleColorRows` edits it and shows it live in the open editor.
+  let colors = $state<ProfileColors>(untrack(() => structuredClone(get(settings.values)['appearance.roleColors'])));
+  let colorsValid = $state(true);
+  const colorsChanged = (): boolean => !samePalette(colors, get(settings.values)['appearance.roleColors']);
   let tablist = $state<HTMLElement | undefined>(undefined);
   let busy = $state(false);
 
   /** What the Machines page says about its form: filled in by the page while it is shown. */
   const machinesModel: MachinesModel = { hasDraft: () => false };
+  /** The same for the Profiles page: an inline profile form with changes that are not saved. */
+  const profilesModel: ProfilesModel = { hasDraft: () => false, draftName: () => null };
 
   /** What closing now would lose. The machine form lives in the page, which is only mounted on its tab. */
   function leaveState(): LeaveState {
     return {
-      values: !readOnly && Object.keys(changedValues(current, get(settings.values))).length > 0,
+      values: !readOnly && (Object.keys(changedValues(current, get(settings.values))).length > 0 || colorsChanged()),
       draft: machinesModel.hasDraft(),
+      profile: profilesModel.draftName(),
     };
   }
 
@@ -528,13 +582,14 @@
     settings.values.subscribe((after) => {
       untrack(() => {
         current = rebaseValues(current, synced, after);
+        colors = rebasePalette(colors, synced, after);
         synced = after;
       });
     }),
   );
 
   const errors = $derived(validateFields(everySpec, current));
-  const blocked = $derived(Object.keys(errors).length > 0);
+  const blocked = $derived(Object.keys(errors).length > 0 || !colorsValid);
 
   /** Pages that hold a field the user has to fix before anything can be saved. */
   const invalid = $derived(
@@ -577,15 +632,16 @@
 
   async function selectCategory(category: DialogTab): Promise<void> {
     if (changingTab) return;
-    // The ordinary change happens at once; only a change away from an open machine form asks.
-    if (active !== MACHINES_TAB || category === active || !machinesModel.hasDraft()) {
+    // The ordinary change happens at once; only a change away from an open machine or profile form asks.
+    const profile = profilesModel.draftName();
+    if (category === active || (active !== MACHINES_TAB && active !== PROFILES_TAB) || (!machinesModel.hasDraft() && profile === null)) {
       active = category;
       focusActiveTab();
       return;
     }
     changingTab = true;
     try {
-      if (await mayChangeTab(active, category, machinesModel.hasDraft(), (o) => dialogs.confirm(o), t)) active = category;
+      if (await mayChangeTab(active, category, machinesModel.hasDraft(), (o) => dialogs.confirm(o), t, profile)) active = category;
     } finally {
       changingTab = false;
     }
@@ -777,8 +833,9 @@
     if (blocked || readOnly || busy) return;
     // Save writes the settings and closes; a machine form that is still open would go with
     // it, so that is asked about first (the values are what the user is saving).
-    if (!(await askToLeave({ values: false, draft: machinesModel.hasDraft() }))) return;
-    const patch = changedValues(current, get(settings.values));
+    if (!(await askToLeave({ values: false, draft: machinesModel.hasDraft(), profile: profilesModel.draftName() }))) return;
+    const patch: Partial<Settings> = changedValues(current, get(settings.values));
+    if (colorsChanged()) patch['appearance.roleColors'] = $state.snapshot(colors);
     if (Object.keys(patch).length === 0) {
       close();
       return;
@@ -949,7 +1006,7 @@
         {#if active === MACHINES_TAB}
           <MachinesPage model={machinesModel} />
         {:else if active === PROFILES_TAB}
-          <ProfilesPage />
+          <ProfilesPage model={profilesModel} />
         {:else if active === KEYBOARD_TAB}
           <KeyboardPage />
         {:else if active === PACKAGES_TAB}
@@ -963,6 +1020,15 @@
             errors={errorsFor(activeSpecs)}
             onChange={set}
           />
+          {#if active === 'appearance'}
+            <RoleColorRows
+              {colors}
+              firstMode={$effectiveTheme}
+              preview
+              onchange={(next) => (colors = next)}
+              onvalid={(valid) => (colorsValid = valid)}
+            />
+          {/if}
         {/if}
 
         {#each activeLists as spec (spec.id)}

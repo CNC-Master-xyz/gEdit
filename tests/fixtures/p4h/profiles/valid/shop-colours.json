@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
+  "id": "shop-colours",
+  "name": "Shop mill with its own colours",
+  "shortName": "SHOP MILL",
+  "version": 2,
+  "extends": "fanuc-gcode",
+  "detect": {
+    "content": [],
+    "folders": ["/programs/mill"]
+  },
+  "editing": {
+    "tabWidth": 2,
+    "rulers": [72, 80]
+  },
+  "colors": {
+    "dark": { "feed": "#ffaa00", "tool": "#7fd4ff" },
+    "light": { "feed": "#7a3d00" }
+  }
+}

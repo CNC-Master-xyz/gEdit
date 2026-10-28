@@ -113,6 +113,10 @@ def profile_variants() -> List[Tuple[str, Dict[str, Any]]]:
         ("sinumerik without names", _variant("sinumerik", _syntax(names=None))),
         ("sinumerik without calls", _variant("sinumerik", _syntax(calls=False))),
         ("sinumerik without exponent", _variant("sinumerik", _syntax(exponentMarker=None))),
+        # P4h (plan section 6.10 rule 13; T123): a machine's extra axes, which `applyMachine`
+        # writes into `syntax.extraAxisNames`; no built-in profile lists any.
+        ("sinumerik + extra axes", _variant("sinumerik", _syntax(extraAxisNames=["AA", "BB", "QQ"]))),
+        ("fanuc + extra axes", _variant("fanuc-gcode", _syntax(extraAxisNames=["AA", "QQ"]))),
         ("klartext case-sensitive", _variant("heidenhain-klartext", _syntax(caseSensitive=True))),
         ("klartext without decimal comma", _variant("heidenhain-klartext", _syntax(decimalSeparatorAlt=None))),
         ("klartext without free text", _variant("heidenhain-klartext", _syntax(freeText=[]))),
@@ -169,6 +173,9 @@ _PERTURB = [
     "<A_B>", "%", "*", "~", "\\", "\xa0", "é", "ñ", "　", "\x0b", "\x0c", "\r", "NLAP1", "NA", "XNOW", "LAST_CUT",
     "AB", "ABC", "ABCD", "G1X", "XY", "XY+1", "P1X+0", "FQ50", "DR2+0.05", "IX+10", "I+5", "-", "+", ".", ",", "/", "1",
     "10", ".5", "N10", "N", "N-", ",R5", ",C", "#", "#[", "#[#1]", "EX", "EX3", "E3", "0.5EX2",
+    # P4h (plan section 6.10 rule 13): the words of an extra axis of the machine, and look-alikes
+    # (the variant "sinumerik + extra axes" lists AA, BB and QQ).
+    "AA90", "AA=90", "aa=-5.", "QQ0", "BB-1.5", "AA 90", "AAB1", "AA.5", "QQ=R1",
 ]
 
 

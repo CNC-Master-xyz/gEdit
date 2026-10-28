@@ -38,6 +38,8 @@ interface Golden {
     inForce?: unknown[];
     /** FB-2: modal codes in force outside the cycle and motion groups; each lends its arc-centre words. */
     modes?: unknown[];
+    /** P4h (T118): which block of a two-block cycle of `codes` the block is; absent or null: not known. */
+    cycleBlock?: 1 | 2 | null;
     expected: ResolvedClass;
   }[];
   value: {
@@ -172,6 +174,7 @@ describe('machines/numbers.json', () => {
         blockCodes: c.codes as CodeEntry[],
         pitchFeed: c.pitchFeed === true,
         ...(inForce !== undefined ? { inForce } : {}),
+        ...(c.cycleBlock !== undefined ? { cycleBlock: c.cycleBlock } : {}),
       }),
     ).toBe(c.expected);
   });

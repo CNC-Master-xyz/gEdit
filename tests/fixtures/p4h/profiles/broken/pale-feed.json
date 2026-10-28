@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
+  "id": "pale-feed",
+  "name": "A feed colour too pale for the dark theme",
+  "shortName": "PALE",
+  "version": 1,
+  "extends": "fanuc-gcode",
+  "colors": {
+    "dark": { "feed": "#333333" }
+  }
+}

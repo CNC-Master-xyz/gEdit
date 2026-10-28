@@ -152,6 +152,48 @@ cutting speed under constant surface speed, whatever the machine's number settin
 Counts — a repeat count, a number of holes, a block number, a program number — are never
 converted either.
 
+## The Numbers table
+
+Under the choice of how the control reads numbers, the machine's page has a table **Numbers**
+with one row for each kind of number: **Length**, **Angle**, **Feed per minute**, **Feed per
+revolution** and **Dwell**. It shows what the machine reads, the same answer the hover gives
+for a word, never a copy of what is stored. Choosing a number input fills it; a row you change
+by hand is saved with the machine, and the choice above then reads **Custom** because no preset
+has exactly those rules. You no longer need the file to change a rule. Saving writes the whole number rule, checked by the same rules as the file, and a problem
+shows at its row.
+
+| | |
+|---|---|
+| **Reading** | **In steps of the increment (a number without a point)**: a word with a point is as written, a word without one counts steps. **As written**: both are as written. **Every number times the unit**: the point changes nothing; the increment is the value of a written 1 |
+| **Increment** | The step in mm (length and the two feeds), degrees (angle) or seconds (dwell). A decimal number above zero, such as `0.001`. A dwell left without a step of its own counts in the same digits as the length step; the angle step is not used for it |
+| **Increment in inch programs** | Only the kinds that follow the program's units: length and the two feeds. See below |
+
+**The inch step.** For a **length**, leave the field empty and gEdit takes a tenth of the metric
+step (0.001 mm is 0.0001 inch), which is right on all the controls the project has the manuals
+of. For a **feed**, no single rule fits: a Fanuc counts a hundredth of the metric step (1 mm/min
+is 0.01 inch/min; 0.0001 mm/rev is 0.000001 inch/rev), an Okuma a tenth. So a feed row that is
+read in steps needs its **inch step written**: if you empty it, or change the metric step and
+leave the old one, the table refuses to save and says what is missing. The presets that come
+with gEdit always carry their inch steps and are never refused. A feed set to "As written" or
+"Every number times the unit" needs no inch step to be saved.
+
+**"As written" still counts the cycle values.** On the Fanuc lathe the length step stays in use
+under "As written", because the control always takes some cycle values in steps: the `P` and `Q`
+of `G74` and `G75`, `P` and `Q` of `G76` (second block) and `Q` of `G83`. That is why the preset
+names 0.001 mm even though every position is read as written. If you change that step, those
+cycle values read differently; a step that does not match the control's parameters makes them
+wrong.
+
+**A word that is read by the block it stands in.** The two blocks of a lathe thread cycle give the
+same letter two readings. In `G76 P010060 R0.1` the `P` packs three two-digit numbers (finishing
+passes, chamfer, tool angle) and is a count, shown as written and never converted. In
+`G76 X.. Z.. P1500 Q300 F1.5` the `P` is the thread height in steps of the least increment of the
+axis, as a radius, so on a metric IS-B machine `P1500` is 1.5 mm. The control takes no decimal
+point in that word. gEdit tells the block apart by its words and, when it cannot (a block with
+neither block's words), gives no value rather than guessing. Hover, the inspector and every
+script read the two blocks the same way, and the scripts treat both words as values of the cycle:
+Address Arithmetic leaves them as written and lists them.
+
 ## What "none" means
 
 "Machine: none" is a perfectly good state. It means: read this program with what the
@@ -225,6 +267,7 @@ that machine.
 | **Name** | What the status bar and the picker call it. Yours to choose, up to 64 characters and different from every other machine's name, capitals aside: "Lathe 2", "Mill 3", "the old one" |
 | **How the control reads numbers** | One of the dialect's presets — on Okuma, the control's unit system; Sinumerik has only one. Every preset's name says what it does to a word with and without a point, so you can pick it without knowing the jargon. A preset the project has taken from a manual and not checked against a machine says **(unconfirmed)** after its name, and the help under the choice says it is the usual setting for this kind of control, not one checked against yours: compare it with your machine's parameters before you rely on it |
 | **Point-less feeds** | Fanuc only, and only with one of the increment presets (not *as written*): how the control counts a feed written without a decimal point. The choices differ for a mill and a lathe, because the control's two parameters for it belong to one kind of machine each. **Mill:** *Standard* is a feed per minute in 1 mm/min and a feed per revolution in 0.01 mm/rev; the other choice counts the feed per revolution in thousandths (0.001 mm/rev; parameter 1405 bit 1). **Lathe:** *Standard* is a feed per minute in 1 mm/min and a feed per revolution and thread lead in 0.0001 mm/rev (`F2500` is 0.25 mm/rev); *per minute in thousandths* counts the feed per minute in 0.001 mm/min (parameter 1404 bit 2); *Series 15 format* counts the feed per revolution and the thread lead in 0.01 mm/rev (the old format, parameter 0001 bit 1); *both* does both. You read the parameters off your machine; gEdit does not assume a change. A choice marked **(unconfirmed)** is a documented default, not one checked against a machine. A feed with an inverse-time or per-tooth meaning gets no value in any choice. Without a machine gEdit never applies it |
+| **Numbers** | A table on the machine's page, one row for each kind of number: how the control reads it and by what step. Choosing a number input above fills the table; a row you change is saved with the machine. See [The Numbers table](#the-numbers-table) |
 | **Units at power-on** | Millimetres or inches — what the control measures in until the program says otherwise |
 | **X and U are diameters at power-on** (Fanuc lathe), **X is a diameter at power-on** (Okuma, Sinumerik turning and milling) | Off for a control set to radius programming. The label names the dialect's diameter words, and on Sinumerik this is the diameter programming (`DIAMON`) a program starts with; it defaults to on for turning and to off for the Sinumerik milling profile |
 | **G-code system** | Fanuc lathe only: A or B. See [the Fanuc lathe](#the-fanuc-lathe) |
@@ -234,6 +277,8 @@ that machine.
 | **Counter spindle** | Lathes (Fanuc, Okuma, Sinumerik): *Y turns with Z* (the default, verify) or *Y stays*. What the Z mirror for the counter spindle does with `Y`, an incremental `Y` and `J`; see [the Z mirror](scripts.md#the-z-mirror-for-the-counter-spindle) |
 | **T on the M6 line** | Fanuc mill only: whether the `T` written on the `M6` line is the tool loaded (the default) or the next tool. See [the Fanuc mill](#the-fanuc-mill-the-t-word-and-m6) |
 | **Feed mode at power-on**, **Spindle-speed mode at power-on**, **Plane at power-on** and **Positioning at power-on** | What is in force before the program sets it, as far as the dialect offers them — Fanuc mill: feed mode, positioning, plane; Fanuc lathe: feed mode, spindle-speed mode, plane; Okuma: feed mode, positioning, spindle-speed mode; Sinumerik turning and milling: feed mode (the feed type), plane, positioning. "Dialect default" leaves it to the profile |
+| **Extra axes** | Sinumerik only: axis names of more than one letter that the machine builder set up, such as `AA`. See [Sinumerik: extra axes and machine builder codes](#sinumerik-extra-axes-and-machine-builder-codes) |
+| **Machine builder codes** | Sinumerik only: the G codes the machine builder added (`G810-G829`); hover names them. Same section |
 | **Motion and limits** | A page of its own: rapid rates, top feed, tool-change time, peck values, top spindle speed and travel, all optional and none assumed. See [Motion and limits](#motion-and-limits) |
 | **Notes** | Your own note, up to 500 characters. gEdit only stores it |
 
@@ -704,6 +749,45 @@ is set up to manage its tools by name — a setup of the control, like the other
 it is not a setting in gEdit, because gEdit reads both forms as a tool change (see
 [dialects.md](dialects.md#the-sinumerik-840d-turning-profile)).
 
+## Sinumerik: extra axes and machine builder codes
+
+Two fields of a Sinumerik machine (turning and milling) describe what the machine builder added
+to the control. Both are empty by default, and a machine without them reads a program as before.
+
+**Extra axes.** The control names its axes with one letter (`X`, `Y`, `Z`, `A`, `B`, `C`), and the
+machine builder can add axes with longer names, such as `AA` or `BB`. The control's programming
+manual says an equals sign belongs between an address of more than one letter and its value, so
+the form to write is **`AA=90`**. List the name (2 to 8 capital letters) under **Extra axes**,
+separated by commas, and write `rotary` after a name that turns in degrees (`AA, BB rotary`):
+gEdit then reads `AA=90` as a move of the axis `AA`, with a length (or an angle for a rotary one),
+shows it in hover and the inspector and counts it in the extents. Without the entry `AA=90` is an
+assignment.
+
+Some programs write the value directly, `AA90`. A standard control reads that as the name of a
+program, not as the axis `AA` with the value 90; the manual has no such form. Listing a name
+nevertheless makes gEdit read both `AA=90` and `AA90` as axis words, because programs of this
+kind exist, so list a name only if your machine reads it as an axis. `AA90X10` reads as `AA90`
+and `X10`; `AAX1`, a name without a value and anything in a comment stay what they were. The
+colour of such a word in the editor does not change: the colouring belongs to the dialect and
+not to the machine.
+
+A name may not be a word the dialect already reads: an axis, centre, feed or tool address, a
+keyword such as `TRANS` or `MCALL`, or a code. The form says what the word already is.
+The scripts that move a program treat an extra axis like the axes they do not move (a Fanuc
+mill's `U`, `V` or `W`): **Translate, Rotate and Mirror leave its words as written.** Translate
+says so in an information row that names the words it left, so that a user whose `AA` runs along
+`X` sees that it did not move and changes it by hand. A rotary extra axis is left without a row,
+as `C` is. A script that cannot tell what a word is still refuses; nothing here makes it guess.
+
+**Machine builder codes.** The control reserves two groups of G codes for the machine builder,
+`G810` to `G819` and `G820` to `G829`, and `OEMIPO1` and `OEMIPO2` for the same purpose among the
+interpolation codes. Under **Machine builder codes** write the ones your machine uses, in the
+form of the wait codes: `G810-G829`. Only G codes can be listed. A code the code database
+already knows is refused. The only difference is **hover and the inspector**: such a code is
+named *a code of the machine builder (its meaning is in the machine's documentation)* instead of
+*unknown code*. Every script and check still reads it as a code gEdit does not know, so a
+script that needs to know what a block does still refuses it.
+
 ## Motion and limits
 
 The page **Motion and limits** of the machine form holds what the machine's own documentation
@@ -874,7 +958,7 @@ only" writes — so a later change to a preset never changes a machine you alrea
 `0.001` in the first one is not a slip: it is the increment the micron parameters of the
 turning cycles are counted in, while every position is read as written. A machine is
 matched to a preset only when every rule is the same, so one made from an older version of
-a preset shows as "Custom (edited in the file)" until you pick a preset again.
+a preset shows as "Custom (edited in the file)" until you pick a preset again; its rules are in [the Numbers table](#the-numbers-table).
 
 What the file must hold:
 
@@ -890,7 +974,7 @@ What the file must hold:
 **Open machines file** on the Machines page, or **Open Machines File** in the command
 palette, opens it as a document in gEdit. Saving it makes gEdit re-read it, so the next thing you do on the Machines page is written on top of
 your edit rather than over it. A number rule you wrote by hand that matches no preset shows
-in the form as "Custom (edited in the file)" and survives an edit of the name — gEdit does
+in the form as "Custom (edited in the file)", with its rules in the Numbers table, and survives an edit of the name — gEdit does
 not quietly replace what it did not offer you.
 
 A single machine the file holds but gEdit cannot use — a typo in its number rule, a power-on

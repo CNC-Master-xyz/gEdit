@@ -24,10 +24,10 @@
 import { normalizeCode } from '$lib/core/codes/lookup';
 import type { CodeDb } from '$lib/core/codes/types';
 import type { MachineParamsDecl, Profile, VariantDecl } from '$lib/core/profiles/types';
-import { parseWaitCodes } from '$lib/core/channels/codes';
-import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE, type ChannelParams } from '$lib/core/channels/types';
+import { isWaitCode, parseWaitCodes } from '$lib/core/channels/codes';
+import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE, type ChannelParams, type WaitCodeRange } from '$lib/core/channels/types';
 import { t } from '$lib/i18n';
-import { patternSubsetProblem } from '$lib/core/profiles/validate';
+import { EXTRA_AXIS_NAME, MAX_EXTRA_AXES, patternSubsetProblem } from '$lib/core/profiles/validate';
 import { foldersOf } from './folderRules';
 import type { MachineConfig, MachineProblem, NumberClass, NumberReading } from './types';
 
@@ -51,6 +51,9 @@ const READINGS: readonly NumberReading[] = ['increment', 'calculator', 'scale'];
 
 /** The classes a `NumberInput.classes` entry may name. */
 const CLASSES: readonly NumberClass[] = ['length', 'angle', 'feedPerMin', 'feedPerRev', 'dwell'];
+
+/** The classes that follow the program's units, so the only ones with an inch increment. */
+const UNIT_CLASSES: readonly NumberClass[] = ['length', 'feedPerMin', 'feedPerRev'];
 
 /**
  * Decimal text, the way an increment is stored: digits, optionally a point and more
@@ -292,7 +295,186 @@ export function validateMachine(m: MachineConfig, o: ValidateMachineOptions): Ma
     }
   }
 
+  problems.push(...builderProblems(params, decl, o.profile, id, at, o.codes));
   return problems;
+}
+
+/** An extra axis name as a machine stores it: upper case, letters only (§6.10 rule 13). */
+const STORED_AXIS_NAME = /^[A-Z]{2,8}$/;
+
+/** The most characters of `params.builderCodes` (§6.10 rule 14). */
+export const MAX_BUILDER_CODES_LENGTH = 1000;
+
+/** The address members of a profile that hold one word, and what the word is there (plain words). */
+const SINGLE_ADDRESSES: readonly [keyof Profile['addresses'], string][] = [
+  ['tool', 'the tool word'],
+  ['feed', 'the feed word'],
+  ['rapid', 'the rapid word'],
+  ['spindle', 'the spindle speed word'],
+];
+
+/** The address members that hold a list of words, and what each word is there. */
+const LIST_ADDRESSES: readonly [keyof Profile['addresses'], string][] = [
+  ['axes', 'an axis'],
+  ['arcCenter', 'an arc centre word'],
+  ['diameter', 'a diameter axis'],
+  ['angular', 'a rotary axis'],
+  ['speedLimitWords', 'a speed limit word'],
+  ['offsetWords', 'an offset word'],
+];
+
+/** The address members that are maps whose keys are words. */
+const KEYED_ADDRESSES: readonly [keyof Profile['addresses'], string][] = [
+  ['incremental', 'an incremental axis word'],
+  ['feedUnitWords', 'a feed unit word'],
+  ['arcDirectionWords', 'an arc direction word'],
+];
+
+/**
+ * P4h (plan §6.10 rule 13; T123): what the word `name` already is to the profile or its code
+ * database, in plain words, or null when it is free to be an extra axis. Ignoring case, as the
+ * names are stored in capitals. A name that is already a word of the profile would be read
+ * as that word by one rule and as an axis by another, so it is refused rather than guessed:
+ * an address of `addresses`, a keyword, a colon word, a parameter of a code, or a code or
+ * alias made of letters only (`TRANS`, `MCALL`).
+ */
+export function extraAxisClash(name: string, profile: Profile, codes?: CodeDb): string | null {
+  const key = name.toUpperCase();
+  const same = (word: unknown): boolean => typeof word === 'string' && word.toUpperCase() === key;
+  const addresses = (isRecord(profile.addresses) ? profile.addresses : {}) as Record<string, unknown>;
+  for (const [member, what] of SINGLE_ADDRESSES) if (same(addresses[member])) return `"${name}" is already ${what} of this profile`;
+  for (const [member, what] of LIST_ADDRESSES) {
+    const list = addresses[member];
+    if (Array.isArray(list) && list.some(same)) return `"${name}" is already ${what} of this profile`;
+  }
+  for (const [member, what] of KEYED_ADDRESSES) {
+    const map = addresses[member];
+    if (isRecord(map) && (Object.keys(map).some(same) || (member === 'incremental' && Object.values(map).some(same)))) {
+      return `"${name}" is already ${what} of this profile`;
+    }
+  }
+  const syntax = (isRecord(profile.syntax) ? profile.syntax : {}) as Record<string, unknown>;
+  const keywords = Array.isArray(syntax.keywords) ? syntax.keywords : [];
+  if (keywords.some((keyword) => typeof keyword === 'string' && same(keyword.trim().split(/\s+/)[0]))) {
+    return `"${name}" is already a keyword of this profile`;
+  }
+  const colonWords = Array.isArray(syntax.colonWords) ? syntax.colonWords : [];
+  if (colonWords.some(same)) return `"${name}" is already a word written with a colon (${name}:…)`;
+  for (const entry of codes?.codes ?? []) {
+    for (const code of [entry?.code, ...(Array.isArray(entry?.aliases) ? entry.aliases : [])]) {
+      if (typeof code === 'string' && /^[A-Za-z]+$/.test(code) && same(code)) return `"${name}" is already the code ${entry.code}`;
+    }
+    const param = (Array.isArray(entry?.params) ? entry.params : []).find((candidate) => same(candidate?.address));
+    if (param) return `"${name}" is already a parameter of ${entry.code}`;
+  }
+  return null;
+}
+
+/**
+ * P4h (plan §6.10 rule 14; T123): the codes of `ranges` the code database already describes,
+ * as written in the database. A builder code is one gEdit does not know; one it knows would
+ * be named twice, once by the database and once as the builder's.
+ */
+export function knownBuilderCodes(ranges: readonly WaitCodeRange[], codes: CodeDb): string[] {
+  const known: string[] = [];
+  for (const entry of codes.codes ?? []) {
+    for (const code of [entry?.code, ...(Array.isArray(entry?.aliases) ? entry.aliases : [])]) {
+      if (typeof code !== 'string') continue;
+      const match = /^([A-Za-z])0*(\d+)$/.exec(normalizeCode(code));
+      if (match && isWaitCode(ranges, match[1], Number(match[2]))) {
+        known.push(entry.code);
+        break;
+      }
+    }
+  }
+  return known;
+}
+
+/**
+ * P4h (plan §6.10 rules 13 and 14; T123): the shape of `params.extraAxes` and
+ * `params.builderCodes`, and that the profile offers them (the prelude's), and on top of
+ * those (P4.43b) that no extra axis is a word the profile or its codes already read, that the
+ * machine's names and the profile's own stay within `MAX_EXTRA_AXES`, and that no builder
+ * code is a code the database knows (only where the caller has the database).
+ */
+function builderProblems(
+  params: Record<string, unknown>,
+  decl: MachineParamsDecl,
+  profile: Profile,
+  id: string | null,
+  at: (member: string) => string,
+  codeDb?: CodeDb,
+): MachineProblem[] {
+  const profileId = profile.id;
+  const out: MachineProblem[] = [];
+  const axes = params.extraAxes;
+  if (axes !== undefined) {
+    if (decl.extraAxes === undefined) {
+      out.push(problem(id, at('extraAxes'), `the profile "${profileId}" has no extra axes`));
+    } else if (!Array.isArray(axes)) {
+      out.push(problem(id, at('extraAxes'), 'the extra axes are a list'));
+    } else if (axes.length > MAX_EXTRA_AXES) {
+      out.push(problem(id, at('extraAxes'), `a machine names at most ${MAX_EXTRA_AXES} extra axes`));
+    } else {
+      const seen = new Set<string>();
+      axes.forEach((axis, i) => {
+        const where = `${at('extraAxes')}[${i}]`;
+        if (!isRecord(axis)) {
+          out.push(problem(id, where, 'an extra axis has a name and a kind'));
+          return;
+        }
+        const name = axis.name;
+        if (typeof name !== 'string' || !STORED_AXIS_NAME.test(name) || !EXTRA_AXIS_NAME.test(name)) {
+          out.push(problem(id, `${where}.name`, 'an extra axis name is 2 to 8 capital letters, e.g. "AA"'));
+        } else if (seen.has(name)) {
+          out.push(problem(id, `${where}.name`, `"${name}" is already listed`));
+        } else {
+          seen.add(name);
+          const clash = extraAxisClash(name, profile, codeDb);
+          if (clash !== null) out.push(problem(id, `${where}.name`, clash));
+        }
+        if (axis.kind !== 'linear' && axis.kind !== 'rotary') {
+          out.push(problem(id, `${where}.kind`, 'an extra axis is "linear" or "rotary"'));
+        }
+      });
+      // The profile's own names and the machine's are one list once applied (`applyMachine`).
+      const own = Array.isArray(profile.syntax?.extraAxisNames) ? profile.syntax.extraAxisNames : [];
+      const all = new Set([...own.map((n) => String(n).toUpperCase()), ...seen]);
+      if (all.size > MAX_EXTRA_AXES) {
+        out.push(problem(id, at('extraAxes'), `with the profile's own extra axes this makes more than ${MAX_EXTRA_AXES}`));
+      }
+    }
+  }
+
+  const codes = params.builderCodes;
+  if (codes !== undefined) {
+    if (decl.builderCodes === undefined) {
+      out.push(problem(id, at('builderCodes'), `the profile "${profileId}" has no machine builder codes`));
+    } else if (typeof codes !== 'string' || codes.trim() === '' || codes.length > MAX_BUILDER_CODES_LENGTH) {
+      out.push(
+        problem(id, at('builderCodes'), `the builder codes are a list such as "G810-G829", at most ${MAX_BUILDER_CODES_LENGTH} characters`),
+      );
+    } else {
+      // The wait codes' list reader; its messages speak of wait codes, so the problem has its own words.
+      const letters = decl.builderCodes.letters;
+      const parsed = parseWaitCodes(codes, { letters });
+      const known = parsed.errors.length === 0 && codeDb !== undefined ? knownBuilderCodes(parsed.ranges, codeDb) : [];
+      if (known.length > 0) {
+        const shown = known.slice(0, 3).join(', ') + (known.length > 3 ? ` and ${known.length - 3} more` : '');
+        out.push(problem(id, at('builderCodes'), `${shown} ${known.length === 1 ? 'is a code' : 'are codes'} gEdit already knows, not a code of the machine builder`));
+      }
+      if (parsed.errors.length > 0) {
+        out.push(
+          problem(
+            id,
+            at('builderCodes'),
+            `the builder codes are codes and ranges of the letter${letters.length === 1 ? '' : 's'} ${letters.join(', ')}, such as "${decl.builderCodes.example ?? `${letters[0] ?? 'G'}810-${letters[0] ?? 'G'}829`}"`,
+          ),
+        );
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -300,7 +482,7 @@ export function validateMachine(m: MachineConfig, o: ValidateMachineOptions): Ma
  * preset it was given (§7.15), so this is the shape that decides how every literal of that
  * machine is read — and the one place a typo in the file has to be caught.
  */
-function numberInputProblems(raw: unknown, id: string | null, path: string): MachineProblem[] {
+export function numberInputProblems(raw: unknown, id: string | null, path: string): MachineProblem[] {
   const problems: MachineProblem[] = [];
   if (!isRecord(raw)) return [problem(id, path, 'the number input must be a JSON object')];
 
@@ -339,6 +521,12 @@ function numberInputProblems(raw: unknown, id: string | null, path: string): Mac
       if (value[member] !== undefined && !isPositiveDecimal(value[member])) {
         problems.push(problem(id, `${where}.${member}`, 'an increment is decimal text above zero, e.g. "0.001"'));
       }
+    }
+    // P4.39b (§6.10 rule 2): `incrementInch` only on a class that follows the program's units
+    // (the contract of `NumberInput.classes`, and the profile's rule for its presets). On an
+    // angle or a dwell it was read by nothing, so a machine that set it was misunderstood.
+    if (value.incrementInch !== undefined && !UNIT_CLASSES.includes(name as NumberClass)) {
+      problems.push(problem(id, `${where}.incrementInch`, `the ${name} class does not change with the units, so it has no inch increment`));
     }
   }
   return problems;
@@ -696,6 +884,12 @@ function ruleProblems(
     add(`${at}.semantics`, `what ${label} checks is one of ${SEMANTICS.join(', ')}`);
   }
   if (rule.blocking !== undefined && typeof rule.blocking !== 'boolean') add(`${at}.blocking`, `"blocking" of ${label} is on or off`);
+  // P4.39b (§6.10 rule 2, the agreement with the schema): the channel check reads these two
+  // as `=== true`, so a "yes" was quietly off. Refused like `blocking`.
+  if (rule.answers !== undefined && typeof rule.answers !== 'boolean') add(`${at}.answers`, `"answers" of ${label} is on or off`);
+  if (rule.samePartners !== undefined && typeof rule.samePartners !== 'boolean') {
+    add(`${at}.samePartners`, `"samePartners" of ${label} is on or off`);
+  }
   // Manual check D2-4, D2-5: the members the channel check reads since then.
   if (rule.markSeparator !== undefined && (typeof rule.markSeparator !== 'string' || rule.markSeparator === '')) {
     add(`${at}.markSeparator`, `${label}: the separator between marks is text, for example ","`);

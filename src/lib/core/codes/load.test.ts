@@ -689,13 +689,32 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
         { address: 'U', label: 'Again', block: 1 },
         { address: 'R', label: 'Retract' },
         { address: 'R', label: 'Retract of the second block', block: 2 },
-        { address: 'P', label: 'Packed', unit: 'count', block: 1 },
-        { address: 'P', label: 'Height', unit: 'increment', block: 2 },
+        { address: 'Q', label: 'Depth', position: 'none', block: 1 },
+        { address: 'Q', label: 'Depth again', position: 'tool-axis', block: 2 },
       ]),
     );
-    expect(problems.map((p) => p.path)).toEqual(['codes[0].params[1]', 'codes[0].params[3]', 'codes[0].params[5].unit']);
-    expect(problems[2].message).toContain('same unit in both blocks');
-    expect(db.codes[0].params?.map((p) => p.label)).toEqual(['Depth of cut', 'Retract', 'Packed']);
+    expect(problems.map((p) => p.path)).toEqual(['codes[0].params[1]', 'codes[0].params[3]', 'codes[0].params[5].position']);
+    expect(problems[2].message).toContain('same position in both blocks');
+    expect(db.codes[0].params?.map((p) => p.label)).toEqual(['Depth of cut', 'Retract', 'Depth']);
+  });
+
+  // P4h (plan §6.10 rule 11; T118): the block-aware unit. Before P4h the second `P` was refused.
+  it('keeps a unit that differs between a block-1 and a block-2 declaration, and only there', () => {
+    const { db, problems } = load(
+      g71([
+        { address: 'P', label: 'Packed', unit: 'count', block: 1 },
+        { address: 'P', label: 'Thread height', unit: 'increment', block: 2 },
+        { address: 'W', label: 'Both blocks', unit: 'increment' },
+        { address: 'W', label: 'Second block', unit: 'count', block: 2 },
+      ]),
+    );
+    // `W` without a block counts for both blocks, so a second `W` clashes with it first.
+    expect(problems.map((p) => p.path)).toEqual(['codes[0].params[3]']);
+    expect(db.codes[0].params?.map((p) => [p.address, p.block ?? null, p.unit])).toEqual([
+      ['P', 1, 'count'],
+      ['P', 2, 'increment'],
+      ['W', null, 'increment'],
+    ]);
   });
 
   it('reads review: "pending" and drops any other value', () => {
@@ -1228,5 +1247,64 @@ describe('P4b follow-ups (v1.2.0)', () => {
       // Wave Y (T163): RND and CHF, whose feed applies to the rounding or the chamfer only.
       expect(db.codes.filter((e) => e.blockFeed === true).map((e) => e.code), db.dialect).toEqual(db.dialect === 'heidenhain' ? ['RND', 'CHF', 'CYCL CALL POS'] : []);
     }
+  });
+});
+
+describe('P4.39b: the loader agrees with schemas/codes.schema.json', () => {
+  it('reads a value of a closed list exactly as written: blanks around it are reported, not trimmed', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      codes: [
+        {
+          code: 'G2',
+          label: 'Arc',
+          frame: ' open',
+          conflicts: [' tcp', 'radiusComp'],
+          sets: { motion: 'feed ', path: 'arc' },
+          params: [{ address: 'R', label: 'Radius', position: 'none ', unit: ' length' }],
+        },
+      ],
+    });
+    expect(problems.map((p) => p.path)).toEqual([
+      'codes[0].frame',
+      'codes[0].conflicts[0]',
+      'codes[0].params[0].unit',
+      'codes[0].params[0].position',
+      'codes[0].sets.motion',
+    ]);
+    const g2 = db.codes[0];
+    expect(g2.frame).toBeUndefined();
+    expect(g2.conflicts).toEqual(['radiusComp']);
+    expect(g2.sets).toEqual({ path: 'arc' });
+    expect(g2.params?.[0].position).toBeUndefined();
+    expect(g2.params?.[0].unit).toBeUndefined();
+  });
+
+  it('reports a bound, a group or a description that is no text or number, instead of dropping it silently', () => {
+    const { db, problems } = load({
+      dialect: 'x',
+      version: 1,
+      addresses: { X: { label: 'X axis', description: 5 } },
+      codes: [
+        { code: 'G1', label: 'Line', group: 7, description: ['a'] },
+        { code: 'G81', label: 'Drill', params: [{ address: 'Z', label: 'Depth', min: '-5', max: null }] },
+        { code: 'G0', label: 'Rapid', group: 'motion', description: '' },
+      ],
+    });
+    expect(problems.map((p) => p.path)).toEqual([
+      'addresses.X.description',
+      'codes[0].group',
+      'codes[0].description',
+      'codes[1].params[0].min',
+      'codes[1].params[0].max',
+    ]);
+    expect(db.codes.map((e) => e.code)).toEqual(['G1', 'G81', 'G0']);
+  });
+
+  it('reports a remove list it cannot read; a good one says nothing', () => {
+    expect(load({ dialect: 'x', version: 1, codes: [], remove: 'G81' }).problems.map((p) => p.path)).toEqual(['remove']);
+    expect(load({ dialect: 'x', version: 1, codes: [], remove: ['G81', 5, ' '] }).problems.map((p) => p.path)).toEqual(['remove[1]', 'remove[2]']);
+    expect(load({ dialect: 'x', version: 1, codes: [], remove: ['G81', 'G82'] }).problems).toEqual([]);
   });
 });

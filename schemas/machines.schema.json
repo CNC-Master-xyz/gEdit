@@ -1,0 +1,1214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/machines.schema.json",
+  "title": "gEdit machines file",
+  "description": "The machines file of gEdit (machines.json in the settings folder): how each of your machines reads programs, and which machine a profile uses when nothing else is chosen. gEdit itself checks every machine against its profile; this description lets another editor point out typing mistakes while you edit the file by hand.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "title": "Schema",
+      "description": "The address of this description, so that an editor can check the file while you type. gEdit does not read it."
+    },
+    "$version": {
+      "title": "File format version",
+      "description": "The version of the file format; gEdit writes 1. A file with a higher number comes from a newer gEdit and is read but never changed.",
+      "maximum": 1,
+      "default": 1
+    },
+    "machines": {
+      "title": "Machines",
+      "description": "Your machines, at most 100. Each one says how its control reads the programs of one profile. A machine with a mistake is kept in the file and listed with the mistake, but it cannot be chosen until it is put right.",
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/machine"
+      }
+    },
+    "defaults": {
+      "title": "Default machines",
+      "description": "The machine a profile's documents use when you choose none: the profile id, then the machine id. Example: { \"fanuc-lathe\": \"lathe-2\" }. An entry that names a machine that does not exist is ignored.",
+      "type": "object",
+      "additionalProperties": {
+        "title": "Default machine",
+        "description": "The id of the machine, as written in its \"id\", written as text.",
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "machine": {
+      "title": "Machine",
+      "description": "One machine: its id, its name, the profile of its programs, and the settings that differ from the profile's defaults.",
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "profile"
+      ],
+      "properties": {
+        "id": {
+          "title": "Id",
+          "description": "A short, fixed name gEdit remembers the machine by, for example \"lathe-2\": 1 to 64 characters of a to z, 0 to 9 and \"-\", starting with a letter or a digit. Change it and the documents that remember this machine forget it.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "name": {
+          "title": "Name",
+          "description": "The name shown in gEdit, for example \"Lathe 2, hall B\": 1 to 64 characters, different from every other machine's name.",
+          "type": "string",
+          "pattern": "\\S",
+          "maxLength": 64
+        },
+        "profile": {
+          "title": "Profile",
+          "description": "The id of the profile whose programs this machine runs, for example \"fanuc-lathe\". The machine can be chosen for documents of that profile and of every profile built on it.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "params": {
+          "$ref": "#/$defs/machineParams"
+        },
+        "notes": {
+          "title": "Notes",
+          "description": "Your own notes about the machine, at most 500 characters. gEdit does not read them.",
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "machineParams": {
+      "title": "Settings",
+      "description": "Only what differs from the profile's defaults. Everything left out follows the profile. Which settings a machine may have depends on its profile.",
+      "type": "object",
+      "properties": {
+        "numberInput": {
+          "title": "Number input",
+          "description": "How the control reads a number without a decimal point, for example whether X50 means 50 mm or 0.050 mm. null, or left out: as the profile's default says.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/numberInput"
+            }
+          ]
+        },
+        "units": {
+          "title": "Units at power-on",
+          "description": "The units the control starts in before a program says G20/G21 (or G70/G71): \"mm\" or \"inch\".",
+          "enum": [
+            "mm",
+            "inch"
+          ]
+        },
+        "diameter": {
+          "title": "Diameter programming",
+          "description": "On a lathe: \"on\" when X is written as a diameter, \"off\" when it is written as a radius. Only for profiles that have this setting.",
+          "enum": [
+            "on",
+            "off",
+            null
+          ]
+        },
+        "variants": {
+          "title": "Variants",
+          "description": "The machine's choice for each variant its profile offers, by the variant's id, for example { \"gcodeSystem\": \"B\" }. The choices are listed in the profile.",
+          "type": "object",
+          "additionalProperties": {
+            "title": "Choice",
+            "description": "The value of one of the variant's choices, as written in the profile.",
+            "type": "string"
+          }
+        },
+        "modalInitial": {
+          "title": "Codes in force at power-on",
+          "description": "The code each modal group holds when the program starts, where the machine differs from the profile, for example { \"feed\": \"G95\" }. Only for the groups the profile offers; the code has to belong to that group.",
+          "type": "object",
+          "additionalProperties": {
+            "title": "Code",
+            "description": "A code of the group, written as text, for example \"G95\".",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "channels": {
+          "$ref": "#/$defs/channelParams"
+        },
+        "motion": {
+          "$ref": "#/$defs/motion"
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        },
+        "extraAxes": {
+          "title": "Extra axes",
+          "description": "Axis names of more than one letter that the machine builder set up, such as AA. A Siemens control writes them with an equals sign (AA=90); some machines also take AA90. gEdit then reads both as a move of that axis, and Translate, Rotate and Mirror leave that axis as written. On a standard Siemens control AA90 alone is the name of a program, so list a name only if your machine reads it as an axis. At most 16. Only for profiles that offer extra axes.",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/extraAxis"
+          }
+        },
+        "builderCodes": {
+          "title": "Machine builder codes",
+          "description": "Codes the machine builder added, written as a list of codes and ranges, for example \"G810-G829\". gEdit then names such a code as the builder's instead of an unknown code. At most 1000 characters; only for profiles that offer it, and only with the letters the profile names.",
+          "type": "string",
+          "pattern": "\\d",
+          "maxLength": 1000
+        }
+      }
+    },
+    "positiveDecimal": {
+      "title": "Increment",
+      "description": "A number above zero written as text, with digits and at most one decimal point, for example \"0.001\" or \"1\". Text, so that 0.001 stays exactly 0.001.",
+      "type": "string",
+      "pattern": "^(?:\\d*[1-9]\\d*(?:\\.\\d+)?|\\d+\\.\\d*[1-9]\\d*)$"
+    },
+    "numberReading": {
+      "title": "Reading",
+      "description": "\"increment\": a number without a decimal point counts steps of the increment (X50 is 0.050 mm with an increment of 0.001), one with a point is read as written. \"calculator\": every number as written. \"scale\": every number, with or without a point, times the increment.",
+      "enum": [
+        "increment",
+        "calculator",
+        "scale"
+      ]
+    },
+    "numberClass": {
+      "title": "Reading of one kind of number",
+      "description": "Where the control reads this kind of number differently from lengths: its own reading and increment.",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/numberReading"
+        },
+        "increment": {
+          "$ref": "#/$defs/positiveDecimal",
+          "title": "Increment",
+          "description": "The increment of this kind of number: in mm for lengths and feeds in a metric program, in degrees for angles, in seconds for dwell times."
+        },
+        "incrementInch": {
+          "$ref": "#/$defs/positiveDecimal",
+          "title": "Increment in inch programs",
+          "description": "The increment in an inch program. Only for lengths and feeds; angles and dwell times do not change with the units."
+        }
+      }
+    },
+    "numberInput": {
+      "title": "Number input",
+      "description": "How the control reads the numbers of a program: one reading for lengths, and where angles, feeds or dwell times are read differently, their own. Example: { \"mode\": \"increment\", \"incrementMm\": \"0.001\" } reads X50 as 0.050 mm and X50. as 50 mm.",
+      "type": "object",
+      "required": [
+        "mode",
+        "incrementMm"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/numberReading"
+        },
+        "incrementMm": {
+          "$ref": "#/$defs/positiveDecimal",
+          "title": "Increment in mm",
+          "description": "The smallest step of a length in a metric program, in mm, for example \"0.001\". With \"scale\" it is the value of 1."
+        },
+        "incrementInch": {
+          "$ref": "#/$defs/positiveDecimal",
+          "title": "Increment in inch",
+          "description": "The same for an inch program, in inch, for example \"0.0001\". Left out: a tenth of the metric increment, which is right for lengths; a feed should name its inch step (Fanuc: a hundredth of the metric step, Okuma: a tenth)."
+        },
+        "incrementDeg": {
+          "$ref": "#/$defs/positiveDecimal",
+          "title": "Increment in degrees",
+          "description": "The smallest step of an angle, in degrees, in metric and inch programs alike. Left out: the same digits as the metric increment."
+        },
+        "incrementSec": {
+          "$ref": "#/$defs/positiveDecimal",
+          "title": "Increment in seconds",
+          "description": "The smallest step of a dwell time, in seconds. Left out: the same digits as the metric increment (incrementMm)."
+        },
+        "classes": {
+          "title": "Other kinds of number",
+          "description": "Where the control reads a kind of number differently from lengths, for example feeds always as written: { \"feedPerMin\": { \"mode\": \"calculator\" } }. The kinds are length, angle, feedPerMin, feedPerRev and dwell.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "length": {
+              "$ref": "#/$defs/numberClass",
+              "title": "Lengths",
+              "description": "Axis positions and other lengths."
+            },
+            "angle": {
+              "$ref": "#/$defs/numberClass",
+              "title": "Angles",
+              "description": "Rotary axis positions and other angles, in degrees.",
+              "not": {
+                "required": [
+                  "incrementInch"
+                ]
+              }
+            },
+            "feedPerMin": {
+              "$ref": "#/$defs/numberClass",
+              "title": "Feed per minute",
+              "description": "Feeds in mm (or inch) per minute."
+            },
+            "feedPerRev": {
+              "$ref": "#/$defs/numberClass",
+              "title": "Feed per revolution",
+              "description": "Feeds in mm (or inch) per revolution, and thread leads."
+            },
+            "dwell": {
+              "$ref": "#/$defs/numberClass",
+              "title": "Dwell",
+              "description": "Dwell times, in seconds.",
+              "not": {
+                "required": [
+                  "incrementInch"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "userPattern": {
+      "title": "Pattern",
+      "description": "A search pattern (a regular expression) in gEdit's pattern language, at most 1000 characters. The pattern tester on the Machines page shows what it finds.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "fileNameTemplate": {
+      "title": "File name template",
+      "description": "A file name in which {{stem}} stands for the common part of the names and {{channel}} for the channel's id, for example {{stem}}_CH{{channel}}.nc. Nothing else may stand in double braces.",
+      "type": "string",
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "\\{\\{(?!\\s*(?:stem|channel)\\s*\\}\\})[^}]*\\}\\}"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(?<!\\{)\\{(?:stem|channel)\\}(?!\\})"
+          }
+        }
+      ]
+    },
+    "waitCodeList": {
+      "title": "Codes",
+      "description": "A list of codes and ranges as you would write them, for example \"M100-M199, M300\" or \"P1-9999\".",
+      "type": "string",
+      "pattern": "\\d"
+    },
+    "channelList": {
+      "title": "Channels",
+      "description": "Channels by their id or another spelling, at least one.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "title": "Channel",
+        "description": "The id or another spelling of a channel of this machine.",
+        "type": "string"
+      }
+    },
+    "whenAbsent": {
+      "title": "Without the channel word",
+      "description": "Which channels a wait waits for when its line does not name them: \"none\", \"all\", or \"fixed\" with a list, for example { \"kind\": \"fixed\", \"channels\": [\"1\", \"2\"] }.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "description": "\"none\": no other channel. \"all\": every channel. \"fixed\": the channels listed.",
+          "enum": [
+            "none",
+            "all",
+            "fixed"
+          ]
+        },
+        "channels": {
+          "title": "Channels",
+          "description": "For \"fixed\": the channels, by their id or another spelling."
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "fixed"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "channels"
+        ],
+        "properties": {
+          "channels": {
+            "$ref": "#/$defs/channelList"
+          }
+        }
+      }
+    },
+    "syncRule": {
+      "title": "Wait rule",
+      "description": "How gEdit finds the wait codes of the channels in a program, and which channels each wait waits for.",
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "match",
+        "partners"
+      ],
+      "properties": {
+        "id": {
+          "title": "Id",
+          "description": "A short name of the rule, different from the other rules of the machine. \"stops-and-ends\" is taken.",
+          "type": "string",
+          "pattern": "\\S",
+          "not": {
+            "const": "stops-and-ends"
+          }
+        },
+        "label": {
+          "title": "Label",
+          "description": "The text gEdit shows for the rule's waits.",
+          "type": "string"
+        },
+        "semantics": {
+          "title": "What is checked",
+          "description": "\"rendezvous\": each wait meets the wait with the same number in the other channels. \"count\": only the number of waits must be the same on both sides. \"ordered\": the numbers only order the channels, smaller first, and may stand on one side only.",
+          "enum": [
+            "rendezvous",
+            "count",
+            "ordered",
+            null
+          ],
+          "default": "rendezvous"
+        },
+        "blocking": {
+          "title": "Waits",
+          "description": "true: the control stops here until the partners arrive, and gEdit checks it. false: a mark that does not stop, shown but not checked.",
+          "type": "boolean",
+          "default": true
+        },
+        "answers": {
+          "title": "Answers a wait",
+          "description": "true for a mark that does not stop but answers a wait of another channel with the same number (Siemens SETM).",
+          "type": "boolean",
+          "default": false
+        },
+        "samePartners": {
+          "title": "Same channels on both sides",
+          "description": "true when two waits that meet must name the same channels, both with the channel word or both without (the Fanuc waiting M-code with P).",
+          "type": "boolean",
+          "default": false
+        },
+        "markSeparator": {
+          "title": "Separator between marks",
+          "description": "For a pattern whose number is a list of marks, for example SETM(5,6): the text between them, for example \",\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "markValues": {
+          "title": "Allowed mark numbers",
+          "description": "The lowest and highest number a mark may have, for example { \"min\": 0, \"max\": 99 }. A number outside is a warning.",
+          "type": "object",
+          "required": [
+            "min",
+            "max"
+          ],
+          "properties": {
+            "min": {
+              "title": "Lowest",
+              "description": "The lowest number, a whole number.",
+              "type": "integer"
+            },
+            "max": {
+              "title": "Highest",
+              "description": "The highest number, a whole number, not below the lowest.",
+              "type": "integer"
+            }
+          }
+        },
+        "withCodes": {
+          "$ref": "#/$defs/waitCodeList",
+          "title": "Codes that need a common mark",
+          "description": "Codes that may only stand at a mark that the other channel has too, for example \"S, M03-M05, G96\" for the spindle commands at an Okuma P code."
+        },
+        "sharesWaitsWith": {
+          "title": "Shares its waits with",
+          "description": "The id of a rule that checks by count and whose waits stand in the same channels, for example the Okuma M100 beside the P codes.",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "match": {
+          "title": "What it matches",
+          "description": "How a wait is found in a line: a list of \"codes\", the start of a code (\"prefix\"), or a pattern (\"regex\").",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "title": "Kind",
+              "description": "\"codes\": a list such as M100-M199. \"prefix\": the start of a code, such as M1. \"regex\": a pattern.",
+              "enum": [
+                "codes",
+                "prefix",
+                "regex"
+              ]
+            },
+            "codes": {
+              "title": "Codes",
+              "description": "For \"codes\": the wait codes as a list, for example \"M100-M199\" or \"P1-9999\"."
+            },
+            "prefix": {
+              "title": "Start of the code",
+              "description": "For \"prefix\": a letter and up to seven letters or digits, for example M1."
+            },
+            "idDigits": {
+              "title": "Digits of the number",
+              "description": "For \"prefix\": how many digits follow the start of the code, from 1 to 8, for example { \"min\": 2, \"max\": 2 }."
+            },
+            "pattern": {
+              "title": "Pattern",
+              "description": "For \"regex\": a pattern for the wait, with a part (?<mark>…) for its number unless the rule checks by count."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "codes"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "then": {
+                "required": [
+                  "codes"
+                ],
+                "properties": {
+                  "codes": {
+                    "$ref": "#/$defs/waitCodeList"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "prefix"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "then": {
+                "required": [
+                  "prefix"
+                ],
+                "properties": {
+                  "prefix": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9]{0,7}$"
+                  },
+                  "idDigits": {
+                    "type": "object",
+                    "required": [
+                      "min",
+                      "max"
+                    ],
+                    "properties": {
+                      "min": {
+                        "title": "Fewest",
+                        "description": "The fewest digits, 1 to 8.",
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 8
+                      },
+                      "max": {
+                        "title": "Most",
+                        "description": "The most digits, 1 to 8, not below the fewest.",
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 8
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "regex"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "then": {
+                "required": [
+                  "pattern"
+                ],
+                "properties": {
+                  "pattern": {
+                    "$ref": "#/$defs/userPattern"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "partners": {
+          "title": "Who it waits for",
+          "description": "Which channels a wait waits for: \"all\", a \"fixed\" list, the value of a \"word\" on the wait's line (for example P12), or a \"line\" pattern.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "title": "Kind",
+              "description": "\"all\": every channel. \"fixed\": the channels listed. \"word\": an address word on the wait's line names them. \"line\": a pattern on the wait's line names them.",
+              "enum": [
+                "all",
+                "fixed",
+                "word",
+                "line"
+              ]
+            },
+            "channels": {
+              "title": "Channels",
+              "description": "For \"fixed\": the channels, by their id or another spelling."
+            },
+            "address": {
+              "title": "Address letter",
+              "description": "For \"word\": the letter of the word that names the channels, for example P."
+            },
+            "decode": {
+              "title": "How the number is read",
+              "description": "\"digits\": each digit is a channel (P12 = channels 1 and 2). \"bitmask\": a sum of 1, 2, 4, … (P3 = channels 1 and 2). \"split\": a list split at the separator."
+            },
+            "pattern": {
+              "title": "Pattern",
+              "description": "For \"line\": a pattern on the wait's line with a part (?<channels>…) that names the channels."
+            },
+            "separator": {
+              "title": "Separator",
+              "description": "For \"line\": the text between the channels of a list, for example \",\".",
+              "default": ","
+            },
+            "whenAbsent": {
+              "title": "Without the channel word",
+              "description": "For \"word\" and \"line\": which channels a wait waits for when its line does not name them. Left out: none."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "fixed"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "then": {
+                "required": [
+                  "channels"
+                ],
+                "properties": {
+                  "channels": {
+                    "$ref": "#/$defs/channelList"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "word"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "then": {
+                "required": [
+                  "address",
+                  "decode"
+                ],
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z]$"
+                  },
+                  "decode": {
+                    "enum": [
+                      "digits",
+                      "bitmask"
+                    ]
+                  },
+                  "whenAbsent": {
+                    "$ref": "#/$defs/whenAbsent"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "line"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "then": {
+                "required": [
+                  "pattern"
+                ],
+                "properties": {
+                  "pattern": {
+                    "$ref": "#/$defs/userPattern",
+                    "pattern": "\\(\\?<channels>"
+                  },
+                  "separator": {
+                    "type": "string"
+                  },
+                  "decode": {
+                    "enum": [
+                      "split",
+                      "digits",
+                      "bitmask"
+                    ]
+                  },
+                  "whenAbsent": {
+                    "$ref": "#/$defs/whenAbsent"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "if": {
+        "required": [
+          "match"
+        ],
+        "properties": {
+          "match": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "regex"
+              }
+            }
+          },
+          "semantics": {
+            "not": {
+              "const": "count"
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "match": {
+            "properties": {
+              "pattern": {
+                "pattern": "\\(\\?<mark>"
+              }
+            }
+          }
+        }
+      }
+    },
+    "channelParams": {
+      "title": "Channels",
+      "description": "How the machine's channels (turrets, paths) are laid out in its programs and which codes are its waits. Leave the block out for a machine with one channel.",
+      "type": "object",
+      "required": [
+        "layout",
+        "list"
+      ],
+      "properties": {
+        "layout": {
+          "title": "Layout",
+          "description": "\"single-file\": all channels in one program, in sections. \"multi-file\": one program per channel.",
+          "enum": [
+            "single-file",
+            "multi-file"
+          ]
+        },
+        "list": {
+          "title": "Channels",
+          "description": "The channels, 2 to 32, in the order gEdit shows them.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 32,
+          "items": {
+            "title": "Channel",
+            "description": "One channel: its id, its name and the other ways programs write it.",
+            "type": "object",
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "title": "Id",
+                "description": "1 to 16 lower-case letters, digits, \"-\" or \"_\", starting with a letter or a digit, for example \"1\" or \"a\".",
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,15}$"
+              },
+              "name": {
+                "title": "Name",
+                "description": "The name gEdit shows, 1 to 32 characters, for example \"Turret A\".",
+                "type": "string",
+                "pattern": "\\S",
+                "maxLength": 32
+              },
+              "aliases": {
+                "title": "Other spellings",
+                "description": "Other ways programs name this channel, for example G13 or WAIT_K1, at most 8, each 1 to 32 characters.",
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "title": "Spelling",
+                  "description": "One other spelling of the channel.",
+                  "type": "string",
+                  "pattern": "\\S",
+                  "maxLength": 32
+                }
+              },
+              "fileName": {
+                "$ref": "#/$defs/fileNameTemplate",
+                "title": "File name",
+                "description": "One program per channel only: this channel's own file name, with {{stem}} and {{channel}}, for example {{stem}}_GS.MPF."
+              }
+            }
+          }
+        },
+        "sectionStart": {
+          "title": "Section start",
+          "description": "One program only: a pattern for the line that starts a channel's section, for example the line with G13 or G14. A part (?<channel>…) names the channel.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/userPattern"
+            }
+          ]
+        },
+        "sectionSeparator": {
+          "title": "Separator in the section start",
+          "description": "One program only: the character between several channels named by one section start, for example \"/\". One character that is not a letter, a digit or a blank.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[^\\w\\s]$"
+            }
+          ],
+          "default": "/"
+        },
+        "sectionEnd": {
+          "title": "Section end",
+          "description": "One program only: a pattern for the line that ends a section. Left out: a section runs to the next start.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/userPattern"
+            }
+          ]
+        },
+        "fileName": {
+          "title": "File name pattern",
+          "description": "One program per channel only: a pattern for the file name with a part (?<stem>…) for the common part and a part (?<channel>…) for the channel.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/userPattern",
+              "allOf": [
+                {
+                  "pattern": "\\(\\?<stem>"
+                },
+                {
+                  "pattern": "\\(\\?<channel>"
+                }
+              ]
+            }
+          ]
+        },
+        "fileNameFor": {
+          "title": "File name of another channel",
+          "description": "One program per channel only: the file name of another channel's program, with {{stem}} and {{channel}}, for example {{stem}}_CH{{channel}}.nc.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/fileNameTemplate",
+              "pattern": "\\{\\{\\s*channel\\s*\\}\\}"
+            }
+          ]
+        },
+        "marker": {
+          "title": "Channel marker",
+          "description": "One program per channel only: a pattern for a line near the top that names the program's channel, with a part (?<channel>…), for example a header comment.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/userPattern",
+              "pattern": "\\(\\?<channel>"
+            }
+          ]
+        },
+        "syncMarks": {
+          "title": "Wait rules",
+          "description": "How the waits between the channels are found, at most 32 rules.",
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/syncRule"
+          }
+        },
+        "stopsAndEndsWait": {
+          "title": "Stops and ends count as waits",
+          "description": "true when every program stop and end also waits for the other channels.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "layout": {
+                "const": "single-file"
+              }
+            },
+            "required": [
+              "layout"
+            ]
+          },
+          "then": {
+            "required": [
+              "sectionStart"
+            ],
+            "properties": {
+              "sectionStart": {
+                "type": "string"
+              },
+              "fileName": {
+                "type": "null"
+              },
+              "fileNameFor": {
+                "type": "null"
+              },
+              "marker": {
+                "type": "null"
+              },
+              "list": {
+                "items": {
+                  "not": {
+                    "required": [
+                      "fileName"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "layout": {
+                "const": "multi-file"
+              }
+            },
+            "required": [
+              "layout"
+            ]
+          },
+          "then": {
+            "properties": {
+              "sectionStart": {
+                "type": "null"
+              },
+              "sectionEnd": {
+                "type": "null"
+              },
+              "sectionSeparator": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "extraAxis": {
+      "title": "Extra axis",
+      "description": "One axis the machine builder named with more than one letter.",
+      "type": "object",
+      "required": [
+        "name",
+        "kind"
+      ],
+      "properties": {
+        "name": {
+          "title": "Name",
+          "description": "2 to 8 capital letters, for example \"AA\". It may not be a word the profile already reads.",
+          "type": "string",
+          "pattern": "^[A-Z]{2,8}$"
+        },
+        "kind": {
+          "title": "Kind",
+          "description": "\"linear\" for an axis that moves in mm or inch, \"rotary\" for one that turns in degrees.",
+          "enum": [
+            "linear",
+            "rotary"
+          ]
+        }
+      }
+    },
+    "motion": {
+      "title": "Motion",
+      "description": "The machine's rapid rates, top feed and tool-change time, for the time estimate and the cycle forms. Leave out what you do not know; nothing is assumed.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "units": {
+          "title": "Units",
+          "description": "The units of every length and rate in this block: \"mm\" (mm and mm/min) or \"inch\" (inch and in/min). Needed once a rate or a length is set.",
+          "enum": [
+            "mm",
+            "inch"
+          ]
+        },
+        "rapid": {
+          "title": "Rapid rates",
+          "description": "The rapid rate of each axis per minute, for example { \"X\": 30000, \"Z\": 30000 }: a linear axis in the block's units, at most 200,000 mm/min, a rotary axis in degrees per minute.",
+          "type": "object",
+          "additionalProperties": {
+            "title": "Rapid rate",
+            "description": "Per minute, above 0.",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1000000
+          }
+        },
+        "rapidKind": {
+          "title": "How rapid moves",
+          "description": "\"straight\": all axes on one line. \"per-axis\": each axis at its own rate, the move ends with the last axis. Left out: straight.",
+          "enum": [
+            "straight",
+            "per-axis"
+          ]
+        },
+        "maxFeed": {
+          "title": "Top feed",
+          "description": "The highest cutting feed per minute, in the block's units, at most 200,000 mm/min (7,874 in/min). A higher programmed feed is counted at this one.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 200000
+        },
+        "toolChange": {
+          "title": "Tool change time",
+          "description": "Seconds one tool change takes, 0 to 600.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 600
+        },
+        "peckRetract": {
+          "title": "Peck retract",
+          "description": "How far a high-speed peck drilling cycle (G73) lifts, in the block's units, at most 100 mm (3.937 inch). Only fills in the forms.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "peckClearance": {
+          "title": "Peck clearance",
+          "description": "How far above the last depth a deep peck drilling cycle (G83) comes back down to, in the block's units, at most 100 mm (3.937 inch). Only fills in the forms.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "maxFeed"
+                ]
+              },
+              {
+                "required": [
+                  "peckRetract"
+                ]
+              },
+              {
+                "required": [
+                  "peckClearance"
+                ]
+              },
+              {
+                "required": [
+                  "rapid"
+                ],
+                "properties": {
+                  "rapid": {
+                    "minProperties": 1
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "units"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "units"
+            ],
+            "properties": {
+              "units": {
+                "const": "inch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "maxFeed": {
+                "maximum": 7874.0157480314965
+              },
+              "peckRetract": {
+                "maximum": 3.937007874015748
+              },
+              "peckClearance": {
+                "maximum": 3.937007874015748
+              }
+            }
+          }
+        }
+      ]
+    },
+    "limits": {
+      "title": "Limits",
+      "description": "What the machine may not exceed: the top speed of each spindle and the travel of each axis.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "units": {
+          "title": "Units",
+          "description": "The units of the travel: \"mm\" or \"inch\". Needed once a travel is set.",
+          "enum": [
+            "mm",
+            "inch"
+          ]
+        },
+        "spindle": {
+          "title": "Top spindle speeds",
+          "description": "The top speed of each spindle in rpm: \"main\" for the plain S word, otherwise the speed address, for example { \"main\": 4000, \"S2\": 3000 }.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^(?:main|[A-Z][A-Z0-9]{0,3})$"
+          },
+          "additionalProperties": {
+            "title": "Top speed",
+            "description": "In rpm, above 0 and at most 200,000.",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 200000
+          }
+        },
+        "travel": {
+          "title": "Travel",
+          "description": "The lowest and highest position of each axis in machine coordinates, for example { \"X\": { \"min\": -300, \"max\": 300 } }: a linear axis in the block's units, a rotary axis in degrees.",
+          "type": "object",
+          "additionalProperties": {
+            "title": "Travel of one axis",
+            "description": "The lowest (min) and highest (max) position, min below max, each between -100,000 and 100,000.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "min",
+              "max"
+            ],
+            "properties": {
+              "min": {
+                "title": "Lowest",
+                "description": "The lowest position.",
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 100000
+              },
+              "max": {
+                "title": "Highest",
+                "description": "The highest position.",
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 100000
+              }
+            }
+          }
+        }
+      },
+      "if": {
+        "required": [
+          "travel"
+        ],
+        "properties": {
+          "travel": {
+            "minProperties": 1
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "units"
+        ]
+      }
+    }
+  }
+}

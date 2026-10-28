@@ -737,7 +737,8 @@ def params_of(entry: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def param_named(entry: Optional[Dict[str, Any]], address: str) -> Optional[Dict[str, Any]]:
     # B1: the first declaration answers for both blocks of a two-block cycle; its `position`
-    # and `unit` are the same in both (`gedit_nc.params_of_block` has the block's labels).
+    # is the same in both (`gedit_nc.params_of_block` has the block's labels). Its `unit` may
+    # differ (P4h, T118: the `G76` `P`), so a cycle's block reads its own (`Run.param_of`).
     for param in params_of(entry):
         written = param.get("address")
         if isinstance(written, str) and written.upper() == address.upper():
@@ -793,6 +794,22 @@ def is_zero(literal: Optional[gedit_nc.NumericLiteral]) -> bool:
     """A value written as a plain number that is zero; a variable or an expression is not."""
     number = gedit_nc.decimal_of(literal) if literal is not None else None
     return number is not None and number == 0
+
+
+#: P4h fix round: counts of a two-block cycle that pack several values into one number, as
+#: (code, address, block). The `G76` `P` of the first block writes the finishing passes, the
+#: chamfer and the insert angle in two digits each (`P010060`); a number added to it changes
+#: the angle to one the control does not take. The code data has no mark for a packed count,
+#: so the list is written here.
+PACKED_COUNTS = frozenset({("G76", "P", 1)})
+
+
+def is_packed_count(entry: Optional[Dict[str, Any]], param: Optional[Dict[str, Any]]) -> bool:
+    """A parameter :data:`PACKED_COUNTS` names: a value of the cycle, left and listed."""
+    if not isinstance(param, dict) or param.get("unit") != "count" or not gedit_nc.declares_blocks(entry):
+        return False
+    address = str(param.get("address") or "").upper()
+    return (code_of(entry).upper(), address, param.get("block")) in PACKED_COUNTS
 
 
 def code_of(entry: Optional[Dict[str, Any]], fallback: str = "the cycle") -> str:
@@ -937,6 +954,11 @@ class Block:
 
     def codes(self) -> List[Dict[str, Any]]:
         return [entry for entry, _, _ in self.entries]
+
+    def cycle_block(self) -> Optional[int]:
+        """Which block of a two-block cycle this block is (P4h, plan §6.10 rule 11; T118):
+        `gedit_nc.block_cycle_of` of its codes and the tokens of all of its lines."""
+        return gedit_nc.block_cycle_of(self.codes(), [token for line in self.lines for token in line.tokens])
 
     def clear(self) -> None:
         """Forgets every change: the block is left as written."""
@@ -1843,6 +1865,7 @@ class Run:
         # T120 / FB-2: under a mode that makes I, J and K its own words (Fanuc `G43.5`,
         # `G41.6`, `G42.6`) they are the tool direction, a count, and no arc centre to scale.
         in_force += gedit_nc.arc_centre_modes(state.get("groups"), interp.entry, setup.profile, codes)
+        cycle_block = block.cycle_block()
         outcomes: List[Outcome] = []
         geometry: List[Outcome] = []
         #: The codes (no arc) whose own positions on a chosen axis this block writes.
@@ -1884,7 +1907,7 @@ class Run:
                     return
                 if owner is not None:
                     points.add(owner)
-                outcome = self.word_outcome(token, line, address, state, codes, in_force, None, False, geo)
+                outcome = self.word_outcome(token, line, address, state, codes, in_force, None, False, geo, cycle_block=cycle_block)
                 outcomes.append(outcome)
                 geometry.append(outcome)
                 continue
@@ -1892,7 +1915,9 @@ class Run:
             fk_why = self.fk_points_kept(block) if fk_axis is not None and fk_axis in setup.chosen and self.params.additive else "scale"
             if fk_axis is not None and fk_axis in setup.chosen and fk_why is None:
                 # T121: the absolute points of an FK contour move with the shift of their axis.
-                outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis)))
+                outcomes.append(
+                    self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis), cycle_block=cycle_block)
+                )
                 continue
             if fk_axis is not None and fk_axis in setup.chosen and fk_why == "outside":
                 # D4: a contour that runs past the selection would be moved only in part.
@@ -1937,7 +1962,7 @@ class Run:
                 )
                 continue
             word_data = None if id(token) in pole_words else cycle_data.get(id(token), data)
-            outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, word_data, is_cycle))
+            outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, word_data, is_cycle, cycle_block=cycle_block))
         for arg, cls in cycle_args:
             outcomes.append(self.arg_outcome(arg, cls, state))
 
@@ -2512,8 +2537,9 @@ class Run:
             return ("cycle-not-reviewed", "nobody reviewed the positions of %s (roadmap R8)" % name)
 
         args = self.cycle_values(block, group)
+        cycle_block = block.cycle_block()
         for arg in args:
-            param = self.param_of(entry, arg)
+            param = self.param_of(entry, arg, cycle_block)
             if arg.kind == "word" and arg.name in setup.axes and gedit_nc.position_of(param) is None:
                 continue  # an axis word: it moves as one
             if param is None:
@@ -2526,12 +2552,14 @@ class Run:
                 return ("cycle-not-reviewed", "%s writes %s, which the code database does not describe" % (name, quote(arg.text)))
             if gedit_nc.position_of(param) is None:
                 return ("cycle-not-reviewed", "nobody reviewed %s of %s (roadmap R8)" % (self.shown(entry, arg), name))
-            if arg.kind == "word" and is_cycle_value(param):
+            if arg.kind == "word" and (is_cycle_value(param) or is_packed_count(entry, param)):
                 # NC-16: a reviewed parameter that is no position (`position: 'none'`) and
                 # may be a length is a value of the cycle, not a coordinate of the program:
                 # the relief `R` of `G74`, the allowance and the taper `R` of `G76`. It is
                 # left and listed like the words of `G71`. A count stays the user's choice
-                # (`K` of `G83`, README "The form").
+                # (`K` of `G83`, README "The form"), except a packed one (`PACKED_COUNTS`:
+                # the first-block `P` of `G76`), which is left and listed too. A block that
+                # does not tell its block reads the first declaration, so a `P` there is left.
                 cycle_data[id(arg.token)] = name
         for own in [entry] + list(block.call_entries):
             others = [str(p.get("address")) for p in params_of(own) if gedit_nc.position_of(p) == "other"]
@@ -2541,7 +2569,7 @@ class Run:
                     "%s has positions of its own (%s) that a shift cannot judge" % (code_of(own), and_list(others)),
                 )
         for arg in args:
-            if gedit_nc.position_of(self.param_of(entry, arg)) != "mode" or arg.text.strip() == "":
+            if gedit_nc.position_of(self.param_of(entry, arg, cycle_block)) != "mode" or arg.text.strip() == "":
                 continue
             value = gedit_nc.decimal_of(arg.literal) if arg.literal is not None else None
             if value is None or value != 0:
@@ -2560,7 +2588,7 @@ class Run:
             )
         # What moves with a shift of the tool axis.
         for arg in args:
-            if gedit_nc.position_of(self.param_of(entry, arg)) != "tool-axis" or arg.text.strip() == "":
+            if gedit_nc.position_of(self.param_of(entry, arg, cycle_block)) != "tool-axis" or arg.text.strip() == "":
                 continue
             if arg.kind == "word":
                 # An address word follows the distance mode like any word (`word_outcome`).
@@ -2589,7 +2617,7 @@ class Run:
         # of the plane, and gEdit does not decide that for the user.
         if setup.scaled_axes:
             for arg in args:
-                along = length_along(self.param_of(entry, arg))
+                along = length_along(self.param_of(entry, arg, cycle_block))
                 if along is None or arg.text.strip() == "":
                     continue
                 hit = sorted(self.along_axes(along, state) & setup.scaled_axes)
@@ -2615,7 +2643,7 @@ class Run:
             codes = block.codes()
             data_axes = own_axes and gedit_nc.axis_words_of(entry) == "data"
             for arg in args:
-                param = self.param_of(entry, arg)
+                param = self.param_of(entry, arg, cycle_block)
                 if arg.text.strip() == "":
                     continue
                 if gedit_nc.position_of(param) != "none":
@@ -2628,7 +2656,7 @@ class Run:
                 if arg.literal is not None and gedit_nc.decimal_of(arg.literal) == 0:
                     continue
                 if arg.kind == "word" and gedit_nc.position_of(param) == "none":
-                    cls = self.number_class(arg.name, codes, [entry])
+                    cls = self.number_class(arg.name, codes, [entry], cycle_block)
                     if cls is not None and cls not in ("length", "increment"):
                         continue
                 return (
@@ -2646,9 +2674,9 @@ class Run:
                     if arg.kind == "word"
                     and arg.name in setup.words
                     and arg.name in setup.axes
-                    and gedit_nc.position_of(self.param_of(entry, arg)) is None
+                    and gedit_nc.position_of(self.param_of(entry, arg, cycle_block)) is None
                 ]
-                lengths = self.length_params(entry, codes)
+                lengths = self.length_params(entry, codes, cycle_block)
                 if scaled and lengths:
                     return (
                         "not-scaled",
@@ -2699,23 +2727,30 @@ class Run:
             str(p.get("address") or "").upper() in axes and gedit_nc.position_of(p) is None for p in params_of(entry)
         )
 
-    def length_params(self, entry: Optional[Dict[str, Any]], codes: List[Dict[str, Any]]) -> List[str]:
+    def length_params(self, entry: Optional[Dict[str, Any]], codes: List[Dict[str, Any]], cycle_block: Optional[int]) -> List[str]:
         """The addresses of the cycle's reviewed parameters that may be lengths (NC-16)."""
         found: List[str] = []
         for param in params_of(entry):
             address = str(param.get("address") or "")
             if address == "" or address in found or not is_cycle_value(param):
                 continue
-            cls = self.number_class(address.upper(), codes, [entry] if isinstance(entry, dict) else [])
+            cls = self.number_class(address.upper(), codes, [entry] if isinstance(entry, dict) else [], cycle_block)
             if cls is not None and cls not in ("length", "increment"):
                 continue
             found.append(address)
         return found
 
-    def param_of(self, entry: Optional[Dict[str, Any]], arg: Arg) -> Optional[Dict[str, Any]]:
+    def param_of(self, entry: Optional[Dict[str, Any]], arg: Arg, cycle_block: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """The parameter ``arg`` writes. ``cycle_block`` (P4h, plan §6.10 rule 11) is the block of
+        a two-block cycle the block is (`Block.cycle_block`): a word is then read by that block's
+        declaration, which can have a unit of its own (the `G76` `P`)."""
         if arg.kind == "call":
             params = params_of(entry)
             return params[arg.position - 1] if 0 < arg.position <= len(params) else None
+        if cycle_block in (1, 2) and gedit_nc.declares_blocks(entry):
+            for param in gedit_nc.params_of_block(entry, cycle_block):
+                if str(param.get("address") or "").upper() == arg.name.upper():
+                    return param
         return param_named(entry, arg.name)
 
     def shown(self, entry: Optional[Dict[str, Any]], arg: Arg) -> str:
@@ -2931,9 +2966,12 @@ class Run:
         data: Optional[str],
         is_cycle: bool,
         geometry: Optional[Tuple[str, str]] = None,
+        *,
+        cycle_block: Optional[int],
     ) -> Outcome:
         """One word of a chosen address (or a cycle position written as a word, or a
-        coordinate of an arc, ``geometry = (mode, axis)``)."""
+        coordinate of an arc, ``geometry = (mode, axis)``). ``cycle_block`` is
+        `Block.cycle_block` of the block the word is in."""
         setup = self.setup
         params = self.params
         additive = params.additive
@@ -2956,9 +2994,9 @@ class Run:
             return ("skip", line, "incremental", "%s: written as an incremental distance, so a shift does not apply to it" % written, written)
         absolute = function == "absolute" or mode == "absolute"
         distance = state.get("distance")
-        cls = self.number_class(address, codes, in_force)
+        cls = self.number_class(address, codes, in_force, cycle_block)
         if cls is None and geometry is not None:
-            cls = self.number_class(geometry[1], codes, in_force)
+            cls = self.number_class(geometry[1], codes, in_force, cycle_block)
         # D4-3 (manual check): G90/G91 decide where the axes go, not what a feed, a dwell, a
         # speed or a count is. Only a position word waits for an absolute distance mode.
         if additive and not twin and not absolute and self.is_position(address, cls, geometry):
@@ -3016,13 +3054,16 @@ class Run:
             or address == "R"  # a length on every profile (`_nc_machine` rule 6)
         )
 
-    def number_class(self, address: str, codes: List[Dict[str, Any]], in_force: List[Dict[str, Any]]) -> Optional[str]:
-        """`gedit_nc.number_class_of`, remembered: a program asks the same few questions."""
+    def number_class(
+        self, address: str, codes: List[Dict[str, Any]], in_force: List[Dict[str, Any]], cycle_block: Optional[int]
+    ) -> Optional[str]:
+        """`gedit_nc.number_class_of`, remembered: a program asks the same few questions.
+        ``cycle_block`` is `Block.cycle_block` of the block asked about (plan §6.10 rule 11)."""
         interp = self.interp
-        key = (address, tuple(id(e) for e in codes), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed)
+        key = (address, tuple(id(e) for e in codes), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed, cycle_block)
         if key not in self._classes:
             self._classes[key] = gedit_nc.number_class_of(
-                address, self.setup.profile, interp.feed_unit, codes, interp.pitch_feed, in_force
+                address, self.setup.profile, interp.feed_unit, codes, interp.pitch_feed, in_force, cycle_block=cycle_block
             )
         return self._classes[key]
 

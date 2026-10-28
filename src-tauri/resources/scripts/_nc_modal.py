@@ -423,10 +423,11 @@ def arc_direction_words_of(profile: Optional[Dict[str, Any]]) -> Dict[str, str]:
 # The TypeScript twins are ``cycleBlockOf`` and ``paramsOfBlock`` in
 # ``src/lib/core/codes/blocks.ts``, held to the same cases (``tests/fixtures/codes/blocks.json``).
 #
-# A reader that only asks how a value is read or moved needs neither: an address declared once
-# per block has the same ``unit``, ``position``, ``axis`` and ``programNumber`` in both (the
-# loader refuses a database that says otherwise), so the first declaration answers for either
-# block. Only the label differs, and a script that shows it asks for the block here.
+# A value can depend on the block (P4h, plan §6.10 rule 11; T118): the ``G76`` ``P`` is a packed
+# count in the first block and the thread height in increments in the second, declared once per
+# block with a different ``unit``. So every caller of ``number_class_of`` passes the block it
+# reads (``block_cycle_of`` below, from the tokens of the whole block), and the label a script
+# shows is the block's too.
 
 
 def _block_params(entry: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -465,6 +466,29 @@ def cycle_block_of(entry: Optional[Dict[str, Any]], written: Any) -> Optional[in
         if address in first:
             wrote_first = True
     return 1 if wrote_first else None
+
+
+def block_cycle_of(entries: Any, tokens: Any) -> Optional[int]:
+    """Which block of a two-block cycle a block is (P4h, plan §6.10 rule 11; T118).
+
+    ``entries`` are the database entries of the codes the block writes, ``tokens`` every token
+    of the block, over all of its lines. The answer is :func:`cycle_block_of` of the entries
+    that declare their blocks, read from the addresses of the words that have a value. ``None``
+    when no entry declares blocks, when the words do not tell, and when two such entries in one
+    block answer differently (refuse rather than guess). Every caller of ``number_class_of``
+    passes it as ``cycle_block``. The twin of ``blockCycleOf`` in
+    ``src/lib/core/codes/wordValue.ts``.
+    """
+    cycles = [entry for entry in (entries or ()) if declares_blocks(entry)]
+    if not cycles:
+        return None
+    written = [
+        token.address
+        for token in (tokens or ())
+        if getattr(token, "kind", None) == "word" and getattr(token, "address", None) is not None and getattr(token, "value_text", None) is not None
+    ]
+    answers = {cycle_block_of(entry, written) for entry in cycles}
+    return answers.pop() if len(answers) == 1 else None
 
 
 def params_of_block(entry: Optional[Dict[str, Any]], block: Optional[int]) -> List[Dict[str, Any]]:

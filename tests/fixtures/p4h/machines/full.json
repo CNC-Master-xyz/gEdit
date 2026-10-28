@@ -1,0 +1,160 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/machines.schema.json",
+  "$version": 1,
+  "machines": [
+    {
+      "id": "lathe-full",
+      "name": "Lathe with every member",
+      "profile": "fanuc-lathe",
+      "params": {
+        "numberInput": {
+          "mode": "increment",
+          "incrementMm": "0.001",
+          "incrementInch": "0.0001",
+          "incrementDeg": "0.001",
+          "incrementSec": "0.001",
+          "classes": {
+            "length": { "mode": "increment", "increment": "0.001", "incrementInch": "0.0001" },
+            "angle": { "mode": "increment", "increment": "0.001" },
+            "feedPerMin": { "mode": "calculator" },
+            "feedPerRev": { "mode": "calculator", "incrementInch": "0.000001" },
+            "dwell": { "mode": "increment", "increment": "0.001" }
+          }
+        },
+        "units": "mm",
+        "diameter": "on",
+        "variants": { "gcodeSystem": "B" },
+        "modalInitial": { "feedmode": "G95" },
+        "channels": {
+          "layout": "multi-file",
+          "list": [
+            { "id": "1", "name": "Path 1", "aliases": ["P1"], "fileName": "{{stem}}_1.NC" },
+            { "id": "2", "name": "Path 2", "fileName": "{{stem}}_2.NC" }
+          ],
+          "fileName": "^(?<stem>.+)_(?<channel>\\d)\\.NC$",
+          "fileNameFor": "{{stem}}_{{channel}}.NC",
+          "marker": "^\\(PATH (?<channel>\\d)\\)",
+          "syncMarks": [
+            {
+              "id": "wait",
+              "label": "Waiting M-code with P",
+              "semantics": "rendezvous",
+              "blocking": true,
+              "samePartners": true,
+              "match": { "kind": "codes", "codes": "M100-M199" },
+              "partners": { "kind": "word", "address": "P", "decode": "digits", "whenAbsent": { "kind": "fixed", "channels": ["1", "2"] } }
+            },
+            {
+              "id": "prefix",
+              "label": "A prefix rule",
+              "match": { "kind": "prefix", "prefix": "M2", "idDigits": { "min": 2, "max": 2 } },
+              "partners": { "kind": "fixed", "channels": ["1", "2"] }
+            }
+          ],
+          "stopsAndEndsWait": true
+        },
+        "motion": {
+          "units": "mm",
+          "rapid": { "X": 20000, "Z": 24000, "C": 36000 },
+          "rapidKind": "per-axis",
+          "maxFeed": 10000,
+          "toolChange": 1.5,
+          "peckRetract": 0.5,
+          "peckClearance": 1
+        },
+        "limits": {
+          "units": "mm",
+          "spindle": { "main": 4000, "S2": 6000 },
+          "travel": { "X": { "min": -10, "max": 300 }, "Z": { "min": -600, "max": 5 } }
+        }
+      },
+      "notes": "A test record that writes every member the machines file knows."
+    },
+    {
+      "id": "okuma-full",
+      "name": "Okuma with two turrets",
+      "profile": "okuma-osp",
+      "params": {
+        "units": "inch",
+        "channels": {
+          "layout": "single-file",
+          "list": [
+            { "id": "a", "name": "Turret A", "aliases": ["G13"] },
+            { "id": "b", "name": "Turret B", "aliases": ["G14"] }
+          ],
+          "sectionStart": "(?<channel>G1[34])",
+          "sectionSeparator": "/",
+          "sectionEnd": "^M02",
+          "syncMarks": [
+            {
+              "id": "p-code",
+              "label": "P codes order the turrets",
+              "semantics": "ordered",
+              "match": { "kind": "codes", "codes": "P1-P9999" },
+              "partners": { "kind": "all" },
+              "withCodes": "S0-S99999, M3-M5",
+              "sharesWaitsWith": "m100"
+            },
+            {
+              "id": "m100",
+              "label": "M100 by count",
+              "semantics": "count",
+              "match": { "kind": "codes", "codes": "M100" },
+              "partners": { "kind": "all" }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "sinumerik-full",
+      "name": "Siemens with builder axes",
+      "profile": "sinumerik",
+      "params": {
+        "extraAxes": [
+          { "name": "AA", "kind": "linear" },
+          { "name": "QQ", "kind": "rotary" }
+        ],
+        "builderCodes": "G810-G829, G850",
+        "channels": {
+          "layout": "multi-file",
+          "list": [
+            { "id": "1", "name": "Channel 1", "aliases": ["WAIT_K1"] },
+            { "id": "2", "name": "Channel 2" }
+          ],
+          "syncMarks": [
+            {
+              "id": "waitm",
+              "label": "WAITM",
+              "markValues": { "min": 0, "max": 99 },
+              "match": { "kind": "regex", "pattern": "\\bWAITM\\s*\\(\\s*(?<mark>[^,)\\s]+)" },
+              "partners": {
+                "kind": "line",
+                "pattern": "\\bWAITM\\s*\\(\\s*[^,)\\s]+\\s*,(?<channels>[^)]*)\\)",
+                "decode": "split",
+                "separator": ",",
+                "whenAbsent": { "kind": "none" }
+              }
+            },
+            {
+              "id": "setm",
+              "label": "SETM",
+              "blocking": false,
+              "answers": true,
+              "markSeparator": ",",
+              "match": { "kind": "regex", "pattern": "\\bSETM\\s*\\((?<mark>[^)]*)\\)" },
+              "partners": { "kind": "all" }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mill-plain",
+      "name": "Mill without settings",
+      "profile": "fanuc-gcode",
+      "params": { "numberInput": null }
+    }
+  ],
+  "defaults": { "fanuc-lathe": "lathe-full", "okuma-osp": "okuma-full" }
+}

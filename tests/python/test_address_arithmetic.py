@@ -1141,12 +1141,13 @@ class TestP4aReviewLatheCycleValues(unittest.TestCase):
         self.assertEqual(finding_at(payload, 4)["reason"], "not-scaled")
 
     def test_an_end_point_without_the_lengths_is_not_scaled_either(self):
-        # The control takes Q and R from the first block or its own settings, unscaled.
+        # The control takes Q and R from the first block or its own settings, unscaled; since
+        # the P4.43a data line the thread height P of the second block is a length too (T118).
         payload = self.lathe("G76 X40. Z-20. F1.5", operation="multiply", operand=2, addresses=["X"])
         self.assertEqual(lines_of(payload)[2], "G76 X40. Z-20. F1.5")
         self.assertEqual(
             finding_at(payload, 3)["message"],
-            "G76 X40. Z-20. F1.5: G76 has depths or distances of its own (Q and R) that a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+            "G76 X40. Z-20. F1.5: G76 has depths or distances of its own (Q, R and P) that a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
         )
 
     def test_an_incremental_end_point_is_refused_like_an_absolute_one(self):
@@ -2131,6 +2132,64 @@ class TestFb2ToolDirection(unittest.TestCase):
         found = [f for f in payload["findings"] if f["line"] == 4]
         self.assertEqual({f["reason"] for f in found}, {"count"}, found)
         self.assertIn("a parameter of G41.6", found[0]["message"])
+
+
+class TestP4hG76ThreadHeightByBlock(unittest.TestCase):
+    """P4h fix round, D1 / NC-2 (plan §6.10 rule 11; T118): the `G76` `P` is a packed count in
+    the first block and the thread height in increments in the second. Every Python caller of
+    `number_class_of` passes the block (`gedit_nc.block_cycle_of`), and the cycle's parameter is
+    read by its block's declaration; without it both `P` words had no class and the cycle was
+    refused as "does not know what kind of number". Now the second-block `P` is a value of the
+    cycle, left and listed like its `Q` and `R` (NC-16). The first-block `P` is a packed count
+    (passes, chamfer and insert angle, two digits each): a number added to it would change the
+    angle (`P010060` to `P10061`, 61 degrees), so it is left and listed too (`PACKED_COUNTS`)."""
+
+    PROGRAM = "G21 G18 G99\nG0 X50. Z5.\nG76 P010060 Q100 R0.05\nG76 X20. Z-30. P1500 Q300 F2.\nM30\n"
+
+    def run_on(self, context, **params):
+        context["params"] = dict({"operation": "add", "operand": 0.5, "addresses": ["P"]}, **params)
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(self.PROGRAM.split("\n"))}
+        result = helpers.run_script(SCRIPT, stdin=self.PROGRAM, context=context)
+        if not result.ok:
+            raise AssertionError(result.stderr)
+        return result.json()
+
+    def check(self, payload):
+        # Both blocks are left as written, each P listed as a value of the cycle.
+        self.assertEqual(lines_of(payload)[2:4], ["G76 P010060 Q100 R0.05", "G76 X20. Z-30. P1500 Q300 F2."])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "data"), (4, "data")])
+        self.assertEqual(finding_at(payload, 3)["message"], "P010060: a value of G76, not a position of this program.")
+        self.assertEqual(finding_at(payload, 4)["message"], "P1500: a value of G76, not a position of this program.")
+        self.assertNotIn("kind of number", json.dumps(payload))
+
+    def test_is_b(self):
+        self.check(self.run_on(helpers.effective_context("fanuc-lathe", preset="is-b")))
+
+    def test_without_a_machine(self):
+        self.check(self.run_on(helpers.effective_context("fanuc-lathe")))
+
+    def test_a_multiply_of_p_leaves_the_packed_count(self):
+        payload = self.run_on(helpers.effective_context("fanuc-lathe", preset="is-b"), operation="multiply", operand=2)
+        self.assertEqual(lines_of(payload)[2], "G76 P010060 Q100 R0.05")
+        self.assertEqual(finding_at(payload, 3)["reason"], "data")
+
+    def test_a_first_block_that_writes_only_p_is_left(self):
+        context = helpers.effective_context("fanuc-lathe", preset="is-b")
+        context["params"] = {"operation": "add", "operand": 0.5, "addresses": ["P"]}
+        text = "G21 G18 G99\nG0 X50. Z5.\nG76 P020060\nM30\n"
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(text.split("\n"))}
+        payload = helpers.run_script(SCRIPT, stdin=text, context=context).json()
+        self.assertEqual(lines_of(payload)[2], "G76 P020060")
+        self.assertEqual(finding_at(payload, 3)["message"], "P020060: a value of G76, not a position of this program.")
+
+    def test_a_multiply_names_the_thread_height_among_the_lengths_it_does_not_scale(self):
+        context = helpers.effective_context("fanuc-lathe", preset="is-b")
+        payload = self.run_on(context, operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[3], "G76 X20. Z-30. P1500 Q300 F2.")
+        self.assertEqual(
+            finding_at(payload, 4)["message"],
+            "G76 X20. Z-30. P1500 Q300 F2.: G76 writes P1500, which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+        )
 
 
 class TestManualCheckD43OnlyPositionsNeedTheDistanceMode(unittest.TestCase):

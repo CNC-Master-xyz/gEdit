@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
+  "id": "shop-lathe",
+  "name": "shop-lathe",
+  "shortName": "SHOP LAT",
+  "version": 1,
+  "extends": "fanuc-lathe",
+  "detect": {
+    "content": []
+  }
+}

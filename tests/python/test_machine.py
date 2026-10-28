@@ -134,6 +134,7 @@ class GoldenCases(unittest.TestCase):
                         case["codes"],
                         case.get("pitchFeed", False),
                         in_force,
+                        case.get("cycleBlock"),
                     ),
                     case["expected"],
                 )

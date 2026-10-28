@@ -115,6 +115,7 @@ const {
   draftErrors,
   duplicateDraft,
   editDraft,
+  extraErrorsOf,
   fieldsFor,
   fileProblems,
   formReadable,
@@ -139,7 +140,9 @@ const { dialogs } = await import('$lib/app/dialogs');
 const { status } = await import('$lib/app/status');
 const { t } = await import('$lib/i18n');
 const {
+  FIELD_BUILDER_CODES,
   FIELD_DIAMETER,
+  FIELD_EXTRA_AXES,
   FIELD_NAME,
   FIELD_NOTES,
   FIELD_NUMBER_INPUT,
@@ -860,5 +863,49 @@ describe('problem paths name the record in the file, not in the list shown (H4B-
   it('falls back to the index for a record added in this session', () => {
     const added = { ...MILL_1, params: { motion: { units: 'mm', maxFeed: -1 } } } as unknown as MachineConfig;
     expect(motionProblemsOf(added, 4, deps)[0]).toContain('machines[4].params.motion.maxFeed');
+  });
+});
+
+// P4h (plan §6.10 rules 13, 14; T123): the two fields of a Siemens machine on the page.
+describe('extra axes and builder codes (P4.43b)', () => {
+  const siemens = (values: Record<string, unknown>): ReturnType<typeof addDraft> => {
+    const draft = addDraft('sinumerik', deps);
+    return { ...draft, values: { ...draft.values, [FIELD_NAME]: 'Turn 5', ...values } };
+  };
+
+  it('offers them on a Siemens machine and not on a Fanuc one', () => {
+    expect(fieldsFor(addDraft('sinumerik', deps), deps).map((field) => field.id)).toEqual(expect.arrayContaining([FIELD_EXTRA_AXES, FIELD_BUILDER_CODES]));
+    expect(fieldsFor(addDraft('fanuc-gcode', deps), deps).map((field) => field.id)).not.toContain(FIELD_EXTRA_AXES);
+    expect(extraErrorsOf(addDraft('fanuc-gcode', deps), deps)).toEqual({});
+  });
+
+  it('tells the programmer how a Siemens control writes such an axis, and that AA90 alone is a program name (NC-1)', () => {
+    const help = fieldsFor(addDraft('sinumerik', deps), deps).find((field) => field.id === FIELD_EXTRA_AXES)?.help ?? '';
+    expect(help).toContain('A Siemens control writes them with an equals sign (AA=90); some machines also take AA90.');
+    expect(help).toContain('Translate, Rotate and Mirror leave that axis as written.');
+    expect(help).toContain('On a standard Siemens control AA90 alone is the name of a program, so list a name only if your machine reads it as an axis.');
+    expect(help).not.toContain('reads with the value written straight behind them');
+  });
+
+  it('shows a name the profile already reads and a code gEdit knows at their fields', () => {
+    const errors = extraErrorsOf(siemens({ [FIELD_EXTRA_AXES]: 'AA, SF rotary', [FIELD_BUILDER_CODES]: 'G17' }), deps);
+    expect(errors[FIELD_EXTRA_AXES]).toEqual({ key: 'machines.extra.problem', params: { message: '"SF" is already a rotary axis of this profile' } });
+    expect(errors[FIELD_BUILDER_CODES]?.params?.message).toBe('G17 is a code gEdit already knows, not a code of the machine builder');
+    expect(extraErrorsOf(siemens({ [FIELD_EXTRA_AXES]: 'AA, QQ rotary', [FIELD_BUILDER_CODES]: 'G810-G829' }), deps)).toEqual({});
+  });
+
+  it('saves the axes and the codes the user typed', async () => {
+    const draft = siemens({ [FIELD_EXTRA_AXES]: 'aa, QQ rotary', [FIELD_BUILDER_CODES]: 'G810-G829' });
+    expect(await submitDraft(draft, deps)).toBe(true);
+    const saved = fake.add.mock.calls.at(-1)?.[0] as unknown as MachineConfig;
+    expect(saved.params.extraAxes).toEqual([{ name: 'AA', kind: 'linear' }, { name: 'QQ', kind: 'rotary' }]);
+    expect(saved.params.builderCodes).toBe('G810-G829');
+  });
+
+  it('refuses to save a list it cannot read, and says why', async () => {
+    const calls = fake.add.mock.calls.length;
+    expect(await submitDraft(siemens({ [FIELD_EXTRA_AXES]: 'A1' }), deps)).toBe(false);
+    expect(fake.add.mock.calls.length).toBe(calls);
+    expect(fake.shown.at(-1)).toEqual({ text: t('machines.extra.notAxis', { item: 'A1' }), error: true });
   });
 });

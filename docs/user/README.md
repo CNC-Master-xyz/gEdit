@@ -1082,13 +1082,13 @@ in lower case, on every shipped dialect.
 
 | Page | What you can set |
 |---|---|
-| **Appearance** | Color theme (System, Light or Dark), editor font and size |
-| **Editor** | Tab width, spaces or tabs, whitespace display, word wrap, minimap, line numbers, current-line highlight, sticky scroll, text drag and drop, copy without a selection |
+| **Appearance** | Color theme (System, Light or Dark), editor font and size, and the [code colours](#code-colours) |
+| **Editor** | Tab width (a [profile of yours](profiles.md#colours-tab-width-and-rulers-in-a-profile) can set its own), spaces or tabs, whitespace display, word wrap, minimap, line numbers, current-line highlight, sticky scroll, text drag and drop, copy without a selection |
 | **Assistance** | Hover help on or off; completion automatic, manual or off; [colouring the lines by how they move](inspector.md#motion-colours) on or off |
 | **Files** | Length of the recent list, what happens when a file changes outside gEdit, the dialect new files start in, and what [Never losing work](#never-losing-work) sets: where the backup copy goes, how many versions to keep, the most space they may take and when the earlier versions of deleted files go, and the switches for crash recovery, session restore and per-file memory |
 | **Scripts** | The Python interpreter, extra script folders, the time limit for a run, whether the bundled scripts are listed — and the path of your own scripts folder |
 | **Machines** | Your machine configurations: add, edit, duplicate, remove, import and export, and which one is the default for a dialect — see [Machines](machines.md) |
-| **Profiles** | Your own profiles and code files: new, open, import, export, remove, test on the open program — see [Your own profiles and code files](profiles.md). **Manage Profiles…** in the palette opens the dialog on this page |
+| **Profiles** | Your own profiles and code files: new, open, edit in a form with a live preview, import, export, remove, test on the open program — see [Your own profiles and code files](profiles.md). **Manage Profiles…** in the palette opens the dialog on this page |
 | **Keyboard** | Your own key for any command, reset, and the keys that clash — see [Your own keys](shortcuts.md#your-own-keys) |
 | **Packages** | Script packages: folders of scripts, profiles and code files, switched on or off — see [Script packages](scripts.md#script-packages) |
 | **Configuration** | Export everything you set up to one zip file, and import such a file with a preview and a backup — see [Export and import](configuration.md#export-and-import) |
@@ -1100,7 +1100,25 @@ saving them?* and offers **Discard changes**. The same question comes while a ma
 Machines page is half filled in (*The machine you are adding or editing is not saved yet. Leave
 without saving it?*): when you close the dialog, press **Open settings file** or **Save**, and
 also when you click another page of the dialog, because the page you leave drops the form.
-With nothing typed, nothing is asked.
+The same goes for a profile of yours that is open in [the form](profiles.md#editing-a-profile-in-a-form)
+on the Profiles page: *The changes to … are not saved. Leave without saving them?* (with the changes
+you made in Settings named too, when there are both). With nothing typed, nothing is asked.
+
+### Code colours
+
+Under the choice of theme, **Appearance** has a block **Code colours**: one row for each kind
+of word (block numbers, G codes, M codes, axis words, arc centres, feed, spindle speed, tool,
+variables, keywords and functions, comments, section headings, program start, end and name,
+other numbers, text in quotes, operators, unknown or invalid words), with the dark and the
+light theme side by side and the theme in use first. A row has a colour picker, the colour as
+`#rrggbb`, the **contrast** against the editor background (for example *7.2 to 1*), and **Reset**,
+which goes back to the colour from the level below. The **open editor shows each change at
+once**; **Save** keeps the colours, and **Cancel** puts the old ones back. A colour that is too
+faint to read, below 4.5 to 1, says why in the row and cannot be saved. The colours are laid
+over the standard ones, and [a profile](profiles.md#colours-tab-width-and-rulers-in-a-profile) can
+lay its own over yours for its documents; the print uses the same colours. The colour of an axis
+word of a machine's [extra axis](machines.md#sinumerik-extra-axes-and-machine-builder-codes) does
+not change, since the colouring belongs to the dialect and not to the machine.
 
 The Machines, Profiles, Keyboard, Packages and Configuration pages are not pages of settings: they act at once on their own file or folder, and the dialog's **Save** does not cover them. Machine configurations are
 records with names of their own, and they live in their own file (`machines.json`), not in
@@ -1108,7 +1126,7 @@ records with names of their own, and they live in their own file (`machines.json
 
 Settings are stored as a small JSON file that holds only what you changed, so a default
 that improves in a later version reaches you. `Open settings file` in the dialog opens it
-as a document, for the few keys that are not in the dialog (column rulers, for example).
+as a document, for the few keys that are not in the dialog (column rulers, for example; a [profile](profiles.md#colours-tab-width-and-rulers-in-a-profile) can also set its own).
 
 Where that file is, and your own scripts folder beside it, is listed under
 [Where things are](#where-things-are).

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
+  "id": "no-short-name",
+  "name": "A child without its own short name",
+  "version": 1,
+  "extends": "fanuc-lathe"
+}

@@ -113,7 +113,9 @@ export interface CodeParam {
    * finishing allowance in the second); the members that change how a value is read or moved
    * (`unit`, `position`, `axis`, `programNumber`) have to agree between the two, so every reader
    * that asks only "what is `U` of `G71`" stays right in both blocks (`core/codes/load.ts`
-   * refuses a second declaration that disagrees).
+   * refuses a second declaration that disagrees). P4h (plan §6.10 rule 11; T118): `unit` alone
+   * may differ between a `block: 1` and a `block: 2` declaration; a reader that knows the block
+   * (`numberClassOf`'s `cycleBlock`) reads that block's unit, one that does not reads no class.
    *
    * Which block a written block is (`cycleBlockOf`, `core/codes/blocks.ts`; Python
    * `gedit_nc.cycle_block_of`): the second when it writes an address declared for the second

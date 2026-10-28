@@ -2031,12 +2031,15 @@ class PathTracker:
             # The class of an axis word depends on the block's codes (a `CodeParam.unit`) and,
             # for a feed, on the unit in force; remembered per combination, because a long
             # program asks the same question on every line.
-            key = (token.address or "", tuple(id(e) for e in entries), self.interp.feed_unit, self.interp.pitch_feed)
+            # P4h (plan §6.10 rule 11; T118): the block of a two-block cycle the line is, read
+            # from its tokens (a step is one line), is part of the question.
+            cycle_block = gedit_nc.block_cycle_of(entries, self._step.tokens)
+            key = (token.address or "", tuple(id(e) for e in entries), self.interp.feed_unit, self.interp.pitch_feed, cycle_block)
             if key in self._classes:
                 cls = self._classes[key]
             else:
                 cls = gedit_nc.number_class_of(
-                    token.address or "", self.profile, self.interp.feed_unit, entries, self.interp.pitch_feed
+                    token.address or "", self.profile, self.interp.feed_unit, entries, self.interp.pitch_feed, cycle_block=cycle_block
                 )
                 self._classes[key] = cls
         text, readings = self.readings.get(literal, cls, units or "mm")

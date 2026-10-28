@@ -17,7 +17,9 @@
     "a profile no built-in has), and 'profiles' are the profiles the class rules are read from.",
     "A class case may name 'modes': the modal codes in force outside the cycle and motion groups",
     "(FB-2). A mode that declares an arc-centre word lends the block those words only",
-    "(arcCentreEntry / arc_centre_entry), which both sides add to 'inForce' before they ask."
+    "(arcCentreEntry / arc_centre_entry), which both sides add to 'inForce' before they ask.",
+    "A class case may name 'cycleBlock' (P4h, T118): which block of a two-block cycle of its",
+    "'codes' the block is (1 or 2), absent or null when that cannot be told."
   ],
   "fmt": { "decimals": "keep", "trailingZeros": "keep", "keepPoint": true, "plusSign": "keep" },
 
@@ -56,6 +58,7 @@
       "note": "section 8.8, the Okuma 10 um unit system, read from the okuma-osp profile (T206); the control has no 10 um inch system, so M9 (WP9.5a) gives an inch word on it no value instead of inventing a unit of 0.001 in",
       "preset": "okuma-osp/okuma-10um"
     },
+    "form-rows": {"note": "P4h (P4.43a, plan section 6.10 rule 12): the value the machine dialog's per-class table saves for an IS-B mill whose dwell is read as written and whose angles count in 0.0001 degrees (numberForm.test.ts builds it from the rows and compares it with this object)", "mode": "increment", "incrementMm": "0.001", "incrementInch": "0.0001", "incrementDeg": "0.001", "incrementSec": "0.001", "classes": {"feedPerMin": {"mode": "increment", "increment": "1", "incrementInch": "0.01"}, "feedPerRev": {"mode": "increment", "increment": "0.01", "incrementInch": "0.0001"}, "angle": {"increment": "0.0001"}, "dwell": {"mode": "calculator"}}},
     "mixed": {
       "note": "not a shipped preset: one machine that reads every class differently, so the per-class rules are covered",
       "mode": "increment",
@@ -127,6 +130,12 @@
       "note": "an increment that is not a power of ten, so the write-back division does not terminate",
       "mode": "increment",
       "incrementMm": "0.003"
+    },
+    "odd-scale": {
+      "note": "P4h parity D2: not a shipped preset; a scale with increments that are not powers of ten, so a write-back quotient of 28 or more digits has to keep all of them",
+      "mode": "scale",
+      "incrementMm": "0.0003",
+      "incrementInch": "0.00007"
     }
   },
 
@@ -698,6 +707,113 @@
         { "code": "G49", "group": "lengthComp", "modal": true, "params": [] }
       ],
       "expected": "length"
+    },
+    {
+      "note": "P4h (T118, plan section 6.10 rule 11): the G76 entry is written here as fanuc-lathe.json carries it (the P of the second block has the unit increment, the P of the first block is a count). In the second block (X written) P is the thread height in least increments, so G76 P1500 is 1.5 mm on IS-B",
+      "profile": "lathe",
+      "address": "P",
+      "feedUnit": "per-rev",
+      "pitchFeed": true,
+      "cycleBlock": 2,
+      "codes": [{ "code": "G76", "group": "nonmodal", "blocks": 2, "pitchFeed": true, "params": [{ "address": "P", "label": "Packed", "unit": "count", "block": 1 }, { "address": "Q", "label": "Smallest depth", "unit": "increment", "block": 1 }, { "address": "R", "label": "Finishing allowance", "block": 1 }, { "address": "X", "label": "End point", "block": 2 }, { "address": "P", "label": "Thread height", "unit": "increment", "block": 2 }, { "address": "Q", "label": "First depth", "unit": "increment", "block": 2 }, { "address": "F", "label": "Lead", "unit": "feedPerRev", "block": 2 }] }],
+      "expected": "increment"
+    },
+    {
+      "note": "P4h (T118): the same entry in the first block: P packs three two-digit values and is a count, never converted",
+      "profile": "lathe",
+      "address": "P",
+      "feedUnit": "per-rev",
+      "pitchFeed": true,
+      "cycleBlock": 1,
+      "codes": [{ "code": "G76", "group": "nonmodal", "blocks": 2, "pitchFeed": true, "params": [{ "address": "P", "label": "Packed", "unit": "count", "block": 1 }, { "address": "Q", "label": "Smallest depth", "unit": "increment", "block": 1 }, { "address": "R", "label": "Finishing allowance", "block": 1 }, { "address": "X", "label": "End point", "block": 2 }, { "address": "P", "label": "Thread height", "unit": "increment", "block": 2 }, { "address": "Q", "label": "First depth", "unit": "increment", "block": 2 }, { "address": "F", "label": "Lead", "unit": "feedPerRev", "block": 2 }] }],
+      "expected": "count"
+    },
+    {
+      "note": "P4h (T118): the same entry while the block cannot be told (cycle_block_of answers none): the two blocks declare P with different units, so P has no class and no value; refuse rather than guess",
+      "profile": "lathe",
+      "address": "P",
+      "feedUnit": "per-rev",
+      "pitchFeed": true,
+      "codes": [{ "code": "G76", "group": "nonmodal", "blocks": 2, "pitchFeed": true, "params": [{ "address": "P", "label": "Packed", "unit": "count", "block": 1 }, { "address": "Q", "label": "Smallest depth", "unit": "increment", "block": 1 }, { "address": "R", "label": "Finishing allowance", "block": 1 }, { "address": "X", "label": "End point", "block": 2 }, { "address": "P", "label": "Thread height", "unit": "increment", "block": 2 }, { "address": "Q", "label": "First depth", "unit": "increment", "block": 2 }, { "address": "F", "label": "Lead", "unit": "feedPerRev", "block": 2 }] }],
+      "expected": null
+    },
+    {
+      "note": "P4h (T118): an explicit null block is the same as none",
+      "profile": "lathe",
+      "address": "P",
+      "feedUnit": "per-rev",
+      "pitchFeed": true,
+      "cycleBlock": null,
+      "codes": [{ "code": "G76", "group": "nonmodal", "blocks": 2, "pitchFeed": true, "params": [{ "address": "P", "label": "Packed", "unit": "count", "block": 1 }, { "address": "Q", "label": "Smallest depth", "unit": "increment", "block": 1 }, { "address": "R", "label": "Finishing allowance", "block": 1 }, { "address": "X", "label": "End point", "block": 2 }, { "address": "P", "label": "Thread height", "unit": "increment", "block": 2 }, { "address": "Q", "label": "First depth", "unit": "increment", "block": 2 }, { "address": "F", "label": "Lead", "unit": "feedPerRev", "block": 2 }] }],
+      "expected": null
+    },
+    {
+      "note": "P4h (T118): Q is in increments in both blocks, so it keeps its class while the block cannot be told",
+      "profile": "lathe",
+      "address": "Q",
+      "feedUnit": "per-rev",
+      "pitchFeed": true,
+      "codes": [{ "code": "G76", "group": "nonmodal", "blocks": 2, "pitchFeed": true, "params": [{ "address": "P", "label": "Packed", "unit": "count", "block": 1 }, { "address": "Q", "label": "Smallest depth", "unit": "increment", "block": 1 }, { "address": "R", "label": "Finishing allowance", "block": 1 }, { "address": "X", "label": "End point", "block": 2 }, { "address": "P", "label": "Thread height", "unit": "increment", "block": 2 }, { "address": "Q", "label": "First depth", "unit": "increment", "block": 2 }, { "address": "F", "label": "Lead", "unit": "feedPerRev", "block": 2 }] }],
+      "expected": "increment"
+    },
+    {
+      "note": "P4h (T118): a declaration of the first block only is not read in the second: the R of a G73-shaped entry is a count of passes in its first block, and an R written in its second block falls back to the profile (R is a length)",
+      "profile": "lathe",
+      "address": "R",
+      "feedUnit": "per-rev",
+      "cycleBlock": 2,
+      "codes": [{ "code": "G73", "group": "nonmodal", "blocks": 2, "params": [{ "address": "U", "label": "Relief", "block": 1 }, { "address": "R", "label": "Number of passes", "unit": "count", "block": 1 }, { "address": "P", "label": "First block", "unit": "count", "block": 2 }, { "address": "Q", "label": "Last block", "unit": "count", "block": 2 }] }],
+      "expected": "length"
+    },
+    {
+      "note": "P4h (T118): the same R in the first block is the count of passes",
+      "profile": "lathe",
+      "address": "R",
+      "feedUnit": "per-rev",
+      "cycleBlock": 1,
+      "codes": [{ "code": "G73", "group": "nonmodal", "blocks": 2, "params": [{ "address": "U", "label": "Relief", "block": 1 }, { "address": "R", "label": "Number of passes", "unit": "count", "block": 1 }, { "address": "P", "label": "First block", "unit": "count", "block": 2 }, { "address": "Q", "label": "Last block", "unit": "count", "block": 2 }] }],
+      "expected": "count"
+    },
+    {
+      "note": "P4h (T118): the lead F is declared for the second block; in the first block it is not read, and the feed word follows the pitch rule (per revolution)",
+      "profile": "lathe",
+      "address": "F",
+      "feedUnit": "per-rev",
+      "pitchFeed": true,
+      "cycleBlock": 1,
+      "codes": [{ "code": "G76", "group": "nonmodal", "blocks": 2, "pitchFeed": true, "params": [{ "address": "P", "label": "Packed", "unit": "count", "block": 1 }, { "address": "Q", "label": "Smallest depth", "unit": "increment", "block": 1 }, { "address": "R", "label": "Finishing allowance", "block": 1 }, { "address": "X", "label": "End point", "block": 2 }, { "address": "P", "label": "Thread height", "unit": "increment", "block": 2 }, { "address": "Q", "label": "First depth", "unit": "increment", "block": 2 }, { "address": "F", "label": "Lead", "unit": "feedPerRev", "block": 2 }] }],
+      "expected": "feedPerRev"
+    },
+    {
+      "note": "P4h (T118): an entry without blocks: 2 is read whole whatever the block, so its two units of P still tell nothing",
+      "profile": "lathe",
+      "address": "P",
+      "feedUnit": "per-rev",
+      "pitchFeed": true,
+      "cycleBlock": 2,
+      "codes": [{ "code": "G76", "group": "nonmodal", "pitchFeed": true, "params": [{ "address": "P", "label": "Packed", "unit": "count", "block": 1 }, { "address": "Q", "label": "Smallest depth", "unit": "increment", "block": 1 }, { "address": "R", "label": "Finishing allowance", "block": 1 }, { "address": "X", "label": "End point", "block": 2 }, { "address": "P", "label": "Thread height", "unit": "increment", "block": 2 }, { "address": "Q", "label": "First depth", "unit": "increment", "block": 2 }, { "address": "F", "label": "Lead", "unit": "feedPerRev", "block": 2 }] }],
+      "expected": null
+    },
+    {
+      "note": "P4h (T118): the block only filters the two-block cycle; another code of the block that declares P with another unit still makes P undecidable (T212)",
+      "profile": "lathe",
+      "address": "P",
+      "feedUnit": "per-rev",
+      "pitchFeed": true,
+      "cycleBlock": 2,
+      "codes": [{ "code": "G76", "group": "nonmodal", "blocks": 2, "pitchFeed": true, "params": [{ "address": "P", "label": "Packed", "unit": "count", "block": 1 }, { "address": "Q", "label": "Smallest depth", "unit": "increment", "block": 1 }, { "address": "R", "label": "Finishing allowance", "block": 1 }, { "address": "X", "label": "End point", "block": 2 }, { "address": "P", "label": "Thread height", "unit": "increment", "block": 2 }, { "address": "Q", "label": "First depth", "unit": "increment", "block": 2 }, { "address": "F", "label": "Lead", "unit": "feedPerRev", "block": 2 }] }, { "code": "G900", "group": "nonmodal", "params": [{ "address": "P", "label": "Angle", "unit": "angle" }] }],
+      "expected": null
+    },
+    {
+      "note": "P4h (T118): a two-block cycle in force is read as if the block were not known (the two-block cycles are not modal): no class for its P",
+      "profile": "lathe",
+      "address": "P",
+      "feedUnit": "per-rev",
+      "pitchFeed": true,
+      "cycleBlock": 2,
+      "codes": [],
+      "inForce": [{ "code": "G76", "group": "nonmodal", "blocks": 2, "pitchFeed": true, "params": [{ "address": "P", "label": "Packed", "unit": "count", "block": 1 }, { "address": "Q", "label": "Smallest depth", "unit": "increment", "block": 1 }, { "address": "R", "label": "Finishing allowance", "block": 1 }, { "address": "X", "label": "End point", "block": 2 }, { "address": "P", "label": "Thread height", "unit": "increment", "block": 2 }, { "address": "Q", "label": "First depth", "unit": "increment", "block": 2 }, { "address": "F", "label": "Lead", "unit": "feedPerRev", "block": 2 }] }],
+      "expected": null
     }
   ],
 
@@ -795,6 +911,12 @@
     {"note": "T083: IS-A: a point-less angle is a count of 0.01 degree, in an inch program too", "literal": "9000", "class": "angle", "input": "is-a", "units": "inch", "expected": "90"},
     {"note": "T083: IS-A: a point-less dwell is a count of 0.01 s", "literal": "250", "class": "dwell", "input": "is-a", "units": "mm", "expected": "2.5"},
     {"note": "T083: IS-A: a cycle parameter in least increments counts in 0.01 mm (Q600 is 6 mm)", "literal": "600", "class": "increment", "input": "is-a", "units": "mm", "expected": "6"},
+    {"note": "P4h (T118): the thread height of the second G76 block in least increments: P1500 is 1.5 mm on the lathe IS-B preset", "literal": "1500", "class": "increment", "input": "lathe-is-b", "units": "mm", "expected": "1.5"},
+    {"note": "P4h (P4.43a): the per-class table's form-rows input: an angle counts in 0.0001 degrees, so C90000 is 9 degrees", "literal": "90000", "class": "angle", "input": "form-rows", "units": "mm", "expected": "9"},
+    {"note": "P4h (P4.43a): form-rows: the dwell is read as written, so P2500 is 2500 s, not 2.5 s", "literal": "2500", "class": "dwell", "input": "form-rows", "units": "mm", "expected": "2500"},
+    {"note": "P4h (P4.43a): form-rows: a dwell with a point is the same either way", "literal": "2.5", "class": "dwell", "input": "form-rows", "units": "mm", "expected": "2.5"},
+    {"note": "P4h (P4.43a): form-rows: the length keeps the base reading (0.001 mm)", "literal": "50", "class": "length", "input": "form-rows", "units": "mm", "expected": "0.05"},
+    {"note": "P4h (P4.43a): form-rows: the feed per revolution keeps the preset's own entry (0.01 mm/rev)", "literal": "25", "class": "feedPerRev", "input": "form-rows", "units": "mm", "expected": "0.25"},
     {"note": "T083: IS-A: a point-less feed per minute is 1 mm/min, as on IS-B", "literal": "200", "class": "feedPerMin", "input": "is-a", "units": "mm", "expected": "200"},
     {"note": "T083: IS-A: a point-less feed per revolution is 0.01 mm/rev, as on IS-B", "literal": "25", "class": "feedPerRev", "input": "is-a", "units": "mm", "expected": "0.25"},
     {"note": "manual-check fix D4-1: a lathe on IS-B counts a point-less feed per revolution in 0.0001 mm/rev, so G99 F12345 is 1.2345 mm/rev", "literal": "12345", "class": "feedPerRev", "input": "lathe-is-b", "units": "mm", "expected": "1.2345"},
@@ -807,7 +929,10 @@
     {"note": "T084: the point-less-feeds choice 'per-rev' on IS-C: a point-less feed per revolution counts in 0.001 mm/rev, F25 is 0.025 mm/rev", "literal": "25", "class": "feedPerRev", "input": "is-c-per-rev", "units": "mm", "expected": "0.025"},
     {"note": "T084: and in 0.00001 in/rev in an inch program", "literal": "2500", "class": "feedPerRev", "input": "is-c-per-rev", "units": "inch", "expected": "0.025"},
     {"note": "T084: the feed per minute of that machine keeps its 1 mm/min", "literal": "200", "class": "feedPerMin", "input": "is-c-per-rev", "units": "mm", "expected": "200"},
-    {"note": "T084: and its lengths their 0.0001 mm", "literal": "50", "class": "length", "input": "is-c-per-rev", "units": "mm", "expected": "0.005"}
+    {"note": "T084: and its lengths their 0.0001 mm", "literal": "50", "class": "length", "input": "is-c-per-rev", "units": "mm", "expected": "0.005"},
+    {"note": "P4h parity D2: a 31-digit literal keeps every digit as written (the 28-digit default precision rounded it)", "literal": "1234567890123456789012345678901", "class": "length", "input": "calculator", "units": "mm", "expected": "1234567890123456789012345678901"},
+    {"note": "P4h parity D2: and as a count of 0.001 mm the point moves, no digit is lost", "literal": "1234567890123456789012345678901", "class": "length", "input": "is-b", "units": "mm", "expected": "1234567890123456789012345678.901"},
+    {"note": "P4h parity D2: 32 digits around a point, as written", "literal": "12345678901234567890.123456789012", "class": "length", "input": "calculator", "units": "mm", "expected": "12345678901234567890.123456789012"}
   ],
 
   "writeBack": [
@@ -843,7 +968,9 @@
     {"note": "T084: 0.2005 mm/min into a point-less F200 on that machine is 200.5 counts, written back as 201 and flagged", "value": "0.2005", "original": "200", "class": "feedPerMin", "input": "fine-feeds", "units": "mm", "expected": {"text": "201", "rounded": true}},
     {"note": "T084: 0.18 mm/rev into a point-less F250 is 180 counts, exact", "value": "0.18", "original": "250", "class": "feedPerRev", "input": "fine-feeds", "units": "mm", "expected": {"text": "180", "rounded": false}},
     {"note": "T083: IS-A: 0.005 mm does not fit a point-less length counted in 0.01 mm; it goes back rounded and flagged", "value": "0.005", "original": "50", "class": "length", "input": "is-a", "units": "mm", "expected": {"text": "1", "rounded": true}},
-    {"note": "T083: IS-A: 0.37 mm is 37 counts, exact", "value": "0.37", "original": "50", "class": "length", "input": "is-a", "units": "mm", "expected": {"text": "37", "rounded": false}}
+    {"note": "T083: IS-A: 0.37 mm is 37 counts, exact", "value": "0.37", "original": "50", "class": "length", "input": "is-a", "units": "mm", "expected": {"text": "37", "rounded": false}},
+    {"note": "P4h parity D2: a 28-digit quotient that does not terminate is rounded, and the rounding is reported", "value": "100000000000000000000000.5", "original": "1500", "class": "length", "input": "odd-scale", "units": "inch", "expected": {"text": "1428571428571428571428578571", "rounded": true}},
+    {"note": "P4h parity D2: and the inspector refuses that rounding", "value": "100000000000000000000000.5", "original": "1500", "class": "length", "input": "odd-scale", "units": "inch", "refuseRounding": true, "expected": {"error": "rounded"}}
   ],
 
   "readings": [

@@ -11,8 +11,10 @@
       action is disabled and only "Open machines file" and "Replace with an empty file" are
       offered, so a broken hand edit is never overwritten behind the user's back (AD-31).
    2. **A record the form cannot express is kept.** Number rules written by hand that match
-      no preset show as "Custom (edited in the file)" and survive an edit of the name; so
-      does anything a later version adds (`core/machines/fields.ts`).
+      no preset show as "Custom" and survive an edit of the name; so does anything a later
+      version adds (`core/machines/fields.ts`). P4h (plan §6.10 rule 12): the table
+      "Numbers" (`MachineNumberForm.svelte`) shows those rules per kind of number and edits
+      them; a rule set that is not edited is saved as it was.
    3. **Nothing is corrected in silence.** Switching the G-code system re-offers the
       power-on codes of the database that system actually uses, and a code the new system
       does not have is dropped **with a message saying so**.
@@ -30,16 +32,23 @@
 -->
 <script module lang="ts">
   import {
+    CUSTOM_PRESET,
     FIELD_NAME,
+    FIELD_NUMBER_INPUT,
+    FIELD_POINTLESS_FEEDS,
+    pointlessFeedsIdOf,
+    presetIdOf,
+    withPointlessFeeds,
     machineFields,
     machineFromValues,
     pruneModalValues,
     followVariantDefaults,
     variantIdOf,
+    extraFieldErrors,
   } from '$lib/core/machines/fields';
   import { initialValues } from '$lib/core/forms/values';
   import { validateFields } from '$lib/core/forms/validate';
-  import { channelBlock, MAX_NAME_LENGTH, validateChannels } from '$lib/core/machines/validate';
+  import { channelBlock, MAX_NAME_LENGTH, validateChannels, validateMachine } from '$lib/core/machines/validate';
   import { positionOf } from '$lib/core/machines/file';
   import {
     blockIssues,
@@ -51,6 +60,7 @@
     validateMotion,
     type AxisSets,
   } from '$lib/core/machines/motion';
+  import { inputReadingAs, numberInputFromRows, numberRowProblems, numberRows, type NumberClassRow } from '$lib/core/machines/numberForm';
   import type { ChannelParams } from '$lib/core/channels/types';
   import type { CodeDb } from '$lib/core/codes/types';
   import type { FieldChoice, FieldSpec } from '$lib/core/forms/types';
@@ -61,6 +71,7 @@
     type MachineMotion,
     type MachineParams,
     type MachineProblem,
+    type NumberInput,
   } from '$lib/core/machines/types';
   import type {
     CodeDbService,
@@ -125,6 +136,18 @@
      * not, so a broken hand edit stays until the user changes it.
      */
     motion?: MotionDraft;
+    /**
+     * P4h (plan §6.10 rule 12): the table "Numbers" once the user changed a row of it: the
+     * number input the rows started from and the rows. Absent, the number input is what the
+     * preset choice (or the stored record) gives, and it is saved as it was.
+     */
+    numbers?: NumberDraft;
+  }
+
+  /** The table "Numbers" of a draft (P4.43a). */
+  export interface NumberDraft {
+    base: NumberInput;
+    rows: NumberClassRow[];
   }
 
   /** The Motion and limits page of a draft. */
@@ -319,11 +342,74 @@
     return draft.kind === 'edit' && draft.id !== null ? deps.machines.get(draft.id) : undefined;
   }
 
+  /** Where the page checks the table's number input (the problems name this path). */
+  export const NUMBERS_PATH = 'params.numberInput';
+
+  /** The number input the table starts from: the chosen preset with its point-less feeds, or the stored rules. */
+  export function numberBaseOf(draft: Draft, deps: MachinesDeps): NumberInput | null {
+    const decl = deps.profiles.profile(draft.profileId).machineParams;
+    if (decl?.numberInput === undefined || draft.kind === 'duplicate') return null;
+    const input = machineFromValues(decl, draft.values, currentOf(draft, deps)).params.numberInput;
+    return input !== null && typeof input === 'object' && !Array.isArray(input) ? input : null;
+  }
+
+  /** The table's rows, or null when the dialect declares no number input. */
+  export function numberRowsOf(draft: Draft, deps: MachinesDeps): NumberClassRow[] | null {
+    if (draft.numbers !== undefined) return draft.numbers.rows;
+    const base = numberBaseOf(draft, deps);
+    return base === null ? null : numberRows(base);
+  }
+
+  /** The number input a changed table saves, or undefined while it is not changed. */
+  export function editedNumberInput(draft: Draft): NumberInput | undefined {
+    return draft.numbers === undefined ? undefined : numberInputFromRows(draft.numbers.base, draft.numbers.rows);
+  }
+
+  /** What stops the table from being saved (`numberInputProblems` of what it would save). */
+  export function numberProblemsOf(draft: Draft): MachineProblem[] {
+    if (draft.numbers === undefined || draft.kind === 'duplicate') return [];
+    return numberRowProblems(draft.numbers.base, draft.numbers.rows, draft.id, NUMBERS_PATH);
+  }
+
+  /** The record a draft edits with the table's rules in it, so the preset choice can say "Custom". */
+  function withEditedNumbers(current: MachineConfig | undefined, draft: Draft): MachineConfig | undefined {
+    const edited = editedNumberInput(draft);
+    if (edited === undefined) return current;
+    const record: MachineConfig = current ?? { id: '', name: '', profile: draft.profileId, params: {} };
+    return { ...record, params: { ...record.params, numberInput: edited } };
+  }
+
+  /**
+   * The draft after a row of the table changed: the rows kept, and the preset choice (and its
+   * point-less feeds) set to what the rules now amount to, "Custom" when no preset is them.
+   */
+  export function withNumberRows(draft: Draft, rows: NumberClassRow[], deps: MachinesDeps): Draft {
+    const decl = deps.profiles.profile(draft.profileId).machineParams;
+    // Rows that read exactly as a preset (with a point-less-feed choice) are that preset.
+    const choices = [undefined, ...(decl?.numberInput?.pointlessFeeds?.choices ?? [])];
+    const candidates = (decl?.numberInput?.presets ?? [])
+      .filter((preset) => preset?.value !== null && typeof preset?.value === 'object')
+      .flatMap((preset) => choices.map((choice) => withPointlessFeeds(preset.value, choice)));
+    const preset = inputReadingAs(candidates, rows);
+    const base = preset ?? draft.numbers?.base ?? numberBaseOf(draft, deps);
+    if (base === null) return draft;
+    // The rows stay as typed (CODE-10): `0.0010` reads as the preset's `0.001`, and replacing the
+    // text under the cursor would eat the zero. The saved value is the preset's own either way.
+    // Only the "own rule" marks are the preset's.
+    const marks = preset === null ? null : numberRows(preset);
+    const kept = marks === null ? rows : rows.map((row, i) => ({ ...row, fromBase: marks[i]?.fromBase ?? row.fromBase }));
+    const next: Draft = { ...draft, numbers: { base, rows: kept } };
+    const record = withEditedNumbers(currentOf(draft, deps), next);
+    const values: Record<string, unknown> = { ...draft.values, [FIELD_NUMBER_INPUT]: presetIdOf(decl, record) };
+    if (FIELD_POINTLESS_FEEDS in draft.values) values[FIELD_POINTLESS_FEEDS] = pointlessFeedsIdOf(decl, record);
+    return { ...next, values };
+  }
+
   /** The form of a draft, rebuilt from its own values, so a variant switch moves the fields. */
   export function fieldsFor(draft: Draft, deps: MachinesDeps): FieldSpec[] {
     const decl = deps.profiles.profile(draft.profileId).machineParams;
     if (decl === undefined) return [];
-    const current = currentOf(draft, deps);
+    const current = withEditedNumbers(currentOf(draft, deps), draft);
     if (draft.kind === 'duplicate') {
       return [
         {
@@ -363,6 +449,21 @@
       }
     }
     return errors;
+  }
+
+  /**
+   * P4h (§6.10 rules 13, 14; T123): the problems of the fields "Extra axes" and "Machine builder
+   * codes", by field id: the record's own rules run on the machine the form describes, so a
+   * name the profile already reads or a code gEdit knows is refused at its field before save.
+   */
+  export function extraErrorsOf(draft: Draft, deps: MachinesDeps): Record<string, Msg> {
+    const profile = deps.profiles.profile(draft.profileId);
+    const decl = profile.machineParams;
+    if (draft.kind === 'duplicate' || decl === undefined || (decl.extraAxes === undefined && decl.builderCodes === undefined)) return {};
+    const built = machineFromValues(decl, draft.values, currentOf(draft, deps));
+    const candidate: MachineConfig = { id: draft.id ?? 'new-machine', name: built.name, profile: draft.profileId, params: built.params };
+    const problems = validateMachine(candidate, { path: 'machine', profile, codes: codeDbFor(draft.profileId, built.params, deps) });
+    return extraFieldErrors(decl, draft.values, problems);
   }
 
   /** The draft for "Add", once the dialect is known. */
@@ -433,7 +534,20 @@
         deps.status.show(deps.t('machines.motion.title'), { error: true });
         return false;
       }
+      if (numberProblemsOf(draft).length > 0) {
+        deps.status.show(deps.t('machineNumbers.problemsTitle'), { error: true });
+        return false;
+      }
+      // P4h: an extra axes list the field cannot read would otherwise keep the stored one.
+      const extra = Object.values(extraErrorsOf(draft, deps));
+      if (extra.length > 0) {
+        deps.status.show(deps.t(extra[0].key, extra[0].params), { error: true });
+        return false;
+      }
       const built = machineFromValues(decl, draft.values, currentOf(draft, deps), { channels: draft.channels });
+      // P4h: a changed table "Numbers" is saved whole; one that was not changed leaves the rules as the choice gives them.
+      const numbers = editedNumberInput(draft);
+      if (numbers !== undefined) built.params.numberInput = numbers;
       // A page the user changed rewrites both blocks from its fields (an empty field removes
       // the member, an empty block the block); one that was not touched leaves them as stored.
       if (draft.motion?.touched === true) {
@@ -562,6 +676,7 @@
   import ChannelsTester from '$lib/components/dialogs/ChannelsTester.svelte';
   import MachineMotionForm from '$lib/components/dialogs/MachineMotionForm.svelte';
   import MachineFolders from '$lib/components/dialogs/MachineFolders.svelte';
+  import MachineNumberForm from '$lib/components/dialogs/MachineNumberForm.svelte';
   import { REPOSITORY_URL } from '$lib/components/dialogs/AboutDialog.svelte';
   import { editor } from '$lib/monaco/editorService';
   import { commands } from '$lib/app/registry/commands';
@@ -609,14 +724,18 @@
 
   const profileFields = $derived(profileField(deps));
   const fields = $derived(draft ? fieldsFor(draft, deps) : []);
-  const errors = $derived(draft ? draftErrors(fields, draft, $list) : {});
+  const errors = $derived(draft ? { ...draftErrors(fields, draft, $list), ...extraErrorsOf(draft, deps) } : {});
   /** The Channels step (M12): only for dialects that declare `machineParams.channels`. */
   const channelsDecl = $derived(
     draft && hasChannelsStep(draft, deps) ? deps.profiles.profile(draft.profileId).machineParams?.channels : undefined,
   );
   const channelIssues = $derived(draft ? channelErrors(draft, deps) : []);
   const motionIssues = $derived(draft ? motionErrors(draft, deps) : []);
-  const blockedSave = $derived(Object.keys(errors).length > 0 || channelIssues.length > 0 || motionIssues.length > 0 || busy);
+  const numberRowsNow = $derived(draft ? numberRowsOf(draft, deps) : null);
+  const numberIssues = $derived(draft ? numberProblemsOf(draft) : []);
+  const blockedSave = $derived(
+    Object.keys(errors).length > 0 || channelIssues.length > 0 || motionIssues.length > 0 || numberIssues.length > 0 || busy,
+  );
   /** The stored blocks' problems, shown until the user changes a field of the page (plan §6.4 rule 4). */
   const storedMotionProblems = $derived.by(() => {
     if (!draft || draft.kind !== 'edit' || draft.motion?.touched !== false) return [];
@@ -677,7 +796,15 @@
       const dropped = pruneModalValues(values, fieldsFor({ ...draft, values }, deps));
       if (dropped.length > 0) status.show(t('machines.page.modalDropped', { codes: dropped.join(', ') }));
     }
-    draft = { ...draft, values };
+    // P4h: choosing a preset (or its point-less feeds) fills the table "Numbers" again.
+    const refill = id === FIELD_POINTLESS_FEEDS || (id === FIELD_NUMBER_INPUT && value !== CUSTOM_PRESET);
+    const next: Draft = { ...draft, values };
+    if (refill) delete next.numbers;
+    draft = next;
+  }
+
+  function setNumbers(rows: NumberClassRow[]): void {
+    if (draft) draft = withNumberRows(draft, rows, deps);
   }
 
   function setChannels(next: ChannelParams | undefined): void {
@@ -846,6 +973,19 @@
               />
             {/if}
           {/if}
+        </div>
+      {/if}
+      {#if numberRowsNow !== null && draft.kind !== 'duplicate'}
+        <div class="numbers-step" data-testid="machine-numbers-step">
+          <MachineNumberForm
+            rows={numberRowsNow}
+            onChange={setNumbers}
+            problems={numberIssues}
+            path={NUMBERS_PATH}
+            machineId={draft.id ?? ''}
+            custom={draft.values[FIELD_NUMBER_INPUT] === CUSTOM_PRESET}
+            disabled={view.blocked}
+          />
         </div>
       {/if}
       {#if draft.motion && draft.kind !== 'duplicate'}
@@ -1030,6 +1170,7 @@
     border-top: 1px solid var(--border-color);
   }
 
+  .numbers-step,
   .motion-step {
     margin-top: 12px;
     padding-top: 10px;

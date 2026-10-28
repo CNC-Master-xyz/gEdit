@@ -586,7 +586,7 @@ describe('hoverText in context: Fanuc lathe, G-code system A (l01-turning-a.nc)'
     expect(q).toMatch(/Q — Peck depth.*\(G83\)/);
     // A micron word reads 3 mm under calculator input too, so the preset is named by its whole
     // label (as the panel does), never by a bare "As written" next to a converted value.
-    expect(q).toContain('Q3000 — depends on the machine; choose a machine:\n- 3 mm: As written: X50 and X50. are both 50 mm; G74/G75 P and Q, G76 Q and G83/G87 Q are in microns (Q6000 is 6 mm) (profile default)');
+    expect(q).toContain('Q3000 — depends on the machine; choose a machine:\n- 3 mm: As written: X50 and X50. are both 50 mm; G74/G75 P and Q, G76 Q and P (second block), G83/G87 Q are in microns (Q6000 is 6 mm) (profile default)');
     expect(q).toContain('- 0.3 mm: Increments of 0.0001 mm (IS-C): X50 is 0.0050 mm');
     expect(q).not.toContain('As written (profile default)');
   });
@@ -926,5 +926,41 @@ describe('hoverText: the required words of a two-block lathe cycle belong to the
   it('leaves the hover of a single-block code unchanged', () => {
     const mill = openDoc('fanuc-gcode', 'G83 X10. Z-20. R2. Q5. F100.');
     expect(hoverIn(mill, 1, 'G83', { context: false })).toContain('Required: Z, R, Q, F');
+  });
+});
+
+// P4h (plan §6.10 rules 13, 14; T123): what the document's machine says about a word the database
+// does not describe — a code of the machine builder, one of its extra axes. Hover only.
+describe('a machine with extra axes and builder codes (P4.43b)', async () => {
+  const { viewOf } = await import('../../../../tests/unit/helpers/inspectView');
+  const machine = { extraAxes: [{ name: 'AA', kind: 'linear' as const }, { name: 'QQ', kind: 'rotary' as const }], builderCodes: 'G810-G829' };
+  const on = viewOf('sinumerik', { name: 'Turn 5', params: machine });
+  const off = viewOf('sinumerik');
+  const at = (view: typeof on, line: string, word: string): string | null =>
+    hoverAt(line, line.indexOf(word), view.cp, view.db, t, undefined, {
+      context: { before: null, after: null, profile: view.profile, machine: view.machine },
+    })?.markdown ?? null;
+
+  it('names a builder code as the builder\'s, and keeps "unknown" without the machine', () => {
+    const named = at(on, 'N10 G810 X10', 'G810');
+    expect(named).toContain(escapeMarkdown(t('machines.extra.builderCode')));
+    expect(named).not.toContain(escapeMarkdown(t('assistant.hover.unknown')));
+    expect(at(off, 'N10 G810 X10', 'G810')).toContain(escapeMarkdown(t('assistant.hover.unknown')));
+    // Outside the list, with a point or with a sign it is no builder code.
+    expect(at(on, 'N10 G830 X10', 'G830')).toContain(escapeMarkdown(t('assistant.hover.unknown')));
+    expect(at(on, 'N10 G810.5', 'G810')).not.toContain(escapeMarkdown(t('machines.extra.builderCode')));
+    // A code the database describes keeps its own hover.
+    expect(at(on, 'N10 G17', 'G17')).not.toContain(escapeMarkdown(t('machines.extra.builderCode')));
+  });
+
+  it('says a word is an extra axis of the machine, linear or rotary', () => {
+    expect(at(on, 'G1 AA90 X10', 'AA90')).toContain(escapeMarkdown(t('machines.extra.axisLinear')));
+    expect(at(on, 'G1 QQ-45.5', 'QQ')).toContain(escapeMarkdown(t('machines.extra.axisRotary')));
+    expect(at(on, 'AA=10', 'AA')).toContain(escapeMarkdown(t('machines.extra.axisLinear')));
+    expect(at(off, 'G1 AA90 X10', 'AA90') ?? '').not.toContain(escapeMarkdown(t('machines.extra.axisLinear')));
+  });
+
+  it('is said in a message the catalog has', () => {
+    for (const key of ['machines.extra.builderCode', 'machines.extra.axisLinear', 'machines.extra.axisRotary']) expect(t(key)).not.toBe(key);
   });
 });

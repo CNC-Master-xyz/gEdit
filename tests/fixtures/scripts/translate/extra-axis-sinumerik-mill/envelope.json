@@ -1,0 +1,11 @@
+{
+  "message": "Moved by X5 Y-2 Z1: 8 words on 6 blocks. Left 3 words as written: 3 words of an extra axis of the machine. Machine 'Mill extra axes': it does not say how it reads numbers, so a word whose reading depends on that would refuse the run.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "info",
+      "message": "AA0: AA is an extra axis of the machine, and Translate moves only X, Y and Z, so it left AA0, AA15.5 and AA=25 as written. If AA moves along X, Y or Z on this machine, change them by hand.",
+      "reason": "extra-axis"
+    }
+  ]
+}

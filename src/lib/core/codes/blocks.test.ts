@@ -52,7 +52,7 @@ describe('the blocks of a two-block cycle in the shipped databases', () => {
     expect(paramOfBlock(g71, 'U', null)?.label).toMatch(/^Depth of cut/);
     expect(paramOfBlock(g71, 'R', 2)).toBeNull();
     const g76 = entry('fanuc-lathe', 'G76');
-    expect([paramOfBlock(g76, 'P', 1)?.unit, paramOfBlock(g76, 'P', 2)?.unit]).toEqual(['count', 'count']);
+    expect([paramOfBlock(g76, 'P', 1)?.unit, paramOfBlock(g76, 'P', 2)?.unit]).toEqual(['count', 'increment']);
     expect(paramOfBlock(g76, 'R', 2)?.label).toMatch(/^Taper/);
     expect(paramOfBlock(g76, 'F', 1)).toBeNull();
   });

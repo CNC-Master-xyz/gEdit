@@ -18,6 +18,8 @@
 // summary.
 
 import { isLocaleTag } from '$lib/i18n/locale';
+import { paletteProblems } from '$lib/core/grammar/contrast';
+import { ROLES } from '$lib/core/grammar/roles';
 import { DEFAULTS, SETTING_FIELDS, type Settings } from './schema';
 
 export interface MergeResult {
@@ -32,7 +34,7 @@ export interface MergeResult {
 /** Every settings key, in the order `DEFAULTS` declares them. */
 const KEYS = Object.keys(DEFAULTS) as (keyof Settings)[];
 
-type Kind = 'string' | 'number' | 'boolean' | 'integers' | 'strings';
+type Kind = 'string' | 'number' | 'boolean' | 'integers' | 'strings' | 'palette';
 
 interface Rule {
   kind: Kind;
@@ -55,6 +57,7 @@ const LIST_KIND: Partial<Record<keyof Settings, Kind>> = {
   'editor.rulers': 'integers',
   'scripts.folders': 'strings',
   'packages.disabled': 'strings',
+  'appearance.roleColors': 'palette',
 };
 
 function ruleFor(key: keyof Settings): Rule {
@@ -97,6 +100,8 @@ function expected(rule: Rule): string {
       return 'expected a list of whole numbers';
     case 'strings':
       return 'expected a list of non-empty strings';
+    case 'palette':
+      return 'expected an object with "dark" and "light", each a role and a #rrggbb colour';
     default:
       if (rule.localeTag) return 'expected a language code such as en or de-CH';
       if (rule.choices) return `expected one of ${rule.choices.map(String).join(', ')}`;
@@ -133,6 +138,8 @@ function accept(raw: unknown, rule: Rule): unknown | undefined {
       return raw.every((v) => typeof v === 'string' && v.length > 0)
         ? [...(raw as string[])]
         : undefined;
+    case 'palette':
+      return cleanPalette(raw);
     default:
       if (typeof raw !== 'string') return undefined;
       if (rule.nonEmpty && raw.length === 0) return undefined;
@@ -140,6 +147,35 @@ function accept(raw: unknown, rule: Rule): unknown | undefined {
       if (rule.choices && !rule.choices.includes(raw)) return undefined;
       return raw;
   }
+}
+
+/**
+ * The usable part of a palette (`appearance.roleColors`): the colours that pass the contrast
+ * rule, in the order of the roles, `dark` before `light`, an empty theme left out. Unlike a
+ * list, a palette is taken colour by colour (§6.10 rule 6): the setting keeps its other colours
+ * and `paletteWarnings` names each one that is not used. Undefined when `raw` is not an object.
+ */
+function cleanPalette(raw: unknown): Record<string, Record<string, string>> | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const bad = new Set(paletteProblems(raw).map(([path]) => path));
+  const out: Record<string, Record<string, string>> = {};
+  for (const mode of ['dark', 'light'] as const) {
+    const roles = (raw as Record<string, unknown>)[mode];
+    if (typeof roles !== 'object' || roles === null || Array.isArray(roles)) continue;
+    const kept: Record<string, string> = {};
+    for (const role of ROLES) {
+      const value = (roles as Record<string, unknown>)[role];
+      if (value !== undefined && !bad.has(`${mode}.${role}`)) kept[role] = value as string;
+    }
+    if (Object.keys(kept).length > 0) out[mode] = kept;
+  }
+  return out;
+}
+
+/** One warning per colour of a palette that is not used, named by its place in the file. */
+function paletteWarnings(key: string, raw: unknown): string[] {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return [];
+  return paletteProblems(raw).map(([path, message]) => `"${key}${path === '' ? '' : `.${path}`}": ${message}; not used`);
 }
 
 /**
@@ -186,6 +222,7 @@ export function mergeSettings(raw: Record<string, unknown>): MergeResult {
       continue;
     }
     const accepted = accept(value, rule);
+    if (rule.kind === 'palette' && accepted !== undefined) warnings.push(...paletteWarnings(key, value));
     if (accepted === undefined) {
       warnings.push(
         `"${key}": ${expected(rule)}, got ${show(value)}; using the default ${show(DEFAULTS[key as keyof Settings])}`,
@@ -199,8 +236,9 @@ export function mergeSettings(raw: Record<string, unknown>): MergeResult {
   return { values, warnings, unknown };
 }
 
-/** Value equality that also covers the two list settings. */
+/** Value equality that also covers the two list settings and the palette. */
 function same(a: unknown, b: unknown): boolean {
+  if (isPalette(a) || isPalette(b)) return JSON.stringify(canonicalPalette(a)) === JSON.stringify(canonicalPalette(b));
   if (Array.isArray(a) || Array.isArray(b)) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
     return a.every((value, index) => value === b[index]);
@@ -208,8 +246,18 @@ function same(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
+function isPalette(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** A palette with its keys in a fixed order, so two spellings of one palette compare equal. */
+function canonicalPalette(value: unknown): unknown {
+  return isPalette(value) ? (cleanPalette(value) ?? {}) : value;
+}
+
 /** A copy, so that nothing hands out a reference into the store's own state. */
 function copy(value: unknown): unknown {
+  if (isPalette(value)) return structuredClone(canonicalPalette(value));
   return Array.isArray(value) ? [...value] : value;
 }
 

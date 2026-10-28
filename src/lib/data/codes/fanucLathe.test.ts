@@ -77,7 +77,7 @@ const FEED_MARKED: Record<string, string[]> = {
   'fanuc-lathe-b': ['G6.2', 'G71', 'G72', 'G73', 'G74', 'G75', 'G77', 'G79', 'G83', 'G85', 'G87', 'G89', 'G90', 'G94'],
 };
 
-function tableUnit(dialect: string, code: string, address: string): Unit | undefined {
+function tableUnit(dialect: string, code: string, address: string, block?: number): Unit | undefined {
   // Rows without a dialect in §8.2 hold wherever the code is defined.
   if (code === 'G4') return address === 'P' ? 'count' : address === 'X' || address === 'U' ? 'dwell' : undefined;
   if (code === 'M98') return address === 'P' || address === 'L' ? 'count' : undefined;
@@ -114,7 +114,8 @@ function tableUnit(dialect: string, code: string, address: string): Unit | undef
     // M9 (WP9.2): the other face and side cycles count their dwell and repeats too, like G83 and G87.
     if (['G84', 'G85', 'G88', 'G89'].includes(code)) return address === 'P' || address === 'K' ? 'count' : undefined;
     if (code === 'G74' || code === 'G75') return address === 'P' || address === 'Q' ? 'increment' : undefined;
-    if (code === 'G76') return address === 'Q' ? 'increment' : address === 'P' ? 'count' : undefined;
+    // P4h (T118): the P of the second block is the thread height in least increments; the packed P of the first stays a count.
+    if (code === 'G76') return address === 'Q' ? 'increment' : address === 'P' ? (block === 2 ? 'increment' : 'count') : undefined;
     if (code === 'G83' || code === 'G87') {
       if (address === 'Q') return 'increment';
       if (address === 'P' || address === 'K') return 'count';
@@ -260,7 +261,7 @@ describe('the shipped Fanuc databases', () => {
   it.each(FANUC_DIALECTS)('%s carries exactly the parameter units of §8.2, and no others', (dialect) => {
     for (const e of entriesOf(dialect)) {
       for (const param of e.params ?? []) {
-        expect(param.unit, `${dialect} ${e.code} ${param.address}`).toBe(tableUnit(dialect, e.code, param.address));
+        expect(param.unit, `${dialect} ${e.code} ${param.address}`).toBe(tableUnit(dialect, e.code, param.address, param.block));
       }
     }
   });
@@ -464,19 +465,19 @@ describe('the lathe database of G-code system A (§8.2)', () => {
     // one edit by hand; scaling a tapping pitch cuts a different thread.
     expect(entry(A, 'G74')?.pitchFeedAmbiguous).toBe(true);
     expect(entry(A, 'G75')?.pitchFeedAmbiguous).toBeUndefined();
-    // G8 M6 (the same review, recorded as a decision rather than a fix): `G76`'s `P` is
-    // six packed digits in the first block of the cycle and the thread height in microns
-    // in the second. B1: each block has its own `P` with its own label (`CodeParam.block`),
-    // and both stay a `count` (the two blocks' units have to agree), so the packed digits
-    // can never be converted and the thread height is only ever shown as written — a
-    // missing value, which is the safe half of the trade.
+    // G8 M6, then P4h (T118, plan §6.10 rule 11): `G76`'s `P` is six packed digits in the first
+    // block of the cycle and the thread height in least increments in the second. Each block has
+    // its own `P` with its own label (`CodeParam.block`). The first stays a `count`, so the packed
+    // digits can never be converted; the second is an `increment` like `Q`, read with the block
+    // aware unit (`P1500` is 1.5 mm on a metric IS-B machine).
     const p76 = entry(A, 'G76')?.params?.filter((param) => param.address === 'P') ?? [];
     expect(p76.map((p) => [p.block, p.unit])).toEqual([
       [1, 'count'],
-      [2, 'count'],
+      [2, 'increment'],
     ]);
     expect(p76[0].label).toContain('Counted, never converted');
-    expect(p76[1].label).toMatch(/^Thread height.*shown as written$/);
+    expect(p76[1].label).toBe('Thread height, a radius value in least increments without a point (µm on a metric IS-B machine)');
+    expect(entry(A, 'G76')?.description).toMatch(/never converts it; the thread height P of the second block is read in least increments, like Q\.$/);
     // Tapping and threading are the only lathe entries that carry it. The source review
     // (2026-09) added the variable-lead thread G34 and the older-format rigid tap G84.2,
     // both in the lathe's own G-code list, and the 2026-09 scaling pass the tapping mode

@@ -44,6 +44,12 @@ describe('settings schema', () => {
     expect(empty.map((f) => f.key)).toEqual(['files.defaultProfile', 'ui.language']);
   });
 
+  it('has the user role colours as a palette, empty by default', () => {
+    expect(DEFAULTS['appearance.roleColors']).toEqual({});
+    expect(Object.isFrozen(DEFAULTS['appearance.roleColors'])).toBe(true);
+    expect(SETTING_FIELDS.find((f) => f.key === 'appearance.roleColors')?.category).toBe('appearance');
+  });
+
   it('freezes the defaults, arrays included', () => {
     expect(Object.isFrozen(DEFAULTS)).toBe(true);
     expect(Object.isFrozen(DEFAULTS['editor.rulers'])).toBe(true);
@@ -93,9 +99,10 @@ describe('settings schema', () => {
   });
 
   it('keeps every key out of the dialog only on purpose', () => {
-    // P4g: the language joins the Appearance page when a second language ships (P4.37), and the
+    // `editor.rulers` is edited in the file; the role colours have their own editor
+    // (`RoleColorRows.svelte`) that the Appearance page draws under the theme choice. P4g: the language joins the Appearance page when a second language ships (P4.37), and the
     // switched-off packages are edited on the Packages page (plan §6.9 rules 12 and 37).
-    expect(SETTING_FIELDS.filter((f) => !f.dialog).map((f) => f.key)).toEqual(['editor.rulers', ...(offersLanguageChoice() ? [] : ['ui.language']), 'packages.disabled']);
+    expect(SETTING_FIELDS.filter((f) => !f.dialog).map((f) => f.key)).toEqual(['appearance.roleColors', 'editor.rulers', ...(offersLanguageChoice() ? [] : ['ui.language']), 'packages.disabled']);
   });
 
   it('shows the language row exactly when a second language ships (§6.9 rule 41)', () => {
