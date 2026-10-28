@@ -464,10 +464,11 @@
           },
           {
             "id": "fanuc-3path-digits-nop12",
-            "label": "Three paths, one file per path named <name>_<path>.<ext> (PART_1.ISO, PART_2.ISO, PART_3.ISO; careful: a version file such as SHAFT_2.NC is read as path 2 too); waits M190-M199 (one builder's range; your machine's range is parameters 8110/8111); P as path numbers (P123 = paths 1, 2 and 3); a wait without P = paths 1 and 2; M198 counts as a wait only if the machine moved the call of a program on an external device off M198 (parameter 6030)",
+            "label": "Three paths, one file per path named <name>_<path>.<ext> (PART_1.ISO, PART_2.ISO, PART_3.ISO; careful: a version file such as SHAFT_2.NC is read as path 2 too); path 1 may also be written without an extension (PART); waits M190-M199 (one builder's range; your machine's range is parameters 8110/8111); P as path numbers (P123 = paths 1, 2 and 3); a wait without P = paths 1 and 2; M198 counts as a wait only if the machine moved the call of a program on an external device off M198 (parameter 6030)",
             "source": "Fanuc 30i/31i user manual, multi-path waiting function (a wait without P is defined for two paths only); a three-path machine on which a wait without P pairs paths 1 and 2 is one machine builder's variant, a layout seen in practice",
             "value": {
               "fileName": "^(?<stem>.+)_(?<channel>\\d{1,2})\\.[A-Za-z]+$",
+              "firstFileName": "^(?<stem>[^.]+)$",
               "layout": "multi-file",
               "list": [
                 {
