@@ -44,10 +44,11 @@
     pruneModalValues,
     followVariantDefaults,
     variantIdOf,
+    extraFieldErrors,
   } from '$lib/core/machines/fields';
   import { initialValues } from '$lib/core/forms/values';
   import { validateFields } from '$lib/core/forms/validate';
-  import { channelBlock, MAX_NAME_LENGTH, validateChannels } from '$lib/core/machines/validate';
+  import { channelBlock, MAX_NAME_LENGTH, validateChannels, validateMachine } from '$lib/core/machines/validate';
   import { positionOf } from '$lib/core/machines/file';
   import {
     blockIssues,
@@ -445,6 +446,21 @@
     return errors;
   }
 
+  /**
+   * P4h (§6.10 rules 13, 14; T123): the problems of the fields "Extra axes" and "Machine builder
+   * codes", by field id: the record's own rules run on the machine the form describes, so a
+   * name the profile already reads or a code gEdit knows is refused at its field before save.
+   */
+  export function extraErrorsOf(draft: Draft, deps: MachinesDeps): Record<string, Msg> {
+    const profile = deps.profiles.profile(draft.profileId);
+    const decl = profile.machineParams;
+    if (draft.kind === 'duplicate' || decl === undefined || (decl.extraAxes === undefined && decl.builderCodes === undefined)) return {};
+    const built = machineFromValues(decl, draft.values, currentOf(draft, deps));
+    const candidate: MachineConfig = { id: draft.id ?? 'new-machine', name: built.name, profile: draft.profileId, params: built.params };
+    const problems = validateMachine(candidate, { path: 'machine', profile, codes: codeDbFor(draft.profileId, built.params, deps) });
+    return extraFieldErrors(decl, draft.values, problems);
+  }
+
   /** The draft for "Add", once the dialect is known. */
   export function addDraft(profileId: string, deps: MachinesDeps): Draft {
     const values = initialValues(fieldsFor({ kind: 'add', id: null, profileId, values: {} }, deps));
@@ -515,6 +531,12 @@
       }
       if (numberProblemsOf(draft).length > 0) {
         deps.status.show(deps.t('machineNumbers.problemsTitle'), { error: true });
+        return false;
+      }
+      // P4h: an extra axes list the field cannot read would otherwise keep the stored one.
+      const extra = Object.values(extraErrorsOf(draft, deps));
+      if (extra.length > 0) {
+        deps.status.show(deps.t(extra[0].key, extra[0].params), { error: true });
         return false;
       }
       const built = machineFromValues(decl, draft.values, currentOf(draft, deps), { channels: draft.channels });
@@ -696,7 +718,7 @@
 
   const profileFields = $derived(profileField(deps));
   const fields = $derived(draft ? fieldsFor(draft, deps) : []);
-  const errors = $derived(draft ? draftErrors(fields, draft, $list) : {});
+  const errors = $derived(draft ? { ...draftErrors(fields, draft, $list), ...extraErrorsOf(draft, deps) } : {});
   /** The Channels step (M12): only for dialects that declare `machineParams.channels`. */
   const channelsDecl = $derived(
     draft && hasChannelsStep(draft, deps) ? deps.profiles.profile(draft.profileId).machineParams?.channels : undefined,
