@@ -191,7 +191,8 @@
       { "code": "CALL", "declared": {"call": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "PCALL", "declared": {"call": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "EXTCALL", "declared": {"call": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} }
-    ]
+    ],
+    "sinumerik-mill": []
   },
   "droppedByOverride": {
     "fanuc-lathe": [

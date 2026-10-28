@@ -1673,6 +1673,8 @@
           "label": "File name for the tape header",
           "type": "text",
           "help": "Letters and digits, starting with a letter, at most 16. Writes the header line $NAME.MIN%; leave empty for none.",
+          "maxLength": 16,
+          "charset": "name",
           "prefix": "$",
           "suffix": ".MIN%",
           "uppercase": true
@@ -1682,6 +1684,8 @@
           "label": "Program name (O)",
           "type": "text",
           "help": "At most four letters or digits after O; leave empty for none.",
+          "maxLength": 4,
+          "charset": "letters-digits",
           "default": "1001",
           "prefix": "O",
           "uppercase": true
@@ -2083,6 +2087,8 @@
           "label": "Contour name",
           "type": "text",
           "help": "N followed by at most four letters or digits, for example NLAP1; the same in all three places. The form offers a name the program does not use yet.",
+          "maxLength": 5,
+          "charset": "name",
           "required": true,
           "default": "NLAP1",
           "uppercase": true

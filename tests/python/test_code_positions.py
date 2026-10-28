@@ -16,7 +16,7 @@ from tests.python import helpers
 gedit_nc = helpers.import_gedit_nc()
 
 GOLDEN = helpers.load_json(helpers.FIXTURES_DIR / "codes" / "positions.json")
-DIALECTS = ["fanuc", "fanuc-lathe", "fanuc-lathe-b", "heidenhain", "okuma", "sinumerik"]
+DIALECTS = ["fanuc", "fanuc-lathe", "fanuc-lathe-b", "heidenhain", "okuma", "sinumerik", "sinumerik-mill"]
 
 
 def own_codes(dialect: str):

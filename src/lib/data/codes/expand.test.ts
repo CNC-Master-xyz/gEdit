@@ -37,6 +37,8 @@ const WITH_SCHEMA: Record<string, string[]> = {
   heidenhain: ['CYCL DEF 200', 'CYCL DEF 201'],
   okuma: [],
   sinumerik: ['CYCLE81', 'CYCLE82', 'CYCLE83', 'CYCLE85', 'CYCLE86', 'CYCLE89'],
+  // Wave Y (T156): the milling set writes no code of its own; it has the turning set's.
+  'sinumerik-mill': ['CYCLE81', 'CYCLE82', 'CYCLE83', 'CYCLE85', 'CYCLE86', 'CYCLE89'],
 };
 
 const entry = (dialect: string, code: string): CodeEntry => {
@@ -285,8 +287,9 @@ describe('P4.6: what the manuals give each cycle', () => {
     ]);
     const orient = LOADED.sinumerik.codes.filter((e) => e.orient === true).map((e) => e.code);
     expect(orient).toEqual(['SPOS']);
+    expect(LOADED['sinumerik-mill'].codes.filter((e) => e.orient === true).map((e) => e.code)).toEqual(['SPOS']);
     expect(entry('sinumerik', 'SPOS').params?.map((p) => p.address)).toEqual(['SPOS']);
-    for (const dialect of DIALECTS.filter((d) => d !== 'sinumerik')) {
+    for (const dialect of DIALECTS.filter((d) => d !== 'sinumerik' && d !== 'sinumerik-mill')) {
       expect(LOADED[dialect].codes.some((e) => e.orient === true), dialect).toBe(false);
     }
   });

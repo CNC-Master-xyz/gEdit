@@ -32,7 +32,8 @@
       { "code": "G3", "arcDirection": "ccw" },
       { "code": "G41", "compSide": "left" },
       { "code": "G42", "compSide": "right" }
-    ]
+    ],
+    "sinumerik-mill": []
   },
   "unflagged": {
     "fanuc": {
@@ -101,6 +102,13 @@
       "comp": {}
     },
     "sinumerik": {
+      "arc": {
+        "CIP": "through an intermediate point: the points decide the direction",
+        "CT": "tangential: the direction follows from the element before"
+      },
+      "comp": {}
+    },
+    "sinumerik-mill": {
       "arc": {
         "CIP": "through an intermediate point: the points decide the direction",
         "CT": "tangential: the direction follows from the element before"
