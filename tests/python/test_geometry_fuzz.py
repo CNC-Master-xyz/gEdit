@@ -2539,11 +2539,14 @@ class GeneratorSelfTest(unittest.TestCase):
                 self.__dict__.update(real.__dict__)
                 self.fault = fault
 
-            def run(self, name: str, text: str, context: Dict[str, Any], params: Optional[Dict[str, Any]] = None, preceding: Optional[List[str]] = None) -> Outcome:
+            def run(
+                self, name: str, text: str, context: Dict[str, Any], params: Optional[Dict[str, Any]] = None,
+                preceding: Optional[List[str]] = None, following: Optional[List[str]] = None,
+            ) -> Outcome:
                 params = dict(params or {})
                 if name == "translate" and self.fault == "forgot-z":
                     params["dz"] = 0
-                out = Scripts.run(self, name, text, context, params, preceding)
+                out = Scripts.run(self, name, text, context, params, preceding, following)
                 if name == "mirror" and self.fault == "no-swap" and out.payload is not None and not out.refused:
                     out.payload["text"] = out.text.replace("G2 ", "G#").replace("G3 ", "G2 ").replace("G#", "G3 ")
                 if name == "translate" and self.fault == "partial" and out.payload is not None:

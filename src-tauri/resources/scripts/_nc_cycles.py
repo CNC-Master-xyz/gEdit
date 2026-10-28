@@ -641,7 +641,9 @@ def _q_assignments(tokens: Sequence[Any]) -> Dict[str, Any]:
 def _straight_codes(codes: Sequence[Dict[str, Any]], motion: str) -> List[Dict[str, Any]]:
     """The entries that make a plain straight move of the kind ``motion`` (``'rapid'``,
     ``'feed'``): the motion group, ``sets.motion``, no path, no thread or tap, no machine or data
-    words, no pole, no parameters of their own (plan §6.3 rule 5)."""
+    words, no pole, no parameters of their own (plan §6.3 rule 5). Wave Y (FZ-8): the optional
+    corner words a move may carry at its end (the Fanuc chamfer ``,C`` and rounding ``,R``,
+    addresses written with a comma) are no parameter the move needs: the expansion writes none."""
     out = []
     for entry in codes:
         if not isinstance(entry, dict) or entry.get("group") != "motion":
@@ -651,7 +653,7 @@ def _straight_codes(codes: Sequence[Dict[str, Any]], motion: str) -> List[Dict[s
             continue
         if entry.get("pitchFeed") or entry.get("tapping") or entry.get("pitchFeedAmbiguous"):
             continue
-        if entry.get("axisWords") or entry.get("pole") or _params(entry):
+        if entry.get("axisWords") or entry.get("pole") or [p for p in _params(entry) if not p["address"].startswith(",")]:
             continue
         out.append(entry)
     return out
