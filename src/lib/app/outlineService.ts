@@ -476,6 +476,15 @@ const THEN_ANY = /(?<![A-Z0-9_])THEN(?![A-Z0-9_])/i;
 const GOTO_ANY = /(?<![A-Z0-9_])GOTO[FBCS]?(?![A-Z_])/i;
 const ELSE_LINE = /^ELSE(?![A-Z0-9_])/i;
 const ENDIF_LINE = /^ENDIF(?![A-Z0-9_])/i;
+/**
+ * A block that ends a program or starts the next one in the same file (NC-5), as the tokenizer
+ * reads it: a program marker (`%`, `O1234`, `OSUB1`, `<NAME>`, `%_N_SUB_SPF`), the program ends
+ * `M02`/`M2`, `M30`, `M99`, `M17`, and `RET` / `RTS`. A jump over one would land in another
+ * program, so it is not followed.
+ */
+const PROGRAM_END_M = new Set([2, 17, 30, 99]);
+const PROGRAM_END_KEYWORDS = new Set(['RET', 'RTS']);
+
 /** One channel's lines as `computeFlow` reads them. */
 interface FlowScan {
   /** How deep the scan is inside structured IF blocks right now (only while scanning). */
@@ -484,6 +493,8 @@ interface FlowScan {
   inIf: Set<number>;
   /** An ELSE or ENDIF without its IF, or an IF without its ENDIF: no jump of the channel is followed. */
   ifUnbalanced: boolean;
+  /** The lines that end a program or start one (a program marker, `PROGRAM_END_M`, `PROGRAM_END_KEYWORDS`). */
+  programBounds: number[];
   numbers: Map<string, number[]>;
   names: Map<string, number[]>;
   /** Lines with a loop keyword (`isLoopLine`), plus `REPEATB` lines. */
@@ -507,7 +518,9 @@ interface FlowScan {
  *   `CASE`, a skippable block (`/`), `GOTOB`, a computed target, no target or two, and a target in
  *   another channel are opaque. So is a jump that is inside a structured IF block (Sinumerik
  *   `IF` … `ELSE` … `ENDIF`, Fanuc `IF[…]THEN` … `ENDIF`) or whose target is, every jump of a
- *   channel whose IF blocks do not balance. A jump over a whole IF block is followed.
+ *   channel whose IF blocks do not balance, and a jump over a program end or the head of the
+ *   next program in the file (`M02`, `M30`, `M99`, `M17`, `RET`, `RTS`, `%`, `O…`, `<…>`). A
+ *   jump over a whole IF block is followed.
  * - F2: a followed jump's skipped lines hold no loop line and no target of any other jump.
  * - F3: a counted loop is a `FOR v=a TO b` / `ENDFOR` pair with whole-number bounds, `a < b`
  *   (`count = b - a + 1`), and a `REPEAT LABEL P=n` whose label is written once before it (`count =
@@ -527,7 +540,7 @@ export function computeFlow(
   const scanOf = (channel: string): FlowScan => {
     let s = scans.get(channel);
     if (!s) {
-      s = { ifDepth: 0, inIf: new Set(), ifUnbalanced: false, numbers: new Map(), names: new Map(), loopLines: new Set(), gotos: [], refs: [], fors: [], endfors: [], repeats: [] };
+      s = { ifDepth: 0, inIf: new Set(), ifUnbalanced: false, programBounds: [], numbers: new Map(), names: new Map(), loopLines: new Set(), gotos: [], refs: [], fors: [], endfors: [], repeats: [] };
       scans.set(channel, s);
     }
     return s;
@@ -566,6 +579,12 @@ export function computeFlow(
     }
     // The block behind its head, for the structured IF.
     const body = masked.slice(headEnd).replace(/^[\s:]+/, '');
+    const programBound = tokens.some(
+      (t) =>
+        t.kind === 'programMarker' ||
+        (t.kind === 'keyword' && t.address !== undefined && PROGRAM_END_KEYWORDS.has(t.address.toUpperCase())) ||
+        (t.kind === 'word' && t.address?.toUpperCase() === 'M' && t.valueText !== undefined && /^\d+$/.test(t.valueText) && PROGRAM_END_M.has(Number(t.valueText))),
+    );
     // The unconditional jumps of this line, with their targets.
     const gotos: FlowScan['gotos'] = [];
     const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'comment');
@@ -620,6 +639,7 @@ export function computeFlow(
           if (ifStep === 'close') s.ifDepth--;
         }
       } else if (s.ifDepth > 0) s.inIf.add(n);
+      if (programBound) s.programBounds.push(n);
       if (loopLine) s.loopLines.add(n);
       for (const tok of tokens) {
         if (tok.kind === 'blockNumber' && tok.valueText !== undefined) {
@@ -709,7 +729,9 @@ function flowOf(s: FlowScan): ChannelFlow {
       // NC-1: the jump and its target outside every structured IF, and the channel's IF blocks balanced.
       !s.ifUnbalanced &&
       !s.inIf.has(g.line) &&
-      !s.inIf.has(one)
+      !s.inIf.has(one) &&
+      // NC-5: no program end or program head between them (the target would be in another program).
+      !anyBetween(s.programBounds, g.line, one)
     ) {
       jumps.push({ line: g.line, target: one });
       continue;

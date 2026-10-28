@@ -1,0 +1,67 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Fanuc two-path: path 1's file holds its main program O3011 and a subprogram O3012. The GOTO 100 of the main program names N100, which is only in the subprogram, past the M30 and the next O head. The control looks for the target in the same program only, so the jump is not followed: the lines between keep their written order, and the missing M902 of path 2 is reported, before and after.",
+  "rule": "F1 F4",
+  "profile": "fanuc-lathe",
+  "preset": "fanuc-2path",
+  "program": {
+    "1": [
+      "%",
+      "O3011 (PATH 1)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0101",
+      "N20 M901 P3",
+      "GOTO 100",
+      "N30 M902 P3",
+      "N40 M30",
+      "O3012 (SUB)",
+      "N100 M903 P3",
+      "N110 M99",
+      "%"
+    ],
+    "2": [
+      "%",
+      "O3011 (PATH 2)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0202",
+      "N20 M901 P3",
+      "N30 M903 P3",
+      "N40 M30",
+      "%"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [],
+        "loops": [],
+        "opaque": [
+          10
+        ]
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "missing",
+        "channel": "1",
+        "line": 7,
+        "mark": "M902",
+        "other": "2"
+      }
+    ],
+    "after": [
+      {
+        "kind": "missing",
+        "channel": "1",
+        "line": 7,
+        "mark": "M902",
+        "other": "2"
+      }
+    ]
+  }
+}

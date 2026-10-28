@@ -243,6 +243,23 @@ describe('computeFlow: structured IF blocks (NC-1)', () => {
   });
 });
 
+describe('computeFlow: a jump into another program of the file (NC-5)', () => {
+  it('does not follow a jump over a program end or the next program head', () => {
+    expect(one(['N10 M901', 'GOTO 100', 'M902', 'M30', '%', 'O0002', 'N100 M903', 'M99'], 'fanuc-lathe')).toEqual({ jumps: [], loops: [], opaque: [7] });
+    expect(one(['GOTO 100', 'M902', 'O0002 (SUB)', 'N100 M903'], 'fanuc-lathe').jumps).toEqual([]);
+    expect(one(['GOTO 100', 'M902', 'M99', 'N100 M903'], 'fanuc-lathe').jumps).toEqual([]);
+    expect(one(['GOTO 100', 'M902', '/M02', 'N100 M903'], 'fanuc-lathe').jumps).toEqual([]);
+    expect(one(['GOTOF L1', 'X1', 'M17', 'L1: X2'], 'sinumerik').jumps).toEqual([]);
+    expect(one(['GOTOF L1', 'X1', 'RET', 'L1: X2'], 'sinumerik').jumps).toEqual([]);
+    expect(one(['GOTOF L1', 'X1', 'M2', '%_N_SUB_SPF', 'L1: X2'], 'sinumerik').jumps).toEqual([]);
+    expect(one(['GOTO NLAB1', 'P30', 'RTS', 'OSUB1', 'NLAB1 X1'], 'okuma-osp').jumps).toEqual([]);
+  });
+  it('still follows a jump to the line that ends the program', () => {
+    expect(one(['GOTO 30', 'M902', 'N30 M30'], 'fanuc-lathe').jumps).toEqual([{ line: 1, target: 3 }]);
+    expect(one(['GOTOF ENDE', 'WAITM(2,1,2)', 'ENDE: M30'], 'sinumerik').jumps).toEqual([{ line: 1, target: 3 }]);
+  });
+});
+
 describe('computeJumpLines: label targets (NC-3)', () => {
   const jl = (src: string[], profile: string) => computeJumpLines(src, cpOf(profile), () => 'a').a;
   it('names the target of a jump to a label, as computeFlow reads it', () => {
