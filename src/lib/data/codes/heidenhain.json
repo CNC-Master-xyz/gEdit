@@ -470,6 +470,67 @@
       ]
     },
     {
+      "code": "APPR PLT",
+      "group": "motion",
+      "pole": "use",
+      "sets": { "motion": "feed" },
+      "review": "pending",
+      "label": "Approach on a tangential line, polar",
+      "description": "Moves onto the first contour point along a straight line that leaves the contour tangentially. LEN gives the length of that line. The contour point is given in polar coordinates about the pole set with CC: PR is its distance from the pole, PA its angle.",
+      "params": [
+        { "address": "LEN", "label": "Length of the approach or departure line, written without a sign", "min": 0, "unit": "length" }
+      ]
+    },
+    {
+      "code": "APPR PLN",
+      "group": "motion",
+      "pole": "use",
+      "sets": { "motion": "feed" },
+      "review": "pending",
+      "label": "Approach on a normal line, polar",
+      "description": "Moves onto the first contour point along a straight line at a right angle to the contour. LEN gives the length of that line. The contour point is given in polar coordinates about the pole set with CC: PR is its distance from the pole, PA its angle.",
+      "params": [
+        { "address": "LEN", "label": "Length of the approach or departure line, written without a sign", "min": 0, "unit": "length" }
+      ]
+    },
+    {
+      "code": "APPR PCT",
+      "group": "motion",
+      "pole": "use",
+      "sets": { "motion": "feed", "path": "arc" },
+      "review": "pending",
+      "label": "Approach on a tangential arc, polar",
+      "description": "Moves onto the first contour point along an arc that meets the contour tangentially, given by its radius R and the centre angle CCA. The contour point is given in polar coordinates about the pole set with CC: PR is its distance from the pole, PA its angle.",
+      "params": [
+        { "address": "CCA", "label": "Centre angle of the arc, written without a sign; it is measured along the arc, so it does not turn with the path", "min": 0, "unit": "angle" },
+        { "address": "R", "label": "Radius of the approach or departure arc; its sign says whether the arc comes in from outside the contour or from the workpiece side", "unit": "length" }
+      ]
+    },
+    {
+      "code": "APPR PLCT",
+      "group": "motion",
+      "pole": "use",
+      "sets": { "motion": "feed", "path": "arc" },
+      "review": "pending",
+      "label": "Approach on a line and a tangential arc, polar",
+      "description": "Moves onto the first contour point along a straight line followed by an arc that meets the contour tangentially. The contour point is given in polar coordinates about the pole set with CC: PR is its distance from the pole, PA its angle.",
+      "params": [
+        { "address": "R", "label": "Radius of the arc, written without a sign", "min": 0, "unit": "length" }
+      ]
+    },
+    {
+      "code": "DEP PLCT",
+      "group": "motion",
+      "pole": "use",
+      "sets": { "motion": "feed", "path": "arc" },
+      "review": "pending",
+      "label": "Depart on an arc and a line, polar",
+      "description": "Leaves the last contour point along a tangential arc followed by a straight line to the end point, and cancels the radius compensation. The end point is given in polar coordinates about the pole set with CC: PR is its distance from the pole, PA its angle.",
+      "params": [
+        { "address": "R", "label": "Radius of the arc, written without a sign", "min": 0, "unit": "length" }
+      ]
+    },
+    {
       "code": "R0",
       "group": "compensation",
       "sets": { "radiusComp": "off" },

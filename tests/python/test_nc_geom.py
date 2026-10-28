@@ -2217,3 +2217,36 @@ class ReviewRoundGTest(unittest.TestCase):
         # A shift of nothing moves no block, and adds no note either.
         result = run_patched("translate", self.DRILL, helpers.with_pointless_feeds(base, "series-15"), {"dx": 0, "dz": 0})
         self.assertEqual([f for f in result["findings"] if f["reason"] == "cycle-r-left"], [])
+
+
+class LaterVersionTest(unittest.TestCase):
+    """Wave Y, BL-NC-geometry: the later-version transforms in the rules. Each test fails
+    without its change."""
+
+    def refusals(self, profile_id, text, line, op):
+        context, tracker, steps = walk(text, profile_id, upto=line)
+        step = steps[line - 1]
+        return [r.reason for r in _nc_geom.refusals_of(step, _nc_geom.roles_of(step, tracker), tracker, op, context)]
+
+    def roles(self, profile_id, text, line):
+        _, tracker, steps = walk(text, profile_id, upto=line)
+        return [(r.role, r.token.text.strip()) for r in _nc_geom.roles_of(steps[line - 1], tracker)]
+
+    def test_t018_the_polar_approach_and_departure_codes(self) -> None:
+        # TNC 640 Klartext manual (2019): p.148 lists APPR PLT, PLN, PCT, PLCT and DEP PLCT as the
+        # polar forms of the contour point, p.171 writes them with PR and PA about CC.
+        text = "0 BEGIN PGM P MM\n1 CC X+50 Y+50\n2 LP PR+60 PA+180 R0 FMAX\n3 APPR PLCT PR+45 PA+180 R5 RL F250\n4 DEP PLCT PR+60 PA+180 R5 F1000\n5 END PGM P MM"
+        self.assertEqual(
+            self.roles("heidenhain-klartext", text, 4),
+            [("polar-radius", "PR+45"), ("polar-angle", "PA+180"), ("radius", "R5"), ("code-comp", "RL"), ("untouched", "F250")],
+        )
+        for op in (TRANSLATE, ROTATE, MIRROR, _nc_geom.Rotate((D(0), D(0)), D(30))):
+            with self.subTest(op=op):
+                self.assertEqual(self.refusals("heidenhain-klartext", text, 4, op), [])
+                self.assertEqual(self.refusals("heidenhain-klartext", text, 5, op), [])
+        plt = "0 BEGIN PGM P MM\n1 CC X+50 Y+50\n2 L X+0 Y+0 R0 FMAX\n3 APPR PLT PR+45 PA+180 LEN12 RL F250\n4 END PGM P MM"
+        self.assertEqual(self.roles("heidenhain-klartext", plt, 4)[2], ("length", "LEN12"))
+        # Without the pole the polar contour point is not known.
+        nopole = plt.replace("1 CC X+50 Y+50\n", "1 L Z+5 FMAX\n")
+        self.assertIn("pole-unknown", self.refusals("heidenhain-klartext", nopole, 4, ROTATE))
+
