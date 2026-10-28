@@ -30,6 +30,7 @@ import SettingsDialog, {
   leaveQuestion,
   mayChangeTab,
   mayLeave,
+  samePalette,
   settingsModal,
   type SpecDeps,
 } from './SettingsDialog.svelte';
@@ -407,9 +408,20 @@ describe('changing the tab with a machine form open (B1 A9)', () => {
     expect(none.asks).toEqual([]);
   });
 
+  it('asks before leaving the Profiles tab with an unsaved profile form, in the profile wording, and not for a clean form', async () => {
+    const no = asking(false);
+    expect(await mayChangeTab(PROFILES_TAB, MACHINES_TAB, false, no.confirm, t, 'my-lathe.json')).toBe(false);
+    expect(no.asks).toEqual([t('profileForm.leave.message', { name: 'my-lathe.json' })]);
+    const clean = asking(false);
+    expect(await mayChangeTab(PROFILES_TAB, MACHINES_TAB, false, clean.confirm, t, null)).toBe(true);
+    expect(await mayChangeTab(PROFILES_TAB, PROFILES_TAB, false, clean.confirm, t, 'my-lathe.json')).toBe(true);
+    expect(clean.asks).toEqual([]);
+  });
+
   it('is what the tab buttons and the arrow keys go through', () => {
     const source = readFileSync(fileURLToPath(new URL('./SettingsDialog.svelte', import.meta.url)), 'utf8');
     expect(source).toContain('mayChangeTab(active, category, machinesModel.hasDraft()');
+    expect(source).toContain('profilesModel.draftName()');
     expect(source).toContain('onclick={() => void selectCategory(tab)}');
     expect(source).toContain('void selectCategory(tabs[next])');
   });
@@ -454,6 +466,31 @@ describe('leaving with something typed', () => {
     expect(asks).toHaveLength(2);
   });
 
+  it('asks about an unsaved profile form: alone, and together with changed settings', async () => {
+    const alone = leaveQuestion({ values: false, draft: false, profile: 'my-lathe.json' }, t);
+    const both = leaveQuestion({ values: true, draft: false, profile: 'my-lathe.json' }, t);
+    expect(alone?.message).toBe(t('profileForm.leave.message', { name: 'my-lathe.json' }));
+    expect(both?.message).toBe(t('profileForm.leave.withSettings', { name: 'my-lathe.json' }));
+    expect(leaveQuestion({ values: false, draft: false, profile: null }, t)).toBeNull();
+    const asks: string[] = [];
+    const confirm = async (o: { message: string }): Promise<boolean> => (asks.push(o.message), false);
+    expect(await mayLeave({ values: false, draft: false, profile: 'a.json' }, confirm, t)).toBe(false);
+    expect(await mayLeave({ values: false, draft: false, profile: null }, confirm, t)).toBe(true);
+    expect(asks).toHaveLength(1);
+  });
+
+  it('is read by what closes the dialog, what saves it and what changes the tab', () => {
+    const source = readFileSync(fileURLToPath(new URL('./SettingsDialog.svelte', import.meta.url)), 'utf8');
+    expect(source).toContain('<ProfilesPage model={profilesModel} />');
+    expect(source).toMatch(/function leaveState\(\)[\s\S]*?profile: profilesModel\.draftName\(\)/);
+    expect(source).toMatch(/async function save\(\)[\s\S]*?profile: profilesModel\.draftName\(\)/);
+    expect(source).toMatch(/async function selectCategory[\s\S]*?profilesModel\.draftName\(\)/);
+  });
+
+  it('has the profile texts it asks with', () => {
+    expect(hasKey('profileForm.leave.withSettings')).toBe(true);
+  });
+
   it('gives every opener a model whose question starts as "yes" and a mayClose that uses it', async () => {
     const { props, options } = settingsModal('machines');
     expect(props.initialTab).toBe('machines');
@@ -467,5 +504,27 @@ describe('leaving with something typed', () => {
     for (const key of ['title', 'valuesMessage', 'draftMessage', 'bothMessage', 'ok']) {
       expect(hasKey(`settings.leave.${key}`), key).toBe(true);
     }
+  });
+});
+
+describe('samePalette (the code colours the dialog compares)', () => {
+  it('ignores the order the roles were edited in', () => {
+    const saved = { dark: { gcode: '#aaaaaa', feed: '#ffaa00', tool: '#00aaff' } };
+    // Reset feed, then enter the same colour again: the role now comes last.
+    const edited = { dark: { gcode: '#aaaaaa', tool: '#00aaff', feed: '#ffaa00' } };
+    expect(samePalette(edited, saved)).toBe(true);
+    expect(JSON.stringify(edited)).not.toBe(JSON.stringify(saved));
+  });
+
+  it('sees a changed, added or removed colour, in either theme', () => {
+    const saved = { dark: { gcode: '#aaaaaa', feed: '#ffaa00' } };
+    expect(samePalette({ dark: { gcode: '#aaaaaa', feed: '#ffaa01' } }, saved)).toBe(false);
+    expect(samePalette({ dark: { gcode: '#aaaaaa' } }, saved)).toBe(false);
+    expect(samePalette({ ...saved, light: { gcode: '#111111' } }, saved)).toBe(false);
+  });
+
+  it('treats a theme with no colours like a missing one', () => {
+    expect(samePalette({ dark: {} }, {})).toBe(true);
+    expect(samePalette({}, undefined)).toBe(true);
   });
 });

@@ -72,6 +72,7 @@ export default {
   leave: {
     title: 'Discard changes?',
     message: 'The changes to {name} are not saved. Leave without saving them?',
+    withSettings: 'The changes you made in Settings and the changes to {name} are not saved. Leave without saving them?',
     ok: 'Discard',
   },
 } satisfies Messages;

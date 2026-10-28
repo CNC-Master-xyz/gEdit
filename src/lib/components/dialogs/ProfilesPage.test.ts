@@ -5,6 +5,8 @@
 // says about each file. The markup is rendered with `svelte/server` (no DOM), which is where
 // the `profile-row` and `profile-action` test ids of §7.12 are checked.
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { render } from 'svelte/server';
 import { writable } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -61,6 +63,7 @@ const {
   removeRow,
   rowCommand,
   rowsOf,
+  unsavedProfile,
 } = await import('./ProfilesPage.svelte');
 const { userConfig } = await import('$lib/app/userConfig');
 const { profiles } = await import('$lib/stores/profiles');
@@ -472,5 +475,33 @@ describe('Create keeps the form when no file was made', () => {
   it('answers true when the file is there, and false when the command failed', async () => {
     expect(await createFile(draft(), deps({ exists: () => true }))).toBe(true);
     expect(await createFile(draft(), deps({ run: async () => false, exists: () => true }))).toBe(false);
+  });
+});
+
+describe('the inline form and the dialog around it (CODE-1)', () => {
+  const editingOf = (over: Record<string, unknown>) => ({
+    name: 'my-lathe.json',
+    model: { state: writable({ open: true, dirty: false, readOnly: false, fileName: 'my-lathe.json', ...over }) },
+  });
+  // The model is typed as the whole form model; the page only reads its state.
+  type Editing = Parameters<typeof unsavedProfile>[0];
+
+  it('names the file while its form has changes that are not saved, and nothing otherwise', () => {
+    expect(unsavedProfile(null)).toBeNull();
+    expect(unsavedProfile(editingOf({ dirty: true }) as unknown as Editing)).toBe('my-lathe.json');
+    expect(unsavedProfile(editingOf({ dirty: false }) as unknown as Editing)).toBeNull();
+    expect(unsavedProfile(editingOf({ dirty: true, readOnly: true }) as unknown as Editing)).toBeNull();
+    expect(unsavedProfile(editingOf({ dirty: true, open: false }) as unknown as Editing)).toBeNull();
+  });
+
+  it('hands the dialog that answer through the model it is given, and takes it back when the page goes', () => {
+    const model = { hasDraft: () => true, draftName: () => 'x.json' };
+    expect(render(ProfilesPage, { props: { model } }).body).toContain('settings-profiles');
+    // No form is open in a fresh page: the hooks the page installed say so.
+    expect(model.hasDraft()).toBe(false);
+    expect(model.draftName()).toBeNull();
+    const source = readFileSync(fileURLToPath(new URL('./ProfilesPage.svelte', import.meta.url)), 'utf8');
+    expect(source).toContain('model.hasDraft = () => unsavedProfile(editing) !== null');
+    expect(source).toContain('model.draftName = () => unsavedProfile(editing)');
   });
 });
