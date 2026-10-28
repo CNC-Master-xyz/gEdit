@@ -50,3 +50,4 @@ A case with a `machine` member has its effective profile in `tests/fixtures/reso
 | `sinumerik-mill-refused` | Sinumerik milling | refused: `TRANS X`, `X=R1`, `L100`, `POCKET3`, `ROT RPL=` |
 | `sinumerik-mill-frames` | Sinumerik milling | refused: `MIRROR`, `SCALE`, `CYCLE800` and the moves in them (`frame`) |
 | `sinumerik-mill-selection-mcall` | Sinumerik milling | refused: positions of an `MCALL` written above the selection |
+| `t019-sinumerik-cycle95-rough-above` | Sinumerik turning | refused: a selection holds a finishing `CYCLE95("ANFANG:ENDE", …)` and its contour after `M30`, while a roughing `CYCLE95` above the selection names the same labels: moving the contour would make the roughing run it unmoved (`cycle-position`; Wave Y skeptic D3) |

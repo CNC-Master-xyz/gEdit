@@ -136,6 +136,9 @@ v1.2.0 (FZ-5, plan section 7 #503): a selection is judged as the whole run judge
 so it reads the lines below it too (`input.followingLines`) for the one rule that looks ahead:
 a move made before a rotary axis that turns it is first written, when the program turns that
 axis later (`rotary-turned`). Without those lines such a move is refused (`selection-below`).
+Wave Y (skeptic D3): a contour between two labels moves with its cycle (T019) only while no
+line above or below the selection names the same labels (another `CYCLE95`, a contour call);
+without the lines below, the cycle keeps its refusal (`cycle-position`).
 
 Two refusals concern the whole run rather than a block, with reasons of their own: a run
 with no code database (`no-database`: a move cannot be told from a machine position or a
@@ -148,6 +151,7 @@ is handed back byte for byte: the only edits are the spans of the words that mov
 
 from __future__ import annotations
 
+import re
 import sys
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -330,6 +334,21 @@ class Line:
         self.tool_edits: List[Tuple[int, int, str]] = []
 
 
+_STRING = re.compile(r'"[^"]*"')
+
+
+def names_labels(text: str, first: str, last: str) -> bool:
+    """Wave Y skeptic D3: whether a line names the contour between the labels ``first`` and
+    ``last`` (upper case) in a string: as the pair (`"A:B"`, CYCLE95) or as either label alone
+    (`CYCLE62(, 1, "A", "B")`, the start and the end label as two strings). A string in a
+    comment counts too: refusing is the safe side."""
+    for found in _STRING.finditer(text):
+        written = found.group(0)
+        if _nc_geom.contour_labels(written) == (first, last) or written[1:-1].strip().upper() in (first, last):
+            return True
+    return False
+
+
 class Run:
     """Walks the program once with the tracker and judges every line with `_nc_geom`."""
 
@@ -377,6 +396,10 @@ class Run:
         #: the lines above it, for a contour written between two labels (`CYCLE95("A:B", …)`).
         self.labels: Dict[str, List[int]] = {}
         self.labels_above: set = set()
+        #: Wave Y skeptic D3: the lines outside a selection, above it and below it (``None``
+        #: when the run did not get the lines below), where another cycle may name a contour.
+        self.outside_lines: List[str] = []
+        self.below_lines: Optional[List[str]] = None
         #: v1.2.0 (NCR-3): the shifted axes on which the tool still stands where the lines above
         #: a selection left it (a point the run does not move), until a block moves it to a
         #: written position on all of them; and the axes a single pass of the selection wrote
@@ -412,6 +435,8 @@ class Run:
         state = None
         continued = False
         self.base_line = base_line
+        self.outside_lines = list(preceding)
+        self.below_lines = list(following) if following is not None else None
         first_number = base_line - len(preceding)
         for offset, text in enumerate(preceding):
             state, step = tracker.line(text, first_number + offset, state, False)
@@ -726,10 +751,20 @@ class Run:
             line.refusals = kept
 
     def labels_in_run(self, detail: str) -> bool:
+        """Whether every contour of ``detail`` (``A:B;C:D``) lies between its two labels in the
+        run and nothing outside a selection names it (Wave Y skeptic D3): a cycle above or
+        below the selection that names the same labels (a roughing `CYCLE95` above a finishing
+        one, a contour call `CYCLE62(, 1, "A", "B")`) stays where it is and would run the moved
+        contour. A selection whose lines below were not sent cannot tell, so it refuses."""
+        if self.is_selection and self.below_lines is None:
+            return False
+        outside = self.outside_lines + (self.below_lines or [])
         for pair in detail.split(";"):
             first, _, last = pair.partition(":")
             a, b = self.labels.get(first, []), self.labels.get(last, [])
             if len(a) != 1 or len(b) != 1 or first in self.labels_above or last in self.labels_above or a[0] >= b[0]:
+                return False
+            if any(names_labels(text, first, last) for text in outside):
                 return False
         return True
 
