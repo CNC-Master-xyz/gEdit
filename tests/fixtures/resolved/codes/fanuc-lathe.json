@@ -2568,7 +2568,8 @@
         {
           "address": "U",
           "block": 1,
-          "label": "Depth of cut per pass, a radius value without sign"
+          "label": "Depth of cut per pass, a radius value without sign",
+          "min": 0
         },
         {
           "address": "R",
@@ -2640,7 +2641,8 @@
         {
           "address": "W",
           "block": 1,
-          "label": "Depth of cut per pass, a radius value without sign"
+          "label": "Depth of cut per pass, a radius value without sign",
+          "min": 0
         },
         {
           "address": "R",
