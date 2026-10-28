@@ -641,6 +641,24 @@
     return hitList === undefined ? [] : [...hitList.querySelectorAll<HTMLElement>('[data-testid="settings-search-hit"]')];
   }
 
+  /**
+   * The keys of the box and of the results. They are listened for by hand on the wrapper (the
+   * `searchKeys` action below), not with `onkeydown`: Svelte delegates `onkeydown` to the root, but
+   * the dialog frame (`Modal`) listens on its own panel and stops Enter and Escape there, so a
+   * delegated handler would never see them. A listener on a descendant of the panel runs first.
+   */
+  function searchKeys(node: HTMLElement): { destroy: () => void } {
+    const onKey = (e: KeyboardEvent): void => {
+      const target = e.target;
+      if (target === searchInput) onSearchKey(e);
+      else if (target instanceof HTMLElement && target.dataset.testid === 'settings-search-hit') {
+        onHitKey(e, hitButtons().indexOf(target));
+      }
+    };
+    node.addEventListener('keydown', onKey);
+    return { destroy: () => node.removeEventListener('keydown', onKey) };
+  }
+
   /** Enter takes the best hit, and must not reach the dialog, where it would mean Save. Escape clears the box before it closes the dialog. */
   function onSearchKey(e: KeyboardEvent): void {
     if (e.key === 'Escape' && searching) {
@@ -831,7 +849,7 @@
       </p>
     {/if}
 
-    <div class="search">
+    <div class="search" use:searchKeys>
       <div class="search-box">
         <input
           type="text"
@@ -845,7 +863,6 @@
           spellcheck="false"
           bind:this={searchInput}
           bind:value={query}
-          onkeydown={onSearchKey}
         />
         {#if searching}
           <button
@@ -866,7 +883,7 @@
           {:else}
             <p class="sr-only" aria-live="polite">{t('settings.search.found', { count: hits.length })}</p>
             <ul class="hits" aria-label={t('settings.search.hitsLabel')}>
-              {#each hits as hit, index (hit.entry.kind + hit.entry.id)}
+              {#each hits as hit (hit.entry.kind + hit.entry.id)}
                 <li>
                   <button
                     type="button"
@@ -875,7 +892,6 @@
                     data-id={hit.entry.id}
                     data-tab={hit.entry.tab}
                     onclick={() => void chooseHit(hit)}
-                    onkeydown={(e) => onHitKey(e, index)}
                   >
                     <span class="hit-label">{hit.entry.label}</span>
                     <span class="hit-where">

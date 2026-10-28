@@ -624,7 +624,12 @@ describe('the settings search (rule 43)', () => {
     expect(handler).toContain('void chooseHit(hits[0])');
     // Escape with an empty box is not handled: it closes the dialog as before.
     expect(handler).not.toMatch(/Escape'\s*\)/);
-    expect(source).toContain('onkeydown={onSearchKey}');
+    // The keys are listened for by hand on the wrapper: a delegated `onkeydown` never sees Enter and Escape, because the
+    // dialog frame stops them on its own panel first (the environment has no DOM, so the order is pinned by the wiring).
+    expect(source).toContain('class="search" use:searchKeys');
+    expect(source).toMatch(/function searchKeys[\s\S]*addEventListener\('keydown'/);
+    expect(source).not.toContain('onkeydown={onSearchKey}');
+    expect(source).not.toMatch(/onkeydown=\{\(e\) => onHitKey/);
     expect(source).toContain('data-testid="settings-search-hit"');
     expect(source).toMatch(/data-id=\{hit\.entry\.id\}/);
     expect(source).toMatch(/data-tab=\{hit\.entry\.tab\}/);

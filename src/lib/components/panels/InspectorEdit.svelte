@@ -55,10 +55,19 @@
     field?.select();
   });
 
-  function onKey(e: KeyboardEvent): void {
-    if (!isHeldEnter(e)) return;
-    e.preventDefault();
-    e.stopPropagation();
+  /**
+   * Listened for by hand on the field, not with `onkeydown`: Svelte delegates that to the root, but
+   * the dialog frame (`Modal`) confirms on Enter from its own panel listener first, so a delegated
+   * handler would never see the repeat. A listener on the field itself runs before the panel's.
+   */
+  function swallowHeldEnter(node: HTMLInputElement): { destroy: () => void } {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!isHeldEnter(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    node.addEventListener('keydown', onKey);
+    return { destroy: () => node.removeEventListener('keydown', onKey) };
   }
 </script>
 
@@ -83,7 +92,7 @@
       aria-describedby={error === null ? undefined : 'inspector-edit-error'}
       bind:this={field}
       bind:value
-      onkeydown={onKey}
+      use:swallowHeldEnter
     />
   </label>
   {#if errorText !== null}<p class="error" id="inspector-edit-error" role="alert">{errorText}</p>{/if}

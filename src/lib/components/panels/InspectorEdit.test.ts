@@ -2,6 +2,8 @@
 // types into, the attributes it reads, and the refusal next to the field. Rendered with
 // `svelte/server`; typing, Enter and Esc belong to `Modal` and are pinned by its own test.
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { render } from 'svelte/server';
 import { describe, expect, it } from 'vitest';
 import InspectorEdit, { isHeldEnter } from './InspectorEdit.svelte';
@@ -45,5 +47,14 @@ describe('InspectorEdit', () => {
     expect(isHeldEnter({ key: 'Enter', repeat: true })).toBe(true);
     expect(isHeldEnter({ key: 'Enter', repeat: false })).toBe(false);
     expect(isHeldEnter({ key: 'a', repeat: true })).toBe(false);
+  });
+
+  it('CODE-10: the held Enter is swallowed by a native listener on the field, which runs before the dialog frame confirms', () => {
+    // The environment has no DOM, so the order is pinned by the wiring: a delegated `onkeydown` runs at the root,
+    // after `Modal`'s own panel listener has already confirmed and stopped the key.
+    const source = readFileSync(fileURLToPath(new URL('./InspectorEdit.svelte', import.meta.url)), 'utf8');
+    expect(source).toContain('use:swallowHeldEnter');
+    expect(source).toMatch(/function swallowHeldEnter[\s\S]*isHeldEnter[\s\S]*addEventListener\('keydown'/);
+    expect(source).not.toMatch(/onkeydown=/);
   });
 });
