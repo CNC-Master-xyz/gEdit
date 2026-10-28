@@ -586,7 +586,7 @@ describe('hoverText in context: Fanuc lathe, G-code system A (l01-turning-a.nc)'
     expect(q).toMatch(/Q — Peck depth.*\(G83\)/);
     // A micron word reads 3 mm under calculator input too, so the preset is named by its whole
     // label (as the panel does), never by a bare "As written" next to a converted value.
-    expect(q).toContain('Q3000 — depends on the machine; choose a machine:\n- 3 mm: As written: X50 and X50. are both 50 mm; G74/G75 P and Q, G76 Q and G83/G87 Q are in microns (Q6000 is 6 mm) (profile default)');
+    expect(q).toContain('Q3000 — depends on the machine; choose a machine:\n- 3 mm: As written: X50 and X50. are both 50 mm; G74/G75 P and Q, G76 Q and P (second block), G83/G87 Q are in microns (Q6000 is 6 mm) (profile default)');
     expect(q).toContain('- 0.3 mm: Increments of 0.0001 mm (IS-C): X50 is 0.0050 mm');
     expect(q).not.toContain('As written (profile default)');
   });
