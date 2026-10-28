@@ -270,7 +270,11 @@ def _dec_text(value: Decimal) -> str:
     """
     if value == _ZERO:
         return "0"
-    return format(value.normalize(), "f")
+    # P4h parity D2: `normalize` rounds to the context's precision (28 digits by default),
+    # so a value of 29 or more digits needs room for every one of them.
+    with localcontext() as context:
+        context.prec = max(context.prec, len(value.as_tuple().digits))
+        return format(value.normalize(), "f")
 
 
 def _multiply(left: Decimal, right: Decimal) -> Decimal:
@@ -300,7 +304,12 @@ def _divide(left: Decimal, right: Decimal) -> Decimal:
 def _tenth_of(text: Any) -> Optional[str]:
     """``text`` divided by ten, exactly: the digits stay, the point moves."""
     value = _decimal(text)
-    return None if value is None else _dec_text(value.scaleb(-1))
+    if value is None:
+        return None
+    # P4h parity D2: `scaleb` rounds to the context's precision too.
+    with localcontext() as context:
+        context.prec = max(context.prec, len(value.as_tuple().digits))
+        return _dec_text(value.scaleb(-1))
 
 
 # --- the literal -------------------------------------------------------------
