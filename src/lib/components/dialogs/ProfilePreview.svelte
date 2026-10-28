@@ -81,6 +81,8 @@
     let ready = false;
     let disposed = false;
     let lastText = '';
+    /** What the themes were last defined from; a definition repaints every open editor, so only a change earns one. */
+    let themesFrom = '';
 
     const controller: PreviewController = {
       get ready() {
@@ -102,7 +104,13 @@
           generateGrammar(draft, sources.codeDb(profile)) as Parameters<typeof monaco.languages.setMonarchTokensProvider>[1],
         );
         // The draft's own colours are the rules `<role>._profile-preview` of the two themes.
-        defineThemes(monaco, [...sources.profiles(), draft], sources.userColors());
+        const others = sources.profiles();
+        const user = sources.userColors();
+        const signature = JSON.stringify([user, (draft as { colors?: unknown }).colors ?? null, others.map((p) => [p.id, (p as { colors?: unknown }).colors ?? null])]);
+        if (signature !== themesFrom) {
+          defineThemes(monaco, [...others, draft], user);
+          themesFrom = signature;
+        }
         const text = sampleProgram(profile);
         if (text !== lastText) {
           editor.setValue(text);

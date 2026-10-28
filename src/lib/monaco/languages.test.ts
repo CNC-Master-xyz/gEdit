@@ -5,7 +5,7 @@
 // The fake below records the three calls `registerAll` makes per profile plus the two
 // `defineTheme` calls, which is the whole contract this module has with the editor.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { profiles as registry } from '$lib/stores/profiles';
 import { defineThemes, languageConfiguration, previewRoleColors, registerAll, registerLanguages } from './languages';
 import { THEME_IDS } from '$lib/core/grammar';
@@ -343,11 +343,55 @@ describe('the user role colours', () => {
   });
 
   it('previewRoleColors shows a draft in the open editor and puts the saved colours back', () => {
-    const { monaco, log } = fakeMonaco();
-    registerLanguages(monaco, sourcesWith(() => ({ dark: { feed: '#00ccff' } })));
-    previewRoleColors({ dark: { feed: '#ffcc00' } });
-    expect(feedOf(log, THEME_IDS.dark)).toBe('#ffcc00');
-    previewRoleColors(null);
-    expect(feedOf(log, THEME_IDS.dark)).toBe('#00ccff');
+    vi.useFakeTimers();
+    try {
+      const { monaco, log } = fakeMonaco();
+      registerLanguages(monaco, sourcesWith(() => ({ dark: { feed: '#00ccff' } })));
+      previewRoleColors({ dark: { feed: '#ffcc00' } });
+      vi.advanceTimersByTime(20);
+      expect(feedOf(log, THEME_IDS.dark)).toBe('#ffcc00');
+      previewRoleColors(null);
+      expect(feedOf(log, THEME_IDS.dark)).toBe('#00ccff');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // CODE-4: a colour picker fires `input` tens of times a second; every definition repaints every editor.
+  it('previewRoleColors defines the themes once per frame, with the newest draft (20 pushes, one pair)', () => {
+    vi.useFakeTimers();
+    try {
+      const { monaco, log } = fakeMonaco();
+      registerLanguages(monaco, sourcesWith(() => ({})));
+      const before = log.themes.length;
+      for (let i = 0; i < 20; i++) previewRoleColors({ dark: { feed: `#ffcc${(i + 10).toString(16).padStart(2, '0')}` } });
+      expect(log.themes).toHaveLength(before);
+      vi.advanceTimersByTime(20);
+      expect(log.themes).toHaveLength(before + 2);
+      expect(feedOf(log, THEME_IDS.dark)).toBe('#ffcc1d');
+      vi.advanceTimersByTime(100);
+      expect(log.themes).toHaveLength(before + 2);
+      previewRoleColors(null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('previewRoleColors(null) puts the saved colours back at once and drops a draft that was waiting', () => {
+    vi.useFakeTimers();
+    try {
+      const { monaco, log } = fakeMonaco();
+      registerLanguages(monaco, sourcesWith(() => ({ dark: { feed: '#00ccff' } })));
+      const before = log.themes.length;
+      previewRoleColors({ dark: { feed: '#ffcc00' } });
+      expect(log.themes).toHaveLength(before);
+      previewRoleColors(null);
+      expect(feedOf(log, THEME_IDS.dark)).toBe('#00ccff');
+      const after = log.themes.length;
+      vi.advanceTimersByTime(100);
+      expect(log.themes).toHaveLength(after);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
