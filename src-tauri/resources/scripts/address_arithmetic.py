@@ -776,6 +776,22 @@ def is_zero(literal: Optional[gedit_nc.NumericLiteral]) -> bool:
     return number is not None and number == 0
 
 
+#: P4h fix round: counts of a two-block cycle that pack several values into one number, as
+#: (code, address, block). The `G76` `P` of the first block writes the finishing passes, the
+#: chamfer and the insert angle in two digits each (`P010060`); a number added to it changes
+#: the angle to one the control does not take. The code data has no mark for a packed count,
+#: so the list is written here.
+PACKED_COUNTS = frozenset({("G76", "P", 1)})
+
+
+def is_packed_count(entry: Optional[Dict[str, Any]], param: Optional[Dict[str, Any]]) -> bool:
+    """A parameter :data:`PACKED_COUNTS` names: a value of the cycle, left and listed."""
+    if not isinstance(param, dict) or param.get("unit") != "count" or not gedit_nc.declares_blocks(entry):
+        return False
+    address = str(param.get("address") or "").upper()
+    return (code_of(entry).upper(), address, param.get("block")) in PACKED_COUNTS
+
+
 def code_of(entry: Optional[Dict[str, Any]], fallback: str = "the cycle") -> str:
     code = entry.get("code") if isinstance(entry, dict) else None
     return code if isinstance(code, str) and code != "" else fallback
@@ -2355,12 +2371,14 @@ class Run:
                 return ("cycle-not-reviewed", "%s writes %s, which the code database does not describe" % (name, quote(arg.text)))
             if gedit_nc.position_of(param) is None:
                 return ("cycle-not-reviewed", "nobody reviewed %s of %s (roadmap R8)" % (self.shown(entry, arg), name))
-            if arg.kind == "word" and is_cycle_value(param):
+            if arg.kind == "word" and (is_cycle_value(param) or is_packed_count(entry, param)):
                 # NC-16: a reviewed parameter that is no position (`position: 'none'`) and
                 # may be a length is a value of the cycle, not a coordinate of the program:
                 # the relief `R` of `G74`, the allowance and the taper `R` of `G76`. It is
                 # left and listed like the words of `G71`. A count stays the user's choice
-                # (`K` of `G83`, README "The form").
+                # (`K` of `G83`, README "The form"), except a packed one (`PACKED_COUNTS`:
+                # the first-block `P` of `G76`), which is left and listed too. A block that
+                # does not tell its block reads the first declaration, so a `P` there is left.
                 cycle_data[id(arg.token)] = name
         for own in [entry] + list(block.call_entries):
             others = [str(p.get("address")) for p in params_of(own) if gedit_nc.position_of(p) == "other"]

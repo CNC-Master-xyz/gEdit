@@ -1994,8 +1994,9 @@ class TestP4hG76ThreadHeightByBlock(unittest.TestCase):
     `number_class_of` passes the block (`gedit_nc.block_cycle_of`), and the cycle's parameter is
     read by its block's declaration; without it both `P` words had no class and the cycle was
     refused as "does not know what kind of number". Now the second-block `P` is a value of the
-    cycle, left and listed like its `Q` and `R` (NC-16), and the first-block `P` is a count,
-    which a shift of `P` changes as written (README "The form")."""
+    cycle, left and listed like its `Q` and `R` (NC-16). The first-block `P` is a packed count
+    (passes, chamfer and insert angle, two digits each): a number added to it would change the
+    angle (`P010060` to `P10061`, 61 degrees), so it is left and listed too (`PACKED_COUNTS`)."""
 
     PROGRAM = "G21 G18 G99\nG0 X50. Z5.\nG76 P010060 Q100 R0.05\nG76 X20. Z-30. P1500 Q300 F2.\nM30\n"
 
@@ -2008,12 +2009,10 @@ class TestP4hG76ThreadHeightByBlock(unittest.TestCase):
         return result.json()
 
     def check(self, payload):
-        lines = lines_of(payload)
-        # Block 1: a count, changed as written (the user chose P), rounded to a whole number.
-        self.assertEqual(lines[2], "G76 P10061 Q100 R0.05")
-        # Block 2: the thread height, a value of the cycle and no position: left and listed.
-        self.assertEqual(lines[3], "G76 X20. Z-30. P1500 Q300 F2.")
-        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "rounded"), (4, "data")])
+        # Both blocks are left as written, each P listed as a value of the cycle.
+        self.assertEqual(lines_of(payload)[2:4], ["G76 P010060 Q100 R0.05", "G76 X20. Z-30. P1500 Q300 F2."])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "data"), (4, "data")])
+        self.assertEqual(finding_at(payload, 3)["message"], "P010060: a value of G76, not a position of this program.")
         self.assertEqual(finding_at(payload, 4)["message"], "P1500: a value of G76, not a position of this program.")
         self.assertNotIn("kind of number", json.dumps(payload))
 
@@ -2022,6 +2021,20 @@ class TestP4hG76ThreadHeightByBlock(unittest.TestCase):
 
     def test_without_a_machine(self):
         self.check(self.run_on(helpers.effective_context("fanuc-lathe")))
+
+    def test_a_multiply_of_p_leaves_the_packed_count(self):
+        payload = self.run_on(helpers.effective_context("fanuc-lathe", preset="is-b"), operation="multiply", operand=2)
+        self.assertEqual(lines_of(payload)[2], "G76 P010060 Q100 R0.05")
+        self.assertEqual(finding_at(payload, 3)["reason"], "data")
+
+    def test_a_first_block_that_writes_only_p_is_left(self):
+        context = helpers.effective_context("fanuc-lathe", preset="is-b")
+        context["params"] = {"operation": "add", "operand": 0.5, "addresses": ["P"]}
+        text = "G21 G18 G99\nG0 X50. Z5.\nG76 P020060\nM30\n"
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(text.split("\n"))}
+        payload = helpers.run_script(SCRIPT, stdin=text, context=context).json()
+        self.assertEqual(lines_of(payload)[2], "G76 P020060")
+        self.assertEqual(finding_at(payload, 3)["message"], "P020060: a value of G76, not a position of this program.")
 
     def test_a_multiply_names_the_thread_height_among_the_lengths_it_does_not_scale(self):
         context = helpers.effective_context("fanuc-lathe", preset="is-b")
