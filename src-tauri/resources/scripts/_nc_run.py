@@ -458,11 +458,16 @@ class PlaneRun:
     def walk(self, preceding: Sequence[str], lines: Sequence[str], first: int) -> None:
         tracker = self.tracker
         state: Any = None
+        named_outside = None
         if self.lathe_z:
             # Wave Y (T015): the block numbers the scope and the lines above carry, so a roughing
-            # or finishing cycle can be told whether its contour lies in the scope.
-            scope, above = block_numbers(self.cp, preceding, lines, first)
-            _nc_geom.set_block_numbers(tracker, scope, above)
+            # or finishing cycle can be told whether its contour lies in the scope. Wave Y skeptic
+            # D2: and the lines below, and the contours the cycles above and below name; a
+            # selection whose lines below were not sent knows no contour in its scope.
+            following: Optional[List[str]] = following_lines(self.context) if self.selection else []
+            numbers = block_numbers(self.cp, preceding, lines, first, following or [], _nc_geom._data(tracker).ranges)
+            _nc_geom.set_block_numbers(tracker, numbers.scope if following is not None else {}, numbers.outside)
+            named_outside = numbers
         for number, text in enumerate(preceding, first - len(preceding)):
             state, step = tracker.line(text, number, state, False)
             _nc_geom.observe(step, tracker)
@@ -475,8 +480,27 @@ class PlaneRun:
             block = self.judge(step, index, text)
             self.blocks.append(block)
         self.end_first_blocks()
+        if named_outside is not None and named_outside.named:
+            self.end_contours(named_outside)
         if self.selection and self.blocks:
             self.end_selection(state)
+
+    def end_contours(self, numbers: Numbers) -> None:
+        """Wave Y skeptic D2: a contour that a cycle above or below the scope names, from a line
+        that carries its first number to the next line that carries its last (to the end of the
+        lines read when none does), refuses the first block of the scope inside it: that cycle,
+        which the run does not mirror, would cut the mirrored contour (``roughing-cycle``)."""
+        where: Dict[str, List[int]] = {}
+        for line, number in numbers.carried:
+            where.setdefault(number, []).append(line)
+        for start, end in set(numbers.named):
+            for line in where.get(start, []):
+                last = next((other for other in where.get(end, []) if other >= line), None)
+                # The blocks stand in line order from `self.first` on, one per line.
+                index = max(line - self.first, 0)
+                if index < len(self.blocks) and (last is None or self.blocks[index].line <= last):
+                    block = self.blocks[index]
+                    block.refuse("roughing-cycle", quote(block.text))
 
     def prime_selection(self, state: Any, first: int) -> None:
         """What the lines above a selection leave in force that the selection cannot judge:
@@ -1148,13 +1172,42 @@ class PlaneRun:
         return out
 
 
-def block_numbers(cp: Any, preceding: Sequence[str], lines: Sequence[str], first: int) -> Tuple[Dict[str, List[int]], List[str]]:
-    """Wave Y (T015): the block numbers of the scope (number -> the lines that carry it) and
-    those of the lines above it, read from the tokens (``blockNumber``)."""
+class Numbers(NamedTuple):
+    """Wave Y (T015, skeptic D2): the block numbers :func:`block_numbers` reads."""
+
+    #: Number -> the lines of the scope that carry it.
+    scope: Dict[str, List[int]]
+    #: The numbers no contour of the scope may use: those the lines above and below the scope
+    #: carry, and the first and last numbers of each contour a cycle there names.
+    outside: List[str]
+    #: The contours the cycles above and below the scope name: (first number, last number).
+    named: List[Tuple[str, str]]
+    #: Every line read that carries a number: (its line, the number), in line order.
+    carried: List[Tuple[int, str]]
+
+
+def block_numbers(
+    cp: Any,
+    preceding: Sequence[str],
+    lines: Sequence[str],
+    first: int,
+    following: Sequence[str] = (),
+    ranges: Sequence[Tuple[Any, List[str]]] = (),
+) -> Numbers:
+    """Wave Y (T015): the block numbers of the scope and those of the lines above it, read from
+    the tokens (``blockNumber``). Wave Y skeptic D2: and those of the lines below it
+    (``following``), and the contours a cycle above or below the scope names (``ranges``: the
+    profile's ``numbering.references`` rules that name two addresses, ``G70``-``G73`` ``P``/``Q``,
+    as ``_nc_geom`` reads them), so a cycle of the scope whose contour another cycle uses too, or a
+    contour of the scope a cycle outside it uses, is not mirrored on its own."""
     scope: Dict[str, List[int]] = {}
-    above: List[str] = []
+    outside: List[str] = []
+    named: List[Tuple[str, str]] = []
+    carried: List[Tuple[int, str]] = []
     state: Any = None
-    for index, text in enumerate(list(preceding) + list(lines)):
+    inside = range(len(preceding), len(preceding) + len(lines))
+    for index, text in enumerate(list(preceding) + list(lines) + list(following)):
+        line = first + index - len(preceding)
         tokens, state = gedit_nc.tokenize_line(text, cp, state)
         for token in tokens:
             if token.kind != "blockNumber":
@@ -1162,11 +1215,35 @@ def block_numbers(cp: Any, preceding: Sequence[str], lines: Sequence[str], first
             number = _nc_geom.number_of(token.value_text if token.value_text is not None else token.text)
             if number is None:
                 continue
-            if index < len(preceding):
-                above.append(number)
+            carried.append((line, number))
+            if index in inside:
+                scope.setdefault(number, []).append(line)
             else:
-                scope.setdefault(number, []).append(first + index - len(preceding))
-    return scope, above
+                outside.append(number)
+        if index in inside or not ranges:
+            continue
+        contour = contour_named(gedit_nc.mask_comments(text, cp), tokens, ranges)
+        if contour is not None:
+            named.append(contour)
+            outside.extend(contour)
+    return Numbers(scope, outside, named, carried)
+
+
+def contour_named(masked: str, tokens: Sequence[Any], ranges: Sequence[Tuple[Any, List[str]]]) -> Optional[Tuple[str, str]]:
+    """Wave Y skeptic D2: the first and last block number of the contour a line outside the scope
+    names (as ``_nc_geom._contour_range`` reads a block of the scope), or ``None``."""
+    words: Dict[str, Any] = {}
+    for token in tokens:
+        if token.kind == "word" and token.address and token.index is None:
+            words[token.address.upper()] = token
+    for regex, (start, end) in ranges:
+        if regex.search(masked) is None:
+            continue
+        a = _nc_geom.number_of(getattr(words.get(start), "value_text", None))
+        b = _nc_geom.number_of(getattr(words.get(end), "value_text", None))
+        if a is not None and b is not None:
+            return a, b
+    return None
 
 
 #: Below this a computed value counts as the value itself (the double precision of a turn).
