@@ -15,6 +15,7 @@ import {
   fileText,
   formSections,
   listText,
+  longestBlock,
   mergeOver,
   parseList,
   parseWeights,
@@ -23,6 +24,7 @@ import {
   sampleProgram,
   setField,
   weightsText,
+  withRuler,
   type ProfileFormDeps,
   type ProfileFormField,
   type ProfileFormState,
@@ -579,6 +581,23 @@ describe('the model: opening', () => {
     await model.load({ kind: 'user', name: 'my-fanuc.json' });
     expect(snapshot().canSave).toBe(false);
     expect(snapshot().loose[0]).toContain('fanuc-gcode');
+  });
+});
+
+describe('the ruler at the longest block', () => {
+  it('reads the longest block from the draft, else from the resolved profile, and ignores anything that is not a column', () => {
+    expect(longestBlock({ syntax: { maxLineLength: 158 } }, null)).toBe(158);
+    expect(longestBlock({}, { syntax: { maxLineLength: 512 } } as unknown as Profile)).toBe(512);
+    expect(longestBlock({ syntax: { maxLineLength: 72 } }, { syntax: { maxLineLength: 512 } } as unknown as Profile)).toBe(72);
+    expect(longestBlock({}, null)).toBeNull();
+    expect(longestBlock({ syntax: { maxLineLength: 0 } }, null)).toBeNull();
+    expect(longestBlock({ syntax: { maxLineLength: 'long' } }, null)).toBeNull();
+  });
+
+  it('adds the column to the rulers in order, and says nothing to add when it is there already', () => {
+    expect(withRuler(undefined, 80)).toEqual([80]);
+    expect(withRuler([72, 160], 80)).toEqual([72, 80, 160]);
+    expect(withRuler([72, 80], 80)).toBeNull();
   });
 });
 

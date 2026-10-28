@@ -144,6 +144,25 @@ describe('the form’s test ids', () => {
   });
 });
 
+describe('the ruler at the longest block (§6.10 rule 9)', () => {
+  const withMax = (max: number | undefined, rulers: number[] = [72, 80]): string => {
+    const file: Obj = { ...FILE, editing: { tabWidth: 8, rulers }, ...(max === undefined ? {} : { syntax: { maxLineLength: max } }) };
+    return markup(stateOf({}, file));
+  };
+
+  it('offers a link with the column where the profile sets syntax.maxLineLength, and writes nothing until it is pressed', () => {
+    const html = withMax(158);
+    const link = tag(html, 'profile-form-ruler-longest', 'data-column');
+    expect(attr(link, 'data-column')).toBe('158');
+    expect(html).toContain('Ruler at the longest block (158)');
+  });
+
+  it('offers nothing where no longest block is set or the ruler is already there', () => {
+    expect(withMax(undefined)).not.toContain('profile-form-ruler-longest');
+    expect(withMax(80)).not.toContain('profile-form-ruler-longest');
+  });
+});
+
 describe('the buttons', () => {
   it('shows Save and Cancel, and Save only when something changed and nothing is wrong', () => {
     const clean = markup(stateOf());

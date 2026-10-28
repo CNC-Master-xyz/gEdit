@@ -417,6 +417,23 @@ export function fileText(original: string, file: Record<string, unknown>): strin
 // Typing into the list-like fields
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * The longest block the dialect takes (`syntax.maxLineLength`): the draft's own value, else the
+ * profile as it resolves; null where none is set (§6.10 rule 9, the one-click ruler).
+ */
+export function longestBlock(file: Record<string, unknown>, preview: Profile | null): number | null {
+  const own = isNode(file.syntax) ? file.syntax.maxLineLength : undefined;
+  const value = own !== undefined ? own : preview?.syntax?.maxLineLength;
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/** The rulers with `column` added, in order; null when `current` already has it. */
+export function withRuler(current: unknown, column: number): number[] | null {
+  const list = Array.isArray(current) ? current.filter((entry): entry is number => typeof entry === 'number') : [];
+  if (list.includes(column)) return null;
+  return [...list, column].sort((a, b) => a - b);
+}
+
 /** A list as the form shows it: one entry per line. */
 export function listText(value: unknown): string {
   return Array.isArray(value) ? value.map(String).join('\n') : '';

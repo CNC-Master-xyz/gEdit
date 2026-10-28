@@ -29,6 +29,7 @@ export default {
   yes: 'Yes',
   no: 'No',
   listHint: 'One entry per line',
+  rulerAtLongest: 'Ruler at the longest block ({count})',
   weightsHint: 'One per line, for example nc = 1',
   badLine: 'Line {line} cannot be read.',
   addRow: 'Add a row',

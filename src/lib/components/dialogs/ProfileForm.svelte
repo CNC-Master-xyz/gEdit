@@ -60,6 +60,8 @@
     colorsOf,
     describeValue,
     listText,
+    longestBlock,
+    withRuler,
     parseList,
     parseWeights,
     patternAnswer,
@@ -295,6 +297,22 @@
         onblur={() => leaveField(field.path)}
       ></textarea>
       {#if draft?.bad != null}<p class="tester">{t('profileForm.badLine', { line: draft.bad })}</p>{/if}
+      {#if field.path === 'editing.rulers' && !field.readOnly}
+        {@const longest = longestBlock($ms.file, $ms.preview)}
+        {@const withIt = longest === null ? null : withRuler(field.own ?? field.inherited, longest)}
+        {#if longest !== null && withIt !== null}
+          <button
+            type="button"
+            class="link"
+            data-testid="profile-form-ruler-longest"
+            data-column={longest}
+            onclick={() => {
+              model.set(field.path, withIt);
+              leaveField(field.path);
+            }}>{t('profileForm.rulerAtLongest', { count: longest })}</button
+          >
+        {/if}
+      {/if}
       {#if field.kind === 'pattern-list' && Array.isArray(field.own)}
         {#each field.own as entry, k (k)}
           {@const answer = typeof entry === 'string' ? patternAnswer(entry, PATTERN_GROUPS[field.path]) : null}
