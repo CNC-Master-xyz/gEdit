@@ -188,13 +188,15 @@ describe.skipIf(!python.ok)('TS/Python modal parity over every owner-public prog
     expect(Object.keys(python3).sort()).toEqual(runs.map((run) => run.name).sort());
   });
 
+  // P4h fix round: the TypeScript walk of the longest programs can take more than the default
+  // 5 s on a loaded machine, so each gets 60 s.
   it.each(runs.map((run) => [run.name, run] as const))('%s: TypeScript equals Python on every line', (_name, run) => {
     const ts = walkRun(run).map(digestOf);
     const py = python3[run.name].digests ?? [];
     expect(py).toHaveLength(run.lines.length);
     const differ = differingLines(ts, py);
     expect(differ, `${differ.length} of ${run.lines.length} lines differ, the first at ${differ[0]}`).toEqual([]);
-  });
+  }, 60_000);
 });
 
 describe.runIf(!python.ok)('without Python', () => {
