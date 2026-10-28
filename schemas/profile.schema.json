@@ -537,7 +537,7 @@
         },
         "extraAxisNames": {
           "title": "Extra axis names",
-          "description": "Axis names of more than one letter read with the value packed behind them, for example AA in AA90. Letters only, 2 to 8 of them, at most 16 names. Usually set on the machine page, not here.",
+          "description": "Axis names of more than one letter that the machine builder set up, such as AA (usually set on the machine page, not here). A Siemens control writes them with an equals sign (AA=90); some machines also take AA90. gEdit then reads both as a move of that axis, and Translate, Rotate and Mirror leave that axis as written. On a standard Siemens control AA90 alone is the name of a program, so list a name only if your machine reads it as an axis.",
           "type": "array",
           "maxItems": 16,
           "uniqueItems": true,

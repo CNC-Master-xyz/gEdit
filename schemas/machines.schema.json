@@ -7,8 +7,7 @@
   "properties": {
     "$schema": {
       "title": "Schema",
-      "description": "The address of this description, so that an editor can check the file while you type. gEdit does not read it.",
-      "type": "string"
+      "description": "The address of this description, so that an editor can check the file while you type. gEdit does not read it."
     },
     "$version": {
       "title": "File format version",
@@ -143,7 +142,7 @@
         },
         "extraAxes": {
           "title": "Extra axes",
-          "description": "Axes the machine builder named with more than one letter, for example AA or QQ, so that AA90 is read as an axis word. At most 16. Only for profiles that offer extra axes.",
+          "description": "Axis names of more than one letter that the machine builder set up, such as AA. A Siemens control writes them with an equals sign (AA=90); some machines also take AA90. gEdit then reads both as a move of that axis, and Translate, Rotate and Mirror leave that axis as written. On a standard Siemens control AA90 alone is the name of a program, so list a name only if your machine reads it as an axis. At most 16. Only for profiles that offer extra axes.",
           "type": "array",
           "maxItems": 16,
           "items": {
@@ -152,7 +151,7 @@
         },
         "builderCodes": {
           "title": "Machine builder codes",
-          "description": "Codes the machine builder added, written as a list of codes and ranges, for example \"G810-G829, G850\". gEdit then names such a code as the builder's instead of an unknown code. At most 1000 characters; only for profiles that offer it, and only with the letters the profile names.",
+          "description": "Codes the machine builder added, written as a list of codes and ranges, for example \"G810-G829\". gEdit then names such a code as the builder's instead of an unknown code. At most 1000 characters; only for profiles that offer it, and only with the letters the profile names.",
           "type": "string",
           "pattern": "\\d",
           "maxLength": 1000
@@ -214,7 +213,7 @@
         "incrementInch": {
           "$ref": "#/$defs/positiveDecimal",
           "title": "Increment in inch",
-          "description": "The same for an inch program, in inch, for example \"0.0001\". Left out: a tenth of the metric increment."
+          "description": "The same for an inch program, in inch, for example \"0.0001\". Left out: a tenth of the metric increment, which is right for lengths; a feed should name its inch step (Fanuc: a hundredth of the metric step, Okuma: a tenth)."
         },
         "incrementDeg": {
           "$ref": "#/$defs/positiveDecimal",
@@ -224,7 +223,7 @@
         "incrementSec": {
           "$ref": "#/$defs/positiveDecimal",
           "title": "Increment in seconds",
-          "description": "The smallest step of a dwell time, in seconds. Left out: as the angle increment."
+          "description": "The smallest step of a dwell time, in seconds. Left out: the same digits as the metric increment (incrementMm)."
         },
         "classes": {
           "title": "Other kinds of number",

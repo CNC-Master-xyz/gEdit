@@ -10,8 +10,7 @@
   "properties": {
     "$schema": {
       "title": "Schema",
-      "description": "The address of this description, so that an editor can check the file while you type. gEdit does not read it.",
-      "type": "string"
+      "description": "The address of this description, so that an editor can check the file while you type. gEdit does not read it."
     },
     "dialect": {
       "title": "Database id",
@@ -718,7 +717,7 @@
         },
         "unit": {
           "title": "How the value is read",
-          "description": "Where the value is read differently from its address: \"length\", \"angle\", \"feedPerMin\", \"feedPerRev\", \"dwell\", \"increment\" (always steps of the least increment, with or without a point), \"count\" (a plain number nothing converts, such as a repeat count) or \"feed\" (a feed rate in the feed unit in force; the value is read as without a unit, and Scale feed rates knows it is a feed).",
+          "description": "Where the value is read differently from its address: \"length\", \"angle\", \"feedPerMin\", \"feedPerRev\", \"dwell\", \"increment\" (always steps of the least increment; the control takes no decimal point on such a word, and gEdit reads a point written there as whole units), \"count\" (a plain number nothing converts, such as a repeat count) or \"feed\" (a feed rate in the feed unit in force; the value is read as without a unit, and Scale feed rates knows it is a feed).",
           "enum": [
             "length",
             "angle",

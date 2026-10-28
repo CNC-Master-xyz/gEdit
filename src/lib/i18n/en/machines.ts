@@ -103,7 +103,7 @@ export default {
     /** P4h (§6.10 rule 13; T123): only on a profile that offers it (the Siemens profiles). */
     extraAxes: 'Extra axes',
     extraAxesHelp:
-      'Axis names of more than one letter that this machine reads with the value written straight behind them, such as AA90. Separate the names with commas and write "rotary" after a name that turns in degrees, for example: AA, BB rotary. Leave it empty if the machine has none. The colour of such a word in the editor does not change.',
+      'Axis names of more than one letter that the machine builder set up, such as AA. A Siemens control writes them with an equals sign (AA=90); some machines also take AA90. gEdit then reads both as a move of that axis, and Translate, Rotate and Mirror leave that axis as written. On a standard Siemens control AA90 alone is the name of a program, so list a name only if your machine reads it as an axis. Separate the names with commas and write "rotary" after a name that turns in degrees, for example: AA, BB rotary. Leave it empty if the machine has none. The colour of such a word in the editor does not change.',
     /** P4h (§6.10 rule 14; T123). `{example}` is data from the profile (`G810-G829`). */
     builderCodes: 'Machine builder codes',
     builderCodesHelp:

@@ -334,6 +334,27 @@ describe('schemas/machines.schema.json (P4.39b)', () => {
     expect(machinesSchema.$id).toBe('https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/machines.schema.json');
   });
 
+  it('takes a $schema member of any JSON type, as the file reader does (CODE-10)', () => {
+    for (const odd of [5, null, true, ['x'], { a: 1 }]) {
+      const file = { $schema: odd, machines: [], defaults: {} };
+      expect(parseMachinesFile(file).error).toBeNull();
+      expect(parseMachinesFile(file).unknown).toEqual({ $schema: odd });
+      expect(schemaAccepts(file), JSON.stringify(odd)).toBe(true);
+    }
+  });
+
+  it('describes the extra axes as the control reads them, and the builder, dwell and inch steps truthfully (NC-1, NC-4, NC-5, NC-9)', () => {
+    const text = JSON.stringify(machinesSchema);
+    expect(text).toContain('A Siemens control writes them with an equals sign (AA=90); some machines also take AA90.');
+    expect(text).toContain('On a standard Siemens control AA90 alone is the name of a program');
+    expect(text).not.toContain('so that AA90 is read as an axis word');
+    expect(text).toContain('Left out: the same digits as the metric increment (incrementMm).');
+    expect(text).not.toContain('Left out: as the angle increment.');
+    expect(text).toContain('\\"G810-G829\\"');
+    expect(text).not.toContain('G850');
+    expect(text).toContain('a feed should name its inch step (Fanuc: a hundredth of the metric step, Okuma: a tenth)');
+  });
+
   it('compiles with the test validator, every keyword in the allowed list (rule 3)', () => {
     expect(typeof validate).toBe('function');
     const used = new Set(subschemas(ROOT).flatMap((s) => Object.keys(s)));

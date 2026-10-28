@@ -759,6 +759,15 @@ describe('schemas/profile.schema.json (P4.39a)', () => {
     expect(profileSchema.$id).toBe('https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json');
   });
 
+  it('takes a $schema member of any JSON type, and describes the extra axes as the control reads them (NC-1, CODE-10)', () => {
+    const raw = BUILTIN_PROFILE_SOURCES[0].raw as Json;
+    for (const odd of [5, null, ['x']]) expect(schemaProblems({ ...raw, $schema: odd }), JSON.stringify(odd)).toEqual([]);
+    const text = JSON.stringify(profileSchema);
+    expect(text).toContain('A Siemens control writes them with an equals sign (AA=90); some machines also take AA90.');
+    expect(text).toContain('so list a name only if your machine reads it as an axis');
+    expect(text).not.toContain('read with the value packed behind them');
+  });
+
   it('compiles with the test validator (rule 4), every keyword in the allowed list (rule 3)', () => {
     expect(typeof validateBySchema).toBe('function');
     const used = new Set<string>();

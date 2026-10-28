@@ -879,6 +879,14 @@ describe('extra axes and builder codes (P4.43b)', () => {
     expect(extraErrorsOf(addDraft('fanuc-gcode', deps), deps)).toEqual({});
   });
 
+  it('tells the programmer how a Siemens control writes such an axis, and that AA90 alone is a program name (NC-1)', () => {
+    const help = fieldsFor(addDraft('sinumerik', deps), deps).find((field) => field.id === FIELD_EXTRA_AXES)?.help ?? '';
+    expect(help).toContain('A Siemens control writes them with an equals sign (AA=90); some machines also take AA90.');
+    expect(help).toContain('Translate, Rotate and Mirror leave that axis as written.');
+    expect(help).toContain('On a standard Siemens control AA90 alone is the name of a program, so list a name only if your machine reads it as an axis.');
+    expect(help).not.toContain('reads with the value written straight behind them');
+  });
+
   it('shows a name the profile already reads and a code gEdit knows at their fields', () => {
     const errors = extraErrorsOf(siemens({ [FIELD_EXTRA_AXES]: 'AA, SF rotary', [FIELD_BUILDER_CODES]: 'G17' }), deps);
     expect(errors[FIELD_EXTRA_AXES]).toEqual({ key: 'machines.extra.problem', params: { message: '"SF" is already a rotary axis of this profile' } });
