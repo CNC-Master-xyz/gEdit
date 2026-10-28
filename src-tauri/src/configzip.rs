@@ -271,7 +271,37 @@ pub enum Classified {
 
 /// A script or group name inside a zip: a plain segment (the rule of `scripts/discovery.rs`).
 fn script_segment_ok(segment: &str) -> bool {
-    crate::scripts::discovery::is_safe_segment(segment)
+    crate::scripts::discovery::is_safe_segment(segment) && !segment.chars().any(is_format_char)
+}
+
+/// The characters that change how a name looks or reads without showing: the soft hyphen, the
+/// Arabic letter mark, the Mongolian vowel separator, zero-width and direction marks
+/// (U+200B..U+200F), line and paragraph separators and the bidi embeddings and overrides
+/// (U+2028..U+202E), the invisible operators (U+2060..U+2064), the bidi isolates and the
+/// deprecated format characters (U+2066..U+206F), the byte order mark and the interlinear
+/// annotation marks. `Cc` is already refused for the whole archive by [`check_shape`]; these
+/// are `Cf`/`Zl`/`Zp`, and a script or group named with one is ignored (`name-not-allowed`)
+/// like any name the user-file rules refuse; the archive is not refused for it.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+    )
+}
+
+/// The folder name of the shared library, `gedit_nc`: `import gedit_nc` would find a folder of
+/// that name in the scripts folder, so no script group may be called so.
+fn is_library_group(group: &str) -> bool {
+    let stem = crate::scripts::discovery::LIBRARY_FILE_NAME.trim_end_matches(".py");
+    group.eq_ignore_ascii_case(stem)
 }
 
 /// A script file name: `<stem>.py`, a plain segment, not the shared library's name.
@@ -295,6 +325,7 @@ fn json_file_ok(name: &str) -> bool {
 fn script_member(rest: &[&str]) -> Result<(Option<String>, String), &'static str> {
     match rest {
         [name] => script_file_ok(name).map(|()| (None, (*name).to_string())),
+        [group, _] if is_library_group(group) => Err("reserved-name"),
         [group, name] if script_segment_ok(group) && !group.starts_with('.') => {
             script_file_ok(name).map(|()| (Some((*group).to_string()), (*name).to_string()))
         }
@@ -567,7 +598,7 @@ pub fn inventory(bytes: &[u8]) -> Result<Inventory, Vec<Refusal>> {
             refusals.push(Refusal::new(&name, reason));
             continue;
         }
-        if !seen.insert(name.trim_end_matches('/').to_lowercase()) {
+        if !seen.insert(duplicate_key(&name)) {
             refusals.push(Refusal::new(&name, RefusalReason::Duplicate));
             continue;
         }
@@ -650,7 +681,9 @@ pub fn read_entry(
 pub fn fingerprint(archive: &[u8]) -> String {
     use std::hash::BuildHasher;
     static KEY: std::sync::OnceLock<std::hash::RandomState> = std::sync::OnceLock::new();
-    let hash = KEY.get_or_init(std::hash::RandomState::new).hash_one(archive);
+    let hash = KEY
+        .get_or_init(std::hash::RandomState::new)
+        .hash_one(archive);
     format!("{hash:016x}")
 }
 
@@ -859,6 +892,13 @@ fn join_segments(base: &Path, segments: &[&str]) -> PathBuf {
         path.push(segment);
     }
     path
+}
+
+/// What two entry names are the same under: the name without a closing `/`, case folded (a file
+/// system that folds case keeps one of two such files). The inventory refuses an archive holding
+/// two such names; the export uses the same key to leave the second out.
+fn duplicate_key(name: &str) -> String {
+    name.trim_end_matches('/').to_lowercase()
 }
 
 /// The bytes a JSON object is written as (the shape `config::save_json_object` writes).
@@ -1677,6 +1717,8 @@ struct Collector {
     /// headers, so the archive never passes [`MAX_ARCHIVE_BYTES`].
     estimate: u64,
     omitted: Vec<String>,
+    /// The [`duplicate_key`] of every entry admitted so far.
+    seen: HashSet<String>,
 }
 
 /// What the manifest and the headers may take of the 16 MiB.
@@ -1701,7 +1743,13 @@ impl Collector {
             return None;
         }
         match classify(name) {
-            Classified::Member(member) => Some(member),
+            Classified::Member(member) => {
+                if !self.seen.insert(duplicate_key(name)) {
+                    self.skip(name, "duplicate");
+                    return None;
+                }
+                Some(member)
+            }
             Classified::Ignored("system-file") => None,
             Classified::Ignored(reason) => {
                 self.skip(name, reason);
@@ -2514,6 +2562,60 @@ mod tests {
         ] {
             assert_eq!(classify(name), Classified::Ignored(reason), "{name}");
         }
+    }
+
+    #[test]
+    fn the_library_name_is_reserved_as_a_script_group_too() {
+        for name in [
+            "scripts/gedit_nc/__init__.py",
+            "scripts/gedit_nc/x.py",
+            "scripts/GEDIT_NC/x.py",
+            "packages/p/scripts/gedit_nc/__init__.py",
+        ] {
+            assert_eq!(
+                classify(name),
+                Classified::Ignored("reserved-name"),
+                "{name}"
+            );
+        }
+        // Helper modules of the user's own stay members, and export keeps them.
+        for name in [
+            "scripts/_common.py",
+            "scripts/lib/__init__.py",
+            "scripts/gedit_nc_tools/x.py",
+            "packages/p/scripts/lib/__init__.py",
+        ] {
+            assert!(matches!(classify(name), Classified::Member(_)), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_name_with_a_bidi_zero_width_or_format_character_is_ignored_and_does_not_refuse_the_archive(
+    ) {
+        for name in [
+            "scripts/evil\u{202E}py.py",
+            "scripts/a\u{200B}b.py",
+            "scripts/\u{FEFF}x.py",
+            "scripts/grp\u{2066}/x.py",
+            "scripts/ok/x\u{00AD}.py",
+            "packages/p/scripts/a\u{2028}b.py",
+            "packages/p/scripts/g\u{061C}/x.py",
+        ] {
+            assert_eq!(
+                classify(name),
+                Classified::Ignored("name-not-allowed"),
+                "{name:?}"
+            );
+        }
+        let bytes = archive(&[
+            (MANIFEST_NAME, b"{}"),
+            ("scripts/ok.py", b"x = 1\n"),
+            ("scripts/evil\u{202E}py.py", b"x = 1\n"),
+            ("scripts/a\u{200B}b.py", b"x = 1\n"),
+        ]);
+        let inv = inventory(&bytes).unwrap();
+        assert_eq!(inv.members().count(), 2, "the manifest and ok.py");
+        assert_eq!(inv.ignored().len(), 2);
     }
 
     #[test]
@@ -3952,7 +4054,11 @@ mod tests {
         let dir = dirs.import_backups_dir();
         fs::create_dir_all(&dir).unwrap();
         for i in 0..MAX_IMPORT_BACKUPS {
-            fs::write(dir.join(format!("before-import-20300101-0000{i:02}.zip")), b"x").unwrap();
+            fs::write(
+                dir.join(format!("before-import-20300101-0000{i:02}.zip")),
+                b"x",
+            )
+            .unwrap();
         }
     }
 
@@ -3967,7 +4073,10 @@ mod tests {
         let result = apply(&dirs, &bytes, &p.fingerprint, &all_groups(&p), true).unwrap();
         let name = result.backup.unwrap();
         let left = backups(&dirs);
-        assert!(left.contains(&name), "the undo of this import is gone: {left:?}");
+        assert!(
+            left.contains(&name),
+            "the undo of this import is gone: {left:?}"
+        );
         assert_eq!(left.len(), MAX_IMPORT_BACKUPS);
         let _ = fs::remove_dir_all(&root);
 
@@ -4182,6 +4291,62 @@ mod tests {
         assert!(get(&to, "state.json").is_none());
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&root2);
+    }
+
+    #[test]
+    fn export_skips_a_second_name_that_is_equal_once_case_is_folded() {
+        let mut c = Collector::default();
+        assert!(c.admits("scripts/Mill.py").is_some());
+        assert!(c.admits("scripts/mill.py").is_none());
+        assert!(c.admits("scripts/other.py").is_some());
+        assert_eq!(c.skipped.len(), 1);
+        assert_eq!(
+            (c.skipped[0].path.as_str(), c.skipped[0].reason.as_str()),
+            ("scripts/mill.py", "duplicate")
+        );
+        // The same key as the import's: what export lets through the import accepts.
+        let bytes = archive(&[("scripts/Mill.py", b"x\n"), ("scripts/mill.py", b"x\n")]);
+        assert_eq!(
+            refused(&bytes),
+            vec![("scripts/mill.py".into(), RefusalReason::Duplicate)]
+        );
+    }
+
+    #[test]
+    fn export_skips_a_script_the_import_would_ignore_for_its_name() {
+        let (root, dirs) = scratch("export-format");
+        put(&dirs, "scripts/ok.py", b"x = 1\n");
+        put(&dirs, "scripts/evil\u{202E}py.py", b"x = 1\n");
+        put(&dirs, "scripts/gedit_nc/__init__.py", b"x = 1\n");
+        put(&dirs, "scripts/lib/__init__.py", b"x = 1\n");
+        let (result, bytes) = exported(&dirs, &root);
+        let mut skipped: Vec<(String, String)> = result
+            .skipped
+            .iter()
+            .map(|s| (s.path.clone(), s.reason.clone()))
+            .collect();
+        skipped.sort();
+        assert_eq!(
+            skipped,
+            vec![
+                (
+                    "scripts/evil\u{202E}py.py".to_string(),
+                    "name-not-allowed".to_string()
+                ),
+                (
+                    "scripts/gedit_nc/__init__.py".to_string(),
+                    "reserved-name".to_string()
+                ),
+            ]
+        );
+        let inv = inventory(&bytes).unwrap();
+        let mut names: Vec<&str> = inv.entries.iter().map(|e| e.name.as_str()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![MANIFEST_NAME, "scripts/lib/__init__.py", "scripts/ok.py"]
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
