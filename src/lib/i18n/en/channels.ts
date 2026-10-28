@@ -218,7 +218,6 @@ export default {
       'This makes one new document for each channel. To bring changes made in them back into this program, use Merge Channels Back while this program is open.',
     ok: 'Split',
     done: 'Made {count} documents. Merge Channels Back brings your changes in them back into the program.',
-    name: '{title} — {channel}',
   },
 
   /** `channels.mergeBack` (P4.23, `core/channels/merge.ts`): the answers in the status bar. `{channel}` is the machine's own name. */

@@ -1154,7 +1154,10 @@ export function createCompareService(deps: CompareDeps): CompareController {
       cutOriginal = cutOne(channelSet(original.docId), linesOf(deps.textOf(original.docId)), other?.title ?? '');
     } else if (source.kind === 'saved') {
       const lines = linesOf(original.text);
-      cutOriginal = cutOne(channelSet(doc.id, lines), lines, fileName(doc.path ?? doc.title));
+      // A program of one file per channel has no sections to cut by (`setOfLines` reads only
+      // `single-file`): its saved version is the same channel's file, the whole text (P4f CODE-2).
+      const savedSet = modifiedSet.layout === 'multi-file' ? modifiedSet : channelSet(doc.id, lines);
+      cutOriginal = cutOne(savedSet, lines, fileName(doc.path ?? doc.title));
     } else {
       return fail('channelScope.compare.fileSide');
     }

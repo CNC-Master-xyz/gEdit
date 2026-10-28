@@ -556,9 +556,23 @@ function testOnDocument(): void {
 
 let splitConfirmed = false;
 
-/** The name a split gives a channel document when the machine has no file name for it (N1). */
-export function usualChannelName(stem: string, ext: string, channelName: string): string {
-  return `${t('channels.split.name', { title: stem, channel: channelName })}${ext}`;
+/**
+ * A text made fit for one file name: the characters a file name cannot hold (and `/` and `\`,
+ * which would point into another folder) become `_` (P4f fix B, CODE-4).
+ */
+export function plainFileText(text: string): string {
+  return text.replace(/[/\\:*?"<>|\u0000-\u001f]/g, '_');
+}
+
+/**
+ * The name a split gives a channel document when the machine has no file name for it (N1, owner
+ * decision of 2026-10-28): `{stem}_{CHANNEL ID}{ext}`, `PART_1.MPF` or `PART_A.MIN`. No blank
+ * and no dash, which neither a Fanuc nor a Sinumerik program name allows. The id is the machine's
+ * own short id (`[a-z0-9_-]`), never its free-text name; whatever else reaches the name is
+ * made plain, so the name can never point into another folder.
+ */
+export function usualChannelName(stem: string, ext: string, channelId: string): string {
+  return `${plainFileText(stem)}_${plainFileText(channelId).toUpperCase()}${plainFileText(ext)}`;
 }
 
 async function splitToDocuments(): Promise<void> {
@@ -596,7 +610,7 @@ async function splitToDocuments(): Promise<void> {
   const made: DocId[] = [];
   for (const { channel, text } of texts) {
     const next = files.newUntitled({ profileId: doc.profileId, text, activate: false });
-    docs.update(next, { proposedPath: usualChannelName(stem, ext, channel.name) });
+    docs.update(next, { proposedPath: usualChannelName(stem, ext, channel.id) });
     if (machineId !== null) machines.setForDoc(next, machineId);
     made.push(next);
   }
@@ -758,7 +772,6 @@ export function proposedNames(
   source: { title: string; path: string | null },
   record: SplitRecord,
   params: ChannelParams | null,
-  nameOf: (channelId: string) => string,
 ): { channelId: string; docId: DocId; name: string; usual: boolean; template: boolean }[] {
   const stem = stemOf(source.title);
   const ext = extensionOf(source.title);
@@ -767,7 +780,7 @@ export function proposedNames(
   return record.channels.map((c) => {
     const ref = refs.find((r) => r.id === c.channelId);
     const given = ref !== undefined && params !== null ? channelFileName(stem, ref, params) : null;
-    const name = given ?? usualChannelName(stem, ext, nameOf(c.channelId));
+    const name = given ?? usualChannelName(stem, ext, c.channelId);
     const template = params !== null && Array.isArray(params.list) && (typeof params.fileNameFor === 'string' || typeof params.list.find((x) => x?.id === c.channelId)?.fileName === 'string');
     return { channelId: c.channelId, docId: c.docId, name: place === null ? name : `${place.folder}${place.sep}${name}`, usual: given === null, template };
   });
@@ -794,7 +807,7 @@ export async function saveChannelFiles(deps: SaveFilesDeps, activeId: DocId): Pr
   }
   const params = deps.params(record.sourceId);
   const names = new Map((params?.list ?? []).map((c) => [c.id, c.name]));
-  const open = proposedNames(source, record, params, (id) => names.get(id) ?? id).filter((p) => deps.docs.get(p.docId) !== undefined);
+  const open = proposedNames(source, record, params).filter((p) => deps.docs.get(p.docId) !== undefined);
   if (open.length === 0) {
     deps.show(t('channelScope.files.nothingOpen'), true);
     return;
@@ -818,6 +831,8 @@ export async function saveChannelFiles(deps: SaveFilesDeps, activeId: DocId): Pr
   const parts = [t('channelScope.files.saved', { count: saved, total: open.length })];
   const usual = open.filter((p) => p.usual && p.template).map((p) => names.get(p.channelId) ?? p.channelId);
   if (usual.length > 0) parts.push(t('channelScope.files.usualName', { channels: usual.join(', ') }));
+  // Q4 (2026-10-28): every source of a split is a one-file program (Okuma G13/G14, a Sinumerik archive).
+  if (saved > 0) parts.push(t('channelScope.files.copies'));
   deps.show(parts.join(' '));
 }
 

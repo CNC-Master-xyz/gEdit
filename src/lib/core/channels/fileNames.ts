@@ -7,7 +7,8 @@
 //  N1. The name comes from the machine's own rules, in the order `siblingNames` uses them: the
 //      channel's `list[].fileName` template, then the shared `fileNameFor`, each filled with
 //      `fillTemplate(template, stem, channel.id)`. With neither, the name is the split's own
-//      default (`channels.split.name`: the title, then the channel's name). A name is never
+//      default (`usualChannelName`, contrib/channels.ts: `{stem}_{channel id}{ext}`, `PART_1.MPF`;
+//      characters a file name cannot hold become `_`). A name is never
 //      derived by replacing a capture of the `fileName` pattern: with no existing file there is
 //      nothing to replace in.
 //  N2. `stem` is the source document's title without its last extension. The extension of a

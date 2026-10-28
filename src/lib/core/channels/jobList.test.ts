@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { cpOf } from '../../../../tests/unit/helpers/profiles';
 import { hasKey } from '$lib/i18n';
 import { CHANNEL_CAPS, type ChannelParams } from './types';
-import { jobListChannel, jobListNames, MAX_JOB_ENTRIES, MAX_JOB_LINES, programKey, readJobList, startsLikeJobList } from './jobList';
+import { jobListChannel, jobListNames, MAX_JOB_ENTRIES, MAX_JOB_LINES, programKey, programKind, readJobList, startsLikeJobList } from './jobList';
 import { documentChannel } from './siblings';
 import { resolveDocument } from './marks';
 
@@ -89,6 +89,22 @@ describe('job list', () => {
     expect(jobListChannel(job, 'shaft2.mpf', two)).toEqual({ channel: expect.objectContaining({ id: '2' }), line: 4 });
     expect(jobListChannel(job, '_N_SHAFT1_MPF', two)).toEqual({ channel: expect.objectContaining({ id: '1' }), line: 3 });
     expect(jobListChannel(job, 'SHAFT3.MPF', two)).toBeNull();
+  });
+
+  it('J4 (NC-10b): SELECT selects a main program, so an entry never gives a channel to a .SPF file', () => {
+    const job = readJobList(['SELECT PART12 CH=1', 'SELECT PART13.MPF CH=2', 'SELECT _N_PART14_MPF CH=1']);
+    expect(jobListChannel(job, 'PART12.MPF', two)).toEqual({ channel: expect.objectContaining({ id: '1' }), line: 1 });
+    expect(jobListChannel(job, 'PART12', two)).toEqual({ channel: expect.objectContaining({ id: '1' }), line: 1 });
+    expect(jobListChannel(job, 'PART12.SPF', two)).toBeNull();
+    expect(jobListChannel(job, 'part13.spf', two)).toBeNull();
+    expect(jobListChannel(job, '_N_PART14_SPF', two)).toBeNull();
+    expect(jobListChannel(job, '_N_PART14_MPF', two)).toEqual({ channel: expect.objectContaining({ id: '1' }), line: 3 });
+    // The other way round: an .SPF entry names a subprogram, not the main program of that name.
+    const sub = readJobList(['SELECT PART12.SPF CH=1']);
+    expect(jobListChannel(sub, 'PART12.MPF', two)).toBeNull();
+    expect(jobListChannel(sub, 'PART12.SPF', two)).toEqual({ channel: expect.objectContaining({ id: '1' }), line: 1 });
+    expect(programKind('/a/PART12.spf')).toBe('sub');
+    expect(programKind('PART12')).toBe('main');
   });
 
   it('J4: a base name that two entries of different channels explain answers ambiguous', () => {
