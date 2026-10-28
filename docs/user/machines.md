@@ -300,6 +300,9 @@ that list has to be believed; it says who claimed it.
 
 The item is not shown at all for a dialect that has no machine parameters.
 
+A program saved in one of a machine's [folders](#folders-of-a-machine) uses that machine when
+you have not chosen one for the file.
+
 **The choice is remembered for that file.** Pick a machine for `WELLE.NC` and it is there
 again the next time you open `WELLE.NC`, this afternoon or next month — **None (dialect
 defaults)** included, which is why it is a choice of its own rather than the absence of
@@ -325,6 +328,68 @@ case the program is the right one and the machine is not; it stays for about ten
 Changing the machine through **Other machines…** changes the dialect and the machine in one
 step, so you see only the final message (*now uses machine … and the … dialect*), not a
 "not for this profile" notice first.
+
+## Folders of a machine
+
+Many shops keep one folder for each machine, usually the DNC folder the program is sent from.
+You can tell gEdit which folders belong to a machine, and a program saved there then uses that
+machine **without you picking it**.
+
+On the Machines page (`Settings ▸ Machines`), a machine has a **Folders** section. **Choose folder…** opens the
+folder dialog; or type the folder in the field and press **Add folder**. Each folder has
+**Include subfolders** (on by default) and **Remove**. A folder is written as a full path: a
+drive letter (`D:\DNC\Lathe1`), a network share (`\\server\share\Lathe1`) or a path from the
+root (`/dnc/lathe1`). Not a relative path, and not with `..`. A machine has at most 16
+folders, each at most 1,024 characters. Each change is saved at once.
+
+Where this sits in the order of choice, from the strongest:
+
+1. **The machine you picked for the document**, including *None*. This is the one remembered
+   for the file.
+2. **The machine of its folder.** The status bar's hover says *Machine chosen by its folder:
+   `\\dnc\lathe1`*.
+3. The default machine of the dialect.
+4. None.
+
+A program that is not saved yet has no folder, and no folder rule applies to it. A machine
+that does not fit the program's dialect is not applied; gEdit says so once and goes on to the
+default.
+
+**The longest folder wins.** If `D:\DNC` belongs to *Mill 1* and `D:\DNC\Lathe1` to *Lathe 1*,
+a program in `D:\DNC\Lathe1\old` uses *Lathe 1* and one in `D:\DNC\Mill1` uses *Mill 1*. A
+folder with *Include subfolders* off holds only the files directly in it.
+
+**Two machines on one folder give none.** If the longest folder that holds a program is
+claimed by two machines, gEdit uses neither. It does not guess. The program takes the
+dialect's default, the hover names both machines (*The folder … belongs to more than one
+machine (…); the profile's default machine is used.*), and the Machines page marks the
+folder *Same folder on two machines* where you made it. Take it off one of them.
+
+**gEdit compares the folder as text and does not look at the disk.**
+
+- The letters of a Windows drive or a share name are compared without regard to capitals; on
+  Windows and macOS the rest of the path is too; on Linux it is not. `/` and `\` are the same.
+- The two ways of writing a letter with an accent (macOS writes "ä" in file names as `a`
+  and a dot, a Windows or Linux keyboard writes the single letter) are the same folder.
+- A **link** is not followed. A program opened through another spelling of the same folder
+  (a mapped drive `Z:\DNC` against the share `\\server\dnc`, a SUBST letter, a link) does not match
+  the other spelling: **add each spelling you use**. A program you open from the system
+  (a double-click) keeps the spelling it was written with, so `Z:\DNC\part.nc` matches a folder
+  written `Z:\DNC`.
+- A folder on a share that does not answer costs nothing here, because gEdit never opens it
+  for this.
+
+**Duplicate… does not copy the folders.** A folder belongs to one machine, and a
+copy with the same folders would put two machines on one folder.
+
+If the folder list in `machines.json` cannot be used (you edited it by hand and the shape is
+wrong), only that machine's folders are off: the page shows *The folder list in machines.json
+cannot be used, so this machine has no folders*, with **Start the list again**. The rest of
+the machine and its file are kept.
+
+Choosing a folder with the dialog also lets gEdit read that folder until you quit, since the
+dialog is the way gEdit is told a folder may be used. Typing a path gives gEdit nothing: the
+rule only compares text.
 
 ## Reading the settings off your machine
 
@@ -701,6 +766,7 @@ with no channel settings, or with *No channels*, reads every program as one stre
 | **Stops and ends count as waits** | A tick, off by default. See [stops and ends](channels.md#stops-and-ends) |
 | **The channels** | A short name, a name for reports, and **Also written as** for the other spellings (`G13`). Two to 32 channels, in the order they are shown. For one program per channel, also the file name of each. **Add a path**, and the arrows and **Remove** on each row |
 | **Wait codes** | One block for each kind of wait: its name, **Wait codes** (a list like `M900-M999, M300` with a live preview), *What is checked*, *Paths named by* and *A wait without a P word means*, and a tick *These codes make a path wait* (untick it for a code that only sets a flag; it is shown but never checked). See [the wait codes](channels.md#the-wait-codes) and [what kind of wait it is](channels.md#what-kind-of-wait-it-is) |
+| **File name of the first path** (Advanced, one program per channel) | For a control that writes the program of the first path **without** an extension, `SHAFT`, while the others have one (`SHAFT.P-2`). A pattern with `(?<stem>…)` and no `(?<channel>…)`, such as `^(?<stem>[^.]+)$`. Empty: no file is taken as the first path by this rule. Mark it *verify* until you have seen your own machine write it; a program in a folder without an extension then reads as path 1. See [when the names do not tell](channels.md#when-the-names-do-not-tell) |
 | **Advanced** | Closed unless the settings need it. The patterns that find a section start and end, the file names, a marker in the program, and, per rule, a start and digits or a pattern, and a pattern for the partners. **Help with patterns** says where [Regular expressions](regex.md) is |
 
 Everything a field needs is said under it in plain words, and a wrong entry is quoted back
