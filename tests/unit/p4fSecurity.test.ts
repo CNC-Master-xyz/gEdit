@@ -155,10 +155,17 @@ describe('the files the system opens (S7)', () => {
     expect(code).toContain('tauri::async_runtime::spawn_blocking(move || handle(&app, &texts, None, refused))');
   });
 
-  it('grants a file only through state::grant_file, after the checks, and nowhere else', () => {
-    expect(code.split('state::grant_file(').length - 1).toBe(1);
-    expect(code.indexOf('check_arguments(args')).toBeLessThan(code.indexOf('state::grant_file('));
-    expect(code).not.toMatch(/allow_directory|allow_file|fs_scope/);
+  // P4f fix R (CODE-1) grants the canonical path and the delivered spelling of each file through
+  // `state::grant_in`, both inside `grant_checked`, which `handle` calls on the checked arguments
+  // only. (The test still named `state::grant_file` and failed at the Wave Y combine.)
+  it('grants a file only through state::grant_in in grant_checked, after the checks, and nowhere else', () => {
+    const grantFn = code.slice(code.indexOf('pub fn grant_checked('), code.indexOf('/// The whole of S7 for one hand-over'));
+    expect(grantFn.split('state::grant_in(').length - 1).toBe(2);
+    expect(code.split('state::grant_in(').length - 1).toBe(2);
+    expect(code.split('grant_checked(').length - 1).toBe(2); // its definition and the one call in `handle`
+    expect(code.indexOf('check_arguments(args')).toBeLessThan(code.indexOf('grant_checked(&app.fs_scope()'));
+    expect(code.split('fs_scope').length - 1).toBe(1);
+    expect(code).not.toMatch(/allow_directory|allow_file|state::grant_file/);
   });
 
   it('sends the webview only the paths and the number refused, in one place', () => {
