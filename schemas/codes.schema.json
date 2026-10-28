@@ -718,7 +718,7 @@
         },
         "unit": {
           "title": "How the value is read",
-          "description": "Where the value is read differently from its address: \"length\", \"angle\", \"feedPerMin\", \"feedPerRev\", \"dwell\", \"increment\" (always steps of the least increment, with or without a point) or \"count\" (a plain number nothing converts, such as a repeat count).",
+          "description": "Where the value is read differently from its address: \"length\", \"angle\", \"feedPerMin\", \"feedPerRev\", \"dwell\", \"increment\" (always steps of the least increment, with or without a point), \"count\" (a plain number nothing converts, such as a repeat count) or \"feed\" (a feed rate in the feed unit in force; the value is read as without a unit, and Scale feed rates knows it is a feed).",
           "enum": [
             "length",
             "angle",
@@ -726,7 +726,8 @@
             "feedPerRev",
             "dwell",
             "increment",
-            "count"
+            "count",
+            "feed"
           ]
         },
         "decimals": {

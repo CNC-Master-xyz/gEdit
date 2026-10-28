@@ -378,6 +378,9 @@ def _declared_unit(codes: "Sequence[Dict[str, Any]]", word: str, cycle_block: Op
     read; with it ``None`` both are, and two different units are the same "cannot tell" as
     above: no class, never the other block's unit. Every other entry is read whole. The twin
     of ``declaredUnit`` in ``numbers.ts``.
+
+    T210: the feed marker ``unit: 'feed'`` declares nothing here: it says the parameter is a
+    feed rate in the unit in force, which is how the word is read without it.
     """
     found = None
     for entry in codes:
@@ -389,7 +392,7 @@ def _declared_unit(codes: "Sequence[Dict[str, Any]]", word: str, cycle_block: Op
             if per_block and param.get("block") is not None and param.get("block") != cycle_block:
                 continue
             param_address = param.get("address")
-            if not isinstance(param_address, str) or param_address.upper() != word or param.get("unit") is None:
+            if not isinstance(param_address, str) or param_address.upper() != word or param.get("unit") in (None, "feed"):
                 continue
             if found is not None and found != param["unit"]:
                 return _CONFLICT

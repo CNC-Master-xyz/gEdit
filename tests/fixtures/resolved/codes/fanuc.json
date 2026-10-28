@@ -114,10 +114,24 @@
     },
     {
       "code": "G1",
-      "description": "Straight move to the target at the active feed.",
+      "description": "Straight move to the target at the active feed. A chamfer (,C) or a corner rounding (,R) written at its end is cut between it and the next move.",
       "group": "motion",
       "label": "Linear feed move",
       "modal": true,
+      "params": [
+        {
+          "address": ",C",
+          "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign",
+          "min": 0,
+          "unit": "length"
+        },
+        {
+          "address": ",R",
+          "label": "Corner rounding between this move and the next: its radius, without sign",
+          "min": 0,
+          "unit": "length"
+        }
+      ],
       "sets": {
         "motion": "feed"
       }
@@ -133,6 +147,18 @@
           "address": "R",
           "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees",
           "lengthAlong": "plane"
+        },
+        {
+          "address": ",C",
+          "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign",
+          "min": 0,
+          "unit": "length"
+        },
+        {
+          "address": ",R",
+          "label": "Corner rounding between this move and the next: its radius, without sign",
+          "min": 0,
+          "unit": "length"
         }
       ],
       "review": "pending",
@@ -153,6 +179,18 @@
           "address": "R",
           "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees",
           "lengthAlong": "plane"
+        },
+        {
+          "address": ",C",
+          "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign",
+          "min": 0,
+          "unit": "length"
+        },
+        {
+          "address": ",R",
+          "label": "Corner rounding between this move and the next: its radius, without sign",
+          "min": 0,
+          "unit": "length"
         }
       ],
       "review": "pending",
@@ -254,7 +292,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -1291,6 +1330,10 @@
           "min": 1
         }
       ],
+      "requires": [
+        "P"
+      ],
+      "review": "pending",
       "wordsAreData": true
     },
     {
@@ -1312,6 +1355,10 @@
           "min": 1
         }
       ],
+      "requires": [
+        "P"
+      ],
+      "review": "pending",
       "wordsAreData": true
     },
     {
@@ -1602,7 +1649,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1652,7 +1700,8 @@
           "label": "Feed from the thread pitch",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -1716,7 +1765,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -1809,7 +1859,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1898,7 +1949,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1988,7 +2040,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2038,7 +2091,8 @@
           "label": "Feed from the thread pitch",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -2102,7 +2156,8 @@
           "label": "Feed from the thread pitch",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -2159,7 +2214,8 @@
           "label": "Feed from the thread pitch",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -2247,7 +2303,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2330,7 +2387,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2387,7 +2445,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "P",
@@ -2449,7 +2508,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2540,7 +2600,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",

@@ -214,7 +214,7 @@ under a Z shift has nothing to change and is not listed.
 | `expression` | a variable or an `=` expression (Okuma `X=V1+2`, Sinumerik `X=R1`); a value function around a plain number is read (M10 review): `Z=AC(3.25)` is an absolute position whatever the distance mode, `Z=IC(2)` an incremental distance (`incremental` on add and subtract, scaled on multiply and divide) |
 | `machine-dependent` | the word has no resolved value (`resolve_value` is `None`), which includes every machine-dependent word while no machine is chosen: "the reading depends on the machine; choose a machine" |
 | `count` | a `count`/`increment` parameter reached through `arcCentres` (`G83 … K3` under multiply) |
-| `fk-point` | (B1 fix NC, NC-03; a **warning**) an absolute point of a Klartext FK contour on a chosen axis (`P1X` … `P3Y`, the centre `CCX`/`CCY`, `P1Z` … `P3Z`): "an absolute point of an FK contour; gEdit does not move it. Check the FK contour" |
+| `fk-point` | (B1 fix NC, NC-03; a **warning**) an absolute point of a Klartext FK contour on a chosen axis (`P1X` … `P3Y`, the centre `CCX`/`CCY`, `PDX`/`PDY`, `P1Z` … `P3Z`) under a scale, or in a block with a word nobody classified (Wave Y, T121: a shift moves them otherwise): "an absolute point of an FK contour; gEdit does not move it. Check the FK contour" |
 | `process-value` | (v1.2.0, NCR-7; a **warning**) the length or radius of a Klartext approach or departure (`APPR`/`DEP` `LEN`, `R`) under a multiply or divide of an axis of the plane: "a size of APPR LN, kept; check the approach fits the scaled contour". The summary counts "approach or departure sizes" |
 
 `incremental` also covers a distance mode that is **not known** (no code set it before the
@@ -348,7 +348,7 @@ and the blocks under it refused (`frame`), a `TRAORI` section judged and a simul
 | `fanuc-polar-g16` | Fanuc mill | (NC-5) +5 to `X`, `Y`: `G16` to `G15` is a frame; `G123` alone is listed once (`unknown-code-note`) |
 | `fanuc-multiply-rule` | Fanuc mill | (CODE-8) multiply 2 on `X`, `Y`, `Z`: a `G91` block and a block before `G90` scaled, `G52` refused (`not-scaled`), the `G4` dwell `X` left (`data`) |
 | `lathe-frames` | Fanuc lathe | (B1 fix NC, NC-02) − 0.5 on `Z`: the blocks under the turret mirror `G68` refused (`frame`), the block after `G69` moved, a `G68.1` rotation stays in force across a `G69` (its blocks refused, `frame`) until `G69.1` |
-| `klartext-fk` | Klartext | (B1 fix NC, NC-03) + 5 on `X`: `FPOL`, `FL`, `APPR`, `L` moved; the FK points `CCX`, `P1X`, `P2X` of `FC`, `FLT`, `FCT` left (`fk-point`, warnings) |
+| `klartext-fk` | Klartext | (B1 fix NC, NC-03; Wave Y, T121) + 5 on `X`: `FPOL`, `FL`, `APPR`, `L` moved, and with every FK word classified the FK points `CCX`, `P1X`, `P2X` of `FC`, `FLT`, `FCT` too |
 | `b4-lathe-cycle-values` | Fanuc lathe, none | (P4a review, NC-16) + 1 on `X` and `R`: the end points of `G74`, `G75`, `G76` and the `G71` contour moved; the relief `R` of `G74`/`G75`, the allowance and the taper `R` of `G76` and the words of `G71` left (`data`); the radius of a `G2` left too (`data`; v1.2.0 NCR-5: a shift never changes an arc radius) |
 | `b4-lathe-cycle-multiply` | Fanuc lathe, none | (P4a review, NC-16) multiply 2 on `X`: both blocks of `G74`, `G75`, `G76` and `G71` refused (`not-scaled`), never scaled in part; the moves and the `G71` contour scaled, `G70` (block numbers only) not listed |
 

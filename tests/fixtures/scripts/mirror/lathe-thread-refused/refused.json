@@ -1,23 +1,17 @@
 {
-  "message": "Nothing was changed: 5 blocks cannot be mirrored for the counter spindle: 2 thread blocks, 2 roughing cycle blocks, 1 turning cycle block. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "message": "Nothing was changed: 4 blocks cannot be mirrored for the counter spindle: 2 thread blocks, 2 roughing cycle blocks. No machine chosen: a word whose reading depends on the machine would refuse the run.",
   "findings": [
     {
       "line": 7,
       "severity": "error",
-      "message": "G71 U2. R0.5: a roughing cycle that works from a contour (its finishing allowance along Z has a direction); gEdit does not mirror it yet.",
+      "message": "G71 U2. R0.5: a roughing cycle that works from a contour (its finishing allowance along Z has a direction): gEdit mirrors G70 to G73 only together with both their blocks and their whole contour, and does not mirror the Okuma LAP.",
       "reason": "roughing-cycle"
     },
     {
       "line": 8,
       "severity": "error",
-      "message": "G71 P10 Q20 U0.4 W0.1 F0.25: a roughing cycle that works from a contour (its finishing allowance along Z has a direction); gEdit does not mirror it yet.",
+      "message": "G71 P10 Q30 U0.4 W0.1 F0.25: a roughing cycle that works from a contour (its finishing allowance along Z has a direction): gEdit mirrors G70 to G73 only together with both their blocks and their whole contour, and does not mirror the Okuma LAP.",
       "reason": "roughing-cycle"
-    },
-    {
-      "line": 12,
-      "severity": "error",
-      "message": "G70 P10 Q20: a turning, grooving or drilling cycle; its parameters are not mirrored, so the cycle would work on the wrong side.",
-      "reason": "lathe-cycle"
     },
     {
       "line": 15,

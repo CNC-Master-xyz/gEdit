@@ -39,7 +39,7 @@
     ],
     "self": "2"
   },
-  "codes": "sinumerik",
+  "codes": "sinumerik-mill",
   "machine": {
     "choice": "none",
     "id": null,
@@ -110,7 +110,7 @@
       "spindle": "S",
       "tool": "T"
     },
-    "codes": "sinumerik",
+    "codes": "sinumerik-mill",
     "compare": {
       "ignoreBlockNumbers": true,
       "ignoreCase": true,

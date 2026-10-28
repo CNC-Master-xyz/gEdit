@@ -220,8 +220,10 @@ incremental twin such as `W`, the Klartext `I` prefix — and every word while t
 mode is not known), variables and expressions, words with no resolved value (every
 machine-dependent word while no machine is chosen), the values of a cycle (NC-16), and
 count parameters reached only through the arc-centre option (`G83 … K3`). An absolute point of a Klartext FK contour
-(`P1X` … `P3Y`, the centre `CCX`/`CCY`) on a chosen axis is left and listed as a warning
-(B1 fix NC, NC-03): gEdit does not move it, so the FK contour has to be checked.
+(`P1X` … `P3Y`, the centre `CCX`/`CCY`, a point beside the contour `PDX`/`PDY`) on a chosen axis
+moves with a shift of that axis when every word of its block is classified (v1.2.0 Wave Y, T121:
+`FK_KEPT`); under a scale, or in a block with a word nobody classified, it is left and listed as
+a warning (B1 fix NC, NC-03), so the FK contour has to be checked.
 
 Selections
 ----------
@@ -309,10 +311,32 @@ WORD_REASONS = ("unreadable", "data", "incremental", "expression", "machine-depe
 #: or scale of their axis leaves them as written and says so instead of moving the contour
 #: only in part without a word.
 FK_POINT_AXES = {
-    "P1X": "X", "P2X": "X", "P3X": "X", "CCX": "X",
-    "P1Y": "Y", "P2Y": "Y", "P3Y": "Y", "CCY": "Y",
+    "P1X": "X", "P2X": "X", "P3X": "X", "CCX": "X", "PDX": "X",
+    "P1Y": "Y", "P2Y": "Y", "P3Y": "Y", "CCY": "Y", "PDY": "Y",
     "P1Z": "Z", "P2Z": "Z", "P3Z": "Z",
 }
+
+#: v1.2.0 Wave Y (T121): every other word an FK block writes, classified from the TNC 640
+#: Klartext manual (2019, free contour programming, p.175-189), none of which a shift changes:
+#: the elements (``FL``, ``FLT``, ``FC``, ``FCT``, ``FPOL`` whose ``X``/``Y`` are axis words,
+#: ``FSELECT`` and its solution number, ``CLSD``), the direction ``DR``, the sizes (``R``,
+#: ``LEN``, ``D`` the distance of a point beside the contour, ``DP`` the distance of a parallel
+#: line, ``CCA``), the angles (``AN``, ``IAN``, read as ``AN`` with its prefix), the polar values
+#: about ``FPOL`` (``PR``, ``PA``, ``IPR``, ``IPA``, ``CCPR``, ``CCPA``, ``ICCPR``, ``ICCPA``), the
+#: incremental centre (``ICCX``, ``ICCY``) and the relative references to an earlier block, written
+#: incremental and naming that block (``RX``, ``RY``, ``RPR``, ``RPA``, ``RAN``, ``PAR``, ``RCCX``,
+#: ``RCCY``, ``RCCPR``, ``RCCPA``). A shift of a chosen axis moves the absolute points of
+#: :data:`FK_POINT_AXES` with it only in a block whose every word is in one of the two tables
+#: (or is an axis word, the feed, an M word or a compensation code): the whole FK contour then
+#: moves with the path. A scale still leaves them as written: the sizes would have to scale too.
+FK_KEPT = frozenset((
+    "FL", "FLT", "FC", "FCT", "FPOL", "FSELECT", "CLSD", "DR",
+    "R", "LEN", "D", "DP", "CCA", "AN",
+    "PR", "PA", "IPR", "IPA", "CCPR", "CCPA", "ICCPR", "ICCPA", "ICCX", "ICCY",
+    "RX", "RY", "RPR", "RPA", "RAN", "PAR", "RCCX", "RCCY", "RCCPR", "RCCPA",
+))
+#: The words besides them an FK block may write.
+FK_OTHER = frozenset(("F", "M", "RL", "RR", "R0"))
 
 #: What the summary calls a count of each reason (singular, plural).
 REASON_TEXT = {
@@ -756,6 +780,21 @@ def code_of(entry: Optional[Dict[str, Any]], fallback: str = "the cycle") -> str
     return code if isinstance(code, str) and code != "" else fallback
 
 
+def is_def_active(entry: Optional[Dict[str, Any]]) -> bool:
+    """T093 (Wave Y): a DEF-active cycle whose parameters the run judges. A cycle entry (`group:
+    'cycle'`) with parameters and no `sets.cycle`: it acts where it is defined and is never
+    called (Klartext cycle 20 CONTOUR DATA). Cycle 14, which has no parameters, stays out."""
+    return isinstance(entry, dict) and entry.get("group") == "cycle" and not sets_of(entry).get("cycle") and bool(params_of(entry))
+
+
+def used_by(entry: Optional[Dict[str, Any]]) -> List[str]:
+    """T093: the cycles that read a DEF-active cycle's values when they are called
+    (`CodeEntry.usedBy`, upper case): the values of cycle 20 are the depth, surface and
+    clearances of the SL cycles 21 to 24."""
+    found = entry.get("usedBy") if isinstance(entry, dict) else None
+    return [str(code).upper() for code in found if isinstance(code, str) and code] if isinstance(found, list) else []
+
+
 # ---------------------------------------------------------------------------
 # One block
 # ---------------------------------------------------------------------------
@@ -896,8 +935,13 @@ class Group:
     ``kind`` says how the cycle runs: ``'modal'`` (a word that stays in force until it is
     cancelled, Fanuc `G81`), ``'single'`` (a one-shot word, a lathe `G71`), ``'call'`` (a call,
     `CYCLE81(…)`, repeated after every position behind `MCALL`), ``'define'`` (a definition
-    and its calls, Klartext), ``'undefined'`` (a call with no reviewed definition) and
-    ``'macro'`` (a modal macro call, `G66`).
+    and its calls, Klartext), ``'undefined'`` (a call with no reviewed definition),
+    ``'macro'`` (a modal macro call, `G66`) and ``'active'`` (T093: a DEF-active cycle whose
+    values other cycles read, Klartext cycle 20).
+
+    ``linked`` (T093): the groups moved together with this one or not at all, both ways: a
+    DEF-active cycle and the definitions that read its values (cycle 20 and the SL cycles 21
+    to 24, with their calls).
     """
 
     def __init__(self, kind: str, entry: Optional[Dict[str, Any]], line: int) -> None:
@@ -905,6 +949,12 @@ class Group:
         self.entry = entry
         self.line = line
         self.members: List[Block] = []
+        self.linked: List["Group"] = []
+
+    def link(self, other: "Group") -> None:
+        if other is not self and other not in self.linked:
+            self.linked.append(other)
+            other.linked.append(self)
 
 
 def joined_code(entry_of: Any, name: str, number: Optional[str]) -> Optional[str]:
@@ -1055,6 +1105,8 @@ class Run:
         # The cycles in force.
         self.iso_group: Optional[Group] = None
         self.defined: Optional[Group] = None
+        #: T093: the DEF-active cycle in force for each cycle that reads it (`usedBy`), by code.
+        self.served: Dict[str, Group] = {}
         self.modal_call = False
         self.mcall: Optional[Group] = None
         self.macro: Optional[Group] = None
@@ -1365,6 +1417,20 @@ class Run:
         if self.macro is not None and positions:
             return self.macro
 
+        # T093: a DEF-active cycle whose values other cycles read (Klartext cycle 20). Its
+        # tool-axis positions move with the run; the definitions that read it, and their calls,
+        # are moved with it or not at all.
+        active_defs = [e for e, _, _ in entries if is_def_active(e)]
+        if active_defs:
+            entry = active_defs[-1]
+            group = self.new_group("active", entry, block.number)
+            for code in used_by(entry):
+                self.served[code] = group
+            defined = self.defined
+            if defined is not None and code_of(defined.entry, "").upper() in used_by(entry):
+                group.link(defined)
+            return group
+
         cycles = [(e, k) for e, k, _ in entries if sets_of(e).get("cycle") in ("start", "define", "call", "call-modal")]
 
         # A definition, known or not, replaces the one before it and ends a modal call.
@@ -1372,6 +1438,9 @@ class Run:
         if defines or block.generic_cycle is not None:
             self.defined = self.new_group("define", defines[-1] if defines else None, block.number)
             self.modal_call = False
+            served = self.served.get(code_of(self.defined.entry, "").upper())
+            if served is not None:
+                self.defined.link(served)
             return self.defined
         calls = [e for e, _ in cycles if sets_of(e).get("cycle") in ("call", "call-modal")]
         if calls:
@@ -1668,6 +1737,10 @@ class Run:
                 geometry.append(outcome)
                 continue
             fk_axis = FK_POINT_AXES.get(address)
+            if fk_axis is not None and fk_axis in setup.chosen and self.params.additive and self.fk_classified(block):
+                # T121: the absolute points of an FK contour move with the shift of their axis.
+                outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis)))
+                continue
             if fk_axis is not None and fk_axis in setup.chosen:
                 written = quote(token.text)
                 outcomes.append(
@@ -2491,7 +2564,7 @@ class Run:
                     literal = gedit_nc.parse_number(arg_text)
                     args.append(Arg("argument %d" % position, arg_text, literal, line, span, None, "call", position))
             return args
-        if group.kind == "define":
+        if group.kind in ("define", "active"):
             # The definition writes its values; a call of it writes positions, not arguments.
             if any(e is entry for e, _, _ in block.entries):
                 return list(block.q_args)
@@ -2509,6 +2582,19 @@ class Run:
     def units(self, state: Dict[str, Any]) -> str:
         value = as_dict(state.get("units")).get("value")
         return value if value in ("mm", "inch") else self.setup.power_on_units
+
+    def fk_classified(self, block: Block) -> bool:
+        """T121: every word of an FK block is one :data:`FK_POINT_AXES` or :data:`FK_KEPT` names,
+        an axis word or one of :data:`FK_OTHER`."""
+        axes = self.setup.axes
+        for token, _ in block.words:
+            address = (token.address or "").upper()
+            if not address:
+                continue  # a bare number: the solution of FSELECT, the block a reference names
+            if address in FK_POINT_AXES or address in FK_KEPT or address in FK_OTHER or address in axes:
+                continue
+            return False
+        return True
 
     def word_outcome(
         self,
@@ -2793,10 +2879,31 @@ class Run:
             )
             block.clear()
 
+    def linked_groups(self) -> List[List[Group]]:
+        """T093: the groups in pieces that move together, each in program order: a group alone,
+        or a DEF-active cycle with the definitions that read it (`Group.linked`)."""
+        seen: set = set()
+        pieces: List[List[Group]] = []
+        for group in self.groups:
+            if id(group) in seen:
+                continue
+            seen.add(id(group))
+            piece = [group]
+            stack = [group]
+            while stack:
+                for other in stack.pop().linked:
+                    if id(other) not in seen:
+                        seen.add(id(other))
+                        piece.append(other)
+                        stack.append(other)
+            pieces.append(piece)
+        return pieces
+
     def settle_groups(self) -> bool:
         changed = False
-        for group in self.groups:
-            members = group.members
+        for piece in self.linked_groups():
+            group = piece[0]
+            members = group.members if len(piece) == 1 else sorted((m for g in piece for m in g.members), key=lambda m: m.number)
             if not members:
                 continue
             first = next((m for m in members if m.refusal is not None), None)
@@ -2806,6 +2913,8 @@ class Run:
             if first is None and outside is None:
                 continue
             what = {"pole": "the same contour around the pole", "pass": "the same series of passes"}.get(group.kind, "the same cycle")
+            if len(piece) > 1:
+                what = "the same cycle and the contour data it uses"
             for member in members:
                 if member.refusal is None:
                     changed = changed or bool(member.edits)

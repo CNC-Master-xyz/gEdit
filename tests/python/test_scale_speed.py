@@ -1527,3 +1527,37 @@ class TestM13ReviewUnreadable(unittest.TestCase):
         self.assertIn("U+2013 EN DASH, not the ASCII minus sign -", payload["findings"][0]["message"])
         self.assertIn("Scaled 1 of 2 spindle speeds to 90 %; 1 left because the value cannot be read.", payload["message"])
         self.assertNotIn("variable", payload["message"])
+
+
+def run_inline(profile_id, text, params=None):
+    """Scale spindle speeds over ``text`` on a profile's own defaults, the envelope back."""
+    effective = helpers.effective_context(profile_id)
+    context = helpers.make_context(params=dict(params or {"percent": 50}))
+    context["profile"] = effective["profile"]
+    context["codes"] = effective["codes"]
+    context["machine"] = dict(effective["machine"])
+    context["document"]["profile"] = profile_id
+    context["input"] = {"scope": "document", "startLine": 1, "endLine": text.count("\n") + 1}
+    result = helpers.run_script(SCRIPT, stdin=text, context=context)
+    if not result.ok:
+        raise AssertionError(result.stderr)
+    return result.json()
+
+
+class TestWaveYBlocks(unittest.TestCase):
+    """T090 (Wave Y): a code on a continuation line counts for the whole block."""
+
+    def test_a_tap_on_a_continuation_line_keeps_the_speed_above_it(self):
+        # An Okuma block whose `$` line taps (G77): the S on its first line is the tap's
+        # speed, tied to the feed by the pitch, and left as written.
+        payload = run_inline("okuma-osp", "G00 X0 Z5 S300\n$ G77 Z-20 F1.25\nG00 X50 S400\n")
+        self.assertEqual(payload["text"], "G00 X0 Z5 S300\n$ G77 Z-20 F1.25\nG00 X50 S200\n")
+        (finding,) = [f for f in payload["findings"] if f["line"] == 1]
+        self.assertIn("S300 is the speed of a tapping block (G77)", finding["message"])
+        self.assertIn("1 tapping speed left as written", payload["message"])
+
+    def test_a_thread_on_a_continuation_line_is_named_at_the_speed_above_it(self):
+        payload = run_inline("okuma-osp", "G01 X30 Z-20 S600 F2\n$ G33\n")
+        self.assertEqual(payload["text"], "G01 X30 Z-20 S300 F2\n$ G33\n")
+        (finding,) = payload["findings"]
+        self.assertIn("S600 was scaled in a thread block (G33)", finding["message"])

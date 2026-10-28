@@ -537,8 +537,19 @@ def is_assignment(token: Token) -> bool:
         return False
     if token.index is not None:
         return True
-    head, sep, _ = token.text.partition("=")
-    return sep == "=" and head.strip().upper() == token.address.upper()
+    text = token.text
+    # T137: most words carry no `=` at all, and every script asks about every word.
+    if "=" not in text:
+        return False
+    head = text.partition("=")[0]
+    return head.strip().upper() == token.address.upper()
+
+
+#: T137: the characters a word's value may start with that keep the head of its written code
+#: (:func:`_head_of` of ``normalize_code(address + value)``) the address alone: an ASCII
+#: character that is neither a letter nor a blank, so ``normalize_code`` neither joins nor
+#: changes anything in front of it. ``X12.5`` has the head ``X``; ``FQ50`` has ``FQ``.
+_VALUE_LEADS = frozenset(chr(c) for c in range(128) if not chr(c).isalpha() and not chr(c).isspace())
 
 
 def _codes_in(tokens: Sequence[Token], index: Dict[str, Dict[str, Any]]) -> List[str]:
@@ -666,7 +677,12 @@ class ModalInterpreter:
     6. ``fNotFeed`` makes the block's feed word a time, not a feed (M8). The block is a
        dwell, so its speed word is not a speed either (Sinumerik ``G4 S2`` waits two
        revolutions);
-    7. a tool line (``toolCall.trigger``, not ``toolCall.ignore``) sets the tool;
+    7. a tool line (``toolCall.trigger``, not ``toolCall.ignore``) sets the tool. On a
+       profile whose ``toolCall.tool`` names the tool axis (an ``axis`` group, Klartext),
+       a tool line that names no tool, or the tool already loaded without an axis
+       (``TOOL CALL 4 S5000`` after ``TOOL CALL 4 Z``), only changes the speed: it is no
+       tool change and the tool keeps the line it was loaded on (T113; the program map and
+       the tool list read it so, syntax-heidenhain §5.1);
     8. :meth:`reset` applies the **effective** profile's power-on state — ``modal.initial``,
        ``modal.units`` and ``modal.diameter`` — each assumed, at line 0, with the source
        ``modal.sources`` gives. Nothing else is assumed: a group stays unknown until it is
@@ -736,6 +752,14 @@ class ModalInterpreter:
         self.codes = list(codes or [])
         #: Written code (normalized) -> database entry, aliases included.
         self._entries: Dict[str, Dict[str, Any]] = _build_index(self.codes)
+        #: T137: the heads of the database's codes (:func:`_head_of`), so that a word whose
+        #: address starts none of them (`X12.5` against a database without an `X` code) is
+        #: known to be no code without normalizing it (:meth:`_word_entry`).
+        self._code_heads: FrozenSet[str] = frozenset(_head_of(key) for key in self._entries)
+        #: Address as written -> whether a code may start with it; a program writes few.
+        self._address_heads: Dict[str, bool] = {}
+        #: ``id(entry)`` -> :meth:`_facts_of`; the entries live as long as ``self._entries``.
+        self._entry_facts: Dict[int, Tuple[Any, ...]] = {}
 
         profile = getattr(cp, "profile", None)
         self._profile: Dict[str, Any] = profile if isinstance(profile, dict) else {}
@@ -762,6 +786,10 @@ class ModalInterpreter:
             if isinstance(limits, list)
             else frozenset()
         )
+        #: T137: the addresses :meth:`_apply_words` reads besides the spindle's own words.
+        self._read_addresses = (
+            frozenset(self._feed_unit_words) | self._speed_limit_words | {self._feed_address, self._speed_address}
+        )
         self._diameter_words = diameter_axes(self._profile)
         axes = addresses.get("axes")
         #: Rule 11: the words that make a block a positioning block.
@@ -778,6 +806,14 @@ class ModalInterpreter:
         self._tool_from_before = tool_from == "last-before"
         # Both read the `T` words of every line, not only those of the tool lines.
         self._tool_from_last = tool_from == "same-line-or-last" or self._tool_from_before
+        #: T113, rule 7: the tool pattern names the tool axis (Klartext), so a tool line that
+        #: repeats the loaded tool without one only changes the speed. Read off the pattern
+        #: as written in the profile, as the program map and the tool list read it.
+        tool_source = tool_call.get("tool")
+        self._axis_aware = isinstance(tool_source, str) and "(?<axis>" in tool_source
+        list_rules = self._profile.get("toolList")
+        #: How the program map and the tool list compare two stations (``collapseOffsetDigits``).
+        self._collapse_offsets = isinstance(list_rules, dict) and list_rules.get("collapseOffsetDigits") is True
 
         #: A database with no ``sets.distance`` anywhere allows only one reading (rule 8).
         self._has_distance = any(
@@ -959,7 +995,9 @@ class ModalInterpreter:
                 "".join(token.text for token in tokens), self.cp
             )
         same_block = self._continued or continued
-        self._continued = any(token.kind == "continuation" for token in tokens)
+        # T137: the block's codes are looked up once, here, with the continuation marker
+        # found on the same walk; every rule below reads this list.
+        codes, self._continued = self._block_codes(tokens)
         if not same_block:
             if self._feed_back is not None:
                 # Rule 17: the feed of a `blockFeed` block was that block's alone.
@@ -974,27 +1012,26 @@ class ModalInterpreter:
         # word is read (rules 4 and 6 both depend on it).
         self._axis_plane = False
         self._read_values(tokens)
-        codes = _codes_in(tokens, self._entries)
         # Rule 11b: a `'call-modal-next'` word ends the modal call in force; the cycle written
         # behind it in the same block (if any) becomes the new one.
         self._block_modal_next = self._has_modal_next and any(
-            _sets_of(self._entries.get(normalize_code(code))).get("cycle") == "call-modal-next" for code in codes
+            _sets_of(entry).get("cycle") == "call-modal-next" for _, entry in codes
         )
         if self._block_modal_next:
             self._mcall = None
-        for code in codes:
-            self._apply_code(code, line)
+        for code, entry in codes:
+            self._apply_code(code, line, entry)
         if self._has_block_feed and self._feed_back is None and any(
-            (self._entries.get(normalize_code(code)) or {}).get("blockFeed") is True for code in codes
+            entry.get("blockFeed") is True for _, entry in codes
         ):
             # Rule 17: what is in force before the block's own feed word is read.
             self._feed_back = (self._feed, self._feed_unit_word)
         if self._axis_plane:
             self._apply_tool_axis(tokens)
-        self._apply_modal_call(tokens)
+        self._apply_modal_call(tokens, codes)
         if self._owners:
             # Rule 16: only a block with an owner in force or a code that owns words is walked.
-            if self._block_owner is not None or any(self._is_owner(code) for code in codes):
+            if self._block_owner is not None or any(id(entry) in self._owners for _, entry in codes):
                 self._mark_owned(tokens)
             else:
                 self._owned = {}
@@ -1069,44 +1106,142 @@ class ModalInterpreter:
         self._block_owner = owner
         self._owned = owned
 
-    def _is_owner(self, code: str) -> bool:
-        """Rule 16: whether a written code of the block is one that owns words."""
-        entry = self._entries.get(normalize_code(code))
-        return entry is not None and id(entry) in self._owners
-
     def owner_of(self, token: Token) -> Optional[str]:
         """Rule 16: the code that owns ``token``, a word of the line just applied, or ``None``."""
         return self._owned.get(id(token)) if self._owned else None
 
-    def _apply_code(self, code: str, line: int) -> None:
-        entry = self._entries.get(normalize_code(code))
+    # -- the codes of a block (T137) -----------------------------------------
+    #
+    # Every line of a long program comes through here, so a block's codes are found and
+    # looked up once per line (:meth:`_block_codes`), and a word that cannot be a code is
+    # known to be none without building and normalizing its text (:meth:`_word_entry`).
+    # The answers are those of :func:`_written_codes` and ``self._entries.get(
+    # normalize_code(code))``; ``tests/python/test_modal.py`` holds the two to each other.
+
+    def _word_entry(self, address: str, value: str) -> Optional[Dict[str, Any]]:
+        """The entry of the code ``address + value`` (a word, ``G01``), or ``None``.
+
+        The answer of ``self._entries.get(normalize_code(address + value))``. When the value
+        starts with a character of :data:`_VALUE_LEADS` (or is empty) and the address is
+        plain ASCII letters, the head of the normalized code is the address in upper case,
+        so an address that heads no code of the database (``X``, ``Y``, ``Z`` on most of
+        them) answers ``None`` straight away.
+        """
+        if value == "" or value[0] in _VALUE_LEADS:
+            heads = self._address_heads.get(address)
+            if heads is None:
+                heads = not (address.isascii() and address.isalpha()) or address.upper() in self._code_heads
+                if len(self._address_heads) < 4096:
+                    self._address_heads[address] = heads
+            if not heads:
+                return None
+        return self._entries.get(normalize_code(address + value))
+
+    def _block_codes(self, tokens: "Sequence[Token]") -> Tuple[List[Tuple[str, Dict[str, Any]]], bool]:
+        """The codes of the line the database knows, with their entries, in written order,
+        and whether the line ends in a continuation marker.
+
+        The codes are those of :func:`_written_codes` less the ones without an entry, which
+        change nothing (rule 9) and which no rule here asks about.
+        """
+        out: List[Tuple[str, Dict[str, Any]]] = []
+        entries = self._entries
+        continued = False
+        count = len(tokens)
+        heads = self._address_heads
+        for i, token in enumerate(tokens):
+            kind = token.kind
+            if kind == "word":
+                address = token.address
+                if not address:
+                    continue
+                value = token.value_text or ""
+                if heads.get(address) is False and (value == "" or value[0] in _VALUE_LEADS):
+                    continue  # :meth:`_word_entry` answers `None` for it, without the call
+                if is_assignment(token):
+                    continue
+                entry = self._word_entry(address, value)
+                if entry is not None:
+                    out.append((address + value, entry))
+            elif kind == "call":
+                name = token.address or ""
+                if name != "":
+                    entry = entries.get(normalize_code(name))
+                    if entry is not None:
+                        out.append((name, entry))
+            elif kind == "keyword":
+                name = token.address or token.text
+                number = token.value_text
+                if number is None:
+                    nxt = _next_code_token(tokens, i + 1, count)
+                    if nxt is not None and nxt.address is None and nxt.value_text is not None:
+                        number = nxt.value_text
+                joined = _joined_code(name, number, entries)
+                code = joined if joined is not None else name
+                entry = entries.get(normalize_code(code))
+                if entry is not None:
+                    out.append((code, entry))
+            elif kind == "continuation":
+                continued = True
+        return out, continued
+
+    def _facts_of(self, entry: Dict[str, Any]) -> Tuple[Any, ...]:
+        """What :meth:`_apply_code` reads of an entry, read once per entry (T137).
+
+        ``(canonical, group, sets, modal, pitchFeedAmbiguous, pitchFeed, framed,
+        planeFromAxisWord, fNotFeed, sets.cycle)``. ``canonical`` is ``None`` for an entry
+        without a code of its own (the written code stands in), and ``framed`` is false for an
+        entry :meth:`_apply_frame` has nothing to do with: no ``frameZeroWords``, no
+        ``frame`` and no ``frameWithoutValues: 'close'``.
+        """
+        canonical = entry.get("code")
+        group = entry.get("group")
+        sets = _sets_of(entry)
+        facts = (
+            canonical if isinstance(canonical, str) and canonical != "" else None,
+            group if isinstance(group, str) and group != "" else None,
+            sets,
+            entry.get("modal") is True,
+            entry.get("pitchFeedAmbiguous") is True,
+            entry.get("pitchFeed") is True,
+            bool(_zero_words_of(entry)) or frame_of(entry) is not None or entry.get("frameWithoutValues") == "close",
+            sets.get("planeFromAxisWord") is True,
+            entry.get("fNotFeed") is True,
+            sets.get("cycle"),
+        )
+        self._entry_facts[id(entry)] = facts
+        return facts
+
+    def _apply_code(self, code: str, line: int, entry: Optional[Dict[str, Any]] = None) -> None:
+        """Applies one written code; ``entry`` is its database entry when the caller has it."""
+        if entry is None:
+            entry = self._entries.get(normalize_code(code))
         if entry is None:
             return  # rule 9: an unknown code changes nothing
-        canonical = entry.get("code")
-        canonical = canonical if isinstance(canonical, str) and canonical != "" else code
-        group = entry.get("group")
-        group = group if isinstance(group, str) and group != "" else None
-        sets = _sets_of(entry)
-        modal = entry.get("modal") is True
-        ambiguous = entry.get("pitchFeedAmbiguous") is True
-        pitch = entry.get("pitchFeed") is True
+        facts = self._entry_facts.get(id(entry))
+        if facts is None:
+            facts = self._facts_of(entry)
+        canonical, group, sets, modal, ambiguous, pitch, framed, axis_plane, f_not_feed, cycle = facts
+        if canonical is None:
+            canonical = code
 
         # Rule 1: a modal entry becomes the active code of its group.
         if modal and group is not None:
             self._groups[group] = {"code": canonical, "line": line, "assumed": False, "from": None}
 
-        self._apply_sets(sets, line, assumed=False)
-        self._apply_frame(entry, canonical, group, line)
+        if sets:
+            self._apply_sets(sets, line, assumed=False)
+        if framed:
+            self._apply_frame(entry, canonical, group, line)
         self._apply_tcp(sets, canonical, group if modal else None, line)
-        if sets.get("planeFromAxisWord") is True:
+        if axis_plane:
             self._axis_plane = True
 
         # Rule 6: the block's feed word is a time here, not a feed.
-        if entry.get("fNotFeed") is True:
+        if f_not_feed:
             self._block["fNotFeed"] = True
             self._block_dwell = self._block_dwell or canonical
 
-        cycle = sets.get("cycle")
         if cycle in ("define", "call", "call-modal"):
             self._apply_defined(cycle, canonical, line, pitch)
             return
@@ -1192,7 +1327,7 @@ class ModalInterpreter:
                 self._call_args[normalize_code(token.address)] = token.value_text or ""
             elif token.kind == "word" and (token.value_text or "") != "":
                 address = token.address or ""
-                if address != "" and not is_assignment(token) and normalize_code(address + (token.value_text or "")) in self._entries:
+                if address != "" and not is_assignment(token) and self._word_entry(address, token.value_text or "") is not None:
                     continue  # one of the block's codes (`G17`), not a value
                 self._block_values = True
 
@@ -1349,27 +1484,27 @@ class ModalInterpreter:
         if self._defined_cycle is not None:
             self._block_run = dict(self._defined_cycle)
 
-    def _apply_modal_call(self, tokens: "Sequence[Token]") -> None:
+    def _apply_modal_call(self, tokens: "Sequence[Token]", codes: "Sequence[Tuple[str, Dict[str, Any]]]") -> None:
         """Rule 11: a positioning block under a modal call runs the defined cycle. Rule 11b:
         one under a cycle a ``'call-modal-next'`` word made modal runs that cycle (not the
         block that holds the word itself)."""
         if self._block_run is not None:
             return
         if self._modal_call is not None and self._defined_cycle is not None:
-            if self._positions(tokens):
+            if self._positions(tokens, codes):
                 self._block_run = dict(self._defined_cycle)
             return
         if self._mcall is None or self._block_modal_next:
             return
-        if self._positions(tokens):
+        if self._positions(tokens, codes):
             self._block_run = dict(self._mcall)
 
-    def _positions(self, tokens: "Sequence[Token]") -> bool:
+    def _positions(self, tokens: "Sequence[Token]", codes: "Sequence[Tuple[str, Dict[str, Any]]]") -> bool:
         """Whether the line moves to a position: an axis word with a value, or a code that
         moves around the pole (``pole: 'use'``: Klartext ``LP PR+30 PA+45``, ``CP IPA+90``,
         whose end point is written in polar words, not axis words), and no code of the block
         that makes its axis words data (a datum shift, ``CYCL DEF 7.1 X+5``). The pole itself
-        (``CC``, ``pole: 'set'``) moves nothing."""
+        (``CC``, ``pole: 'set'``) moves nothing. ``codes`` is the line's :meth:`_block_codes`."""
         axes = self._axes
         if not axes:
             return False
@@ -1379,13 +1514,12 @@ class ModalInterpreter:
                 if not is_assignment(token):
                     found = True
                     break
-        codes = _codes_in(tokens, self._entries)
         if not found:
-            found = any((self._entries.get(normalize_code(code)) or {}).get("pole") == "use" for code in codes)
+            found = any(entry.get("pole") == "use" for _, entry in codes)
             if not found:
                 return False
-        for code in codes:
-            if axis_words_of(self._entries.get(normalize_code(code))) == "data":
+        for _, entry in codes:
+            if axis_words_of(entry) == "data":
                 return False
         return True
 
@@ -1425,17 +1559,24 @@ class ModalInterpreter:
     def _apply_words(self, tokens: "Sequence[Token]", line: int) -> None:
         """The address words of the block: the feed, the speed and the clamp."""
         owned = self._owned
+        read = self._read_addresses
+        speed = self._speed_address
         for token in tokens:
             if token.kind != "word":
                 continue
             address = (token.address or "").upper()
             if address == "":
                 continue
+            if address not in read and not address.startswith(speed):
+                # T137: none of the words below (`X`, `G`), and no word of a spindle either,
+                # whose address starts with the speed address (`S1=`, `S[1]=`, `SB=`).
+                continue
             if owned and id(token) in owned:
                 # Rule 16: a function's own word (`M128 F800`) is skipped as a whole: no
                 # feed in force and no return to the modal feed unit either.
                 continue
-            main = names_main_spindle(token, self._speed_address, self._main_spindle)
+            # Without a main spindle in the profile no word names it (T137: asked per word).
+            main = self._main_spindle is not None and names_main_spindle(token, self._speed_address, self._main_spindle)
             if token.index is not None and not main:
                 # `S[2]=500`, `LIMS[2]=1800`: the spindle (or axis) is the index's, the way
                 # `S2=` and `SB=` name theirs in the address, so this is neither the speed
@@ -1484,6 +1625,7 @@ class ModalInterpreter:
             self._tool_from_before or not (ignore is not None and ignore.search(masked) is not None)
         )
         found: Optional[Dict[str, Any]] = None
+        axis_named = False
         pattern = self._patterns.get("tool")
         if pattern is not None and (is_tool or self._tool_from_last):
             match = pattern.search(masked)
@@ -1493,9 +1635,11 @@ class ModalInterpreter:
                 # read), and the whole match would turn "no tool" into a garbage station, as
                 # it did in the program map and the tool list before. The validator requires
                 # the named group, so `groupdict` only guards a hand-made compiled profile.
-                station = match.groupdict().get("tool")
+                groups = match.groupdict()
+                station = groups.get("tool")
                 if station is not None and station.strip() != "":
                     found = {"station": station.strip(), "written": match.group(0).strip(), "line": line}
+                axis_named = bool(groups.get("axis"))
         before = self._last_tool
         before_unload = self._last_tool_unload
         if found is not None:
@@ -1515,6 +1659,14 @@ class ModalInterpreter:
             self._block["toolChange"] = True
             self._tool = None if before is None else {"station": before["station"], "written": before["written"], "line": line}
             return
+        if self._axis_aware and (
+            found is None
+            or (not axis_named and before is not None and self._same_station(found["station"], before["station"]))
+        ):
+            # T113: a speed change, not a tool change (rule 7). `TOOL CALL S5000` names no tool;
+            # `TOOL CALL 4 S5000` with tool 4 loaded and no axis keeps it (only a named axis
+            # lets the control swap in a sister tool).
+            return
         self._block["toolChange"] = True
         if found is not None:
             self._tool = found
@@ -1526,6 +1678,30 @@ class ModalInterpreter:
                 "written": self._last_tool["written"],
                 "line": line,
             }
+
+    def _same_station(self, a: str, b: str) -> bool:
+        """Whether two written tools name the same station, as the program map compares them.
+
+        Numerically for a number (`T01` is `T1`), exactly for a name in quotation marks or a
+        `QS` parameter; a lathe offset pair is collapsed where the profile's tool list says so.
+        """
+        def number(tool: str) -> Optional[str]:
+            if len(tool) >= 2 and tool.startswith('"') and tool.endswith('"'):
+                return None
+            value = bare(tool)
+            return value.lstrip("0") or "0" if value.isdigit() and value.isascii() else None
+
+        def bare(tool: str) -> str:
+            if len(tool) >= 2 and tool.startswith('"') and tool.endswith('"'):
+                return tool[1:-1]
+            if self._collapse_offsets and tool.isdigit() and tool.isascii() and len(tool) >= 4 and len(tool) % 2 == 0:
+                return tool[: len(tool) // 2]
+            return tool
+
+        a_number, b_number = number(a), number(b)
+        if a_number is not None or b_number is not None:
+            return a_number == b_number
+        return bare(a) == bare(b)
 
     def program_start(self, line: int) -> bool:
         """A program starts on ``line`` (:func:`program_start_of`); answers whether that reset the tool.

@@ -1,0 +1,11 @@
+{
+  "message": "Mirrored in Z about Z-25 for the counter spindle: 7 words and 3 codes on 7 blocks (G2 and G3 swapped). Machine 'Lathe 1': numbers are read as written.",
+  "findings": [
+    {
+      "line": 3,
+      "severity": "warning",
+      "message": "Mirrored for the counter spindle: the tool nose direction (the cutting edge position in each tool's offset) is not in the program. Set it for the counter spindle before this program runs.",
+      "reason": "tool-nose"
+    }
+  ]
+}

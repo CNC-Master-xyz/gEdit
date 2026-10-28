@@ -47,8 +47,9 @@ golden and every owner-public extents run stays byte for byte the same (AD-48).
   :data:`CHORD_SLACK`), or the pole (Klartext ``C``/``CP`` around ``CC``).
 * What stays **not resolved** (an :class:`Unknown` of kind ``'arc'``, the end point known when
   written): tangential arcs and arcs through a point (:data:`UNRESOLVED_ARCS`: Klartext
-  ``CT``, ``CTP``, Sinumerik ``CT``, ``CIP``), Okuma arcs by an ``L`` radius and the C-axis
-  contour arcs ``G102``/``G103`` (no ``arcDirection`` flag), and a Sinumerik arc by its end
+  ``CT``, ``CTP``, Sinumerik ``CT``, ``CIP``), the C-axis contour arcs ``G102``/``G103`` (no
+  ``arcDirection`` flag), an Okuma arc by its ``L`` radius written with a one-shot code
+  (``CALRG``: the larger arc; computed since Wave Y, T112, without one), and a Sinumerik arc by its end
   point and its opening angle ``AR=`` (:data:`ANGLE_WORD`) with no centre. **One case the
   extents read wrongly changed:** ``G2``/``G3 I… J… AR=…`` with no end point was taken for a
   full circle and left the tool at the start point; the tracker reports the arc as not
@@ -627,6 +628,20 @@ def values_of(entries: Sequence[Dict[str, Any]]) -> frozenset:
             if isinstance(param, dict) and param.get("unit") in NOT_A_COORDINATE and isinstance(param.get("address"), str):
                 out.add(param["address"].upper())
     return frozenset(out)
+
+
+def declared_radius(entry: Any) -> Optional[str]:
+    """Wave Y (T112): the address an arc code declares as its radius (upper case), or ``None``:
+    a parameter of the code with ``unit: 'length'`` that lies in the working plane
+    (``lengthAlong: 'plane'``) and names no axis (the Okuma ``L`` of ``G2``/``G3``). Written
+    positive, it gives the arc of at most 180 degrees (OSP-P300 programming manual, circular
+    interpolation by radius)."""
+    for param in as_dict(entry).get("params") or []:
+        if not isinstance(param, dict) or not isinstance(param.get("address"), str):
+            continue
+        if param.get("unit") == "length" and param.get("lengthAlong") == "plane" and not param.get("axis"):
+            return param["address"].upper()
+    return None
 
 
 def head_of(code: Any) -> str:
@@ -1366,6 +1381,11 @@ class PathTracker:
         for e in self.codes:
             for alias in (e.get("aliases") or []) if isinstance(e, dict) else []:
                 self.all_heads = self.all_heads | {head_of(alias)}
+        #: Wave Y (T112): a turning profile whose database has no code that sets a working plane
+        #: (its plane codes choose the compensation plane only) works in the turning plane ZX.
+        self.turning_plane = gedit_nc.machine_type_of(self.profile) == "lathe" and not any(
+            isinstance(e, dict) and as_dict(e.get("sets")).get("plane") in PLANE_AXES for e in self.codes
+        )
         #: The position of every axis, in column values, or `None` while it is not known.
         self.pos: Dict[str, Optional[Decimal]] = {axis: None for axis in self.axes.order}
         #: The pole (Klartext `CC`), by axis, and the last polar radius and angle about it.
@@ -1584,6 +1604,11 @@ class PathTracker:
         )
         data = [(e, c) for f, e, c in flags if f == "data"]
         plane = state["plane"]
+        if plane not in PLANE_AXES and self.turning_plane:
+            # Wave Y (T112): a turning database whose plane codes only choose the compensation
+            # plane (Okuma `G17`-`G19`) has one working plane, the turning plane ZX, as
+            # `_nc_geom` reads it; its arcs are computed in it.
+            plane = "ZX"
 
         if machine is not None:
             # A machine position: the axes it moved are no longer known (the extents list
@@ -2166,7 +2191,12 @@ class PathTracker:
         centre_words = [w for w in self.axes.centre_words if w in words]
         in_plane = pair is not None and any(axis in pair for axis, _ in moves)
         radius_word = next((words[w] for w in RADIUS_WORDS if w in words and not zero(words[w])), None)
-        if direction is not None and drw is None and not centre_words and radius_word is None and not in_plane:
+        # Wave Y (T112): the radius the arc code in force declares (the Okuma `L`).
+        declared = declared_radius(self.interp.entry(motion)) if tangent is None and radius_word is None and isinstance(motion, str) else None
+        declared_word = words.get(declared) if declared is not None else None
+        if declared_word is not None and (declared_word.value_text or "") == "":
+            declared_word = None
+        if direction is not None and drw is None and not centre_words and radius_word is None and declared_word is None and not in_plane:
             return False  # a modal G2 block that moves no axis of the plane: no arc
         name = tangent or (codes[0] if codes else None) or motion or "arc"
         word = "%s (line %d)" % (name, line)
@@ -2193,7 +2223,26 @@ class PathTracker:
             return True
         centre: Optional[Tuple[Decimal, Decimal]] = None
         full = False
-        if radius_word is not None:
+        if declared_word is not None:
+            # Wave Y (T112): an arc by the radius its code declares (Okuma `G2 X… Z… L…`). The
+            # radius is written positive and gives the arc of at most 180 degrees; the larger
+            # one is chosen by a one-shot code written beside it (`CALRG`), which no flag of the
+            # data names, so a block that writes a one-shot code or a word the tokenizer does not
+            # read (`CALRG` is none of its words), a centre word as well (an alarm on the
+            # control), a radius that is not positive or not both end coordinates (the control
+            # needs X and Z) is not resolved.
+            form = "radius"
+            others: List[Any] = [e for e, _, _ in written.entries if e.get("group") == "nonmodal"]
+            others += [t for t in self._step.tokens if t.kind == "unknown" and t.text.strip() != ""]
+            r, _ = self.value(declared_word, units, entries, "length")
+            if r is None or r <= _ZERO or centre_words or others or a not in targets or b not in targets:
+                self._arc_miss(pair, word)
+                return True
+            centre = centre_from_radius(sa, sb, ea, eb, r, direction)
+            if centre is None:
+                self._arc_miss(pair, word)
+                return True
+        elif radius_word is not None:
             form = "radius"
             r, _ = self.value(radius_word, units, entries, "length")
             if r is None:
@@ -2543,6 +2592,7 @@ __all__ = [
     "centre_from_radius",
     "centre_reading",
     "dec",
+    "declared_radius",
     "empty_levels",
     "head_of",
     "is_word_code",

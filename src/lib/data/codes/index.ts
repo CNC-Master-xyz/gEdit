@@ -13,6 +13,9 @@
 // `resolveCodeDbs` — a child cannot be merged without its parent in hand. The variant
 // databases (`fanuc-lathe-b`) are listed here like any other: a machine chooses one
 // through its profile's `machineParams.variants`, not by loading a file of its own.
+//
+// Wave Y (T156, P4h §6.10 rule 15): `sinumerik-mill` is `sinumerik` with the milling
+// Program start in place of the turning one; the milling profile names it in `codes`.
 
 import fanuc from './fanuc.json';
 import fanucLathe from './fanuc-lathe.json';
@@ -20,6 +23,7 @@ import fanucLatheB from './fanuc-lathe-b.json';
 import heidenhain from './heidenhain.json';
 import okuma from './okuma.json';
 import sinumerik from './sinumerik.json';
+import sinumerikMill from './sinumerik-mill.json';
 
 /** Dialect id → the database as it is stored on disk. Resolve and load before use. */
 export const BUILTIN_CODE_DB_JSON: Readonly<Record<string, unknown>> = {
@@ -29,4 +33,5 @@ export const BUILTIN_CODE_DB_JSON: Readonly<Record<string, unknown>> = {
   heidenhain,
   okuma,
   sinumerik,
+  'sinumerik-mill': sinumerikMill,
 };

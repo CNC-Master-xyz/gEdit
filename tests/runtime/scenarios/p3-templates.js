@@ -456,26 +456,27 @@ scenario('p3-templates', { timeout: 900, files: REPO_FILE }, async (h) => {
     await h.waitFor(() => ctx.docs.get(id)?.readOnly === false, { timeout: 5000 })
   })
 
-  // ============================================================ H2. a choice with no default (the review fixes)
-  await guard(h, 'H2. Sinumerik Program start', async () => {
-    const g = await golden(h, 'templates/sinumerik/program-start')
-    const sinumerik = (await codeFile(h, 'sinumerik')).templates
-    const setup = byId(sinumerik, 'program-start').params.find((/** @type {any} */ p) => p.id === 'setup')
-    const program = ['', 'N10 G0 X0 Z0', 'M30']
-    const id = await newDoc(h, program.join('\n'), 'sinumerik')
-    await revealLine(h, id, 1, 1)
-    await ribbonTab(h, 'insert')
-    h.click(h.q('cmd-button', { command: 'insert.template:program-start' }))
-    await waitForm(h)
-    let state = formNow(h)
-    // v1.2.0 T147: a field nobody has touched yet is not marked; OK stays off and the preview asks for the required fields.
-    h.check('the Machining choice of the shared Sinumerik Program start has no default: nothing is chosen, the field is not marked yet, OK is off and the preview asks for the required fields', setup.default === undefined && state.fields.get('setup')?.error === '' && state.okDisabled && state.previewError !== '' && state.preview === ctx.t('forms.previewRequired'), { error: state.fields.get('setup')?.error, shown: state.fields.get('setup')?.value, ok: state.okDisabled, preview: state.preview })
-    await typeInField(h, 'setup', setup.choices[0].label)
-    state = formNow(h)
-    h.check('after the turning line is picked the live text is the golden (G18 G90 G95 DIAMON) and OK is on', state.preview === g.expected && !state.okDisabled, { preview: state.preview, want: g.expected })
-    await pressOk(h)
-    h.check('OK replaces the blank first line and leaves the numbered blocks below', JSON.stringify(linesOf(h, id)) === JSON.stringify([...g.expected.split('\n'), ...program.slice(1)]), linesOf(h, id))
-  })
+  // ============================================================ H2. each Siemens profile has its own Program start
+  // v1.2.0 Wave Y T156: the turning profile reads `sinumerik`, the milling profile `sinumerik-mill`, so neither form
+  // asks which machining the program is for (the shared start had a Machining choice with no default; T147's rule for
+  // such a field is held by `FormDialog.test.ts`).
+  for (const [profileId, codes] of [['sinumerik', 'sinumerik'], ['sinumerik-mill', 'sinumerik-mill']]) {
+    await guard(h, `H2. ${profileId} Program start`, async () => {
+      const g = await golden(h, `templates/${codes}/program-start`)
+      const own = (await codeFile(h, codes)).templates
+      const start = byId(own, 'program-start')
+      const program = ['', 'N10 G0 X0 Z0', 'M30']
+      const id = await newDoc(h, program.join('\n'), profileId)
+      await revealLine(h, id, 1, 1)
+      await ribbonTab(h, 'insert')
+      h.click(h.q('cmd-button', { command: 'insert.template:program-start' }))
+      await waitForm(h)
+      const state = formNow(h)
+      h.check(`${profileId}: the Program start has no Machining choice, opens on the golden and OK is on`, !start.params.some((/** @type {any} */ p) => p.id === 'setup') && state.preview === g.expected && !state.okDisabled, { preview: state.preview, want: g.expected, ok: state.okDisabled })
+      await pressOk(h)
+      h.check(`${profileId}: OK replaces the blank first line and leaves the numbered blocks below`, JSON.stringify(linesOf(h, id)) === JSON.stringify([...g.expected.split('\n'), ...program.slice(1)]), linesOf(h, id))
+    })
+  }
 
   // ============================================================ I. the cost of live at 300,000 lines
   // The plan's known gap 8: the template form's `live` renders the template with the environment read from the

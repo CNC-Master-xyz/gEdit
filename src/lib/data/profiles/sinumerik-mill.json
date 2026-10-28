@@ -5,6 +5,7 @@
   "shortName": "Sinumerik M",
   "version": 1,
   "machineType": "mill",
+  "codes": "sinumerik-mill",
   "files": { "filterName": "Sinumerik milling" },
   "detect": {
     "extensions": { "mpf": 8, "spf": 8 },

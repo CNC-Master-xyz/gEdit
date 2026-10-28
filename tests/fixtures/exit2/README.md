@@ -160,7 +160,7 @@ Each run is one undo step.
 
 | Golden | What it holds |
 |---|---|
-| `okuma-lathe.tools.json`, `sinumerik-lathe.tools.json` | As X1. Okuma: 5 tools. Sinumerik: `ROUGH`, `T1`, `T2`, `THREAD_M44`. |
+| `okuma-lathe.tools.json`, `sinumerik-lathe.tools.json` | As X1. Okuma: 5 tools; the driven tool shows `SB=2400` in its speed column (Wave Y, T116). Sinumerik: `ROUGH`, `T1`, `T2`, `THREAD_M44`. |
 | `okuma-lathe.feed90.MIN` + report | Six feeds scaled. The `G71` lead is listed. The dwell is left (counted in the summary). `SB=` is untouched. |
 | `sinumerik-lathe.feed90.MPF` + report | Five feeds scaled. The `F0.15` of the `G33` block is refused and listed ("G33 takes its lead from I, J or K"). |
 | `sinumerik-lathe.speed110.MPF` + report | `S` scaled. The three `LIMS=` stay as clamps. The three `G33` blocks are flagged. |
@@ -225,7 +225,7 @@ and `unclosedComments` run where the dialect has the marker and the comment end.
 | Golden | What it holds |
 |---|---|
 | `checks-<x>.findings.<machine>.json` | `program_checks.py`. `<machine>` is `none`, `x8-lathe-is-b` or `x8-okuma-1um`; `machine` defines the machine. Every row with a line jumps to it. |
-| `checks-<x>.extents.<machine>.json` | `extents.py`. With none, the point-less words are "not resolved", with the finding and the header saying so. A tool scope is named as the tool list names the tool, with the word as written (`T1 (T010101, line 9)`; M13 review, NC-9). In the lathe program the `G92` passes after the subprogram call are not resolved either: the call may write the taper the passes share (v1.2.0, NCR-2; made again in D4). |
+| `checks-<x>.extents.<machine>.json` | `extents.py`. With none, the point-less words are "not resolved", with the finding and the header saying so. A tool scope is named as the tool list names the tool, with the word as written (`T1 (T010101, line 9)`; M13 review, NC-9). In the lathe program the `G92` passes after the subprogram call are not resolved either: the call may write the taper the passes share (v1.2.0, NCR-2; made again in D4). Since Wave Y (T110) the extents follow the lathe's `M98 P6202` into `O6202`, whose `W-1.` reaches Z-21 (line 4); the mill's `G65 P9010` (a macro with arguments, not in the file) is not followed, and the axes after it are not known (finding `call`). |
 | `checks-lathe.arith-z-0.5.none.nc` + report | Address arithmetic `subtract 0.5` on `Z`, no machine. It changes only absolute `Z` words with a point. It lists both `W` words and the point-less `Z2000`. The tapping cycle `G84` moves its hole bottom with the shift (`Z-12.` becomes `Z-12.5`; manual-check fix D5-8: the lathe drilling cycles are reviewed, their `R` is incremental in G-code system A); the `G68.2` frame is left and listed; the finishing allowance `W0.1` of the second `G71` block is listed as a value of the cycle (P4a, plan §7 #305, #345: the `G70`–`G76` values are cycle data). The `Z–5.` with an en dash (line 76) is left and listed as a word that cannot be read (M13 review, NC-5). |
 | `checks-mill.blockskip.nc` | Block skip insert on the selection lines 18–23 (the `T2` operation), form defaults. |
 | `checks-mill.blockskip.json` | The selection, both status texts, and that remove on the same selection gives the input back. |

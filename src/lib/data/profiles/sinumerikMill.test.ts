@@ -562,7 +562,8 @@ describe('what a milling program starts with', () => {
     expect(mill.profile.files.filterName).toBe('Sinumerik milling');
     expect(mill.profile.files.extensions).toEqual(turn.profile.files.extensions);
     // AD-16: what it does not change it inherits, so the two cannot drift apart.
-    expect(mill.profile.codes).toBe(TURNING);
+    // Wave Y (T156): the codes are the turning set's, under a set of its own whose Program start is the milling one.
+    expect(mill.profile.codes).toBe('sinumerik-mill');
     expect(mill.profile.grammar).toBe(TURNING);
     expect(mill.profile.syntax).toEqual(turn.profile.syntax);
     expect(mill.profile.outline).toEqual(turn.profile.outline);

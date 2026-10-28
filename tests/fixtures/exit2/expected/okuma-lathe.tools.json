@@ -120,7 +120,7 @@
         "line": 45,
         "calls": 1,
         "feed": "100 /min",
-        "speed": ""
+        "speed": "SB=2400"
       }
     ],
     "message": "5 tools",

@@ -112,6 +112,17 @@
           "tcp"
         ]
       },
+      "G65": {
+        "alone": true,
+        "requires": [
+          "P"
+        ]
+      },
+      "G66": {
+        "requires": [
+          "P"
+        ]
+      },
       "G53.1": {
         "alone": true,
         "conflicts": [

@@ -1,0 +1,51 @@
+{
+  "dialect": "sinumerik-mill",
+  "version": 1,
+  "extends": "sinumerik",
+  "codes": [],
+  "templates": [
+    {
+      "id": "program-start",
+      "label": "Program start",
+      "group": "Program",
+      "description": "A description, the safe-start line for milling (G17 plane, absolute, feed per minute, no radius compensation), the units and the work offset.",
+      "toolbar": true,
+      "machineType": "mill",
+      "review": "pending",
+      "body": "{{title}}\n{{N}}G17 G90 G94 G40 {{units}}\n{{N}}{{offset}}",
+      "params": [
+        {
+          "id": "title",
+          "label": "Program description",
+          "type": "text",
+          "default": "NEW PROGRAM",
+          "comment": true
+        },
+        {
+          "id": "units",
+          "label": "Units",
+          "type": "choice",
+          "required": true,
+          "choices": [
+            { "label": "Millimetres (G71)", "value": "G71" },
+            { "label": "Inches (G70)", "value": "G70" }
+          ],
+          "default": "G71"
+        },
+        {
+          "id": "offset",
+          "label": "Work offset",
+          "type": "choice",
+          "required": true,
+          "choices": [
+            { "label": "G54", "value": "G54" },
+            { "label": "G55", "value": "G55" },
+            { "label": "G56", "value": "G56" },
+            { "label": "G57", "value": "G57" }
+          ],
+          "default": "G54"
+        }
+      ]
+    }
+  ]
+}

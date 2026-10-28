@@ -13,6 +13,7 @@
     "nc/heidenhain/h02-tool-names.h": "heidenhain-klartext",
     "nc/heidenhain/h03-speed-only.h": "heidenhain-klartext",
     "nc/heidenhain/h04-cycle-feeds.h": "heidenhain-klartext",
-    "nc/heidenhain/h05-tool-axis.h": "heidenhain-klartext"
+    "nc/heidenhain/h05-tool-axis.h": "heidenhain-klartext",
+    "nc/heidenhain/h06-same-tool-speed.h": "heidenhain-klartext"
   }
 }

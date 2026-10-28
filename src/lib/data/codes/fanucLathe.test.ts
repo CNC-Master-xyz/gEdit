@@ -70,14 +70,26 @@ const MILL_CYCLES = ['G73', 'G74', 'G76', 'G81', 'G82', 'G83', 'G84', 'G84.2', '
 type Unit = NonNullable<CodeParam['unit']>;
 
 /** The unit §8.2 gives `<dialect>` `<code>` `<address>`, or undefined for "by class". */
+/** T210: the codes whose `F` carries the feed marker, per resolved database (NURBS G6.2 is inherited). */
+const FEED_MARKED: Record<string, string[]> = {
+  fanuc: ['G6.2', 'G73', 'G74', 'G76', 'G81', 'G82', 'G83', 'G84', 'G84.2', 'G84.3', 'G85', 'G86', 'G87', 'G88', 'G89'],
+  'fanuc-lathe': ['G6.2', 'G71', 'G72', 'G73', 'G74', 'G75', 'G77', 'G79', 'G83', 'G85', 'G87', 'G89', 'G90', 'G94'],
+  'fanuc-lathe-b': ['G6.2', 'G71', 'G72', 'G73', 'G74', 'G75', 'G77', 'G79', 'G83', 'G85', 'G87', 'G89', 'G90', 'G94'],
+};
+
 function tableUnit(dialect: string, code: string, address: string, block?: number): Unit | undefined {
   // Rows without a dialect in §8.2 hold wherever the code is defined.
   if (code === 'G4') return address === 'P' ? 'count' : address === 'X' || address === 'U' ? 'dwell' : undefined;
   if (code === 'M98') return address === 'P' || address === 'L' ? 'count' : undefined;
+  // Wave Y (FZ-8): the optional chamfer and corner rounding between two moves, unsigned lengths.
+  if (['G1', 'G2', 'G3'].includes(code) && (address === ',C' || address === ',R')) return 'length';
   // M9 (WP9.5a): the F of a code that cuts a thread is its lead, a feed per revolution
   // whatever the feed mode says, and the database says so (`numberClassOf` rule 1). A tap's
   // F is not a lead (`G84`, `G74`, `G63`): it follows the feed unit in force.
   if (address === 'F' && ['G32', 'G33', 'G34'].includes(code)) return 'feedPerRev';
+  // T210: the feed marker on the F of every cycle that cuts at a feed rate in the unit in
+  // force (a tap's F included); the lathe tapping cycles G84/G88 name it a lead and carry none.
+  if (address === 'F' && (FEED_MARKED[dialect] ?? []).includes(code)) return 'feed';
   if (address === 'F' && dialect !== MILL && code === 'G76') return 'feedPerRev';
   // v1.2.0 (NCR-4): system A reads G78 as system B's threading pass, lead and all.
   if (address === 'F' && ((dialect === A && (code === 'G92' || code === 'G78')) || (dialect === B && code === 'G78'))) return 'feedPerRev';
@@ -136,6 +148,7 @@ describe('the shipped Fanuc databases', () => {
       'heidenhain',
       'okuma',
       'sinumerik',
+      'sinumerik-mill',
     ]);
   });
 
@@ -363,7 +376,9 @@ describe('the lathe database of G-code system A (§8.2)', () => {
     // R is chosen, as the Klartext CR and the Sinumerik CR= do.
     for (const dialect of FANUC_DIALECTS) {
       for (const code of ['G2', 'G3']) {
-        expect(entry(dialect, code)?.params, `${dialect} ${code}`).toEqual([expect.objectContaining({ address: 'R', lengthAlong: 'plane' })]);
+        // Wave Y (FZ-8): followed by the corner words ,C and ,R, which are no radius of the arc.
+        expect(entry(dialect, code)?.params?.[0], `${dialect} ${code}`).toEqual(expect.objectContaining({ address: 'R', lengthAlong: 'plane' }));
+        expect(entry(dialect, code)?.params?.slice(1).map((p) => p.address), `${dialect} ${code}`).toEqual([',C', ',R']);
         expect((entry(dialect, code) as (CodeEntry & { review?: string }) | undefined)?.review, `${dialect} ${code}`).toBe('pending');
       }
     }

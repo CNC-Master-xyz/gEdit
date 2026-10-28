@@ -84,6 +84,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import _nc_cycles
+import _nc_geom
 import _nc_path
 import gedit_nc
 from _nc_path import PathTracker, Reach, Step, Unknown, as_dict, literal_of, rounded
@@ -216,6 +217,7 @@ KINDS = {
     "arc": "warning",
     "polar": "warning",
     "rotary": "warning",
+    "call": "warning",
     "data": "info",
     "selection": "info",
 }
@@ -278,6 +280,13 @@ def message_of(s: Dict[str, Any]) -> str:
             "%s, first %s, where it is not known whether X is a diameter or a radius "
             "(an absolute-only diameter mode before the distance mode is known): not resolved."
             % (times(count, "word", "words"), detail)
+        )
+    if kind == "call":
+        return (
+            "%s, first %s: the called program is not in this document, or gEdit does not follow "
+            "this call (a repeat, a jump into the program, a macro with arguments, a call inside "
+            "the called program), so where it leaves the tool is not known; the positions after "
+            "it are not resolved until a block writes them." % (times(count, "subprogram call", "subprogram calls"), detail)
         )
     if kind == "incremental-start":
         return (
@@ -399,6 +408,12 @@ class Extents:
         tool_list = as_dict(self.profile.get("toolList"))
         self.drop_leading_zeros = tool_list.get("dropLeadingZeros") is True
         self.collapse_offset_digits = tool_list.get("collapseOffsetDigits") is True
+        #: v1.2.0 (T110): the lines of the scope (line number -> text) and the programs in it
+        #: (normalised name -> (first body line, last body line) or ``None`` when the name stands
+        #: twice or the program has no plain end), for the calls the walk follows.
+        self.document: Dict[int, str] = {}
+        self.programs: Dict[str, Optional[Tuple[int, int]]] = {}
+        self.following = False
 
     # -- what the tracker knows -----------------------------------------------
 
@@ -601,7 +616,136 @@ class Extents:
             self.tool_words[number] = self.tool_word(step.tokens, step.masked, tool)
         self.record = record
         self.block(step, number, holes)
+        if record and not self.following:
+            self.after_call(step, number)
         return state
+
+    # -- subprogram calls (v1.2.0, T110) --------------------------------------
+
+    def read_programs(self, lines: Sequence[str], first: int) -> None:
+        """The programs of the scope: a line that starts one (the profile's ``program.start``,
+        its ``name`` group) to the line that ends it (an ``end`` rule of the profile's outline:
+        Fanuc ``M99``), which must write nothing else, with no other program start between."""
+        starts = self.cp.patterns.get("program_start") or []
+        ends = [regex for kind, regex in (self.cp.patterns.get("outline") or []) if kind == "end" and regex is not None]
+        open_name: Optional[str] = None
+        open_at = 0
+        for index, text in enumerate(lines):
+            number = first + index
+            self.document[number] = text
+            masked = gedit_nc.mask_comments(text, self.cp)
+            name = None
+            for regex in starts:
+                match = regex.search(masked)
+                if match is not None and match.start() == 0 and match.group(0).strip():
+                    name = _nc_geom.number_of(match.groupdict().get("name")) or (match.groupdict().get("name") or "").upper() or None
+                    break
+            if name is not None:
+                open_name, open_at = name, number
+                if name in self.programs:
+                    self.programs[name] = None  # written twice: which one runs is not certain
+                else:
+                    self.programs[name] = (number + 1, -1)
+                continue
+            if open_name is not None and any(regex.search(masked) for regex in ends):
+                if self.programs.get(open_name) == (open_at + 1, -1):
+                    words = [t for t in gedit_nc.tokenize_line(text, self.cp, None)[0] if t.kind not in ("whitespace", "comment", "blockNumber")]
+                    self.programs[open_name] = (open_at + 1, number - 1) if len(words) == 1 else None
+                open_name = None
+        for name, found in list(self.programs.items()):
+            if found is not None and found[1] < 0:
+                self.programs[name] = None
+
+    def after_call(self, step: Step, number: int) -> None:
+        """v1.2.0 (T110): a block that calls a program. A program of this document, called once
+        by its number (the profile's ``numbering.calls`` rule: no repeat count, no jump into it,
+        no number that packs a count), with no call of its own, is walked right here from where
+        the caller stands, and the caller goes on from where it ends. Any other call leaves every
+        axis not known: the called program may have moved the tool anywhere."""
+        if not self.may_call(step):
+            return
+        call = _nc_geom._line_has_call(_nc_geom._block_of(step, self.tracker))
+        if call is None:
+            return
+        body = self.body_of(step)
+        if body is None:
+            written = " ".join("".join(t.text for t in step.tokens if t.kind != "comment").split())
+            self.findings.add("call", number, "%s (line %d)" % (written or call, number))
+            self.tracker.forget_all("%s (line %d)" % (call, number))
+            return
+        self.following = True
+        state: Optional[gedit_nc.LineState] = None
+        try:
+            for line in range(body[0], body[1] + 1):
+                state = self.line(self.document[line], line, state, record=True)
+        finally:
+            self.following = False
+
+    def may_call(self, step: Step) -> bool:
+        if step.calls:
+            return True
+        for entry, _, _ in step.entries:
+            if entry.get("call") is True or any(isinstance(p, dict) and p.get("programNumber") for p in entry.get("params") or []):
+                return True
+            if entry.get("modal") is True and entry.get("wordsAreData") is True:
+                return True
+        if self.interp.state.get("groups") and any(
+            (self.interp.entry(v.get("code")) or {}).get("wordsAreData") is True and (self.interp.entry(v.get("code")) or {}).get("modal") is True
+            for v in as_dict(self.interp.state.get("groups")).values()
+            if isinstance(v, dict) and isinstance(v.get("code"), str)
+        ):
+            return True
+        text = step.masked or ""
+        return any(regex.search(text) for regex in _nc_geom._data(self.tracker).calls)
+
+    def body_of(self, step: Step) -> Optional[Tuple[int, int]]:
+        """The lines of the program a block calls when the walk follows it, else ``None``."""
+        entries = [e for e, _, _ in step.entries if e.get("call") is True or any(isinstance(p, dict) and p.get("programNumber") for p in e.get("params") or [])]
+        if len(entries) != 1 or step.calls or entries[0].get("wordsAreData") is True:
+            return None
+        address = next((str(p.get("address")).upper() for p in entries[0].get("params") or [] if isinstance(p, dict) and p.get("programNumber")), None)
+        token = step.words.get(address) if address else None
+        if token is None or token.value is None or not (token.value_text or "").isdigit():
+            return None
+        rule = None
+        for found in as_dict(self.profile.get("numbering")).get("calls") or []:
+            found = as_dict(found)
+            trigger = found.get("trigger")
+            if str(found.get("address") or "").upper() == address and isinstance(trigger, str):
+                try:
+                    import re
+
+                    if re.search(trigger, step.masked or ""):
+                        rule = found
+                        break
+                except re.error:
+                    return None
+        if rule is None:
+            return None
+        digits = token.value_text or ""
+        most = rule.get("maxDigits")
+        if isinstance(most, int) and len(digits) > most:
+            return None  # the number packs a repeat count
+        for key in ("repeatAddress", "localAddress"):
+            other = rule.get(key)
+            if isinstance(other, str) and other.upper() in step.words:
+                written = step.words[other.upper()]
+                if key == "localAddress" or (written.value_text or "").lstrip("0") != "1":
+                    return None
+        body = self.programs.get(_nc_geom.number_of(digits) or "")
+        if body is None:
+            return None
+        for line in range(body[0], body[1] + 1):
+            text = self.document.get(line, "")
+            masked = gedit_nc.mask_comments(text, self.cp)
+            if any(regex.search(masked) for regex in _nc_geom._data(self.tracker).calls):
+                return None  # a call of its own: not followed
+            tokens, _ = gedit_nc.tokenize_line(text, self.cp, None)
+            if any(t.kind == "call" for t in tokens) or any(
+                (self.interp.entry((t.address or "") + (t.value_text or "")) or {}).get("call") is True for t in tokens if t.kind == "word"
+            ):
+                return None
+        return body
 
     def tool_word(self, tokens: Sequence[gedit_nc.Token], masked: str, tool: Dict[str, Any]) -> str:
         """NC-9: the word of a tool line that names the tool (`T010101`, `T="ROUGH"`), or the
@@ -861,6 +1005,8 @@ def main() -> int:
 
     walk = Extents(context, cp)
     state: Optional[gedit_nc.LineState] = None
+    # T110: the programs of the scope, for the calls the walk follows.
+    walk.read_programs(lines[:-1] if len(lines) > 1 and lines[-1] == "" else lines, first)
     for number, line in enumerate(above, first - len(above)):
         state = walk.line(line, number, state, record=False)
     if scope.get("scope") == "selection" and first > 1 and not above:

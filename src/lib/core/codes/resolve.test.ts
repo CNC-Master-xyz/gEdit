@@ -194,6 +194,7 @@ describe('resolveCodeDbs', () => {
       'heidenhain',
       'okuma',
       'sinumerik',
+      'sinumerik-mill',
     ]);
   });
 

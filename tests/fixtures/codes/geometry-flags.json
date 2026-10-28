@@ -32,7 +32,8 @@
       { "code": "G3", "arcDirection": "ccw" },
       { "code": "G41", "compSide": "left" },
       { "code": "G42", "compSide": "right" }
-    ]
+    ],
+    "sinumerik-mill": []
   },
   "unflagged": {
     "fanuc": {
@@ -87,7 +88,10 @@
         "APPR CT": "the direction follows from the first contour element",
         "APPR LCT": "the direction follows from the contour and the line before it",
         "DEP CT": "the direction follows from the last contour element",
-        "DEP LCT": "the direction follows from the last contour element and the line after it"
+        "DEP LCT": "the direction follows from the last contour element and the line after it",
+        "APPR PCT": "as APPR CT, its contour point in polar coordinates",
+        "APPR PLCT": "as APPR LCT, its contour point in polar coordinates",
+        "DEP PLCT": "as DEP LCT, its end point in polar coordinates"
       },
       "comp": {}
     },
@@ -101,6 +105,13 @@
       "comp": {}
     },
     "sinumerik": {
+      "arc": {
+        "CIP": "through an intermediate point: the points decide the direction",
+        "CT": "tangential: the direction follows from the element before"
+      },
+      "comp": {}
+    },
+    "sinumerik-mill": {
       "arc": {
         "CIP": "through an intermediate point: the points decide the direction",
         "CT": "tangential: the direction follows from the element before"

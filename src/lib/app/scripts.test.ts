@@ -887,6 +887,14 @@ describe('ScriptService.run: the input scope', () => {
     );
   });
 
+  it('carries the lines below a selection (FZ-5)', async () => {
+    const h = await ready();
+    h.selection = { startLine: 2, endLine: 3, empty: false };
+    h.runs = [result({ stdout: 'N20\nN30' })];
+    await h.service.run('bundled:scale_feed.py');
+    expect((h.requests[0].context as ScriptContextV2).input.followingLines).toEqual(LINES.slice(3));
+  });
+
   it('carries none for a whole-document run, which already sees everything', async () => {
     const h = await ready();
     h.runs = [result({ stdout: 'N10' })];

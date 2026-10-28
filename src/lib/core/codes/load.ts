@@ -22,7 +22,6 @@ import { normalizeCode } from './lookup';
 import { readDwell, readExpand, readExpandRole } from './expand';
 import { loadTemplates } from '$lib/core/templates/load';
 import type { CodeDb, CodeEntry, CodeParam, CodeSets } from './types';
-import type { NumberClass } from '$lib/core/machines/types';
 
 /**
  * M6 (§7.2, AD-19). What a `sets` member may say, one list per member.
@@ -72,7 +71,7 @@ const SETS_VALUES = {
 const SETS_FLAGS = ['speedLimit', 'planeFromAxisWord'] as const;
 
 /** M6 (§7.2, AD-31). How a cycle parameter's value is read, whatever its address suggests. */
-const PARAM_UNITS: readonly (NumberClass | 'increment' | 'count')[] = [
+const PARAM_UNITS: readonly NonNullable<CodeParam['unit']>[] = [
   'length',
   'angle',
   'feedPerMin',
@@ -80,6 +79,7 @@ const PARAM_UNITS: readonly (NumberClass | 'increment' | 'count')[] = [
   'dwell',
   'increment',
   'count',
+  'feed',
 ];
 
 /** P10 (R8, §7.2, §7.16 #106). What a parameter is to a program shift. */
@@ -594,6 +594,10 @@ function readEntry(
   if (flag(raw.alone, `${path}.alone`, report)) entry.alone = true;
   const requires = readWords(raw.requires, `${path}.requires`, report);
   if (requires) entry.requires = requires;
+  // Wave Y (T093): the cycles that read a DEF-active cycle's values (Klartext cycle 20 for the
+  // SL cycles 21 to 24); address arithmetic reads it from the loaded database.
+  const usedBy = readWords(raw.usedBy, `${path}.usedBy`, report);
+  if (usedBy) entry.usedBy = usedBy;
   // B1 (A6): the words behind a code that are its own (Klartext `M128 F800`); the scripts read
   // them from the loaded database, so a member the loader dropped would be one they never see.
   const ownWords = readWords(raw.ownWords, `${path}.ownWords`, report);

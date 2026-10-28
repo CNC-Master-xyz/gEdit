@@ -593,6 +593,16 @@
       "description": "Moves the axes written with it, each on its own and at rapid traverse, to the fixed point FP= names (1 to 4; none or 0 is 1), a position set in machine data and reached in machine coordinates. The values of the axis words are not positions, which is why posts write 0. Milling posts use it to retract before a tool change; it is not allowed while radius compensation or a transformation is on.",
       "group": "nonmodal",
       "label": "Approach a fixed machine point",
+      "params": [
+        {
+          "address": "FP",
+          "label": "Number of the fixed point, set in machine data: 1 to 4; left out or 0 is fixed point 1",
+          "max": 4,
+          "min": 0,
+          "unit": "count"
+        }
+      ],
+      "review": "pending",
       "sets": {
         "motion": "rapid"
       }
@@ -1121,7 +1131,8 @@
           "address": "S_FA",
           "expandRole": "default",
           "label": "Feed for the pre-drilled first part, as a value or as a percentage of the drilling feed, as _AMODE says. gEdit changes or expands the block only with it left out or 0",
-          "position": "mode"
+          "position": "mode",
+          "unit": "feed"
         },
         {
           "address": "S_ZD",
@@ -1133,7 +1144,8 @@
           "address": "S_FD",
           "expandRole": "default",
           "label": "Feed for the remaining depth, as a value or as a percentage of the drilling feed, as _AMODE says. gEdit changes or expands the block only with it left out or 0",
-          "position": "mode"
+          "position": "mode",
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -1699,13 +1711,15 @@
           "address": "FFR",
           "expandRole": "feed",
           "label": "Feed on the way in",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "RFF",
           "expandRole": "feed-out",
           "label": "Feed on the way out",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_GMODE",
@@ -2133,7 +2147,8 @@
         {
           "address": "_FFP1",
           "label": "Machining feed",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_VARI",
@@ -2242,12 +2257,14 @@
         {
           "address": "_FFP1",
           "label": "Feed in the plane",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_FFD",
           "label": "Feed for the infeed in depth",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_CDIR",
@@ -2394,12 +2411,14 @@
         {
           "address": "_FFP1",
           "label": "Feed for machining in the plane",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_FFD",
           "label": "Feed for the infeed in depth",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_CDIR",
@@ -2560,12 +2579,14 @@
         {
           "address": "FFD",
           "label": "Feed for the infeed in depth",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "FFP1",
           "label": "Feed in the plane",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_MID",
@@ -2597,7 +2618,8 @@
         {
           "address": "FFP2",
           "label": "Reserved in the current version; the feed for finishing in older ones",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "SSF",
@@ -2739,12 +2761,14 @@
         {
           "address": "FFD",
           "label": "Feed for the infeed in depth",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "FFP1",
           "label": "Feed in the plane",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_MID",
@@ -2776,7 +2800,8 @@
         {
           "address": "FFP2",
           "label": "Reserved in the current version; the feed for finishing in older ones",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "SSF",
@@ -2786,7 +2811,8 @@
         {
           "address": "_FFCP",
           "label": "Reserved in the current version; in older ones the feed for moving on the circle from slot to slot, in mm/min",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_UMODE",
@@ -2878,12 +2904,14 @@
         {
           "address": "_FFP1",
           "label": "Feed along the contour",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_FFD",
           "label": "Feed for the infeed in depth, or for an approach in space",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_VARI",
@@ -2911,7 +2939,8 @@
         {
           "address": "_FF3",
           "label": "Feed for the moves between, in the G94 or G95 of the contour; in older versions the retraction feed too",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "_AS2",
@@ -3112,17 +3141,20 @@
         {
           "address": "FF1",
           "label": "Feed for roughing",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "FF2",
           "label": "Feed for plunging into undercuts",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "FF3",
           "label": "Feed for finishing",
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "VARI",
@@ -3454,11 +3486,13 @@
         },
         {
           "address": "_FF1",
-          "label": "Feed down to the depth where the spindle turns slower"
+          "label": "Feed down to the depth where the spindle turns slower",
+          "unit": "feed"
         },
         {
           "address": "_FF2",
-          "label": "Lowered feed down to the final depth"
+          "label": "Lowered feed down to the final depth",
+          "unit": "feed"
         },
         {
           "address": "_SS2",
@@ -3576,7 +3610,8 @@
         },
         {
           "address": "_FF1",
-          "label": "Feed"
+          "label": "Feed",
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -3666,7 +3701,8 @@
         },
         {
           "address": "_FF1",
-          "label": "Feed for roughing or finishing"
+          "label": "Feed for roughing or finishing",
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -3700,11 +3736,13 @@
         },
         {
           "address": "_F",
-          "label": "Feed for roughing or finishing"
+          "label": "Feed for roughing or finishing",
+          "unit": "feed"
         },
         {
           "address": "_FR",
-          "label": "Feed for plunging into undercuts"
+          "label": "Feed for plunging into undercuts",
+          "unit": "feed"
         },
         {
           "address": "_RP",
@@ -3823,7 +3861,8 @@
         },
         {
           "address": "_FS",
-          "label": "Feed for the finishing cut when one call roughs and finishes"
+          "label": "Feed for the finishing cut when one call roughs and finishes",
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -4246,7 +4285,8 @@
         {
           "address": "FRC",
           "label": "Feed of the chamfer or rounding of this block, above 0",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending"
@@ -4259,7 +4299,8 @@
         {
           "address": "FRCM",
           "label": "Feed of the following chamfers and roundings, 0 for the path feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending"
@@ -5088,11 +5129,12 @@
   "dialect": "sinumerik",
   "templates": [
     {
-      "body": "{{title}}\n{{N}}{{setup}} {{units}}\n{{N}}{{offset}}",
-      "description": "A description, the safe-start line for turning or milling, the units and the work offset.",
+      "body": "{{title}}\n{{N}}G18 G90 G95 DIAMON {{units}}\n{{N}}{{offset}}",
+      "description": "A description, the safe-start line for turning (G18 plane, absolute, feed per revolution, X as a diameter), the units and the work offset.",
       "group": "Program",
       "id": "program-start",
       "label": "Program start",
+      "machineType": "lathe",
       "params": [
         {
           "comment": true,
@@ -5100,23 +5142,6 @@
           "id": "title",
           "label": "Program description",
           "type": "text"
-        },
-        {
-          "choices": [
-            {
-              "label": "Turning: G18, feed per revolution, X as a diameter",
-              "value": "G18 G90 G95 DIAMON"
-            },
-            {
-              "label": "Milling: G17, feed per minute, no radius compensation",
-              "value": "G17 G90 G94 G40"
-            }
-          ],
-          "help": "The turning and the milling profile share this template; choose the line for your machine. Nothing is chosen until you pick one.",
-          "id": "setup",
-          "label": "Machining",
-          "required": true,
-          "type": "choice"
         },
         {
           "choices": [

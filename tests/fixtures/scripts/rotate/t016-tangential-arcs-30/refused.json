@@ -1,0 +1,29 @@
+{
+  "message": "Nothing was changed: 4 blocks cannot be rotated: 4 tangential arcs or arcs through a point. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 6,
+      "severity": "error",
+      "message": "N50 CT X30 Y10: a tangential arc or an arc through a point; gEdit cannot check it after a turn or a mirror that rounds. Turn by 90, 180 or 270 degrees, or mirror in X or Y.",
+      "reason": "arc-tangential"
+    },
+    {
+      "line": 7,
+      "severity": "error",
+      "message": "N60 CIP X50 Y10 I1=40 J1=15: a tangential arc or an arc through a point; gEdit cannot check it after a turn or a mirror that rounds. Turn by 90, 180 or 270 degrees, or mirror in X or Y.",
+      "reason": "arc-tangential"
+    },
+    {
+      "line": 8,
+      "severity": "error",
+      "message": "N70 G91 CIP X10 Y-10 I1=5 J1=-1 Z-1: a tangential arc or an arc through a point; gEdit cannot check it after a turn or a mirror that rounds. Turn by 90, 180 or 270 degrees, or mirror in X or Y.",
+      "reason": "arc-tangential"
+    },
+    {
+      "line": 9,
+      "severity": "error",
+      "message": "N80 G90 CT X80 Y0: a tangential arc or an arc through a point; gEdit cannot check it after a turn or a mirror that rounds. Turn by 90, 180 or 270 degrees, or mirror in X or Y.",
+      "reason": "arc-tangential"
+    }
+  ]
+}

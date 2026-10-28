@@ -131,13 +131,29 @@ def run_document(text: str, profile_id: str, params: Dict[str, Any]) -> helpers.
     return run_script(SCRIPT, stdin=text, context=context)
 
 
-def run_inline(text: str, profile_id: str, params: Dict[str, Any], preceding: Optional[List[str]] = None) -> Dict[str, Any]:
-    """One run of an inline program; ``preceding`` makes it a selection below those lines."""
+def golden_context(case: helpers.GeometryCase) -> Dict[str, Any]:
+    """``helpers.geometry_context`` with the lines below a selection (FZ-5): a golden's selection
+    ends the document, so they are none."""
+    context = helpers.geometry_context(case)
+    scope = context.get("input")
+    if isinstance(scope, dict) and scope.get("scope") == "selection":
+        scope.setdefault("followingLines", [])
+    return context
+
+
+def run_inline(
+    text: str, profile_id: str, params: Dict[str, Any], preceding: Optional[List[str]] = None, following: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """One run of an inline program; ``preceding`` makes it a selection below those lines, which
+    ends the document unless ``following`` gives the lines below it (FZ-5)."""
     context = helpers.effective_context(profile_id, params=params)
     lines = text.split("\n")
     if preceding is not None:
         start = len(preceding) + 1
-        context["input"] = {"scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding}
+        context["input"] = {
+            "scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding,
+            "followingLines": list(following or []),
+        }
     out = run_script(SCRIPT, stdin=text, context=context)
     if not out.ok:
         raise AssertionError(out.stderr)
@@ -150,7 +166,7 @@ class GoldenTest(unittest.TestCase):
         self.assertGreaterEqual(len(cases), 30)
         for case in cases:
             with self.subTest(case=case.name):
-                out = run_script(SCRIPT, stdin=case.input_text(), context=helpers.geometry_context(case))
+                out = run_script(SCRIPT, stdin=case.input_text(), context=golden_context(case))
                 self.assertTrue(out.ok, out.stderr)
                 result = out.json()
                 self.assertEqual(result["text"], case.expected_text())
@@ -187,7 +203,7 @@ class IdentityAndRoundTripTest(unittest.TestCase):
     def test_a_zero_shift_gives_every_golden_back_byte_for_byte(self) -> None:
         for case in helpers.geometry_cases("translate"):
             with self.subTest(case=case.name):
-                context = helpers.geometry_context(case)
+                context = golden_context(case)
                 context["params"] = dict(ZERO)
                 out = run_script(SCRIPT, stdin=case.input_text(), context=context)
                 self.assertTrue(out.ok, out.stderr)
@@ -199,7 +215,7 @@ class IdentityAndRoundTripTest(unittest.TestCase):
             if case.refused:
                 continue
             with self.subTest(case=case.name):
-                context = helpers.geometry_context(case)
+                context = golden_context(case)
                 context["params"] = negated(case.params)
                 out = run_script(SCRIPT, stdin=case.expected_text(), context=context)
                 self.assertTrue(out.ok, out.stderr)
@@ -1037,6 +1053,67 @@ class RefusedBlocksAreNotMovedTest(unittest.TestCase):
         result, calls = self.run_in_process(text, {"dx": 1, "dy": 2, "dz": 0})
         self.assertEqual(result["findings"], [])
         self.assertIn("Y2.", result["text"])
+
+
+class LaterVersionTest(unittest.TestCase):
+    """Wave Y, BL-NC-geometry: the later-version transforms under translate. Each test fails
+    without its change."""
+
+    KLARTEXT = ReviewFixTest.KLARTEXT
+
+    def errors(self, result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def test_t021_every_call_at_a_position_moves_the_calls_z_and_keeps_q203(self) -> None:
+        # TNC 640 cycle manual (2019, p.65): the tool-axis coordinate of CYCL CALL POS acts like a
+        # further datum shift, so moving it moves the cycle once; Q203 stays.
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 CYCL CALL POS X+30 Y+10 Z-2 FMAX")
+        result = run_inline(text, "heidenhain-klartext", {"dx": 1, "dz": 1})
+        self.assertEqual(self.errors(result), [])
+        lines = result["text"].split("\n")
+        self.assertIn("  Q203=+0 ;SURFACE COORDINATE", lines)
+        self.assertIn("5 CYCL CALL POS X+11 Y+10 Z+1 FMAX", lines)
+        self.assertIn("6 CYCL CALL POS X+31 Y+10 Z-1 FMAX", lines)
+        self.assertIn("4 L Z+51 R0 FMAX", lines)
+
+    def test_t021_one_other_call_keeps_the_refusal(self) -> None:
+        # The golden b3-klartext-call-pos-z holds M99 and M89 calls; here one CYCL CALL.
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 L X+30 Y+10 R0 FMAX\n66 CYCL CALL")
+        self.assertEqual(self.errors(run_inline(text, "heidenhain-klartext", {"dz": 1})), [(4, "cycle-position"), (8, "cycle-position")])
+
+    def test_t021_a_call_at_a_position_without_the_tool_axis_keeps_the_refusal(self) -> None:
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 CYCL CALL POS X+30 Y+10 FMAX")
+        found = self.errors(run_inline(text, "heidenhain-klartext", {"dz": 1}))
+        self.assertEqual(found, [(4, "cycle-position"), (8, "cycle-position"), (9, "cycle-position")])
+
+    def test_t021_a_selection_with_the_definition_and_its_calls(self) -> None:
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 CYCL CALL POS X+30 Y+10 Z-2 FMAX")
+        lines = text.split("\n")
+        result = run_inline("\n".join(lines[3:9]), "heidenhain-klartext", {"dz": 1}, lines[:3])
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("  Q203=+0 ;SURFACE COORDINATE", result["text"].split("\n"))
+
+    def test_t019_cycle95_with_its_contour_between_labels_in_the_scope(self) -> None:
+        # SINUMERIK cycles manual, CYCLE95: NPP names the contour, a subprogram or a section of
+        # the program between two labels ("START:END"). The section in the run moves with it.
+        lines = [
+            "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE", "N10 G18 G90 G95 DIAMON", "N20 T1 D1",
+            "N40 G0 X65 Z2", 'N50 CYCLE95("ANFANG:ENDE",2,0.1,0.2,0.1,0.3,0.25,0.1,9,0,0,0.5)', "N60 G0 X100 Z50", "N70 M30",
+            "ANFANG:", "N80 G1 X20 Z0", "N90 Z-20", "ENDE:",
+        ]
+        text = "\n".join(lines)
+        result = run_inline(text, "sinumerik", {"dz": -1})
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N80 G1 X20 Z-1", result["text"].split("\n"))
+        # A contour in a subprogram stays refused.
+        sub = text.replace('"ANFANG:ENDE"', '"KONTUR1"')
+        self.assertEqual(self.errors(run_inline(sub, "sinumerik", {"dz": -1})), [(5, "cycle-position")])
+        # A label that is not in the run, or one written twice.
+        self.assertEqual(self.errors(run_inline(text.replace("ENDE:", "ENDX:"), "sinumerik", {"dz": -1})), [(5, "cycle-position")])
+        self.assertEqual(self.errors(run_inline(text + "\nANFANG:", "sinumerik", {"dz": -1})), [(5, "cycle-position")])
+        # A selection that holds the cycle and not its contour.
+        found = self.errors(run_inline("\n".join(lines[3:7]), "sinumerik", {"dz": -1}, lines[:3]))
+        self.assertIn((5, "cycle-position"), found)
 
 
 if __name__ == "__main__":

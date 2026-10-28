@@ -335,6 +335,28 @@
       "review": "pending"
     },
     {
+      "axisWords": "machine",
+      "code": "G24",
+      "description": "Moves the turret to the tool-change home position set in the machine's parameters, in machine coordinates and not in the program's, at rapid with each axis on its own (no straight line). An option; one of the home position commands with G20, G21 and G25.",
+      "group": "nonmodal",
+      "label": "Move to the tool-change home position, axes one by one",
+      "review": "pending",
+      "sets": {
+        "motion": "rapid"
+      }
+    },
+    {
+      "axisWords": "machine",
+      "code": "G25",
+      "description": "Moves to the joint position set in the machine's parameters, in machine coordinates and not in the program's, at rapid with each axis on its own (no straight line). An option; one of the home position commands with G20, G21 and G24.",
+      "group": "nonmodal",
+      "label": "Move to the joint position, axes one by one",
+      "review": "pending",
+      "sets": {
+        "motion": "rapid"
+      }
+    },
+    {
       "code": "G31",
       "description": "A fixed thread cycle written the same way as G33: each block cuts one threading pass to the diameter in X and goes back to the point it started from. A following block with only a new X cuts the next pass. F is the lead of the thread, never a feed rate. gEdit does not work out where a tapered pass starts.",
       "group": "motion",
@@ -934,7 +956,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "T",
@@ -995,7 +1018,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "T",
@@ -1062,7 +1086,8 @@
           "address": "F",
           "label": "Tapping feed, tied to the pitch",
           "min": 0,
-          "required": true
+          "required": true,
+          "unit": "feed"
         }
       ],
       "pitchFeed": true,
@@ -1094,7 +1119,8 @@
           "address": "F",
           "label": "Tapping feed, tied to the pitch",
           "min": 0,
-          "required": true
+          "required": true,
+          "unit": "feed"
         }
       ],
       "pitchFeed": true,
@@ -1158,7 +1184,8 @@
         {
           "address": "FA",
           "label": "Feed after the first point",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "XB",
@@ -1181,7 +1208,8 @@
         {
           "address": "FB",
           "label": "Feed after the second point",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "pitchFeedAmbiguous": true,
@@ -1203,7 +1231,8 @@
         {
           "address": "F",
           "label": "Roughing feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "U",
@@ -1235,7 +1264,8 @@
         {
           "address": "F",
           "label": "Roughing feed, until the shape sets one with E",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "U",
@@ -1931,7 +1961,8 @@
         {
           "address": "F",
           "label": "Drilling feed per minute",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "Q",
@@ -1984,7 +2015,8 @@
         {
           "address": "F",
           "label": "Boring feed per minute",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "Q",
@@ -2049,7 +2081,8 @@
         {
           "address": "F",
           "label": "Drilling feed per minute",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "Q",
@@ -2103,7 +2136,8 @@
           "address": "F",
           "label": "Tapping feed, tied to the pitch",
           "min": 0,
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "Q",
@@ -2230,7 +2264,8 @@
         {
           "address": "F",
           "label": "Reaming feed per minute",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "Q",
@@ -2272,6 +2307,13 @@
       "description": "On a machine with three turrets, the blocks that follow are for turret C. Not on every control: on the OSP-P200 G312 and G313 are contour codes for the side face, and the 2014 OSP-P300 list also has G314 for turret D.",
       "group": "turret",
       "label": "Turret C",
+      "review": "pending"
+    },
+    {
+      "code": "G314",
+      "description": "On a machine with four turrets, the blocks that follow are for turret D. An option of the OSP-P300; not on every control.",
+      "group": "turret",
+      "label": "Turret D",
       "review": "pending"
     },
     {
@@ -2746,19 +2788,23 @@
       "label": "Program start",
       "params": [
         {
+          "charset": "name",
           "help": "Letters and digits, starting with a letter, at most 16. Writes the header line $NAME.MIN%; leave empty for none.",
           "id": "file",
           "label": "File name for the tape header",
+          "maxLength": 16,
           "prefix": "$",
           "suffix": ".MIN%",
           "type": "text",
           "uppercase": true
         },
         {
+          "charset": "letters-digits",
           "default": "1001",
           "help": "At most four letters or digits after O; leave empty for none.",
           "id": "prog",
           "label": "Program name (O)",
+          "maxLength": 4,
           "prefix": "O",
           "type": "text",
           "uppercase": true
@@ -3208,10 +3254,12 @@
       "label": "LAP roughing and finishing (G85, G87)",
       "params": [
         {
+          "charset": "name",
           "default": "NLAP1",
           "help": "N followed by at most four letters or digits, for example NLAP1; the same in all three places. The form offers a name the program does not use yet.",
           "id": "name",
           "label": "Contour name",
+          "maxLength": 5,
           "required": true,
           "type": "text",
           "uppercase": true
