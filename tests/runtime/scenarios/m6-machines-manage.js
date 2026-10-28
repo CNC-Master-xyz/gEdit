@@ -49,7 +49,7 @@ const HOME_2 = '{run}/../m6-machines-manage-1/machines-home'
 const IS_B =
   // Manual-check fix D4-1: on the lathe a point-less feed per revolution and a thread lead count in 0.0001 mm/rev.
   'Increments of 0.001 mm (IS-B): X50 is 0.050 mm, X50. is 50 mm, C90000 is 90\u00b0; a point-less feed per minute in 1 mm/min (F200 is 200), per revolution and a thread lead in 0.0001 mm/rev (F2500 is 0.25 mm/rev)'
-const AS_WRITTEN = 'As written: X50 and X50. are both 50 mm; G74/G75 P and Q, G76 Q and G83/G87 Q are in microns (Q6000 is 6 mm)'
+const AS_WRITTEN = 'As written: X50 and X50. are both 50 mm; G74/G75 P and Q, G76 Q and P (second block), G83/G87 Q are in microns (Q6000 is 6 mm)'
 
 /** The `is-b` preset's rule set, as a machine stores it (resolved `fanuc-lathe.json`). */
 const IS_B_RULES = {
