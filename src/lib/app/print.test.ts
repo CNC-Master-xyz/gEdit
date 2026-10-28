@@ -269,15 +269,15 @@ describe('colours', () => {
     }
   });
 
-  it('prints black for a role whose colour is under 3:1 against white (here: a profile override)', () => {
+  it('never prints a pale profile colour: the profile palette ignores it (P4h, §6.10 rule 6), so the role keeps its built-in colour', () => {
     const pale = { ...FANUC.profile, colors: { light: { gcode: '#ffee88', axis: '#0a5f8f' } } };
     const cp = { ...CP, profile: pale } as CompiledProfile;
     expect(contrastOnWhite('#ffee88')).toBeLessThan(3);
-    expect(printPalette(cp).gcode).toBeUndefined();
+    expect(printPalette(cp).gcode).toBe(ROLE_COLORS.light.gcode.toLowerCase());
     expect(printPalette(cp).axis).toBe('#0a5f8f');
     const doc = buildPrintDocument(source(['G1 X10.']), OPTIONS, cp);
     const row = doc.pages[0].rows[0].spans;
-    expect(row.find((s) => s.text === 'G1')?.color).toBeUndefined();
+    expect(row.find((s) => s.text === 'G1')?.color).toBe(ROLE_COLORS.light.gcode.toLowerCase());
     expect(row.find((s) => s.text === 'X10.')?.color).toBe('#0a5f8f');
   });
 
