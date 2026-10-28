@@ -423,8 +423,8 @@ def number_class_of(
     force that the block does not write — the modal cycle, the motion code, a mode such as
     ``G63``; a caller without them passes nothing, and a pitch it flags is then one it
     could not name (rule 3). ``cycle_block`` (P4h, plan §6.10 rule 11; T118) is the block of
-    a two-block cycle of ``block_codes`` this block is (``_nc_modal.cycle_block_of`` of the
-    cycle's entry with the addresses the block writes), or ``None`` when that cannot be told:
+    a two-block cycle of ``block_codes`` this block is (``_nc_modal.block_cycle_of`` of the
+    block's entries and the tokens of the whole block), or ``None`` when that cannot be told:
     a parameter declared with another unit per block (the ``G76`` ``P``) is read with this
     block's unit, and gets no class while the block is not known. The codes in force are
     always read as if the block were not known (the two-block cycles are not modal).

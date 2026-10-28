@@ -918,6 +918,11 @@ class Block:
     def codes(self) -> List[Dict[str, Any]]:
         return [entry for entry, _, _ in self.entries]
 
+    def cycle_block(self) -> Optional[int]:
+        """Which block of a two-block cycle this block is (P4h, plan §6.10 rule 11; T118):
+        `gedit_nc.block_cycle_of` of its codes and the tokens of all of its lines."""
+        return gedit_nc.block_cycle_of(self.codes(), [token for line in self.lines for token in line.tokens])
+
     def clear(self) -> None:
         """Forgets every change: the block is left as written."""
         self.edits = []
@@ -1691,6 +1696,7 @@ class Run:
         # T120 / FB-2: under a mode that makes I, J and K its own words (Fanuc `G43.5`,
         # `G41.6`, `G42.6`) they are the tool direction, a count, and no arc centre to scale.
         in_force += gedit_nc.arc_centre_modes(state.get("groups"), interp.entry, setup.profile, codes)
+        cycle_block = block.cycle_block()
         outcomes: List[Outcome] = []
         geometry: List[Outcome] = []
         #: The codes (no arc) whose own positions on a chosen axis this block writes.
@@ -1732,14 +1738,16 @@ class Run:
                     return
                 if owner is not None:
                     points.add(owner)
-                outcome = self.word_outcome(token, line, address, state, codes, in_force, None, False, geo)
+                outcome = self.word_outcome(token, line, address, state, codes, in_force, None, False, geo, cycle_block=cycle_block)
                 outcomes.append(outcome)
                 geometry.append(outcome)
                 continue
             fk_axis = FK_POINT_AXES.get(address)
             if fk_axis is not None and fk_axis in setup.chosen and self.params.additive and self.fk_classified(block):
                 # T121: the absolute points of an FK contour move with the shift of their axis.
-                outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis)))
+                outcomes.append(
+                    self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis), cycle_block=cycle_block)
+                )
                 continue
             if fk_axis is not None and fk_axis in setup.chosen:
                 written = quote(token.text)
@@ -1756,7 +1764,7 @@ class Run:
             if address not in setup.words and not is_cycle:
                 continue
             word_data = None if id(token) in pole_words else cycle_data.get(id(token), data)
-            outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, word_data, is_cycle))
+            outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, word_data, is_cycle, cycle_block=cycle_block))
         for arg, cls in cycle_args:
             outcomes.append(self.arg_outcome(arg, cls, state))
 
@@ -2447,7 +2455,7 @@ class Run:
                 if arg.literal is not None and gedit_nc.decimal_of(arg.literal) == 0:
                     continue
                 if arg.kind == "word" and gedit_nc.position_of(param) == "none":
-                    cls = self.number_class(arg.name, codes, [entry])
+                    cls = self.number_class(arg.name, codes, [entry], block.cycle_block())
                     if cls is not None and cls not in ("length", "increment"):
                         continue
                 return (
@@ -2467,7 +2475,7 @@ class Run:
                     and arg.name in setup.axes
                     and gedit_nc.position_of(self.param_of(entry, arg)) is None
                 ]
-                lengths = self.length_params(entry, codes)
+                lengths = self.length_params(entry, codes, block.cycle_block())
                 if scaled and lengths:
                     return (
                         "not-scaled",
@@ -2518,14 +2526,14 @@ class Run:
             str(p.get("address") or "").upper() in axes and gedit_nc.position_of(p) is None for p in params_of(entry)
         )
 
-    def length_params(self, entry: Optional[Dict[str, Any]], codes: List[Dict[str, Any]]) -> List[str]:
+    def length_params(self, entry: Optional[Dict[str, Any]], codes: List[Dict[str, Any]], cycle_block: Optional[int]) -> List[str]:
         """The addresses of the cycle's reviewed parameters that may be lengths (NC-16)."""
         found: List[str] = []
         for param in params_of(entry):
             address = str(param.get("address") or "")
             if address == "" or address in found or not is_cycle_value(param):
                 continue
-            cls = self.number_class(address.upper(), codes, [entry] if isinstance(entry, dict) else [])
+            cls = self.number_class(address.upper(), codes, [entry] if isinstance(entry, dict) else [], cycle_block)
             if cls is not None and cls not in ("length", "increment"):
                 continue
             found.append(address)
@@ -2607,9 +2615,12 @@ class Run:
         data: Optional[str],
         is_cycle: bool,
         geometry: Optional[Tuple[str, str]] = None,
+        *,
+        cycle_block: Optional[int],
     ) -> Outcome:
         """One word of a chosen address (or a cycle position written as a word, or a
-        coordinate of an arc, ``geometry = (mode, axis)``)."""
+        coordinate of an arc, ``geometry = (mode, axis)``). ``cycle_block`` is
+        `Block.cycle_block` of the block the word is in."""
         setup = self.setup
         params = self.params
         additive = params.additive
@@ -2632,9 +2643,9 @@ class Run:
             return ("skip", line, "incremental", "%s: written as an incremental distance, so a shift does not apply to it" % written, written)
         absolute = function == "absolute" or mode == "absolute"
         distance = state.get("distance")
-        cls = self.number_class(address, codes, in_force)
+        cls = self.number_class(address, codes, in_force, cycle_block)
         if cls is None and geometry is not None:
-            cls = self.number_class(geometry[1], codes, in_force)
+            cls = self.number_class(geometry[1], codes, in_force, cycle_block)
         # D4-3 (manual check): G90/G91 decide where the axes go, not what a feed, a dwell, a
         # speed or a count is. Only a position word waits for an absolute distance mode.
         if additive and not twin and not absolute and self.is_position(address, cls, geometry):
@@ -2692,13 +2703,16 @@ class Run:
             or address == "R"  # a length on every profile (`_nc_machine` rule 6)
         )
 
-    def number_class(self, address: str, codes: List[Dict[str, Any]], in_force: List[Dict[str, Any]]) -> Optional[str]:
-        """`gedit_nc.number_class_of`, remembered: a program asks the same few questions."""
+    def number_class(
+        self, address: str, codes: List[Dict[str, Any]], in_force: List[Dict[str, Any]], cycle_block: Optional[int]
+    ) -> Optional[str]:
+        """`gedit_nc.number_class_of`, remembered: a program asks the same few questions.
+        ``cycle_block`` is `Block.cycle_block` of the block asked about (plan §6.10 rule 11)."""
         interp = self.interp
-        key = (address, tuple(id(e) for e in codes), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed)
+        key = (address, tuple(id(e) for e in codes), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed, cycle_block)
         if key not in self._classes:
             self._classes[key] = gedit_nc.number_class_of(
-                address, self.setup.profile, interp.feed_unit, codes, interp.pitch_feed, in_force
+                address, self.setup.profile, interp.feed_unit, codes, interp.pitch_feed, in_force, cycle_block=cycle_block
             )
         return self._classes[key]
 

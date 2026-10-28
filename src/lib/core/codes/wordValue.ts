@@ -257,7 +257,8 @@ export function valueWordEntry(db: CodeDb, token: NcToken, lookup: CodeLookup | 
  * is: `cycleBlockOf` of the entry of `blockCodes` that declares its blocks, read from the
  * addresses the block writes. Null when no entry of the block declares blocks, when the words
  * do not tell, and when two such entries in one block answer differently (refuse rather than
- * guess). The Python callers of `number_class_of` ask `cycle_block_of` the same way.
+ * guess). The Python twin is `block_cycle_of` (`_nc_modal.py`): every Python caller of
+ * `number_class_of` passes its answer as `cycle_block`, read from the tokens of the whole block.
  */
 export function blockCycleOf(blockCodes: readonly CodeEntry[], blockTokens: readonly NcToken[]): CycleBlock | null {
   const cycles = blockCodes.filter((entry) => declaresBlocks(entry));

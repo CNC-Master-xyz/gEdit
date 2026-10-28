@@ -1987,6 +1987,41 @@ class TestFb2ToolDirection(unittest.TestCase):
         self.assertIn("a parameter of G41.6", found[0]["message"])
 
 
+class TestP4hG76ThreadHeightByBlock(unittest.TestCase):
+    """P4h fix round, D1 / NC-2 (plan §6.10 rule 11; T118): the `G76` `P` is a packed count in
+    the first block and the thread height in increments in the second. Every Python caller of
+    `number_class_of` passes the block (`gedit_nc.block_cycle_of`); without it both `P` words
+    had no class and the cycle was refused as "does not know what kind of number"."""
+
+    PROGRAM = "G21 G18 G99\nG0 X50. Z5.\nG76 P010060 Q100 R0.05\nG76 X20. Z-30. P1500 Q300 F2.\nM30\n"
+
+    def run_on(self, context, **params):
+        context["params"] = dict({"operation": "add", "operand": 0.5, "addresses": ["P"]}, **params)
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(self.PROGRAM.split("\n"))}
+        result = helpers.run_script(SCRIPT, stdin=self.PROGRAM, context=context)
+        if not result.ok:
+            raise AssertionError(result.stderr)
+        return result.json()
+
+    def test_is_b_moves_the_thread_height_and_reads_the_first_block_p_as_a_count(self):
+        payload = self.run_on(helpers.effective_context("fanuc-lathe", preset="is-b"))
+        lines = lines_of(payload)
+        # Block 2: P1500 is 1.5 mm in increments of 0.001 mm; plus 0.5 mm is P2000.
+        self.assertEqual(lines[3], "G76 X20. Z-30. P2000 Q300 F2.")
+        # Block 1: a count, changed as written (the user chose P), and rounded to a whole number.
+        self.assertEqual(lines[2], "G76 P10061 Q100 R0.05")
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "rounded")])
+        self.assertNotIn("kind of number", json.dumps(payload))
+
+    def test_without_a_machine_the_thread_height_waits_for_one(self):
+        payload = self.run_on(helpers.effective_context("fanuc-lathe"))
+        self.assertEqual(lines_of(payload)[3], "G76 X20. Z-30. P1500 Q300 F2.")
+        found = finding_at(payload, 4)
+        self.assertEqual(found["reason"], "cycle-unresolved")
+        self.assertIn("P1500 cannot be moved (the reading depends on the machine", found["message"])
+        self.assertNotIn("kind of number", json.dumps(payload))
+
+
 class TestManualCheckD43OnlyPositionsNeedTheDistanceMode(unittest.TestCase):
     """Manual-check fix round, D4-3: G90/G91 govern where the axes go, not the feed. Only a
     position word (an axis, its incremental twin, an arc centre, `R` and the other position

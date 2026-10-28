@@ -1227,12 +1227,24 @@ class _Data:
         self._alike[key] = alike
         return alike
 
-    def number_class(self, address: str, profile_feed: Any, entries: Sequence[Dict[str, Any]], pitch: bool, in_force: Sequence[Dict[str, Any]]) -> Optional[str]:
-        key = (address.upper(), profile_feed, pitch, tuple(id(e) for e in entries), tuple(id(e) for e in in_force))
+    def number_class(
+        self,
+        address: str,
+        profile_feed: Any,
+        entries: Sequence[Dict[str, Any]],
+        pitch: bool,
+        in_force: Sequence[Dict[str, Any]],
+        cycle_block: Optional[int],
+    ) -> Optional[str]:
+        """``gedit_nc.number_class_of``, remembered. ``cycle_block`` is the block of a two-block
+        cycle the block is (``gedit_nc.block_cycle_of``; plan §6.10 rule 11), part of the key."""
+        key = (address.upper(), profile_feed, pitch, tuple(id(e) for e in entries), tuple(id(e) for e in in_force), cycle_block)
         if key not in self._classes:
             if len(self._classes) > 4096:
                 self._classes = {}
-            self._classes[key] = gedit_nc.number_class_of(address, self.profile, profile_feed, list(entries), pitch, list(in_force))
+            self._classes[key] = gedit_nc.number_class_of(
+                address, self.profile, profile_feed, list(entries), pitch, list(in_force), cycle_block=cycle_block
+            )
         return self._classes[key]
 
     def axis_of(self, address: str) -> Optional[str]:
@@ -1362,6 +1374,8 @@ class _Block:
         self.unknown_family: List[str] = []
         self._read_codes()
         self.entries = [entry for entry, _ in self.codes.values()]
+        #: P4h (plan §6.10 rule 11; T118): which block of a two-block cycle this block is.
+        self.cycle_block = gedit_nc.block_cycle_of(self.entries, tokens)
         groups = _dict(state.get("groups"))
         motion_code = _dict(groups.get("motion")).get("code")
         written_motion = [e for e in self.entries if e.get("group") == "motion" and (_sets(e).get("motion") or _sets(e).get("path"))]
@@ -1479,7 +1493,9 @@ class _Block:
 
     def number_class(self, address: str, entries: Optional[Sequence[Dict[str, Any]]] = None) -> Optional[str]:
         interp = self.interp
-        return self.data.number_class(address, interp.feed_unit, entries if entries is not None else self.entries, interp.pitch_feed, self.in_force)
+        return self.data.number_class(
+            address, interp.feed_unit, entries if entries is not None else self.entries, interp.pitch_feed, self.in_force, self.cycle_block
+        )
 
     def incremental(self, token: Any, address: str) -> Optional[bool]:
         """How an axis word is read: the tracker's reading where it has one, else the word's
