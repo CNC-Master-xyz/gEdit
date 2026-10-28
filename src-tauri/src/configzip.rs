@@ -271,7 +271,37 @@ pub enum Classified {
 
 /// A script or group name inside a zip: a plain segment (the rule of `scripts/discovery.rs`).
 fn script_segment_ok(segment: &str) -> bool {
-    crate::scripts::discovery::is_safe_segment(segment)
+    crate::scripts::discovery::is_safe_segment(segment) && !segment.chars().any(is_format_char)
+}
+
+/// The characters that change how a name looks or reads without showing: the soft hyphen, the
+/// Arabic letter mark, the Mongolian vowel separator, zero-width and direction marks
+/// (U+200B..U+200F), line and paragraph separators and the bidi embeddings and overrides
+/// (U+2028..U+202E), the invisible operators (U+2060..U+2064), the bidi isolates and the
+/// deprecated format characters (U+2066..U+206F), the byte order mark and the interlinear
+/// annotation marks. `Cc` is already refused for the whole archive by [`check_shape`]; these
+/// are `Cf`/`Zl`/`Zp`, and a script or group named with one is ignored (`name-not-allowed`)
+/// like any name the user-file rules refuse; the archive is not refused for it.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+    )
+}
+
+/// The folder name of the shared library, `gedit_nc`: `import gedit_nc` would find a folder of
+/// that name in the scripts folder, so no script group may be called so.
+fn is_library_group(group: &str) -> bool {
+    let stem = crate::scripts::discovery::LIBRARY_FILE_NAME.trim_end_matches(".py");
+    group.eq_ignore_ascii_case(stem)
 }
 
 /// A script file name: `<stem>.py`, a plain segment, not the shared library's name.
@@ -295,6 +325,7 @@ fn json_file_ok(name: &str) -> bool {
 fn script_member(rest: &[&str]) -> Result<(Option<String>, String), &'static str> {
     match rest {
         [name] => script_file_ok(name).map(|()| (None, (*name).to_string())),
+        [group, _] if is_library_group(group) => Err("reserved-name"),
         [group, name] if script_segment_ok(group) && !group.starts_with('.') => {
             script_file_ok(name).map(|()| (Some((*group).to_string()), (*name).to_string()))
         }
@@ -567,7 +598,7 @@ pub fn inventory(bytes: &[u8]) -> Result<Inventory, Vec<Refusal>> {
             refusals.push(Refusal::new(&name, reason));
             continue;
         }
-        if !seen.insert(name.trim_end_matches('/').to_lowercase()) {
+        if !seen.insert(duplicate_key(&name)) {
             refusals.push(Refusal::new(&name, RefusalReason::Duplicate));
             continue;
         }
@@ -641,24 +672,18 @@ pub fn read_entry(
     Ok(bytes)
 }
 
-/// A 64-bit FNV-1a fingerprint of the archive's length and of every entry's name, checksum and
-/// declared size, in order, as 16 hex digits. The preview hands it out and the apply compares it:
-/// a file that changed in between is not applied. (Change detection, not a signature.)
-pub fn fingerprint(inv: &Inventory) -> String {
-    fn feed(hash: &mut u64, bytes: &[u8]) {
-        for byte in bytes {
-            *hash ^= u64::from(*byte);
-            *hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    feed(&mut hash, &inv.archive_bytes.to_le_bytes());
-    for entry in &inv.entries {
-        feed(&mut hash, entry.name.as_bytes());
-        feed(&mut hash, &[0]);
-        feed(&mut hash, &entry.crc32.to_le_bytes());
-        feed(&mut hash, &entry.size.to_le_bytes());
-    }
+/// The fingerprint of an archive: a keyed 64-bit hash (SipHash, with a key chosen at random once
+/// per process) of *every byte* of the archive, as 16 hex digits. The preview hands it out and
+/// the apply compares it: an archive that changed in between, by one byte anywhere (a script's
+/// text, a comment, a header), is not applied. The key never leaves the process, which previews
+/// and applies alike, so a crafted archive cannot be made to match a fingerprint it was not
+/// previewed under. (Still change detection, not a signature: it protects nothing across runs.)
+pub fn fingerprint(archive: &[u8]) -> String {
+    use std::hash::BuildHasher;
+    static KEY: std::sync::OnceLock<std::hash::RandomState> = std::sync::OnceLock::new();
+    let hash = KEY
+        .get_or_init(std::hash::RandomState::new)
+        .hash_one(archive);
     format!("{hash:016x}")
 }
 
@@ -869,6 +894,13 @@ fn join_segments(base: &Path, segments: &[&str]) -> PathBuf {
     path
 }
 
+/// What two entry names are the same under: the name without a closing `/`, case folded (a file
+/// system that folds case keeps one of two such files). The inventory refuses an archive holding
+/// two such names; the export uses the same key to leave the second out.
+fn duplicate_key(name: &str) -> String {
+    name.trim_end_matches('/').to_lowercase()
+}
+
 /// The bytes a JSON object is written as (the shape `config::save_json_object` writes).
 fn pretty(object: &Map<String, Value>) -> Vec<u8> {
     let mut bytes = serde_json::to_vec_pretty(object).unwrap_or_default();
@@ -1038,6 +1070,38 @@ fn base_of(current: &CurrentJson) -> (Map<String, Value>, Vec<String>) {
     }
 }
 
+/// The note under a `packages.disabled` line the union changed (the preview shows it as is).
+const DISABLED_NOTE: &str = "packages switched off on this computer stay off: a configuration file can switch packages off, not on";
+
+/// `packages.disabled` after an import: the names on this computer, in their order, then the
+/// file's names that are new. A value that is not a list of names counts as an empty list, on
+/// either side. Adds [`DISABLED_NOTE`] when the file's list lacks a name of this computer's.
+fn disabled_union(local: Option<&Value>, zip: &Value, notes: &mut Vec<String>) -> Value {
+    fn names(value: Option<&Value>) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        if let Some(Value::Array(list)) = value {
+            for name in list.iter().filter_map(Value::as_str) {
+                if !out.iter().any(|seen| seen == name) {
+                    out.push(name.to_string());
+                }
+            }
+        }
+        out
+    }
+    let ours = names(local);
+    let theirs = names(Some(zip));
+    if ours.iter().any(|name| !theirs.contains(name)) {
+        notes.push(DISABLED_NOTE.to_string());
+    }
+    let mut all = ours;
+    for name in theirs {
+        if !all.contains(&name) {
+            all.push(name);
+        }
+    }
+    Value::Array(all.into_iter().map(Value::String).collect())
+}
+
 /// `settings.json`, key by key: the zip's keys win, the others stay, and
 /// [`MACHINE_SPECIFIC_KEYS`] are never taken. Answers the merge and the kept keys.
 fn merge_settings(zip: &Map<String, Value>, current: &CurrentJson) -> (Merged, Vec<String>) {
@@ -1060,6 +1124,18 @@ fn merge_settings(zip: &Map<String, Value>, current: &CurrentJson) -> (Merged, V
             continue;
         }
         let value = &zip[key];
+        // A file may switch packages off, never on (the owner's Q4g-2: a file cannot choose
+        // what runs): the list is the union of this computer's and the file's.
+        let union;
+        let value = if key == crate::packages::KEY_PACKAGES_DISABLED {
+            union = disabled_union(base.get(key), value, &mut notes);
+            if base.get(key).is_none() && union == Value::Array(Vec::new()) {
+                continue;
+            }
+            &union
+        } else {
+            value
+        };
         if base.get(key) != Some(value) {
             items.push(item(key, base.get(key), Some(value)));
             merged.insert(key.clone(), value.clone());
@@ -1076,6 +1152,30 @@ fn merge_settings(zip: &Map<String, Value>, current: &CurrentJson) -> (Merged, V
         },
         kept,
     )
+}
+
+/// One command's binding after an import: a string or `null` of the zip replaces the whole
+/// value (both platforms); an object `{"mac":…,"other":…}` of the zip is laid member by member
+/// over this computer's value, so a platform the zip does not name keeps the user's key (a
+/// string here counts as both members, `null` as both unbound).
+fn merge_binding(local: Option<&Value>, zip: &Value) -> Value {
+    let Value::Object(theirs) = zip else {
+        return zip.clone();
+    };
+    let mut merged = match local {
+        Some(Value::Object(ours)) => ours.clone(),
+        Some(single @ (Value::String(_) | Value::Null)) => {
+            let mut both = Map::new();
+            both.insert("mac".into(), single.clone());
+            both.insert("other".into(), single.clone());
+            both
+        }
+        _ => Map::new(),
+    };
+    for (member, value) in theirs {
+        merged.insert(member.clone(), value.clone());
+    }
+    Value::Object(merged)
 }
 
 /// `keybindings.json` by command id: the zip's binding wins, the user's other bindings stay.
@@ -1108,7 +1208,7 @@ fn merge_keybindings(
             let mut ids: Vec<&String> = theirs.keys().collect();
             ids.sort();
             for id in ids {
-                let value = &theirs[id];
+                let value = &merge_binding(bindings.get(id), &theirs[id]);
                 if bindings.get(id) != Some(value) {
                     items.push(item(id, bindings.get(id), Some(value)));
                     bindings.insert(id.clone(), value.clone());
@@ -1641,6 +1741,8 @@ struct Collector {
     /// headers, so the archive never passes [`MAX_ARCHIVE_BYTES`].
     estimate: u64,
     omitted: Vec<String>,
+    /// The [`duplicate_key`] of every entry admitted so far.
+    seen: HashSet<String>,
 }
 
 /// What the manifest and the headers may take of the 16 MiB.
@@ -1665,7 +1767,13 @@ impl Collector {
             return None;
         }
         match classify(name) {
-            Classified::Member(member) => Some(member),
+            Classified::Member(member) => {
+                if !self.seen.insert(duplicate_key(name)) {
+                    self.skip(name, "duplicate");
+                    return None;
+                }
+                Some(member)
+            }
             Classified::Ignored("system-file") => None,
             Classified::Ignored(reason) => {
                 self.skip(name, reason);
@@ -2015,7 +2123,7 @@ pub fn preview(dirs: &AppDirs, archive: &[u8]) -> Result<ImportPreview, String> 
     let ignored_count = plan.ignored.len() + plan.system_files;
     Ok(ImportPreview {
         ok: true,
-        fingerprint: fingerprint(&inv),
+        fingerprint: fingerprint(archive),
         manifest: plan.manifest,
         needs_trust: groups.iter().any(|g| g.runnable),
         groups,
@@ -2088,13 +2196,15 @@ fn write_backup(dirs: &AppDirs, replaced: &[&Planned], secs: u64) -> Result<Stri
     };
     crate::atomic::write_atomic(&dir.join(&name), &bytes)
         .map_err(|err| crate::userfiles::why(&err).to_string())?;
-    prune_backups(&dir);
+    prune_backups(&dir, &name);
     Ok(name)
 }
 
-/// Removes all but the last [`MAX_IMPORT_BACKUPS`] backup zips; only plain files of the backup
-/// name pattern are ever removed.
-fn prune_backups(dir: &Path) {
+/// Removes the oldest backup zips so that [`MAX_IMPORT_BACKUPS`] remain, `keep` (the file just
+/// written, the undo of this import) among them whatever its date says: a clock that ran ahead
+/// and was corrected leaves newer-dated backups behind, and those must not cost the new one its
+/// place. Only plain files of the backup name pattern are ever removed.
+fn prune_backups(dir: &Path, keep: &str) {
     let Ok(read) = std::fs::read_dir(dir) else {
         return;
     };
@@ -2102,13 +2212,16 @@ fn prune_backups(dir: &Path) {
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
+            if name == keep {
+                return None;
+            }
             let key = backup_key(&name)?;
             let meta = std::fs::symlink_metadata(entry.path()).ok()?;
             (meta.is_file() && !is_link(&meta)).then(|| (key, entry.path()))
         })
         .collect();
     found.sort();
-    let excess = found.len().saturating_sub(MAX_IMPORT_BACKUPS);
+    let excess = found.len().saturating_sub(MAX_IMPORT_BACKUPS - 1);
     for (_, path) in found.into_iter().take(excess) {
         let _ = std::fs::remove_file(path);
     }
@@ -2150,7 +2263,7 @@ fn apply_with(
     // 1. The archive again, under every rule of the preview.
     let inv = inventory(archive).map_err(|refusals| refusal_text(&refusals))?;
     // 2. The same archive as the preview read.
-    if self::fingerprint(&inv) != expected {
+    if self::fingerprint(archive) != expected {
         return Err(CHANGED.into());
     }
     // 3. Every entry read and checked again, the merges built, in memory.
@@ -2203,6 +2316,8 @@ fn apply_with(
     };
     // 7. Swap, in order; a failure puts back what was already written.
     let mut done: Vec<&Planned> = Vec::new();
+    // The folders this apply created on the way to a new file, parents first.
+    let mut created: Vec<PathBuf> = Vec::new();
     for file in &to_write {
         let segments: Vec<&str> = file.path.split('/').collect();
         let path = join_segments(&dirs.config, &segments);
@@ -2213,12 +2328,13 @@ fn apply_with(
             OnDisk::Missing
         };
         let result = if state == expected_state {
+            note_new_folders(&dirs.config, &segments, &mut created);
             write(&path, &file.bytes).map_err(|err| crate::userfiles::why(&err).to_string())
         } else {
             Err("changed on disk during the import".to_string())
         };
         if let Err(why) = result {
-            let failed = rollback(dirs, &done, write);
+            let failed = rollback(dirs, &done, &created, write);
             let mut message = format!("{} could not be written ({why})", file.path);
             if failed.is_empty() {
                 message.push_str("; the files already written were put back");
@@ -2242,9 +2358,28 @@ fn apply_with(
     })
 }
 
+/// Adds to `created` the folders on the way to the file `segments` (below `base`) that do not
+/// exist yet, parents first, before the writer makes them.
+fn note_new_folders(base: &Path, segments: &[&str], created: &mut Vec<PathBuf>) {
+    let mut path = base.to_path_buf();
+    for segment in &segments[..segments.len().saturating_sub(1)] {
+        path.push(segment);
+        if std::fs::symlink_metadata(&path).is_err() && !created.contains(&path) {
+            created.push(path.clone());
+        }
+    }
+}
+
 /// Puts back the files of `done`, newest first: a replaced file gets its old bytes, a new file
-/// is removed again (it did not exist before this import). Answers what could not be put back.
-fn rollback(dirs: &AppDirs, done: &[&Planned], write: &mut Writer<'_>) -> Vec<String> {
+/// is removed again (it did not exist before this import). Then the folders in `created` (made
+/// by this import) go, deepest first and only while empty: a folder that was there before, or
+/// holds anything else, stays. Answers what could not be put back.
+fn rollback(
+    dirs: &AppDirs,
+    done: &[&Planned],
+    created: &[PathBuf],
+    write: &mut Writer<'_>,
+) -> Vec<String> {
     let mut failed = Vec::new();
     for file in done.iter().rev() {
         let segments: Vec<&str> = file.path.split('/').collect();
@@ -2256,6 +2391,9 @@ fn rollback(dirs: &AppDirs, done: &[&Planned], write: &mut Writer<'_>) -> Vec<St
         if result.is_err() {
             failed.push(file.path.clone());
         }
+    }
+    for folder in created.iter().rev() {
+        let _ = std::fs::remove_dir(folder);
     }
     failed
 }
@@ -2476,6 +2614,60 @@ mod tests {
     }
 
     #[test]
+    fn the_library_name_is_reserved_as_a_script_group_too() {
+        for name in [
+            "scripts/gedit_nc/__init__.py",
+            "scripts/gedit_nc/x.py",
+            "scripts/GEDIT_NC/x.py",
+            "packages/p/scripts/gedit_nc/__init__.py",
+        ] {
+            assert_eq!(
+                classify(name),
+                Classified::Ignored("reserved-name"),
+                "{name}"
+            );
+        }
+        // Helper modules of the user's own stay members, and export keeps them.
+        for name in [
+            "scripts/_common.py",
+            "scripts/lib/__init__.py",
+            "scripts/gedit_nc_tools/x.py",
+            "packages/p/scripts/lib/__init__.py",
+        ] {
+            assert!(matches!(classify(name), Classified::Member(_)), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_name_with_a_bidi_zero_width_or_format_character_is_ignored_and_does_not_refuse_the_archive(
+    ) {
+        for name in [
+            "scripts/evil\u{202E}py.py",
+            "scripts/a\u{200B}b.py",
+            "scripts/\u{FEFF}x.py",
+            "scripts/grp\u{2066}/x.py",
+            "scripts/ok/x\u{00AD}.py",
+            "packages/p/scripts/a\u{2028}b.py",
+            "packages/p/scripts/g\u{061C}/x.py",
+        ] {
+            assert_eq!(
+                classify(name),
+                Classified::Ignored("name-not-allowed"),
+                "{name:?}"
+            );
+        }
+        let bytes = archive(&[
+            (MANIFEST_NAME, b"{}"),
+            ("scripts/ok.py", b"x = 1\n"),
+            ("scripts/evil\u{202E}py.py", b"x = 1\n"),
+            ("scripts/a\u{200B}b.py", b"x = 1\n"),
+        ]);
+        let inv = inventory(&bytes).unwrap();
+        assert_eq!(inv.members().count(), 2, "the manifest and ok.py");
+        assert_eq!(inv.ignored().len(), 2);
+    }
+
+    #[test]
     fn scripts_and_package_scripts_are_the_runnable_members() {
         assert!(member("scripts/x.py").is_runnable());
         assert!(member("packages/shop/scripts/x.py").is_runnable());
@@ -2657,11 +2849,11 @@ mod tests {
     }
 
     #[test]
-    fn the_fingerprint_changes_with_any_entry_and_not_with_nothing() {
-        let a = inventory(&archive(&[("settings.json", b"{}")])).unwrap();
-        let again = inventory(&archive(&[("settings.json", b"{}")])).unwrap();
-        let other_bytes = inventory(&archive(&[("settings.json", b"{ }")])).unwrap();
-        let other_name = inventory(&archive(&[("machines.json", b"{}")])).unwrap();
+    fn the_fingerprint_changes_with_any_byte_and_not_with_nothing() {
+        let a = archive(&[("settings.json", b"{}")]);
+        let again = archive(&[("settings.json", b"{}")]);
+        let other_bytes = archive(&[("settings.json", b"{ }")]);
+        let other_name = archive(&[("machines.json", b"{}")]);
         assert_eq!(fingerprint(&a), fingerprint(&again));
         assert_ne!(fingerprint(&a), fingerprint(&other_bytes));
         assert_ne!(fingerprint(&a), fingerprint(&other_name));
@@ -3429,6 +3621,55 @@ mod tests {
     }
 
     #[test]
+    fn a_file_switches_packages_off_and_never_on() {
+        let (root, dirs) = scratch("disabled");
+        put(
+            &dirs,
+            "settings.json",
+            br#"{"editor.tabWidth":4,"packages.disabled":["old-tool"]}"#,
+        );
+        let bytes = config_zip(&[(
+            "settings.json",
+            br#"{"editor.tabWidth":4,"packages.disabled":["shop-b"]}"#,
+        )]);
+        let p = previewed(&dirs, &bytes);
+        let file = &group(&p, "settings").files[0];
+        assert_eq!(file.action, FileAction::Replace);
+        assert_eq!(
+            file.items,
+            vec![ImportItem {
+                label: "packages.disabled".into(),
+                from: Some(r#"["old-tool"]"#.into()),
+                to: Some(r#"["old-tool","shop-b"]"#.into())
+            }]
+        );
+        assert_eq!(file.notes, vec![DISABLED_NOTE.to_string()]);
+        apply(&dirs, &bytes, &p.fingerprint, &["settings".into()], false).unwrap();
+        assert_eq!(
+            json_of(&dirs, "settings.json")["packages.disabled"],
+            serde_json::json!(["old-tool", "shop-b"])
+        );
+        let _ = fs::remove_dir_all(&root);
+
+        // A file with an empty list does not switch on what is off here.
+        let (root, dirs) = scratch("disabled-same");
+        put(&dirs, "settings.json", br#"{"packages.disabled":["shop"]}"#);
+        let bytes = config_zip(&[("settings.json", br#"{"packages.disabled":[]}"#)]);
+        let p = previewed(&dirs, &bytes);
+        assert_eq!(action(&p, "settings.json"), FileAction::Same);
+        let before = snapshot(&root);
+        let result = apply(&dirs, &bytes, &p.fingerprint, &["settings".into()], false).unwrap();
+        assert_eq!(result.written, 0);
+        assert_eq!(snapshot(&root), before);
+        // A file without the key, or with the same list, says nothing about it.
+        let bytes = config_zip(&[("settings.json", br#"{"packages.disabled":["shop"]}"#)]);
+        let p = previewed(&dirs, &bytes);
+        assert_eq!(action(&p, "settings.json"), FileAction::Same);
+        assert!(group(&p, "settings").files[0].notes.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_settings_file_with_only_the_interpreter_changes_nothing() {
         let (root, dirs) = scratch("settings-same");
         put(&dirs, "settings.json", br#"{"editor.tabWidth":4}"#);
@@ -3526,6 +3767,34 @@ mod tests {
     }
 
     #[test]
+    fn a_key_with_a_member_per_platform_is_merged_member_by_member() {
+        let (root, dirs) = scratch("keys-members");
+        put(
+            &dirs,
+            "keybindings.json",
+            br#"{"$version":1,"bindings":{"a":{"mac":"Mod+L"},"b":"Mod+B","c":{"mac":"Mod+C","other":"Ctrl+C"},"d":"Mod+D","e":null}}"#,
+        );
+        let bytes = config_zip(&[(
+            "keybindings.json",
+            br#"{"$version":1,"bindings":{"a":{"other":"Mod+K"},"b":{"other":"Alt+B"},"c":"Mod+Z","d":null,"e":{"mac":"Mod+E"},"f":{"other":"F2"}}}"#,
+        )]);
+        let p = previewed(&dirs, &bytes);
+        apply(&dirs, &bytes, &p.fingerprint, &["keys".into()], false).unwrap();
+        assert_eq!(
+            json_of(&dirs, "keybindings.json")["bindings"],
+            serde_json::json!({
+                "a": {"mac": "Mod+L", "other": "Mod+K"},
+                "b": {"mac": "Mod+B", "other": "Alt+B"},
+                "c": "Mod+Z",
+                "d": null,
+                "e": {"mac": "Mod+E", "other": null},
+                "f": {"other": "F2"}
+            })
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_file_on_this_computer_from_a_newer_gedit_is_left_alone() {
         let (root, dirs) = scratch("newer-here");
         put(&dirs, "machines.json", br#"{"$version":99,"machines":[]}"#);
@@ -3537,6 +3806,40 @@ mod tests {
     }
 
     // --- apply ---
+
+    /// Two archives of the same length and the same entries that differ only in the zip comment:
+    /// the old fingerprint (entry names, checksums, sizes) could not tell them apart.
+    #[test]
+    fn an_archive_that_differs_only_in_a_byte_the_entries_do_not_show_is_another_archive() {
+        let (root, dirs) = scratch("changed-comment");
+        put(&dirs, "profiles/a.json", br#"{"id":"a"}"#);
+        let with_comment = |comment: &str| {
+            let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+            for (name, bytes) in [
+                (MANIFEST_NAME, MANIFEST),
+                ("profiles/a.json", br#"{"id":"a2"}"# as &[u8]),
+            ] {
+                writer.start_file(name, deflated()).unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            writer.set_comment(comment).unwrap();
+            writer.finish().unwrap().into_inner()
+        };
+        let first = with_comment("aaaa");
+        let second = with_comment("bbbb");
+        assert_eq!(first.len(), second.len());
+        let p = previewed(&dirs, &first);
+        assert_ne!(p.fingerprint, previewed(&dirs, &second).fingerprint);
+        let before = snapshot(&root);
+        assert_eq!(
+            apply(&dirs, &second, &p.fingerprint, &["profiles".into()], false),
+            Err(CHANGED.to_string())
+        );
+        assert_eq!(snapshot(&root), before);
+        // The archive that was previewed still applies.
+        assert!(apply(&dirs, &first, &p.fingerprint, &["profiles".into()], false).is_ok());
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn an_archive_that_changed_since_the_preview_writes_nothing() {
@@ -3738,6 +4041,52 @@ mod tests {
     }
 
     #[test]
+    fn a_failing_write_also_removes_the_folders_the_import_made_and_only_those() {
+        let (root, dirs) = scratch("rollback-folders");
+        put(&dirs, "settings.json", br#"{"editor.tabWidth":4}"#);
+        // A folder that is there before the import, empty.
+        fs::create_dir_all(dirs.config.join("packages/oldpkg/profiles")).unwrap();
+        let bytes = config_zip(&[
+            ("packages/newpkg/profiles/a.json", br#"{"id":"a"}"#),
+            ("packages/oldpkg/profiles/b.json", br#"{"id":"b"}"#),
+            ("settings.json", br#"{"editor.tabWidth":2}"#),
+        ]);
+        let p = previewed(&dirs, &bytes);
+        let before = snapshot(&dirs.config);
+        assert!(before.contains_key("packages/oldpkg/profiles/"));
+        // The order is packages, then settings: the third write fails.
+        let mut calls = 0usize;
+        let mut writer = |path: &Path, bytes: &[u8]| -> std::io::Result<()> {
+            calls += 1;
+            if calls == 3 {
+                return Err(std::io::Error::other("disk full"));
+            }
+            crate::atomic::write_atomic(path, bytes)
+        };
+        let err = apply_with(
+            &dirs,
+            &bytes,
+            &p.fingerprint,
+            &all_groups(&p),
+            true,
+            0,
+            &mut writer,
+        )
+        .unwrap_err();
+        assert!(err.contains("put back"), "{err}");
+        assert!(
+            !dirs.config.join("packages/newpkg").exists(),
+            "a folder this import made is removed again"
+        );
+        assert_eq!(
+            snapshot(&dirs.config),
+            before,
+            "the config folder is as it was, the old empty folder included"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn the_files_are_written_packages_first_and_settings_last() {
         let (root, dirs) = scratch("order");
         let bytes = config_zip(&[
@@ -3803,7 +4152,7 @@ mod tests {
         fs::write(dir.join("before-import-20260101-000000-3.zip"), b"x").unwrap();
         fs::write(dir.join("notes.txt"), b"mine").unwrap();
         fs::write(dir.join("before-import-x.zip"), b"mine").unwrap();
-        prune_backups(&dir);
+        prune_backups(&dir, "before-import-20260109-000008.zip");
         let left = backups(&dirs);
         assert!(left.contains(&"notes.txt".to_string()));
         assert!(left.contains(&"before-import-x.zip".to_string()));
@@ -3820,6 +4169,61 @@ mod tests {
             Some(("20260101-000000".into(), 3))
         );
         assert_eq!(backup_key("before-import-2026-0101.zip"), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Ten backups a clock that ran ahead left behind, dated after any real date.
+    fn future_backups(dirs: &AppDirs) {
+        let dir = dirs.import_backups_dir();
+        fs::create_dir_all(&dir).unwrap();
+        for i in 0..MAX_IMPORT_BACKUPS {
+            fs::write(
+                dir.join(format!("before-import-20300101-0000{i:02}.zip")),
+                b"x",
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn the_backup_just_written_is_never_pruned_even_when_older_ones_are_dated_later() {
+        // Real clock: ten backups dated 2030 sort after today's.
+        let (root, dirs) = scratch("prune-future");
+        put(&dirs, "profiles/a.json", br#"{"id":"a"}"#);
+        future_backups(&dirs);
+        let bytes = config_zip(&[("profiles/a.json", br#"{"id":"a2"}"#)]);
+        let p = previewed(&dirs, &bytes);
+        let result = apply(&dirs, &bytes, &p.fingerprint, &all_groups(&p), true).unwrap();
+        let name = result.backup.unwrap();
+        let left = backups(&dirs);
+        assert!(
+            left.contains(&name),
+            "the undo of this import is gone: {left:?}"
+        );
+        assert_eq!(left.len(), MAX_IMPORT_BACKUPS);
+        let _ = fs::remove_dir_all(&root);
+
+        // A clock that went back: the same through the injected clock.
+        let (root, dirs) = scratch("prune-back");
+        put(&dirs, "profiles/a.json", br#"{"id":"a"}"#);
+        future_backups(&dirs);
+        let p = previewed(&dirs, &bytes);
+        let secs = 1_735_689_600; // 2025-01-01
+        let result = apply_with(
+            &dirs,
+            &bytes,
+            &p.fingerprint,
+            &all_groups(&p),
+            true,
+            secs,
+            &mut |path, bytes| crate::atomic::write_atomic(path, bytes),
+        )
+        .unwrap();
+        let name = result.backup.unwrap();
+        assert!(name.starts_with("before-import-20250101-"), "{name}");
+        let left = backups(&dirs);
+        assert!(left.contains(&name), "{left:?}");
+        assert_eq!(left.len(), MAX_IMPORT_BACKUPS);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -4010,6 +4414,62 @@ mod tests {
         assert!(get(&to, "state.json").is_none());
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&root2);
+    }
+
+    #[test]
+    fn export_skips_a_second_name_that_is_equal_once_case_is_folded() {
+        let mut c = Collector::default();
+        assert!(c.admits("scripts/Mill.py").is_some());
+        assert!(c.admits("scripts/mill.py").is_none());
+        assert!(c.admits("scripts/other.py").is_some());
+        assert_eq!(c.skipped.len(), 1);
+        assert_eq!(
+            (c.skipped[0].path.as_str(), c.skipped[0].reason.as_str()),
+            ("scripts/mill.py", "duplicate")
+        );
+        // The same key as the import's: what export lets through the import accepts.
+        let bytes = archive(&[("scripts/Mill.py", b"x\n"), ("scripts/mill.py", b"x\n")]);
+        assert_eq!(
+            refused(&bytes),
+            vec![("scripts/mill.py".into(), RefusalReason::Duplicate)]
+        );
+    }
+
+    #[test]
+    fn export_skips_a_script_the_import_would_ignore_for_its_name() {
+        let (root, dirs) = scratch("export-format");
+        put(&dirs, "scripts/ok.py", b"x = 1\n");
+        put(&dirs, "scripts/evil\u{202E}py.py", b"x = 1\n");
+        put(&dirs, "scripts/gedit_nc/__init__.py", b"x = 1\n");
+        put(&dirs, "scripts/lib/__init__.py", b"x = 1\n");
+        let (result, bytes) = exported(&dirs, &root);
+        let mut skipped: Vec<(String, String)> = result
+            .skipped
+            .iter()
+            .map(|s| (s.path.clone(), s.reason.clone()))
+            .collect();
+        skipped.sort();
+        assert_eq!(
+            skipped,
+            vec![
+                (
+                    "scripts/evil\u{202E}py.py".to_string(),
+                    "name-not-allowed".to_string()
+                ),
+                (
+                    "scripts/gedit_nc/__init__.py".to_string(),
+                    "reserved-name".to_string()
+                ),
+            ]
+        );
+        let inv = inventory(&bytes).unwrap();
+        let mut names: Vec<&str> = inv.entries.iter().map(|e| e.name.as_str()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![MANIFEST_NAME, "scripts/lib/__init__.py", "scripts/ok.py"]
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
