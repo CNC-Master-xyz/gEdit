@@ -641,24 +641,16 @@ pub fn read_entry(
     Ok(bytes)
 }
 
-/// A 64-bit FNV-1a fingerprint of the archive's length and of every entry's name, checksum and
-/// declared size, in order, as 16 hex digits. The preview hands it out and the apply compares it:
-/// a file that changed in between is not applied. (Change detection, not a signature.)
-pub fn fingerprint(inv: &Inventory) -> String {
-    fn feed(hash: &mut u64, bytes: &[u8]) {
-        for byte in bytes {
-            *hash ^= u64::from(*byte);
-            *hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    feed(&mut hash, &inv.archive_bytes.to_le_bytes());
-    for entry in &inv.entries {
-        feed(&mut hash, entry.name.as_bytes());
-        feed(&mut hash, &[0]);
-        feed(&mut hash, &entry.crc32.to_le_bytes());
-        feed(&mut hash, &entry.size.to_le_bytes());
-    }
+/// The fingerprint of an archive: a keyed 64-bit hash (SipHash, with a key chosen at random once
+/// per process) of *every byte* of the archive, as 16 hex digits. The preview hands it out and
+/// the apply compares it: an archive that changed in between, by one byte anywhere (a script's
+/// text, a comment, a header), is not applied. The key never leaves the process, which previews
+/// and applies alike, so a crafted archive cannot be made to match a fingerprint it was not
+/// previewed under. (Still change detection, not a signature: it protects nothing across runs.)
+pub fn fingerprint(archive: &[u8]) -> String {
+    use std::hash::BuildHasher;
+    static KEY: std::sync::OnceLock<std::hash::RandomState> = std::sync::OnceLock::new();
+    let hash = KEY.get_or_init(std::hash::RandomState::new).hash_one(archive);
     format!("{hash:016x}")
 }
 
@@ -1038,6 +1030,38 @@ fn base_of(current: &CurrentJson) -> (Map<String, Value>, Vec<String>) {
     }
 }
 
+/// The note under a `packages.disabled` line the union changed (the preview shows it as is).
+const DISABLED_NOTE: &str = "packages switched off on this computer stay off: a configuration file can switch packages off, not on";
+
+/// `packages.disabled` after an import: the names on this computer, in their order, then the
+/// file's names that are new. A value that is not a list of names counts as an empty list, on
+/// either side. Adds [`DISABLED_NOTE`] when the file's list lacks a name of this computer's.
+fn disabled_union(local: Option<&Value>, zip: &Value, notes: &mut Vec<String>) -> Value {
+    fn names(value: Option<&Value>) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        if let Some(Value::Array(list)) = value {
+            for name in list.iter().filter_map(Value::as_str) {
+                if !out.iter().any(|seen| seen == name) {
+                    out.push(name.to_string());
+                }
+            }
+        }
+        out
+    }
+    let ours = names(local);
+    let theirs = names(Some(zip));
+    if ours.iter().any(|name| !theirs.contains(name)) {
+        notes.push(DISABLED_NOTE.to_string());
+    }
+    let mut all = ours;
+    for name in theirs {
+        if !all.contains(&name) {
+            all.push(name);
+        }
+    }
+    Value::Array(all.into_iter().map(Value::String).collect())
+}
+
 /// `settings.json`, key by key: the zip's keys win, the others stay, and
 /// [`MACHINE_SPECIFIC_KEYS`] are never taken. Answers the merge and the kept keys.
 fn merge_settings(zip: &Map<String, Value>, current: &CurrentJson) -> (Merged, Vec<String>) {
@@ -1060,6 +1084,18 @@ fn merge_settings(zip: &Map<String, Value>, current: &CurrentJson) -> (Merged, V
             continue;
         }
         let value = &zip[key];
+        // A file may switch packages off, never on (the owner's Q4g-2: a file cannot choose
+        // what runs): the list is the union of this computer's and the file's.
+        let union;
+        let value = if key == crate::packages::KEY_PACKAGES_DISABLED {
+            union = disabled_union(base.get(key), value, &mut notes);
+            if base.get(key).is_none() && union == Value::Array(Vec::new()) {
+                continue;
+            }
+            &union
+        } else {
+            value
+        };
         if base.get(key) != Some(value) {
             items.push(item(key, base.get(key), Some(value)));
             merged.insert(key.clone(), value.clone());
@@ -2015,7 +2051,7 @@ pub fn preview(dirs: &AppDirs, archive: &[u8]) -> Result<ImportPreview, String> 
     let ignored_count = plan.ignored.len() + plan.system_files;
     Ok(ImportPreview {
         ok: true,
-        fingerprint: fingerprint(&inv),
+        fingerprint: fingerprint(archive),
         manifest: plan.manifest,
         needs_trust: groups.iter().any(|g| g.runnable),
         groups,
@@ -2155,7 +2191,7 @@ fn apply_with(
     // 1. The archive again, under every rule of the preview.
     let inv = inventory(archive).map_err(|refusals| refusal_text(&refusals))?;
     // 2. The same archive as the preview read.
-    if self::fingerprint(&inv) != expected {
+    if self::fingerprint(archive) != expected {
         return Err(CHANGED.into());
     }
     // 3. Every entry read and checked again, the merges built, in memory.
@@ -2662,11 +2698,11 @@ mod tests {
     }
 
     #[test]
-    fn the_fingerprint_changes_with_any_entry_and_not_with_nothing() {
-        let a = inventory(&archive(&[("settings.json", b"{}")])).unwrap();
-        let again = inventory(&archive(&[("settings.json", b"{}")])).unwrap();
-        let other_bytes = inventory(&archive(&[("settings.json", b"{ }")])).unwrap();
-        let other_name = inventory(&archive(&[("machines.json", b"{}")])).unwrap();
+    fn the_fingerprint_changes_with_any_byte_and_not_with_nothing() {
+        let a = archive(&[("settings.json", b"{}")]);
+        let again = archive(&[("settings.json", b"{}")]);
+        let other_bytes = archive(&[("settings.json", b"{ }")]);
+        let other_name = archive(&[("machines.json", b"{}")]);
         assert_eq!(fingerprint(&a), fingerprint(&again));
         assert_ne!(fingerprint(&a), fingerprint(&other_bytes));
         assert_ne!(fingerprint(&a), fingerprint(&other_name));
@@ -3434,6 +3470,55 @@ mod tests {
     }
 
     #[test]
+    fn a_file_switches_packages_off_and_never_on() {
+        let (root, dirs) = scratch("disabled");
+        put(
+            &dirs,
+            "settings.json",
+            br#"{"editor.tabWidth":4,"packages.disabled":["old-tool"]}"#,
+        );
+        let bytes = config_zip(&[(
+            "settings.json",
+            br#"{"editor.tabWidth":4,"packages.disabled":["shop-b"]}"#,
+        )]);
+        let p = previewed(&dirs, &bytes);
+        let file = &group(&p, "settings").files[0];
+        assert_eq!(file.action, FileAction::Replace);
+        assert_eq!(
+            file.items,
+            vec![ImportItem {
+                label: "packages.disabled".into(),
+                from: Some(r#"["old-tool"]"#.into()),
+                to: Some(r#"["old-tool","shop-b"]"#.into())
+            }]
+        );
+        assert_eq!(file.notes, vec![DISABLED_NOTE.to_string()]);
+        apply(&dirs, &bytes, &p.fingerprint, &["settings".into()], false).unwrap();
+        assert_eq!(
+            json_of(&dirs, "settings.json")["packages.disabled"],
+            serde_json::json!(["old-tool", "shop-b"])
+        );
+        let _ = fs::remove_dir_all(&root);
+
+        // A file with an empty list does not switch on what is off here.
+        let (root, dirs) = scratch("disabled-same");
+        put(&dirs, "settings.json", br#"{"packages.disabled":["shop"]}"#);
+        let bytes = config_zip(&[("settings.json", br#"{"packages.disabled":[]}"#)]);
+        let p = previewed(&dirs, &bytes);
+        assert_eq!(action(&p, "settings.json"), FileAction::Same);
+        let before = snapshot(&root);
+        let result = apply(&dirs, &bytes, &p.fingerprint, &["settings".into()], false).unwrap();
+        assert_eq!(result.written, 0);
+        assert_eq!(snapshot(&root), before);
+        // A file without the key, or with the same list, says nothing about it.
+        let bytes = config_zip(&[("settings.json", br#"{"packages.disabled":["shop"]}"#)]);
+        let p = previewed(&dirs, &bytes);
+        assert_eq!(action(&p, "settings.json"), FileAction::Same);
+        assert!(group(&p, "settings").files[0].notes.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_settings_file_with_only_the_interpreter_changes_nothing() {
         let (root, dirs) = scratch("settings-same");
         put(&dirs, "settings.json", br#"{"editor.tabWidth":4}"#);
@@ -3542,6 +3627,40 @@ mod tests {
     }
 
     // --- apply ---
+
+    /// Two archives of the same length and the same entries that differ only in the zip comment:
+    /// the old fingerprint (entry names, checksums, sizes) could not tell them apart.
+    #[test]
+    fn an_archive_that_differs_only_in_a_byte_the_entries_do_not_show_is_another_archive() {
+        let (root, dirs) = scratch("changed-comment");
+        put(&dirs, "profiles/a.json", br#"{"id":"a"}"#);
+        let with_comment = |comment: &str| {
+            let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+            for (name, bytes) in [
+                (MANIFEST_NAME, MANIFEST),
+                ("profiles/a.json", br#"{"id":"a2"}"# as &[u8]),
+            ] {
+                writer.start_file(name, deflated()).unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            writer.set_comment(comment).unwrap();
+            writer.finish().unwrap().into_inner()
+        };
+        let first = with_comment("aaaa");
+        let second = with_comment("bbbb");
+        assert_eq!(first.len(), second.len());
+        let p = previewed(&dirs, &first);
+        assert_ne!(p.fingerprint, previewed(&dirs, &second).fingerprint);
+        let before = snapshot(&root);
+        assert_eq!(
+            apply(&dirs, &second, &p.fingerprint, &["profiles".into()], false),
+            Err(CHANGED.to_string())
+        );
+        assert_eq!(snapshot(&root), before);
+        // The archive that was previewed still applies.
+        assert!(apply(&dirs, &first, &p.fingerprint, &["profiles".into()], false).is_ok());
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn an_archive_that_changed_since_the_preview_writes_nothing() {
