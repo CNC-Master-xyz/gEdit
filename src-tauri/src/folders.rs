@@ -1506,10 +1506,9 @@ pub fn grant_target(
     let resolved = resolve_root(root, is_allowed)?;
     check_path_text(path, cfg!(windows))?;
     let given = Path::new(path);
-    let below = given
-        .strip_prefix(&resolved)
-        .or_else(|_| given.strip_prefix(root))
-        .map_err(|_| E_NOT_IN_FOLDER)?;
+    // Only the resolved spelling counts: a search sends paths built from the resolved root, so a
+    // path under the written root (a link, say) was never sent and is not granted.
+    let below = given.strip_prefix(&resolved).map_err(|_| E_NOT_IN_FOLDER)?;
     let steps: Vec<Component<'_>> = below.components().collect();
     if steps.is_empty() {
         return Err(E_NOT_IN_FOLDER);
@@ -1548,7 +1547,14 @@ pub fn grant_target(
     let real = fs::canonicalize(&target).map_err(|_| E_NOT_IN_FOLDER)?;
     let real = paths::plain(&real).into_owned();
     let plain_file = fs::symlink_metadata(&real).is_ok_and(|meta| meta.is_file());
-    if !real.starts_with(&resolved) || !plain_file || state::is_state_file(&real, state_file) {
+    // The file resolved now must be the very path that was sent: a folder swapped for a link to
+    // another place since the search resolves elsewhere, and what the search never sent is not
+    // granted.
+    if real != given
+        || !real.starts_with(&resolved)
+        || !plain_file
+        || state::is_state_file(&real, state_file)
+    {
         return Err(E_NOT_IN_FOLDER);
     }
     Ok(real)
@@ -3127,13 +3133,45 @@ mod tests {
             );
         }
         assert!(grant(&root, &root.join("real").join("b.nc"), &state_file).is_ok());
-        // The root may be spelled through a link: the file granted is the resolved one.
+        // The root may be spelled through a link: the file granted is the resolved one, which is
+        // what a search sends. The same file under the written spelling was never sent.
         let spelled = dir.join("spelled");
         std::os::unix::fs::symlink(&root, &spelled).unwrap();
-        let granted = grant(&spelled, &spelled.join("real").join("b.nc"), &state_file).unwrap();
-        assert_eq!(granted, root.join("real").join("b.nc"));
+        let resolved_file = root.join("real").join("b.nc");
+        assert_eq!(
+            grant(&spelled, &resolved_file, &state_file),
+            Ok(resolved_file.clone())
+        );
+        assert_eq!(
+            grant(&spelled, &spelled.join("real").join("b.nc"), &state_file),
+            Err(E_NOT_IN_FOLDER)
+        );
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&outside);
+    }
+
+    /// SEC-1: a search of the folder A/sub sent A/sub/f.nc. A/sub is then swapped for a link to
+    /// another scoped folder B/deep (B itself granted without its subfolders). The text still
+    /// names a sent file, but the root now resolves elsewhere: the grant must not follow it.
+    #[cfg(unix)]
+    #[test]
+    fn a_root_swapped_for_a_link_after_the_search_is_not_followed() {
+        let dir = scratch("grant-swap");
+        let root = dir.join("A").join("sub");
+        let sent = root.join("f.nc");
+        put(&sent, b"G0\n");
+        let other = dir.join("B").join("deep");
+        put(&other.join("f.nc"), b"G1\n");
+        let state_file = dir.join("data").join("state.json");
+        assert_eq!(grant(&root, &sent, &state_file), Ok(sent.clone()));
+        // The same user swaps the folder for a link to the other folder.
+        fs::remove_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&other, &root).unwrap();
+        assert_eq!(grant(&root, &sent, &state_file), Err(E_NOT_IN_FOLDER));
+        // The file the link leads to is reachable only under its own, resolved spelling.
+        let resolved = other.join("f.nc");
+        assert_eq!(grant(&root, &resolved, &state_file), Ok(resolved.clone()));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
