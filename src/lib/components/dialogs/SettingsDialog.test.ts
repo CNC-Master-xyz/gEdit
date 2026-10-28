@@ -28,6 +28,7 @@ import SettingsDialog, {
   defaultValues,
   isListKey,
   pagesOf,
+  rebaseValues,
   sameValue,
   snapshotValues,
   specOf,
@@ -342,6 +343,51 @@ describe('changedValues', () => {
   it('never carries a key the dialog does not render', () => {
     const values = { ...snapshotValues(DEFAULTS), 'editor.rulers': [80], 'not.a.setting': 1 };
     expect(changedValues(values, DEFAULTS)).toEqual({});
+  });
+});
+
+// CODE-1 (P4g review): a configuration import inside Settings changes the live values; the dialog's
+// pending values used to stay as they were, so every imported setting counted as the user's edit
+// (the close question appeared and Save wrote the old values back over the import).
+describe('rebaseValues (the live settings move while the dialog is open)', () => {
+  const before: Settings = { ...DEFAULTS, 'editor.tabWidth': 4, 'scripts.folders': ['/a'] };
+  const imported: Settings = { ...before, 'editor.tabWidth': 2, 'scripts.folders': ['/a', '/b'] };
+
+  it('lets a value the user did not touch follow the live value: nothing is left to save or to ask about', () => {
+    const next = rebaseValues(snapshotValues(before), before, imported);
+    expect(next['editor.tabWidth']).toBe(2);
+    expect(next['scripts.folders']).toEqual(['/a', '/b']);
+    expect(changedValues(next, imported)).toEqual({});
+    // Without the rebase the import counts as an edit (what the close guard and Save used to see).
+    expect(Object.keys(changedValues(snapshotValues(before), imported)).sort()).toEqual(['editor.tabWidth', 'scripts.folders']);
+  });
+
+  it('keeps a value the user edited, and the patch holds exactly that edit', () => {
+    const typed = { ...snapshotValues(before), 'editor.tabWidth': 8 };
+    const next = rebaseValues(typed, before, imported);
+    expect(next['editor.tabWidth']).toBe(8);
+    expect(next['scripts.folders']).toEqual(['/a', '/b']);
+    expect(changedValues(next, imported)).toEqual({ 'editor.tabWidth': 8 });
+  });
+
+  it('compares lists entry by entry and copies the list it takes over', () => {
+    const typed = { ...snapshotValues(before), 'scripts.folders': ['/a', '/c'] };
+    expect(rebaseValues(typed, before, imported)['scripts.folders']).toEqual(['/a', '/c']);
+    const next = rebaseValues(snapshotValues(before), before, imported);
+    expect(next['scripts.folders']).not.toBe(imported['scripts.folders']);
+  });
+
+  it('answers the same object when no dialog value moved, and ignores keys the dialog does not render', () => {
+    const current = snapshotValues(before);
+    expect(rebaseValues(current, before, before)).toBe(current);
+    const quiet: Settings = { ...before, 'packages.disabled': ['x'] };
+    expect(rebaseValues(current, before, quiet)).toBe(current);
+  });
+
+  it('is wired to the live settings store in the dialog', () => {
+    // The instance needs a DOM to run; the real flow (import inside Settings, then Save) is a runtime scenario.
+    const source = readFileSync(fileURLToPath(new URL('./SettingsDialog.svelte', import.meta.url)), 'utf8');
+    expect(source).toMatch(/settings\.values\.subscribe\(\(after\)[\s\S]{0,200}rebaseValues\(current, synced, after\)/);
   });
 });
 
