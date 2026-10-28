@@ -123,6 +123,11 @@ def context_of(case):
         context["machine"]["id"] = name.lower().replace(" ", "-")
         context["machine"]["name"] = name
     context.pop("machineName", None)
+    scope = context.get("input")
+    if isinstance(scope, dict) and scope.get("scope") == "selection" and "followingLines" not in scope:
+        # v1.2.0 Wave Y (D5): a selection case runs to the end of its document (README), and
+        # the app sends the lines below a selection, here none (FZ-5).
+        context["input"] = dict(scope, followingLines=[])
     return context
 
 
@@ -1625,16 +1630,58 @@ class TestNcfcFanucArcRadius(unittest.TestCase):
                 self.assertEqual(payload["findings"], [])
 
 
-def run_selection(text, start, end, profile="fanuc-gcode", **params):
-    """A selection of an inline program (lines ``start`` to ``end``), primed with the lines above."""
+def run_selection(text, start, end, profile="fanuc-gcode", below=True, **params):
+    """A selection of an inline program (lines ``start`` to ``end``), primed with the lines above
+    and, unless ``below`` is false, given the lines below."""
     lines = text.split("\n")
     context = helpers.effective_context(profile)
     context["params"] = dict({"operation": "add", "operand": 0.5}, **params)
     context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+    if below:
+        # The app sends the lines below a selection too (FZ-5; v1.2.0 Wave Y, D5).
+        context["input"]["followingLines"] = lines[end:]
     result = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
     if not result.ok:
         raise AssertionError(result.stderr)
     return result.json()
+
+
+class TestRotaryBelowTheSelectionD5(unittest.TestCase):
+    """v1.2.0 Wave Y, D5 (the skeptic of FZ-5): a move made before the program first writes a
+    rotary axis that turns it is refused when the program turns that axis later (NC-4). A
+    selection reads the lines below it for that (``input.followingLines``), so it refuses exactly
+    what the whole run refuses; without them such a move is left with a warning (probe fz5a)."""
+
+    PROGRAM = "\n".join([
+        "%", "O1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G21 G17 G90",
+        "G0 X0. Y0. Z50.", "G1 X10. Y10. F100.", "G1 X20. Y10.", "G0 Z50.", "G0 B90.", "G1 X5. Y5.", "M30", "%",
+    ])
+
+    def test_a_selection_refuses_what_the_whole_run_refuses(self):
+        whole = run(self.PROGRAM, operand=1, addresses=["X"])
+        self.assertEqual([(f["line"], f["reason"]) for f in whole["findings"]], [(n, "rotary-without-tcp") for n in (4, 5, 6, 9)])
+        payload = run_selection(self.PROGRAM, 5, 6, operand=1, addresses=["X"])
+        self.assertEqual(lines_of(payload), ["G1 X10. Y10. F100.", "G1 X20. Y10."])
+        self.assertEqual(
+            [(f["line"], f["reason"], f["message"]) for f in payload["findings"]],
+            [(n, "rotary-without-tcp", m["message"]) for n, m in ((5, finding_at(whole, 5)), (6, finding_at(whole, 6)))],
+        )
+
+    def test_without_the_lines_below_such_a_move_is_left_with_a_warning(self):
+        payload = run_selection(self.PROGRAM, 5, 6, below=False, operand=1, addresses=["X"])
+        self.assertEqual(lines_of(payload), ["G1 X10. Y10. F100.", "G1 X20. Y10."])
+        self.assertEqual(finding_at(payload, 5)["severity"], "warning")
+        self.assertEqual(finding_at(payload, 5)["reason"], "rotary-without-tcp")
+        self.assertIn("the lines below the selection were not available", finding_at(payload, 5)["message"])
+
+    def test_a_program_that_never_turns_the_axis_below_is_shifted(self):
+        program = self.PROGRAM.replace("G0 B90.", "G0 B0.")
+        payload = run_selection(program, 5, 6, operand=1, addresses=["X"])
+        self.assertEqual(lines_of(payload), ["G1 X11. Y10. F100.", "G1 X21. Y10."])
+        self.assertEqual(payload["findings"], [])
+        # A selection that ends at the end of the document has nothing below it.
+        payload = run_selection("G21 G17 G90\nG1 X10. Y10. F100.", 2, 2, operand=1, addresses=["X"])
+        self.assertEqual((lines_of(payload), payload["findings"]), (["G1 X11. Y10. F100."], []))
 
 
 class TestNcr1DrillingCycleAfterAnArc(unittest.TestCase):

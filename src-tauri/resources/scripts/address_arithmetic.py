@@ -234,6 +234,10 @@ distance mode, the plane, a frame and a cycle in force there are known. A cycle 
 started above the selection and is moved there cannot be moved here, so the blocks in the
 selection that run it are refused. Without the lines above, the run says so at its first
 line and reads the selection from the top-of-program state, which leaves most words alone.
+The lines below the selection (`input.followingLines`, FZ-5) are read for the rotary axes only
+(Wave Y, D5): a move made before the program first writes a rotary axis that turns it is
+refused when the program turns that axis later, below the selection too, as the whole run
+refuses it; without those lines such a move is left with a warning.
 
 Everything outside the values it changes — line endings, spacing, block numbers, comments —
 is handed back byte for byte: the only edits are the value spans of tokens.
@@ -1219,6 +1223,8 @@ class Run:
         self.fpol_above = False
         self.numbers_above: set = set()
         #: The selection's lines, their first line number and the tokenizer state they start in.
+        #: The tokenizer state the walk ends in (``walk_below`` reads on from it).
+        self.end_state: Optional[gedit_nc.LineState] = None
         self.selection_lines: List[str] = []
         self.selection_first = 1
         self.selection_state: Optional[gedit_nc.LineState] = None
@@ -1255,6 +1261,44 @@ class Run:
             pending.append(Line(index, first_number + index, text, tokens, index >= inside_from))
         if pending:
             self.finish(pending)
+        self.end_state = state
+
+    def walk_below(self, following: Optional[Sequence[str]], first_number: int) -> None:
+        """v1.2.0 Wave Y (D5, FZ-5): the lines below a selection, read for the rotary axes only:
+        whether the program turns, later, an axis a changed block of the selection waits on
+        (`settle_rotary`), as the whole run would. Without them (``None``) such a block is left
+        (`settle_rotary`)."""
+        if not self.rotary.rotary or following is None:
+            return
+        waiting = set()
+        for block in self.blocks:
+            if block.inside and block.refusal is None and block.edits and block.tilt_pending:
+                waiting |= block.tilt_pending
+        waiting -= set(self.rotary.first_written)
+        if not waiting:
+            return
+        cp = self.cp
+        state = self.end_state
+        pending: List[Line] = []
+        for index, text in enumerate(following):
+            head = gedit_nc.continues_block(text, cp)
+            continued = (state.continuation if state is not None else False) or head
+            if pending and not continued:
+                self.note_below(pending)
+                pending = []
+                if waiting <= set(self.rotary.first_written):
+                    return
+            tokens, state = gedit_nc.tokenize_line(text, cp, state)
+            self.interp.update(tokens, first_number + index, "", continued=head)
+            pending.append(Line(index, first_number + index, text, tokens, False))
+        if pending:
+            self.note_below(pending)
+
+    def note_below(self, lines: List[Line]) -> None:
+        """D5: one block below the selection: its rotary words only."""
+        block = Block(lines)
+        read_block(block, self.entry, self.setup.letters)
+        self.note_rotary(block)
 
     def finish(self, lines: List[Line]) -> None:
         """One whole block has been read: judge it in the state it leaves behind."""
@@ -1344,6 +1388,39 @@ class Run:
             return
         setup = self.setup
         codes = block.codes()
+        before, writes = self.note_rotary(block)
+        if self.interp.tcp is not None:
+            return
+        after = rotary.state
+        if TOOL_AXIS in setup.linear:
+            block.tilt_tool = rotary.blocking(TOOL_AXIS, before, after)
+        turned = set()
+        pending = set()
+        moved: List[str] = []
+        for token, _ in block.words:
+            address = (token.address or "").upper()
+            if (token.value_text or "") == "" or address not in setup.words:
+                continue
+            linear = self.linear_of(address, codes)
+            if linear is None:
+                continue
+            hit, unwritten = rotary.blocking(linear, before, after)
+            if hit or unwritten:
+                if address not in moved:
+                    moved.append(address)
+                turned |= hit
+                pending |= unwritten
+                if hit & writes:
+                    block.tilt_moves = True
+        block.tilt_words = moved
+        block.tilt_turned = frozenset(turned)
+        block.tilt_pending = frozenset(pending)
+
+    def note_rotary(self, block: Block) -> Tuple[Dict[str, str], set]:
+        """NC-4: the rotary words of a block, into :attr:`rotary`: where the axes stood before it,
+        and the axes it writes."""
+        rotary = self.rotary
+        codes = block.codes()
         distance = self.interp.state.get("distance")
         words: List[Tuple[str, Any, Optional[bool]]] = []
         writes = set()
@@ -1372,32 +1449,7 @@ class Run:
         # machine position does, to a place the program's frame does not state.
         if words and "data" not in flags:
             rotary.update(words, block.number, "machine" in flags)
-        if self.interp.tcp is not None:
-            return
-        after = rotary.state
-        if TOOL_AXIS in setup.linear:
-            block.tilt_tool = rotary.blocking(TOOL_AXIS, before, after)
-        turned = set()
-        pending = set()
-        moved: List[str] = []
-        for token, _ in block.words:
-            address = (token.address or "").upper()
-            if (token.value_text or "") == "" or address not in setup.words:
-                continue
-            linear = self.linear_of(address, codes)
-            if linear is None:
-                continue
-            hit, unwritten = rotary.blocking(linear, before, after)
-            if hit or unwritten:
-                if address not in moved:
-                    moved.append(address)
-                turned |= hit
-                pending |= unwritten
-                if hit & writes:
-                    block.tilt_moves = True
-        block.tilt_words = moved
-        block.tilt_turned = frozenset(turned)
-        block.tilt_pending = frozenset(pending)
+        return before, writes
 
     def pass_lengths(self, entry: Optional[Dict[str, Any]]) -> Dict[str, str]:
         """T009: the length parameters of a code and the axis each lies along (`lengthAlong`)."""
@@ -3059,6 +3111,22 @@ class Run:
             if block.refusal is not None or not block.edits or not block.tilt_pending:
                 continue
             later = self.rotary.known_later(block.tilt_pending)
+            unseen = sorted(a for a in block.tilt_pending if a not in first)
+            if not later and unseen and self.is_selection and self.following is None:
+                # D5: the lines below were not sent, so whether the program turns the axis
+                # there (which the whole run refuses) is not known: left, as the whole run may.
+                block.refusal = (
+                    "rotary-without-tcp",
+                    "writes %s before the program has written %s, and the lines below the selection were not available: whether the program turns %s later, which would make %s angle here unknown while tool centre point control is off, cannot be told. Run Address arithmetic on the whole program"
+                    % (
+                        and_list(block.tilt_words),
+                        and_list(unseen),
+                        "it" if len(unseen) == 1 else "them",
+                        "its" if len(unseen) == 1 else "their",
+                    ),
+                )
+                block.clear()
+                continue
             if not later:
                 continue
             block.refusal = (
@@ -3425,6 +3493,10 @@ def main() -> int:
     run.is_selection = scope.get("scope") == "selection"
     run.following = following_lines(context)
     run.walk(list(preceding) + lines, base_line - len(preceding), len(preceding))
+    if run.is_selection:
+        end = scope.get("endLine")
+        below = end + 1 if isinstance(end, int) and not isinstance(end, bool) and end >= base_line else base_line + len(lines)
+        run.walk_below(run.following, below)
     run.settle()
     out = apply_edits(list(preceding) + lines, run)[len(preceding):]
     collect_findings(run, findings)
