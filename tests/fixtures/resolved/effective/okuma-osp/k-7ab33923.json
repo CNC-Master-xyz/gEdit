@@ -1,18 +1,25 @@
 {
   "codes": "okuma",
   "machine": {
-    "choice": "none",
-    "id": null,
-    "name": null,
+    "choice": "document",
+    "id": "review",
+    "name": "review",
     "params": {
       "diameter": "on",
       "modalInitial": {},
       "numberInput": {
-        "incrementDeg": "1",
-        "incrementInch": "1",
-        "incrementMm": "1",
-        "incrementSec": "1",
-        "mode": "calculator"
+        "classes": {
+          "feedPerMin": {
+            "increment": "1"
+          },
+          "feedPerRev": {
+            "increment": "0.01"
+          }
+        },
+        "incrementDeg": "0.01",
+        "incrementMm": "0.01",
+        "incrementSec": "0.1",
+        "mode": "scale"
       },
       "units": "mm",
       "variants": {
@@ -24,9 +31,10 @@
       "diameter": "profile",
       "modalInitial": {
         "distance": "profile",
-        "feedmode": "profile"
+        "feedmode": "profile",
+        "plane": "profile"
       },
-      "numberInput": "profile",
+      "numberInput": "machine",
       "units": "profile",
       "variants": {
         "counterSpindleY": "profile",
@@ -409,12 +417,14 @@
       "diameter": "on",
       "initial": {
         "distance": "G90",
-        "feedmode": "G95"
+        "feedmode": "G95",
+        "plane": "G18"
       },
       "sources": {
         "diameter": "profile",
         "distance": "profile",
         "feedmode": "profile",
+        "plane": "profile",
         "units": "profile"
       },
       "units": "mm"

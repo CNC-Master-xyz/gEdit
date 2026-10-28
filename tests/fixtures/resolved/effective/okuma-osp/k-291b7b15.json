@@ -2,8 +2,8 @@
   "codes": "okuma",
   "machine": {
     "choice": "document",
-    "id": "x8-okuma-1um",
-    "name": "X8 Okuma 1um",
+    "id": "review",
+    "name": "review",
     "params": {
       "diameter": "on",
       "modalInitial": {},
@@ -31,16 +31,17 @@
       }
     },
     "source": {
-      "diameter": "machine",
+      "diameter": "profile",
       "modalInitial": {
         "distance": "profile",
-        "feedmode": "profile"
+        "feedmode": "profile",
+        "plane": "profile"
       },
       "numberInput": "machine",
-      "units": "machine",
+      "units": "profile",
       "variants": {
         "counterSpindleY": "profile",
-        "toolWord": "machine"
+        "toolWord": "profile"
       }
     }
   },
@@ -419,13 +420,15 @@
       "diameter": "on",
       "initial": {
         "distance": "G90",
-        "feedmode": "G95"
+        "feedmode": "G95",
+        "plane": "G18"
       },
       "sources": {
-        "diameter": "machine",
+        "diameter": "profile",
         "distance": "profile",
         "feedmode": "profile",
-        "units": "machine"
+        "plane": "profile",
+        "units": "profile"
       },
       "units": "mm"
     },

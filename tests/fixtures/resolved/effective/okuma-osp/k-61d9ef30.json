@@ -9,20 +9,13 @@
       "modalInitial": {},
       "numberInput": {
         "classes": {
-          "feedPerMin": {
-            "increment": "0.1",
-            "incrementInch": "0.01"
-          },
-          "feedPerRev": {
-            "increment": "0.001",
-            "incrementInch": "0.0001"
-          }
+          "length": {}
         },
-        "incrementDeg": "0.001",
-        "incrementInch": "0.0001",
-        "incrementMm": "0.001",
-        "incrementSec": "0.01",
-        "mode": "scale"
+        "incrementDeg": "1",
+        "incrementInch": "1",
+        "incrementMm": "1",
+        "incrementSec": "1",
+        "mode": "calculator"
       },
       "units": "mm",
       "variants": {
@@ -34,13 +27,14 @@
       "diameter": "profile",
       "modalInitial": {
         "distance": "profile",
-        "feedmode": "profile"
+        "feedmode": "profile",
+        "plane": "profile"
       },
       "numberInput": "machine",
       "units": "profile",
       "variants": {
         "counterSpindleY": "profile",
-        "toolWord": "profile"
+        "toolWord": "machine"
       }
     }
   },
@@ -419,12 +413,14 @@
       "diameter": "on",
       "initial": {
         "distance": "G90",
-        "feedmode": "G95"
+        "feedmode": "G95",
+        "plane": "G18"
       },
       "sources": {
         "diameter": "profile",
         "distance": "profile",
         "feedmode": "profile",
+        "plane": "profile",
         "units": "profile"
       },
       "units": "mm"

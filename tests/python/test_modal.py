@@ -651,6 +651,22 @@ class TestTurningDialects(ModalTestCase):
     def run_lines(self, profile_id: str, lines: Sequence[str]) -> List[Dict[str, Any]]:
         return self.walk(helpers.effective_context(profile_id)["profile"], TURNING_CODES, lines)
 
+    def test_the_okuma_plane_code_stays_in_force_from_g18_at_power_on(self) -> None:
+        # Wave Y data batch: the control selects G18 at power-on and after a reset; G17 and
+        # G19 work in the Y-axis mode (M110) and G119 is a plane of its own, each until
+        # another plane code. The shipped database and profile, as the editor reads them.
+        context = helpers.effective_context("okuma-osp")
+        cp = gedit_nc.compile_profile(context["profile"])
+        self.assertEqual(gedit_nc.ModalInterpreter(cp, context["codes"]).state["groups"]["plane"]["code"], "G18")
+        lines = ["M110", "G17", "G1 X40. Y0 F100", "G19", "G1 Z-2.", "G119", "G1 X0", "G18", "G0 X200."]
+        states = self.walk(context["profile"], context["codes"], lines)
+        self.assertEqual(
+            [state["groups"]["plane"]["code"] for state in states],
+            ["G18", "G17", "G17", "G19", "G19", "G119", "G119", "G18", "G18"],
+        )
+        # The compensation plane only: no working plane is set.
+        self.assertEqual({state["plane"] for state in states}, {"unknown"})
+
     def test_a_call_is_the_code_of_its_identifier(self) -> None:
         states = self.run_lines("sinumerik", ["CYCLE81(5,0,2,-10)", "CYCLE84(5,0,2,-15,,0.5,3,,1.5)", "G0 X10"])
         self.assertEqual([state["block"]["cycle"] for state in states], ["CYCLE81", "CYCLE84", None])

@@ -208,12 +208,16 @@
     {
       "code": "G17",
       "group": "plane",
+      "modal": true,
+      "review": "pending",
       "conflicts": ["radiusComp"],
       "label": "Compensation plane XY, for driven-tool milling on the face"
     },
     {
       "code": "G18",
       "group": "plane",
+      "modal": true,
+      "review": "pending",
       "conflicts": ["radiusComp"],
       "label": "Compensation plane ZX, the turning plane",
       "description": "In force at power-on and after a reset, and selected again by M109."
@@ -221,6 +225,8 @@
     {
       "code": "G19",
       "group": "plane",
+      "modal": true,
+      "review": "pending",
       "label": "Compensation plane YZ, for driven-tool milling on the side"
     },
     {
@@ -834,6 +840,7 @@
     {
       "code": "G119",
       "group": "plane",
+      "modal": true,
       "conflicts": ["radiusComp"],
       "review": "pending",
       "label": "Compensation plane C-X-Z, for driven-tool milling on the side",

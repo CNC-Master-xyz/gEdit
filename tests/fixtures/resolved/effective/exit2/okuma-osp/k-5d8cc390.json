@@ -2,23 +2,26 @@
   "codes": "okuma",
   "machine": {
     "choice": "document",
-    "id": "review",
-    "name": "review",
+    "id": "x8-okuma-1um",
+    "name": "X8 Okuma 1um",
     "params": {
       "diameter": "on",
       "modalInitial": {},
       "numberInput": {
         "classes": {
           "feedPerMin": {
-            "increment": "1"
+            "increment": "0.1",
+            "incrementInch": "0.01"
           },
           "feedPerRev": {
-            "increment": "0.01"
+            "increment": "0.001",
+            "incrementInch": "0.0001"
           }
         },
-        "incrementDeg": "0.01",
-        "incrementMm": "0.01",
-        "incrementSec": "0.1",
+        "incrementDeg": "0.001",
+        "incrementInch": "0.0001",
+        "incrementMm": "0.001",
+        "incrementSec": "0.01",
         "mode": "scale"
       },
       "units": "mm",
@@ -28,16 +31,17 @@
       }
     },
     "source": {
-      "diameter": "profile",
+      "diameter": "machine",
       "modalInitial": {
         "distance": "profile",
-        "feedmode": "profile"
+        "feedmode": "profile",
+        "plane": "profile"
       },
       "numberInput": "machine",
-      "units": "profile",
+      "units": "machine",
       "variants": {
         "counterSpindleY": "profile",
-        "toolWord": "profile"
+        "toolWord": "machine"
       }
     }
   },
@@ -416,13 +420,15 @@
       "diameter": "on",
       "initial": {
         "distance": "G90",
-        "feedmode": "G95"
+        "feedmode": "G95",
+        "plane": "G18"
       },
       "sources": {
-        "diameter": "profile",
+        "diameter": "machine",
         "distance": "profile",
         "feedmode": "profile",
-        "units": "profile"
+        "plane": "profile",
+        "units": "machine"
       },
       "units": "mm"
     },

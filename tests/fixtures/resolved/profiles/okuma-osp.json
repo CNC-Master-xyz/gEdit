@@ -372,7 +372,8 @@
   "modal": {
     "initial": {
       "distance": "G90",
-      "feedmode": "G95"
+      "feedmode": "G95",
+      "plane": "G18"
     }
   },
   "name": "Okuma OSP lathe",

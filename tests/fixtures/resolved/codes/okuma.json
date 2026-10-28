@@ -281,7 +281,9 @@
         "radiusComp"
       ],
       "group": "plane",
-      "label": "Compensation plane XY, for driven-tool milling on the face"
+      "label": "Compensation plane XY, for driven-tool milling on the face",
+      "modal": true,
+      "review": "pending"
     },
     {
       "code": "G18",
@@ -290,12 +292,16 @@
       ],
       "description": "In force at power-on and after a reset, and selected again by M109.",
       "group": "plane",
-      "label": "Compensation plane ZX, the turning plane"
+      "label": "Compensation plane ZX, the turning plane",
+      "modal": true,
+      "review": "pending"
     },
     {
       "code": "G19",
       "group": "plane",
-      "label": "Compensation plane YZ, for driven-tool milling on the side"
+      "label": "Compensation plane YZ, for driven-tool milling on the side",
+      "modal": true,
+      "review": "pending"
     },
     {
       "axisWords": "machine",
@@ -1605,6 +1611,7 @@
       "description": "Cutter radius compensation works on the side of the part, in Z and the C axis, for the contours of G132 and G133. It works only while the C axis is connected, and the plane is changed only while compensation is off (G40). Where the machine's parameters switch the side contour programming on, G119 switches it on as well, and G136, G138, M109 or a reset switches it off.",
       "group": "plane",
       "label": "Compensation plane C-X-Z, for driven-tool milling on the side",
+      "modal": true,
       "review": "pending"
     },
     {

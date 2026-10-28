@@ -35,6 +35,11 @@ import { lookupCode, normalizeCode } from '$lib/core/codes/lookup';
 import { resolveCodeDbFiles } from '$lib/core/codes/resolve';
 import type { CodeDb, CodeEntry, CodeParam } from '$lib/core/codes/types';
 import type { FeedUnit, Profile } from '$lib/core/profiles/types';
+import { ModalInterpreter } from '$lib/core/nc/modal';
+import { maskComments } from '$lib/core/nc/mask';
+import { tokenizeLine } from '$lib/core/nc/tokenizer';
+import type { LineState } from '$lib/core/nc/types';
+import { ctx } from '../../../../tests/unit/helpers/modalIndex';
 
 const DIALECT = 'okuma';
 
@@ -604,7 +609,8 @@ describe('B1: the lathe codes added from the manuals', () => {
 
   it('reads G119 as the side compensation plane, beside G17 to G19', () => {
     expect(codesWith((e) => e.group === 'plane')).toEqual(['G17', 'G18', 'G19', 'G119']);
-    expect(entry('G119').modal).toBeUndefined();
+    // Wave Y data batch: G119 stays in force until another plane code, like G17 to G19.
+    expect(entry('G119').modal).toBe(true);
     expect(entry('G119').sets).toBeUndefined();
   });
 
@@ -639,7 +645,8 @@ describe('B1: the lathe codes added from the manuals', () => {
       // Manual-check fix D5-1: the change points of G84 as coordinates.
       // NC-5: the turret wait M100 refused under nose radius compensation.
       // Wave Y (T101, T102): G24, G25 and G314.
-      'G2', 'G3', 'G20', 'G21', 'G24', 'G25', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'G314', 'GOTO', 'IF', 'M85', 'M100',
+      // Wave Y data batch: G17, G18 and G19 held in force (modal), G18 at power-on.
+      'G2', 'G3', 'G17', 'G18', 'G19', 'G20', 'G21', 'G24', 'G25', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'G314', 'GOTO', 'IF', 'M85', 'M100',
     ]);
     for (const e of ENTRIES.filter((row) => reviewOf(row) !== undefined)) expect(reviewOf(e), e.code).toBe('pending');
   });
@@ -726,5 +733,40 @@ describe('manual-check fixes (2026-10-25): LAP, the fixed thread cycles and the 
     expect((entry('G313') as { review?: unknown }).review).toBe('pending');
     expect(entry('G313').description).toMatch(/G312 and G313 are contour codes for the side face/);
     expect(entry('G313').description).toMatch(/G314 for turret D/);
+  });
+});
+
+describe('Wave Y: the plane code in force', () => {
+  /** The plane group of the modal state after each line (index 0: the power-on state). */
+  function planes(lines: readonly string[]): (string | undefined)[] {
+    const c = ctx('okuma-osp');
+    const interp = new ModalInterpreter(c.cp, c.db);
+    let state: LineState | undefined;
+    const out = [interp.state().groups.plane?.code];
+    lines.forEach((line, i) => {
+      const r = tokenizeLine(line, c.cp, state);
+      state = r.state;
+      interp.update(r.tokens, i + 1, maskComments(line, c.cp));
+      out.push(interp.state().groups.plane?.code);
+    });
+    return out;
+  }
+
+  it('holds G17, G18, G19 and G119 until another plane code, from G18 at power-on', () => {
+    // The control selects G18 at power-on and after a reset; G17 and G19 work in the Y-axis
+    // mode (M110), G119 is a plane of its own, and each stays until another plane code.
+    for (const code of ['G17', 'G18', 'G19', 'G119']) {
+      expect(entry(code).modal, code).toBe(true);
+      expect(entry(code).group, code).toBe('plane');
+      expect(entry(code).sets, code).toBeUndefined();
+    }
+    expect(OKUMA_PROFILE.modal?.initial?.plane).toBe('G18');
+    expect(planes(['G0 X100. Z5.', 'M110', 'G17', 'G1 X40. Y0 F100', 'G19', 'G1 Z-2.', 'G119', 'G1 X0', 'G18', 'G0 X200.'])).toEqual([
+      'G18', 'G18', 'G18', 'G17', 'G17', 'G19', 'G19', 'G119', 'G119', 'G18', 'G18',
+    ]);
+    // They choose the compensation plane only: no working plane is set, the turning plane
+    // ZX stays the one the geometry reads.
+    const c = ctx('okuma-osp');
+    expect(new ModalInterpreter(c.cp, c.db).state().plane).toBe('unknown');
   });
 });
