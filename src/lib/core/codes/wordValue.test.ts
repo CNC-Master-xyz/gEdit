@@ -31,28 +31,10 @@ function preset(profileId: string, id: string): NumberInput {
   return found.value;
 }
 
-/**
- * T118 DATA LINE (P4h, plan §6.10 rule 10). The `G76` `P` of the second block as P4.43a's data
- * change declares it in `src/lib/data/codes/fanuc-lathe.json`: the thread height in least
- * increments (`unit: 'increment'`), where the shipped file still says `count`. Written into
- * the resolved database here so the block-aware unit is tested before the line lands; once it
- * is in the file this patch changes nothing (it sets what is already there).
- */
-function withT118(file: Record<string, unknown>): Record<string, unknown> {
-  const out = structuredClone(file);
-  const codes = (out.codes ?? []) as { code?: string; params?: { address?: string; block?: number; unit?: string }[] }[];
-  const g76 = codes.find((entry) => entry.code === 'G76');
-  const p2 = g76?.params?.find((param) => param.address === 'P' && param.block === 2);
-  if (!p2) throw new Error('fanuc-lathe: no second-block P of G76');
-  p2.unit = 'increment';
-  return out;
-}
-
 /** The document's effective view: the built-in profile, a machine or none, the variants as given. */
 function viewOf(
   profileId: string,
   o: { name?: string; params?: Partial<MachineParams> } | null = null,
-  data: { t118?: boolean } = {},
 ): View {
   const base = profileOf(profileId);
   const machine: MachineConfig | null = o ? { id: 'm', name: o.name ?? 'Machine', profile: profileId, params: o.params ?? {} } : null;
@@ -60,7 +42,7 @@ function viewOf(
   const applied = applyMachine(base, eff);
   const checked = validateProfile(applied.profile, { applied: true });
   if (!checked.ok) throw new Error(checked.errors.join('; '));
-  const db: CodeDb = loadCodeDb(data.t118 === true ? withT118(DBS[applied.codes]) : DBS[applied.codes]);
+  const db: CodeDb = loadCodeDb(DBS[applied.codes]);
   return { profile: checked.profile, cp: compileProfile(checked.profile), db, machine: eff };
 }
 
@@ -208,10 +190,11 @@ describe('readWord on a Fanuc lathe (G-code system A)', () => {
 
   // P4h (plan §6.10 rules 10, 11; T118): the second-block `P` of `G76` is the thread height in
   // least increments, the first-block `P` packs three two-digit values. Before P4.43a the block
-  // was not passed, the two declarations disagreed, and P had no class in either block.
+  // was not passed, the two declarations disagreed, and P had no class in either block. Read
+  // from the shipped `fanuc-lathe.json`: with its second-block `P` a `count` again, this fails.
   it('reads the G76 P by its block: the thread height in increments in the second, a count in the first', () => {
-    const isb = viewOf('fanuc-lathe', { name: 'Lathe IS-B', params: { numberInput: preset('fanuc-lathe', 'is-b') } }, { t118: true });
-    const calc = viewOf('fanuc-lathe', { params: { numberInput: preset('fanuc-lathe', 'calculator') } }, { t118: true });
+    const isb = viewOf('fanuc-lathe', { name: 'Lathe IS-B', params: { numberInput: preset('fanuc-lathe', 'is-b') } });
+    const calc = viewOf('fanuc-lathe', { params: { numberInput: preset('fanuc-lathe', 'calculator') } });
     const g76 = state({ ...LATHE_A, block: { cycle: 'G76', pitchFeed: true } });
     const second = 'G76 X27.6 Z-30. R0 P1500 Q300 F1.5';
     expect(read(isb, g76, 'P1500', second)).toMatchObject({ cls: 'increment', value: '1.5', unit: 'mm', source: 'machine' });
@@ -222,7 +205,7 @@ describe('readWord on a Fanuc lathe (G-code system A)', () => {
     // Q is in increments in both blocks and stays so.
     expect(read(isb, g76, 'Q50', first)).toMatchObject({ cls: 'increment', value: '0.05' });
     // With no machine the lathe presets do not agree on a step, so the height has no value but its readings.
-    const none118 = viewOf('fanuc-lathe', null, { t118: true });
+    const none118 = viewOf('fanuc-lathe', null);
     const free = read(none118, g76, 'P1500', second);
     expect(free?.cls).toBe('increment');
     expect(free?.value).toBeNull();

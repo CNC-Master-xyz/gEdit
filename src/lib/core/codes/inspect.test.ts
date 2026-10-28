@@ -290,9 +290,12 @@ describe('a Fanuc lathe (G-code system A)', () => {
     expect(checkValue(t, '2.5', view)).toEqual({ key: 'inspector.why.wholeNumber' });
     expect(checkValue(t, '202', view)).toBeNull();
     expect(checkValue(t, '2.0', view)).toBeNull();
+    // P4h (T118): the packed P of the first block of G76 is the count; the thread height P of the
+    // second block is a number of least increments, which needs a machine to be read (and so to be edited).
+    const first = inspectBlock(doc(text, 7), view, null, state({ ...base, block: { cycle: 'G76', pitchFeed: true } }));
+    expect(checkValue(row(first, 'P020060'), '20060.5', view)).toEqual({ key: 'inspector.why.wholeNumber' });
     const second = inspectBlock(doc(text, 8), view, null, state({ ...base, block: { cycle: 'G76', pitchFeed: true } }));
-    const p = row(second, 'P1200');
-    expect(checkValue(p, '1200.5', view)).toEqual({ key: 'inspector.why.wholeNumber' });
+    expect(checkValue(row(second, 'P1200'), '1200', view)).toEqual({ key: 'inspector.why.needsMachine' });
     const f = row(second, 'F1.5');
     expect(checkValue(f, '-1', view)).toEqual({ key: 'inspector.why.min', params: { min: '0' } });
     expect(checkValue(f, 'x', view)).toEqual({ key: 'inspector.why.notANumber' });

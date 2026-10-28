@@ -1503,7 +1503,7 @@
     {
       "blocks": 2,
       "code": "G76",
-      "description": "Cuts a thread in several passes, taking less material each time. Written in two blocks: the finishing passes, the pull-out chamfer and the insert angle packed into P, the smallest depth of cut and the finishing allowance first; then the end point, the taper, the thread height, the depth of the first cut and the lead. The block with X (U) and Z (W) runs the cycle; P, Q and R mean different things in the two blocks, and each of them stays in force until it is written again. F is the thread lead per revolution, not a feed rate. gEdit shows both P values as written: the packed digits of the first block must never be converted.",
+      "description": "Cuts a thread in several passes, taking less material each time. Written in two blocks: the finishing passes, the pull-out chamfer and the insert angle packed into P, the smallest depth of cut and the finishing allowance first; then the end point, the taper, the thread height, the depth of the first cut and the lead. The block with X (U) and Z (W) runs the cycle; P, Q and R mean different things in the two blocks, and each of them stays in force until it is written again. F is the thread lead per revolution, not a feed rate. gEdit shows the packed P of the first block as written and never converts it; the thread height P of the second block is read in least increments, like Q.",
       "group": "cycle",
       "label": "Multi-pass threading cycle",
       "params": [
@@ -1558,10 +1558,10 @@
         {
           "address": "P",
           "block": 2,
-          "label": "Thread height, a radius value in least increments without a point (µm on a metric IS-B machine); shown as written",
+          "label": "Thread height, a radius value in least increments without a point (µm on a metric IS-B machine)",
           "min": 0,
           "position": "none",
-          "unit": "count"
+          "unit": "increment"
         },
         {
           "address": "Q",

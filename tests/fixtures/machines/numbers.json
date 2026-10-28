@@ -670,7 +670,7 @@
       "expected": "length"
     },
     {
-      "note": "P4h (T118, plan section 6.10 rule 11): the G76 entry is written here with the P line of the second block as T118 makes it (unit increment; until that line is in fanuc-lathe.json the shipped P of both blocks is a count). In the second block (X written) P is the thread height in least increments, so G76 P1500 is 1.5 mm on IS-B",
+      "note": "P4h (T118, plan section 6.10 rule 11): the G76 entry is written here as fanuc-lathe.json carries it (the P of the second block has the unit increment, the P of the first block is a count). In the second block (X written) P is the thread height in least increments, so G76 P1500 is 1.5 mm on IS-B",
       "profile": "lathe",
       "address": "P",
       "feedUnit": "per-rev",
