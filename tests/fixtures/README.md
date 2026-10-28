@@ -136,6 +136,7 @@ change. They open with `sinumerik-mill`, and with its margin over the turning pr
 | `h03-speed-only.h` | `TOOL CALL Z S5000` and `TOOL CALL S6000 F900`, which change the speed but not the tool. |
 | `h04-cycle-feeds.h` | Cycle 200 with a numeric `Q206` and with `Q206=FAUTO`, cycle 207 with the pitch `Q239`, and the feeds `FAUTO`, `FZ`, `FU`, `FQ50` and `F` with a `Q50 =` assignment. |
 | `h05-tool-axis.h` | The same tool number twice: `TOOL CALL 4 S6500` with no axis (a speed change) and `TOOL CALL 4 Z S7000` with one (a sister-tool swap, a real call). |
+| `h06-same-tool-speed.h` | The tool in the spindle called again only for a new speed: `TOOL CALL 4 S4000` after `TOOL CALL 4 Z`, the same with a named tool `"DRILL_8"`, and `TOOL CALL 12 S1900` after `TOOL CALL 12.1` (another tool) then `TOOL CALL 12 S2000` (speed only). |
 | `detect-heidenhain.txt` | A complete program in a `.txt` file. |
 
 ## `nc/okuma/`: Okuma OSP turning programs
