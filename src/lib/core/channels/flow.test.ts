@@ -198,6 +198,51 @@ describe('computeFlow: Okuma (GOTO, sequence names, IF)', () => {
   });
 });
 
+describe('computeFlow: structured IF blocks (NC-1)', () => {
+  const S = 'sinumerik';
+  const F = 'fanuc-lathe';
+  it('does not follow a jump inside an IF block: Sinumerik IF … ENDIF, IF … ELSE … ENDIF, Fanuc IF[…]THEN … ENDIF', () => {
+    expect(one(['IF R1==1', 'GOTOF L1', 'ENDIF', 'WAITM(2,1,2)', 'L1: X1'], S)).toEqual({ jumps: [], loops: [], opaque: [5] });
+    expect(one(['IF R1==1', 'X1', 'ELSE', 'GOTOF L1', 'ENDIF', 'WAITM(2,1,2)', 'L1: X1'], S)).toEqual({ jumps: [], loops: [], opaque: [7] });
+    expect(one(['N10 IF (R1==1) AND (R2>0) ; why', 'N20 GOTOF N50', 'N30 ENDIF', 'N40 WAITM(2,1,2)', 'N50 X1'], S).jumps).toEqual([]);
+    expect(one(['IF[#1EQ1]THEN', 'GOTO 30', 'ENDIF', 'M902', 'N30 M903'], F)).toEqual({ jumps: [], loops: [], opaque: [5] });
+    expect(one(['N5 IF [#1 EQ 1] THEN (OPEN)', 'GOTO 30', 'ELSE', 'M901', 'ENDIF', 'M902', 'N30 M903'], F).jumps).toEqual([]);
+    // Nested: the inner ENDIF does not end the outer block.
+    expect(one(['IF R1==1', 'IF R2==1', 'X1', 'ENDIF', 'GOTOF L1', 'ENDIF', 'X2', 'L1: X3'], S).jumps).toEqual([]);
+  });
+  it('does not follow a jump whose target is inside an IF block', () => {
+    expect(one(['GOTOF L1', 'IF R1==1', 'L1: X1', 'ENDIF'], S)).toEqual({ jumps: [], loops: [], opaque: [3] });
+    expect(one(['GOTO 30', 'IF[#1EQ1]THEN', 'N30 M903', 'ENDIF'], F)).toEqual({ jumps: [], loops: [], opaque: [3] });
+  });
+  it('follows no jump of a channel whose IF blocks do not balance', () => {
+    expect(one(['IF R1==1', 'X1', 'GOTOF L1', 'X2', 'L1: X3'], S).jumps).toEqual([]);
+    expect(one(['ENDIF', 'GOTOF L1', 'X1', 'L1: X2'], S).jumps).toEqual([]);
+    expect(one(['ELSE', 'GOTO 30', 'M902', 'N30 M903'], F).jumps).toEqual([]);
+    expect(one(['GOTOF L1', 'X1', 'L1: X2', 'IF R1==1', 'X3'], S).jumps).toEqual([]);
+  });
+  it('still follows a jump over a whole IF block, and one after the block', () => {
+    expect(one(['GOTOF L1', 'IF R1==1', 'WAITM(2,1,2)', 'ENDIF', 'L1: X1'], S)).toEqual({ jumps: [{ line: 1, target: 5 }], loops: [], opaque: [] });
+    expect(one(['GOTO 30', 'IF[#1EQ1]THEN', 'M902', 'ELSE', 'M904', 'ENDIF', 'N30 M903'], F)).toEqual({ jumps: [{ line: 1, target: 7 }], loops: [], opaque: [] });
+    expect(one(['IF R1==1', 'X1', 'ENDIF', 'GOTOF L1', 'X2', 'L1: X3'], S).jumps).toEqual([{ line: 4, target: 6 }]);
+  });
+  it('reads a one-line IF as no block: IF … GOTO, IF … THEN with a statement, the Okuma IF … N', () => {
+    expect(one(['IF R1==1 GOTOF L2', 'GOTOF L1', 'X1', 'L1: X2', 'L2: X3'], S).jumps).toEqual([{ line: 2, target: 4 }]);
+    expect(one(['IF[#1EQ1]THEN #2=1', 'GOTO 30', 'M902', 'N30 M903'], F).jumps).toEqual([{ line: 2, target: 4 }]);
+    expect(one(['IF[#1EQ1]GOTO40', 'GOTO 30', 'M902', 'N30 M903', 'N40 M904'], F).jumps).toEqual([{ line: 2, target: 4 }]);
+    expect(one(['IF [V1 EQ 1] N200', 'GOTO N100', 'N2 P30', 'N100 G0 X10', 'N200 X1'], 'okuma-osp').jumps).toEqual([{ line: 2, target: 4 }]);
+    // A comment that says IF or ENDIF is no block.
+    expect(one(['; IF R1==1', 'GOTOF L1', 'X1', 'L1: X2', '; ENDIF'], S).jumps).toEqual([{ line: 2, target: 4 }]);
+  });
+  it('leaves SWITCH and CASE alone (a GOTO between SWITCH and the first CASE runs)', () => {
+    expect(one(['SWITCH[#100]', 'GOTO 30', 'CASE[10] GOTO40', 'M902', 'N30 M903', 'N40 M904'], F).jumps).toEqual([{ line: 2, target: 5 }]);
+  });
+  it('keeps the IF depth per channel', () => {
+    // Channel a opens an IF block that channel b never sees: b's jump is still followed.
+    const flow = computeFlow(['IF R1==1', 'X0', 'GOTOF L1', 'X1', 'L1: X2', 'ENDIF'], cpOf(S), (line) => (line <= 2 || line === 6 ? 'a' : 'b'));
+    expect(flow.b.jumps).toEqual([{ line: 3, target: 5 }]);
+  });
+});
+
 describe('computeJumpLines: label targets (NC-3)', () => {
   const jl = (src: string[], profile: string) => computeJumpLines(src, cpOf(profile), () => 'a').a;
   it('names the target of a jump to a label, as computeFlow reads it', () => {

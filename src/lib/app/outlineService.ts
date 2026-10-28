@@ -463,8 +463,27 @@ const REPEAT_LABEL = new RegExp(`${HEAD}REPEAT\\s+([A-Z_][A-Z0-9_]*)(?:\\s+P\\s*
 /** Any Sinumerik program section repetition with labels (`REPEAT A`, `REPEAT A B P=2`, `REPEATB A`). */
 const REPEAT_ANY = new RegExp(`${HEAD}(REPEATB?)\\s+([A-Z_][A-Z0-9_]*)(?:\\s+([A-Z_][A-Z0-9_]*))?`, 'i');
 
+/**
+ * The structured IF of a block, read from its text behind the head (block number, label, `/`)
+ * with the comments blanked. Sinumerik `IF R1==1` alone (no GOTO on it) and the Fanuc
+ * `IF[#1EQ1]THEN` with nothing after THEN (SPM p.477, F0P p.462) open a block; `ELSE` and `ENDIF`
+ * belong to it. Read from the text, so a dialect without these words is never affected and a
+ * wrong reading can only refuse a jump, never follow one.
+ */
+const IF_HEAD = /^IF(?![A-Z0-9_])/i;
+const THEN_LAST = /(?<![A-Z0-9_])THEN\s*;?\s*$/i;
+const THEN_ANY = /(?<![A-Z0-9_])THEN(?![A-Z0-9_])/i;
+const GOTO_ANY = /(?<![A-Z0-9_])GOTO[FBCS]?(?![A-Z_])/i;
+const ELSE_LINE = /^ELSE(?![A-Z0-9_])/i;
+const ENDIF_LINE = /^ENDIF(?![A-Z0-9_])/i;
 /** One channel's lines as `computeFlow` reads them. */
 interface FlowScan {
+  /** How deep the scan is inside structured IF blocks right now (only while scanning). */
+  ifDepth: number;
+  /** The lines inside a structured IF block (the ELSE and ENDIF lines too, not the IF line). */
+  inIf: Set<number>;
+  /** An ELSE or ENDIF without its IF, or an IF without its ENDIF: no jump of the channel is followed. */
+  ifUnbalanced: boolean;
   numbers: Map<string, number[]>;
   names: Map<string, number[]>;
   /** Lines with a loop keyword (`isLoopLine`), plus `REPEATB` lines. */
@@ -486,7 +505,9 @@ interface FlowScan {
  * - F1: a `GOTO`, `GOTOF` or `GOTOC` alone in its block (a block number or label in front is
  *   allowed) with one target line in the channel, after the jump, is followed. `IF … GOTO`, a
  *   `CASE`, a skippable block (`/`), `GOTOB`, a computed target, no target or two, and a target in
- *   another channel are opaque.
+ *   another channel are opaque. So is a jump that is inside a structured IF block (Sinumerik
+ *   `IF` … `ELSE` … `ENDIF`, Fanuc `IF[…]THEN` … `ENDIF`) or whose target is, every jump of a
+ *   channel whose IF blocks do not balance. A jump over a whole IF block is followed.
  * - F2: a followed jump's skipped lines hold no loop line and no target of any other jump.
  * - F3: a counted loop is a `FOR v=a TO b` / `ENDFOR` pair with whole-number bounds, `a < b`
  *   (`count = b - a + 1`), and a `REPEAT LABEL P=n` whose label is written once before it (`count =
@@ -506,7 +527,7 @@ export function computeFlow(
   const scanOf = (channel: string): FlowScan => {
     let s = scans.get(channel);
     if (!s) {
-      s = { numbers: new Map(), names: new Map(), loopLines: new Set(), gotos: [], refs: [], fors: [], endfors: [], repeats: [] };
+      s = { ifDepth: 0, inIf: new Set(), ifUnbalanced: false, numbers: new Map(), names: new Map(), loopLines: new Set(), gotos: [], refs: [], fors: [], endfors: [], repeats: [] };
       scans.set(channel, s);
     }
     return s;
@@ -532,14 +553,19 @@ export function computeFlow(
     // The head of the block: a label there defines it (`LAB:`, the Okuma `NLAB1`); one behind a jump names a target.
     let headLabel: string | null = null;
     let headToken: (typeof tokens)[number] | undefined;
+    let headEnd = 0;
     for (const tok of tokens) {
       if (tok.kind === 'label' && tok.address !== undefined) {
         headLabel = tok.address.toUpperCase();
         headToken = tok;
+        headEnd = tok.end;
         break;
       }
       if (tok.kind !== 'whitespace' && tok.kind !== 'blockNumber' && tok.kind !== 'skip') break;
+      headEnd = tok.end;
     }
+    // The block behind its head, for the structured IF.
+    const body = masked.slice(headEnd).replace(/^[\s:]+/, '');
     // The unconditional jumps of this line, with their targets.
     const gotos: FlowScan['gotos'] = [];
     const significant = tokens.filter((t) => t.kind !== 'whitespace' && t.kind !== 'comment');
@@ -570,9 +596,30 @@ export function computeFlow(
         for (const tok of tokens) if (tok.kind === 'label' && tok.address !== undefined && tok.address.toUpperCase() !== headLabel) refs.push({ line: n, key: null, name: tok.address.toUpperCase() });
       }
     }
+    // An IF with a jump on it (`IF … GOTOF`, the Okuma `IF […] N100`) or a statement behind THEN opens no block.
+    const ifStep: 'open' | 'else' | 'close' | null = IF_HEAD.test(body)
+      ? THEN_LAST.test(body) || (!THEN_ANY.test(body) && !GOTO_ANY.test(body) && refs.length === 0)
+        ? 'open'
+        : null
+      : ELSE_LINE.test(body)
+        ? 'else'
+        : ENDIF_LINE.test(body)
+          ? 'close'
+          : null;
     const repeat = keywords.includes('REPEAT') || keywords.includes('REPEATB') ? REPEAT_ANY.exec(masked) : null;
     for (const channel of channelsHere) {
       const s = scanOf(channel);
+      // The IF line itself runs whatever the condition says; the lines up to its ENDIF may not.
+      if (ifStep === 'open') {
+        if (s.ifDepth > 0) s.inIf.add(n);
+        s.ifDepth++;
+      } else if (ifStep !== null) {
+        if (s.ifDepth === 0) s.ifUnbalanced = true;
+        else {
+          s.inIf.add(n);
+          if (ifStep === 'close') s.ifDepth--;
+        }
+      } else if (s.ifDepth > 0) s.inIf.add(n);
       if (loopLine) s.loopLines.add(n);
       for (const tok of tokens) {
         if (tok.kind === 'blockNumber' && tok.valueText !== undefined) {
@@ -603,7 +650,10 @@ export function computeFlow(
   }
 
   const out: Record<string, ChannelFlow> = {};
-  for (const [channel, s] of scans) out[channel] = flowOf(s);
+  for (const [channel, s] of scans) {
+    if (s.ifDepth > 0) s.ifUnbalanced = true;
+    out[channel] = flowOf(s);
+  }
   return out;
 }
 
@@ -649,7 +699,18 @@ function flowOf(s: FlowScan): ChannelFlow {
 
   for (const g of gotos) {
     const one = g.targets.length === 1 ? g.targets[0] : null;
-    if (g.bare && g.keyword !== 'GOTOB' && one !== null && one > g.line && !anyBetween(loopLines, g.line, one) && !anyBetween(targetLines, g.line, one)) {
+    if (
+      g.bare &&
+      g.keyword !== 'GOTOB' &&
+      one !== null &&
+      one > g.line &&
+      !anyBetween(loopLines, g.line, one) &&
+      !anyBetween(targetLines, g.line, one) &&
+      // NC-1: the jump and its target outside every structured IF, and the channel's IF blocks balanced.
+      !s.ifUnbalanced &&
+      !s.inIf.has(g.line) &&
+      !s.inIf.has(one)
+    ) {
       jumps.push({ line: g.line, target: one });
       continue;
     }

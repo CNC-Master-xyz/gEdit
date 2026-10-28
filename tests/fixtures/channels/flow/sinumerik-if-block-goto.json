@@ -1,0 +1,63 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Siemens two channels: in channel 1 a GOTOF L1 stands alone in an IF R1==1 … ENDIF block and would jump over WAITM(2,1,2); channel 2 has no mark 2. The jump runs only when R1 is 1, so channel 1 may reach WAITM(2,1,2) and wait there for ever. The jump is inside an IF block, so it is not followed: the missing partner of mark 2 is reported, before and after.",
+  "rule": "F1 F4",
+  "profile": "sinumerik",
+  "preset": "sinumerik-2channel",
+  "program": {
+    "1": [
+      "%_N_FLOWB1_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "WAITM(1,1,2)",
+      "IF R1==1",
+      "GOTOF L1",
+      "ENDIF",
+      "WAITM(2,1,2)",
+      "L1: G0 X100",
+      "WAITM(3,1,2)",
+      "M30"
+    ],
+    "2": [
+      "%_N_FLOWB2_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "WAITM(1,1,2)",
+      "G0 X50",
+      "WAITM(3,1,2)",
+      "M30"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [],
+        "loops": [],
+        "opaque": [
+          8
+        ]
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "missing",
+        "channel": "1",
+        "line": 7,
+        "mark": "2",
+        "other": "2"
+      }
+    ],
+    "after": [
+      {
+        "kind": "missing",
+        "channel": "1",
+        "line": 7,
+        "mark": "2",
+        "other": "2"
+      }
+    ]
+  }
+}
