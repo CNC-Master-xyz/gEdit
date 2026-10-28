@@ -203,8 +203,7 @@
     },
     "editing": {
       "forceUppercase": true,
-      "preventLineJoin": true,
-      "tabWidth": 4
+      "preventLineJoin": true
     },
     "extends": "fanuc-gcode",
     "files": {

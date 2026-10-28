@@ -53,8 +53,9 @@ describe('the built-in profiles', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.profile).toBe(fanucJson);
-    // P2 fields are data this build does not read, and does not drop either.
-    expect((result.profile as Profile & { editing: { tabWidth: number } }).editing.tabWidth).toBe(4);
+    // P2 fields are data this build does not read, and does not drop either. (`editing.tabWidth`
+    // was one until P4.42; no built-in profile sets it now, so `forceUppercase` stands in.)
+    expect(result.profile.editing?.forceUppercase).toBe(true);
     expect(result.profile.compare).toBeTypeOf('object');
   });
 
