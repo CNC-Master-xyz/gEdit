@@ -1,0 +1,68 @@
+{
+  "title": "Extents",
+  "columns": [
+    {
+      "key": "where",
+      "label": "Where"
+    },
+    {
+      "key": "axis",
+      "label": "Axis"
+    },
+    {
+      "key": "min",
+      "label": "Min"
+    },
+    {
+      "key": "minLine",
+      "label": "At line"
+    },
+    {
+      "key": "max",
+      "label": "Max"
+    },
+    {
+      "key": "maxLine",
+      "label": "At line"
+    },
+    {
+      "key": "unresolved",
+      "label": "Not resolved"
+    }
+  ],
+  "rows": [
+    {
+      "where": "Program",
+      "scope": "program",
+      "axis": "X (diameter)",
+      "axisId": "X",
+      "min": "0",
+      "minLine": 3,
+      "max": "200",
+      "maxLine": 10,
+      "unresolved": 1,
+      "line": 10
+    },
+    {
+      "where": "Program",
+      "scope": "program",
+      "axis": "Z",
+      "axisId": "Z",
+      "min": "-50",
+      "minLine": 9,
+      "max": "200",
+      "maxLine": 10,
+      "unresolved": 1,
+      "line": 10
+    }
+  ],
+  "message": "Machine 'Lathe 1'. X is a diameter: diameter programming is on (assumed from the profile). 2 positions not resolved; the findings say why.",
+  "findings": [
+    {
+      "line": 7,
+      "severity": "warning",
+      "message": "1 arc, first G2 (line 7), whose centre or plane is not known: the end points are in the ranges, the arc between them is not resolved.",
+      "reason": "arc"
+    }
+  ]
+}

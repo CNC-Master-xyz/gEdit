@@ -1,12 +1,6 @@
 {
-  "message": "Nothing was changed: 5 blocks cannot be mirrored for the counter spindle: 2 blocks with a rotary axis away from 0, 1 arc gEdit cannot compute, 1 thread block, 1 roughing cycle block. Machine 'Lathe 1': numbers are read as written.",
+  "message": "Nothing was changed: 4 blocks cannot be mirrored for the counter spindle: 2 blocks with a rotary axis away from 0, 1 thread block, 1 roughing cycle block. Machine 'Lathe 1': numbers are read as written.",
   "findings": [
-    {
-      "line": 5,
-      "severity": "error",
-      "message": "N30 G2 X50. Z-10. L20.: an arc gEdit cannot compute (an arc by an L radius, a contour arc with the C axis).",
-      "reason": "arc-unsupported"
-    },
     {
       "line": 6,
       "severity": "error",

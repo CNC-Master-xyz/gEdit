@@ -2,19 +2,19 @@
   "message": "Nothing was changed: 3 blocks cannot be moved by X1 (diameter) Z-0.5: 1 coordinate shift or setting, 1 subprogram or macro call, 1 arc gEdit cannot compute. Machine 'Lathe 1': numbers are read as written; X is a diameter.",
   "findings": [
     {
-      "line": 6,
+      "line": 8,
       "severity": "error",
-      "message": "N4 G3 X90. Z-35. L15.: an arc gEdit cannot compute (an arc by an L radius, a contour arc with the C axis).",
+      "message": "N42 G102 X30. C90. L5. F100: an arc gEdit cannot compute, or cannot check after a turn or a mirror that rounds (an arc by an L radius, a contour arc with the C axis).",
       "reason": "arc-unsupported"
     },
     {
-      "line": 7,
+      "line": 9,
       "severity": "error",
       "message": "N5 G50 X200. Z100.: this sets or shifts the coordinate system or writes offsets (a local shift, a coordinate set, a data setting that changes offsets); gEdit does not move the values it sets, so the positions after it would no longer match the moved path.",
       "reason": "coordinate-shift"
     },
     {
-      "line": 8,
+      "line": 10,
       "severity": "error",
       "message": "N6 CALL O1234: a subprogram or macro call: the called program's positions are not in this document, so it cannot be moved with the rest.",
       "reason": "call"

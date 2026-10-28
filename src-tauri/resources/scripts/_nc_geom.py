@@ -490,7 +490,8 @@ REASONS = {
     ),
     "arc-unsupported": (
         ALL_OPS,
-        "an arc gEdit cannot compute (an arc by an L radius, a contour arc with the C axis)",
+        "an arc gEdit cannot compute, or cannot check after a turn or a mirror that rounds (an "
+        "arc by an L radius, a contour arc with the C axis)",
     ),
     "swap-unknown": (
         TURNING,
@@ -1735,6 +1736,18 @@ def _continuation_mark(data: _Data, tokens: Sequence[Any], i: int) -> bool:
     return found is not None and found.end() >= len(text.rstrip())
 
 
+def _marker_code(block: _Block, token: Any) -> bool:
+    """Wave Y (T017): a token the tokenizer leaves unread whose text is a one-shot code of the
+    database that takes no value and sets nothing (the Okuma ``CALRG``, the larger arc of an
+    ``L`` radius): a code of the block, kept as written by every transform, no word nobody
+    describes. Only such a marker: a code that sets a mode would need the interpreter, which
+    did not read it."""
+    entry = block.interp.entry(token.text.strip())
+    if not isinstance(entry, dict) or entry.get("group") != "nonmodal":
+        return False
+    return not _params(entry) and not _sets(entry) and gedit_nc.axis_words_of(entry) is None
+
+
 def roles_of(step: "_nc_path.Step", tracker: "_nc_path.PathTracker") -> List[WordRole]:
     """Every word and every code of ``step``, in written order, with its role (contract item 1,
     2). Codes that set an arc direction or a compensation side are ``code-arc`` / ``code-comp``;
@@ -1770,7 +1783,7 @@ def roles_of(step: "_nc_path.Step", tracker: "_nc_path.PathTracker") -> List[Wor
                 out.append(role)
             continue
         if kind == "unknown" and token.text.strip() != "":
-            if not _continuation_mark(block.data, tokens, i):
+            if not _continuation_mark(block.data, tokens, i) and not _marker_code(block, token):
                 out.append(WordRole(token, "unknown", None, None, None))
         elif kind == "word" and id(token) not in block.consumed:
             if not token.address:
@@ -2750,7 +2763,19 @@ def refusals_of(
         elif gedit_nc.arc_direction_of(arc) is not None and any(
             r.role == "radius" and (r.token.address or "").upper() not in _nc_path.RADIUS_WORDS for r in roles
         ):
-            add("arc-unsupported", code)
+            # Wave Y (T017): an arc by the radius its code declares (the Okuma `L`, with or
+            # without `CALRG`) keeps its radius and its choice of the arc under every exact
+            # operation, as `R` does (the prelude's case list): the end points move, a mirror
+            # swaps the direction. A rounding one would need the arc checked against a radius
+            # the tracker reads only without `CALRG`: refused there.
+            declared = _nc_path.declared_radius(arc)
+            plain = all(
+                (r.token.address or "").upper() == declared
+                for r in roles
+                if r.role == "radius" and (r.token.address or "").upper() not in _nc_path.RADIUS_WORDS
+            )
+            if not (plain and declared is not None and is_exact(op)):
+                add("arc-unsupported", code)
     if name in ("mirror", "lathe-z-mirror"):
         for role in roles:
             if role.role == "code-arc" and swap_partner(role.entry or {}, data.codes, "arcDirection") is None:
