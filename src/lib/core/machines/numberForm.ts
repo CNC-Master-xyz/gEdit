@@ -84,7 +84,7 @@ function readRow(input: NumberInput, cls: NumberClass): Omit<NumberClassRow, 'fr
 }
 
 /** Two increments are the same value (both decimal text), or the same text. */
-function sameDecimal(a: string | null, b: string | null): boolean {
+export function sameDecimal(a: string | null, b: string | null): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;
   const left = strictCanonical(a);
@@ -162,10 +162,29 @@ export function inputReadingAs(candidates: readonly NumberInput[], rows: readonl
   return null;
 }
 
-/** The problems of the value the rows would save, by `numberInputProblems`, under `path`. */
+/** The feeds, whose inch step is not the tenth of the metric one on every control (NC-5). */
+const FEED_CLASSES: readonly NumberClass[] = ['feedPerMin', 'feedPerRev'];
+
+/**
+ * The problems of the value the rows would save, by `numberInputProblems`, under `path`, and
+ * the one the file cannot see (NC-5): a feed row read in increments needs its inch step written.
+ * The reader would fill an empty field with a tenth of the metric step, which is right for
+ * lengths and for an Okuma feed but a tenfold error for a Fanuc feed (a hundredth), and the
+ * metric step of a row that was edited no longer belongs to the inch step it had. Refuse rather
+ * than guess.
+ */
 export function numberRowProblems(base: NumberInput, rows: readonly NumberClassRow[], id: string | null, path: string): MachineProblem[] {
-  return numberInputProblems(numberInputFromRows(base, rows), id, path);
+  const problems = numberInputProblems(numberInputFromRows(base, rows), id, path);
+  for (const row of rows) {
+    if (FEED_CLASSES.includes(row.cls) && row.mode === 'increment' && row.incrementInch === null) {
+      problems.push({ machineId: id, path: `${path}.classes.${row.cls}.incrementInch`, message: INCH_STEP_NEEDED });
+    }
+  }
+  return problems;
 }
+
+/** The problem of a feed row without its inch step, in the words of the form. */
+export const INCH_STEP_NEEDED = 'write the inch step of this feed: on Fanuc a hundredth of the metric step, on Okuma a tenth';
 
 /**
  * The class a problem of `numberRowProblems` belongs to (`<path>.classes.<cls>…`), or null for

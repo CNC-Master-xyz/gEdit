@@ -22,6 +22,7 @@ import type { MachineServiceDeps } from './machines';
 import type { ConfigLoad } from '$lib/platform/commands';
 import type { DocId, MachineService } from '$lib/app/types';
 import { wasReported, type EffectiveMachine } from '$lib/core/machines/types';
+import { MACHINES_SCHEMA_URL } from '$lib/core/machines/file';
 import { t } from '$lib/i18n';
 
 const FILES = fileURLToPath(new URL('../../../tests/fixtures/machines/files/', import.meta.url));
@@ -676,6 +677,14 @@ describe('editing the set', () => {
   let h: Harness;
   beforeEach(() => {
     h = harness({ docs: [LATHE_DOC] });
+  });
+
+  it('writes the $schema line into the first file saved on a fresh install (CODE-3)', async () => {
+    const fresh = harness({ file: {} });
+    await fresh.machines.add({ name: 'Lathe 2', profile: 'fanuc-lathe', params: {} });
+    expect(fresh.saved).toHaveLength(1);
+    expect(Object.keys(fresh.saved[0])[0]).toBe('$schema');
+    expect(fresh.saved[0].$schema).toBe(MACHINES_SCHEMA_URL);
   });
 
   it('adds a machine with an id made from its name, and saves at once', async () => {

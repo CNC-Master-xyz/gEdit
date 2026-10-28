@@ -335,6 +335,18 @@ describe('schemas/codes.schema.json (P4.39b)', () => {
     expect(codesSchema.$id).toBe('https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/codes.schema.json');
   });
 
+  it('takes a $schema member of any JSON type, as the loader does (CODE-10)', () => {
+    const file = JSON.parse(JSON.stringify(BUILTIN_CODE_DB_JSON.fanuc)) as Record<string, unknown>;
+    expect(schemaAccepts({ ...file, $schema: 'x' })).toBe(true);
+    for (const odd of [5, null, true, ['x'], { a: 1 }]) expect(schemaAccepts({ ...file, $schema: odd }), JSON.stringify(odd)).toBe(true);
+  });
+
+  it('says an increment word takes no decimal point on the control and a written point counts whole units (NC-3)', () => {
+    const text = JSON.stringify(codesSchema);
+    expect(text).toContain('the control takes no decimal point on such a word, and gEdit reads a point written there as whole units');
+    expect(text).not.toContain('with or without a point)');
+  });
+
   it('compiles with the test validator, every keyword in the allowed list (rule 3)', () => {
     expect(typeof validate).toBe('function');
     const used = new Set(subschemas(ROOT).flatMap((s) => Object.keys(s)));

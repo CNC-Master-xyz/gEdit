@@ -393,7 +393,12 @@
     const preset = inputReadingAs(candidates, rows);
     const base = preset ?? draft.numbers?.base ?? numberBaseOf(draft, deps);
     if (base === null) return draft;
-    const next: Draft = { ...draft, numbers: { base, rows: preset === null ? rows : numberRows(preset) } };
+    // The rows stay as typed (CODE-10): `0.0010` reads as the preset's `0.001`, and replacing the
+    // text under the cursor would eat the zero. The saved value is the preset's own either way.
+    // Only the "own rule" marks are the preset's.
+    const marks = preset === null ? null : numberRows(preset);
+    const kept = marks === null ? rows : rows.map((row, i) => ({ ...row, fromBase: marks[i]?.fromBase ?? row.fromBase }));
+    const next: Draft = { ...draft, numbers: { base, rows: kept } };
     const record = withEditedNumbers(currentOf(draft, deps), next);
     const values: Record<string, unknown> = { ...draft.values, [FIELD_NUMBER_INPUT]: presetIdOf(decl, record) };
     if (FIELD_POINTLESS_FEEDS in draft.values) values[FIELD_POINTLESS_FEEDS] = pointlessFeedsIdOf(decl, record);
