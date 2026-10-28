@@ -34,6 +34,7 @@ from tests.python.test_rotate import (
     run_case,
     run_long,
     run_owner_public,
+    run_selection,
     run_text,
 )
 
@@ -602,6 +603,56 @@ class LaterVersionTest(unittest.TestCase):
         found = self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, text))
         self.assertIn((6, "single-pass-taper"), found)
         self.assertIn((7, "single-pass-taper"), found)
+
+
+class SkepticGeometryTest(unittest.TestCase):
+    """Wave Y skeptic of BL-NC-geometry. D1: a tangential arc (CT) or a Klartext departure (DEP)
+    continues the direction of the move before it, and an approach (APPR) meets the contour
+    element after it; outside the selection that move is not mirrored. Each test fails without
+    the fix, except the guards."""
+
+    MIRROR_Y10 = {"about": "x-axis", "py": 10}
+    #: A Sinumerik CT after a line (the skeptic's t016c).
+    TANGENT = [
+        "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "N10 G17 G90 G71", "N20 G0 X10 Y0 Z5", "N30 G1 Z-2 F200", "N40 G1 X20 Y10",
+        "N50 CT X30 Y20", "N60 G1 X40 Y20", "N70 G0 Z50", "N80 M30",
+    ]
+    #: A Klartext approach and departure along straight lines (the skeptic's t018x).
+    APPROACH = [
+        "0 BEGIN PGM T MM", "1 TOOL CALL 1 Z S3000", "2 L X+0 Y+0 R0 FMAX", "3 L Z-2 R0 F200",
+        "4 APPR LT X+10 Y+0 LEN5 RL F200", "5 L X+20 Y+10", "6 DEP LT LEN10 F800", "7 L Z+50 R0 FMAX",
+        "8 END PGM T MM",
+    ]
+
+    def test_d1_a_tangential_arc_from_the_mirror_line_as_the_first_move(self) -> None:
+        # The tool stands at X20 Y10, on the mirror line: the arc would start along the
+        # unmirrored direction of N40 and end on another arc.
+        result = run_selection(SCRIPT, "sinumerik-mill", self.MIRROR_Y10, self.TANGENT, 6, 9)
+        self.assertEqual(errors_of(result), [(6, "selection-start")])
+        self.assertEqual(result["text"], "\n".join(self.TANGENT[5:9]))
+
+    def test_d1_a_tangential_arc_after_the_join(self) -> None:
+        result = run_selection(SCRIPT, "sinumerik-mill", self.MIRROR_Y10, self.TANGENT, 5, 9)
+        self.assertEqual(errors_of(result), [(5, "selection-start")])
+
+    def test_d1_a_departure_as_the_first_move_or_after_the_join(self) -> None:
+        self.assertEqual(errors_of(run_selection(SCRIPT, "heidenhain-klartext", self.MIRROR_Y10, self.APPROACH, 7, 9)), [(7, "selection-start")])
+        self.assertEqual(errors_of(run_selection(SCRIPT, "heidenhain-klartext", self.MIRROR_Y10, self.APPROACH, 6, 9)), [(6, "selection-start")])
+
+    def test_d1_an_approach_as_the_last_move_of_the_selection(self) -> None:
+        # Its contour element (line 6) stays below the selection, unmirrored.
+        result = run_selection(SCRIPT, "heidenhain-klartext", {"about": "x-axis", "py": 0}, self.APPROACH, 3, 5)
+        self.assertEqual(errors_of(result), [(5, "selection-inside")])
+
+    def test_d1_guards_the_whole_program_and_a_selection_with_the_contour(self) -> None:
+        for program, profile in ((self.TANGENT, "sinumerik-mill"), (self.APPROACH, "heidenhain-klartext")):
+            result = run_text(SCRIPT, profile, self.MIRROR_Y10, "\n".join(program))
+            self.assertFalse(refused(result), result["findings"])
+        # The approach with the element it meets, the departure with the element it leaves.
+        result = run_selection(SCRIPT, "heidenhain-klartext", {"about": "x-axis", "py": 0}, self.APPROACH, 3, 7)
+        self.assertFalse(refused(result), result["findings"])
+        self.assertIn("4 APPR LT X+10 Y+0 LEN5 RR F200", result["text"].split("\n"))
 
 
 if __name__ == "__main__":
