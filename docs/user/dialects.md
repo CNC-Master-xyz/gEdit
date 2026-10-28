@@ -450,7 +450,12 @@ the depth of cut, the second the finishing allowance. The inspector's table and 
 *block 1 of 2* or *block 2 of 2* and give every word the meaning it has in that block; gEdit
 tells the blocks apart by their words (`P` and `Q` make a `G71` block the second one), also for
 a second block written alone, when the first block's values are set in the machine's parameters.
-The thread height `P` of the second block of `G76` is shown as written and never converted.
+In `G76` the same letter `P` differs by block: the `P` of the first block packs three two-digit
+numbers (finishing passes, chamfer, tool angle, `P010060`) and is a count, shown as written and
+never converted; the thread height `P` of the second block is read in least increments, as a
+radius and with no decimal point, like `Q` (`G76 P1500` is 1.5 mm on a metric IS-B machine; without
+a machine it has no value). Both are values of the cycle, so the scripts leave them as written.
+The reading is in [the Numbers table](machines.md#the-numbers-table).
 Edit Cycle still refuses a two-block cycle ([templates.md](templates.md#edit-cycle)).
 
 **The turret mirror and the coordinate rotation are two things.** `G68`/`G69` (mirror image
@@ -794,6 +799,16 @@ M-codes above 30 are set up by the machine builder and are never errors. Definit
 (`.GUD`, `.DEF`, `.INI`), tool data and archives are not NC programs. gEdit has no
 plain-text mode: such a file opens with whichever dialect scores highest, and its colours
 and code help mean nothing there.
+
+**Axes with more than one letter, and the machine builder's codes.** A machine builder can add
+axes to a Sinumerik control, named by two letters or more (`AA`), and reserve the G codes `G810`
+to `G829` for its own use. Neither belongs to the dialect: the control's manual calls for an
+equals sign after an address of more than one letter (`AA=90`), and which names and codes a
+machine has is for [the machine](machines.md#sinumerik-extra-axes-and-machine-builder-codes) to
+say. The colours of such a word therefore do not change with the machine: the colouring belongs
+to the dialect, while hover, the inspector, the extents and the number reading follow the
+machine. Without the entry, `AA=90` is an assignment, `AA90` an unknown word and a lone `QQ0` a
+call, which is what the control's manual says they are.
 
 ## Milling on Okuma and Sinumerik
 

@@ -4,7 +4,7 @@ Preferences, where they are stored, themes, keyboard shortcuts and the principle
 
 Tag format: `Priority · Size · Delivery`.
 
-> **Status.** Design note from 2026-09-19. What shipped is described in the user guide ([Settings](../user/README.md#settings), [Shortcuts](../user/shortcuts.md), [Where things are](../user/README.md#where-things-are), [The window](../user/README.md#the-window)); where this note and the guide differ, the guide is right. Status per section: the storage layout, a settings dialog (seven pages, no search box), light/dark/system theme, default shortcuts, window state, session restore and per-file memory shipped in Phase 1 and Phase 2. Not built: user-rebindable shortcuts, the role color editor, a settings search box, full configuration export and relocation, UI translations (all in the Phase 4 table of the [roadmap](roadmap.md)). Cut in Phase 2: a global viewer mode and external commands (so neither is a setting).
+> **Status.** Design note from 2026-09-19. What shipped is described in the user guide ([Settings](../user/README.md#settings), [Shortcuts](../user/shortcuts.md), [Where things are](../user/README.md#where-things-are), [The window](../user/README.md#the-window)); where this note and the guide differ, the guide is right. Status per section: the storage layout, a settings dialog (seven pages, no search box), light/dark/system theme, default shortcuts, window state, session restore and per-file memory shipped in Phase 1 and Phase 2. The role colour editor shipped in P4h. Not built: user-rebindable shortcuts, a settings search box, full configuration export and relocation, UI translations (all in the Phase 4 table of the [roadmap](roadmap.md)). Cut in Phase 2: a global viewer mode and external commands (so neither is a setting).
 
 ## Storage layout
 `P1 · S · Core`
@@ -49,11 +49,11 @@ The table is the plan; the *Shipped* column says what the dialog has now (the gu
 
 | Category | Settings | Priority | Shipped |
 |---|---|---|---|
-| Appearance | Theme (system/light/dark), editor font and size, UI font size, [role colors](#themes-and-colors) | P1 (theme, font), P2 (colors) | theme, editor font and size; the UI font size and the role colors are not built |
+| Appearance | Theme (system/light/dark), editor font and size, UI font size, [role colors](#themes-and-colors) | P1 (theme, font), P2 (colors) | theme, editor font and size, the role colors (P4h: block "Code colours"); the UI font size is not built |
 | Editor | Tab width, insert spaces on Tab, show whitespace, rulers, highlight current line, word wrap, minimap, line numbers, drag and drop of text (off by default: accidental drags reorder blocks), copy the whole line when nothing is selected | P1 | all but rulers, which are a key of the settings file only; sticky scroll was added |
 | Assistance | Hover help on/off, completion auto/manual/off, code inspector panel on/off, assistant master switch ([code-assistant.md](code-assistant.md#code-inspector-panel)) | P1 (hover, completion), P2 (panel) | hover, completion, and colouring the lines by motion. The inspector panel is opened from the View tab, and there is no master switch |
 | Files | Recent-files length, restore last session, remember cursor per file, default profile for new documents, reaction to external changes (ask/reload), backup on save (off/one/N copies), recovery auto-save interval, ~~open read-only for all files (viewer mode)~~, "All files" as the default open filter | P1 (recent, external changes), P2 (rest) | shipped except the viewer mode (cut) and the open filter (the dialog always offers All files); bug-fix round 1 added the backup space limit (500 MB) and the expiry of the history of deleted files (90 days), and a recent-files length of 0 stops recording but keeps the list |
-| Profiles | List and editor of dialect profiles | P2 | a Profiles page with a test of a profile on the open program (M13); the form editor is Phase 4 |
+| Profiles | List and editor of dialect profiles | P2 | a Profiles page with a test of a profile on the open program (M13); the form editor shipped in P4h (inline on the page) |
 | Machines | (not in the plan) the machine configurations | | shipped (M6) |
 | Scripts | Python interpreter path, script folders, default timeout, show bundled scripts | P1 | shipped |
 | ~~External commands~~ | List of commands | P2 | cut in Phase 2 ([scripting.md](scripting.md#external-commands)) |
@@ -64,7 +64,7 @@ The table is the plan; the *Shipped* column says what the dialog has now (the gu
 ## Themes and colors
 `P1 · S · Core` (light/dark/system) · `P2 · M · Core` (role color editor)
 
-**Status:** light/dark/system shipped in Phase 1; the role color editor and per-profile colors are deferred to Phase 4.
+**Status:** light/dark/system shipped in Phase 1; the role color editor (Settings ▸ Appearance ▸ Code colours: a picker, the hex text, the contrast ratio and Reset per role, both themes side by side, the open editor as the live preview, Cancel puts the saved palette back) and per-profile colors shipped in P4h. A colour below 4.5:1 against its theme's editor background cannot be saved. The setting is `appearance.roleColors`, which is not edited as a plain field of the dialog. Closing the dialog asks first when the colours or an inline profile form have unsaved changes, like the Machines page.
 
 - Theme follows the OS by default, with a manual override (shipped in Phase 1; the Phase 0 editor was fixed to `vs-dark`). Both the app chrome (CSS variables, already used by the ribbon and panels) and Monaco switch together.
 - Syntax colors are defined per token role ([dialect-profiles.md](dialect-profiles.md#tokenizer-and-colors)) with a light and a dark palette. P2 adds an editor: a color picker per role with a live preview and reset per role. Per-profile overrides are edited on the profile page.

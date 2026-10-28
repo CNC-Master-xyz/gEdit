@@ -4,7 +4,7 @@ A **profile** is everything gEdit knows about one kind of NC file: extensions an
 
 Tag format: `Priority · Size · Delivery`.
 
-> **Status.** Design note from 2026-09-19. What shipped is described in the user guide ([Dialects](../user/dialects.md), [Machines](../user/machines.md), [Your own profiles and code files](../user/profiles.md)); where this note and the guide differ, the guide is right. Status per section: the profile model, detection, the outline, numbering, the generated grammars, `extends`, user profiles with a lean editor (the JSON in a tab, a Profiles page, a test on the open program) and the editing options (including `autoSpace` and `autoNumber`, P4c) shipped; load and save formatting, per-profile colors, a form-generated editor with a live preview and per-profile `tabWidth`/`rulers`/`completion` did not (roadmap Phase 4 table or backlog). The JSON examples below are the Phase 1 shape: the shipped files carry more members (see `src/lib/data/profiles/`).
+> **Status.** Design note from 2026-09-19. What shipped is described in the user guide ([Dialects](../user/dialects.md), [Machines](../user/machines.md), [Your own profiles and code files](../user/profiles.md)); where this note and the guide differ, the guide is right. Status per section: the profile model, detection, the outline, numbering, the generated grammars, `extends`, user profiles with a lean editor (the JSON in a tab, a Profiles page, a test on the open program) and the editing options (including `autoSpace` and `autoNumber`, P4c) shipped; the JSON Schemas of profiles, machines and code files, per-profile `colors`, per-profile `tabWidth` and `rulers`, and a form generated from the schema with a live preview shipped in P4h (§6.10 of the Phase 4 plan); load and save formatting, per-profile `completion`, `autoIndent` and `highlight` did not (backlog). The JSON examples below are the Phase 1 shape: the shipped files carry more members (see `src/lib/data/profiles/`).
 
 ## Where the knowledge was, and where it is
 
@@ -37,7 +37,7 @@ Example user profile:
 
 ### Format choice
 
-JSON. The plan was to validate it against a JSON Schema (`schema/profile.schema.json`); no schema file ships. The loader checks profiles in code (`src/lib/core/profiles/validate.ts`), and JSON Schemas for profiles and machines are in the Phase 4 table of the roadmap. Reasons for JSON: it needs no extra parser in TypeScript, and serde reads it in Rust. The downside is escaped backslashes in regexes (`"\\d+"`). The [pattern tester](#profile-editor) (*Test Profile on Document*) reduces that pain.
+JSON, described by three JSON Schemas (draft 2020-12) in `schemas/`: `profile.schema.json` (one profile file), `machines.schema.json` (`machines.json`) and `codes.schema.json` (a code file); the plan named one. They are written by hand from the types and tested against the loader's checks on the built-in files, the fixtures and a set of broken patches (accepted by the code means accepted by the schema; refused by the code means refused by the schema or listed with its reason as a rule JSON Schema cannot say). The app never validates with them: the loader's checks (`src/lib/core/profiles/validate.ts`) decide, and the schemas serve the profile form and an editor that reads them. A new profile, code file or machines file starts with `"$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/<file>"` (the public repository; a file that exists is never changed to add it). Reasons for JSON: it needs no extra parser in TypeScript, and serde reads it in Rust. The downside is escaped backslashes in regexes (`"\\d+"`). The [pattern tester](#profile-editor) (*Test Profile on Document*) reduces that pain.
 
 ## Schema overview
 
@@ -59,6 +59,7 @@ JSON. The plan was to validate it against a JSON Schema (`schema/profile.schema.
 | `toolList` | `description` (`above` \| `below` \| `trailing` \| `auto`), `commentFilter`, `extraFields[]`, `collapseOffsetDigits`, `dropLeadingZeros` | [Tool list](nc-transformations.md#tool-list) |
 | `highlight` | `[{match, role \| color, extend}]` | [Colors](#tokenizer-and-colors) |
 | `colors` | `{dark: {role: color}, light: {...}}` | [Colors](#tokenizer-and-colors) |
+| `machineParams` (P4h additions) | `extraAxes {source, verify}` and `builderCodes {letters, example, source, verify}`: whether a machine of the profile may list extra axes (names of 2 to 8 letters) and machine builder codes; `sinumerik.json` offers both. The machine's own list is `extraAxes`/`builderCodes` in `machines.json`, read into `syntax.extraAxisNames` | [Machines](../user/machines.md#sinumerik-extra-axes-and-machine-builder-codes) |
 
 All patterns are ECMAScript regular expressions, matched per line and case-insensitively unless `syntax.caseSensitive` is set. Code patterns see the line with comments masked by the tokenizer (strings stay, because tool names can be strings), so `(T1 M6)` in a comment never counts as a tool change. Only `outline` rules of kind `comment` and `section` see the raw line. Named groups (`tool`, `name`, `text`) supply the values shown in the UI. Lists are JSON arrays, never delimiter-separated strings.
 
@@ -68,7 +69,7 @@ CAM output is often packed (`N10T1M6`), and `\b` finds no boundary between a dig
 
 ```json
 {
-  "$schema": "../schema/profile.schema.json",
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
   "id": "fanuc-gcode",
   "name": "Fanuc (ISO)",
   "version": 1,
@@ -146,7 +147,7 @@ Notes on this example:
 
 ```json
 {
-  "$schema": "../schema/profile.schema.json",
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
   "id": "heidenhain-klartext",
   "name": "Heidenhain Klartext",
   "version": 1,
@@ -221,7 +222,7 @@ Replaced the branches of the old `gcodeParser.ts` with a generic runner. Tool en
 ### Editing
 `P2 · S · Profile`
 
-**Status:** `forceUppercase` and `preventLineJoin` (M13) and `autoSpace` and `autoNumber` (P4c) are read. The two P4c members are optional booleans; **absent means off, in every built-in profile too** (no built-in profile file carries them), and a non-boolean is reported by path. See [Typing options in a profile](../user/profiles.md#typing-options-in-a-profile). `autoIndent`, `rulers` and a per-profile `tabWidth` and `completion` mode are not built (roadmap Phase 4 table); the global editor settings apply.
+**Status:** `forceUppercase` and `preventLineJoin` (M13) and `autoSpace` and `autoNumber` (P4c) are read. The two P4c members are optional booleans; **absent means off, in every built-in profile too** (no built-in profile file carries them), and a non-boolean is reported by path. See [Typing options in a profile](../user/profiles.md#typing-options-in-a-profile). `tabWidth` (1 to 16) and `rulers` (at most 8 columns) shipped in P4h and win over the settings for a document of the profile (`rulers` per editor pane; the aligned compare view uses the settings' rulers); no built-in profile sets either. `autoIndent` and a `completion` mode are not built; the global editor settings apply.
 
 `forceUppercase` (comments excluded), `preventLineJoin`, `autoSpace`, `autoNumber`, `autoIndent`, `tabWidth`, `rulers` (for example the control's maximum block length), `completion` (`auto` \| `manual` \| `off`). Values missing in a profile fall back to the global editor settings.
 
@@ -236,12 +237,12 @@ Replaced the branches of the old `gcodeParser.ts` with a generic runner. Tool en
 ### Tokenizer and colors
 `P1 · M · Core` (generated grammar, role colors) · `P2 · S · Core` (per-profile colors, extra rules)
 
-**Status:** the generated grammars (`iso`, `klartext`, Sinumerik, Okuma) and the role colors shipped; per-profile `colors` and `highlight` are deferred to Phase 4. Coloring lines by motion shipped in P3a as a mark beside the line (see [Understanding a block](../user/inspector.md#motion-colours)).
+**Status:** the generated grammars (`iso`, `klartext`, Sinumerik, Okuma) and the role colors shipped; per-profile `colors` shipped in P4h; `highlight` was not built (an owner decision of P4h). Coloring lines by motion shipped in P3a as a mark beside the line (see [Understanding a block](../user/inspector.md#motion-colours)).
 
 - `grammar` selects a Monarch grammar generator. `iso` covers Fanuc-style word-address code. It is generated from `syntax` (comment delimiters, block-number prefix, skip mark, variables) and the code database keywords. `klartext` is hand-written but reads the same `syntax` fields. Sinumerik (strings, `;` comments, function-style cycle calls) and Okuma OSP (alphanumeric sequence names, `=` addresses, `V` variables) differ too much for `iso` and get their own grammars, following the rule order in [syntax-sinumerik.md](syntax/syntax-sinumerik.md#38-monarch-rule-order-proposal) and [syntax-okuma.md](syntax/syntax-okuma.md#38-monarch-rule-order-proposal).
 - The colours follow the tokens (bug-fix round 1): the grammar rules for free text, `colon` words, call targets, `labelAfter` and `declareAfter` names, plain text runs and name-shaped keywords are written to give the same pieces as the tokenizer (Klartext cycle names, program names and paths are one piece of text, `VC:120` and `#5` one word, Fanuc free text and four-digit G/M codes are right, Okuma names and block numbers are whole, the Sinumerik jump target and `DEF` names are coloured). `differential.test.ts` compares grammar and tokens over the fixtures, a second test runs Monaco's own tokenizer, and the few differences that are reasoned are listed as waivers in the first test ([TODO.md](../../TODO.md)).
 - Tokens carry roles: `blockNumber`, `skip`, `gcode`, `mcode`, `axis`, `arcCenter`, `feed`, `spindle`, `tool`, `variable`, `keyword`, `comment`, `section`, `programMarker`, `number`, `string`, `operator`, `invalid`.
-- Each token is emitted as `role.profileId` (for example `feed.fanuc-gcode`). The app generates one Monaco theme for light and one for dark: base rules per role, plus per-profile overrides from `colors`. Monaco matches the more specific rule, so profiles can color differently even though a Monaco theme is global.
+- Each token is emitted as `role.profileId` (for example `feed.fanuc-gcode`). The app generates one Monaco theme for light and one for dark: base rules per role, plus the user's role colours (Settings ▸ Appearance ▸ Code colours), then per-profile overrides from `colors` (built-in < user < profile; each colour at least 4.5:1 against its theme's editor background, or the profile is refused; the print uses the same colours). Monaco matches the more specific rule, so profiles can color differently even though a Monaco theme is global.
 - `highlight` adds ordered extra rules before the defaults, for example `{ "match": "M0?[01]\\b", "role": "stop" }` or `{ "match": "G0?0\\b", "color": "#e5534b", "extend": "line" }`. `extend` colors the following digits, the following letters, or the whole line.
 - Profile changes re-register the grammar (`setMonarchTokensProvider`) and regenerate the theme without a restart.
 - Coloring whole lines by the active motion mode (rapid vs. feed vs. arc) needs modal state, which Monarch cannot track. It is done with decorations from the modal interpreter (P3).
@@ -249,7 +250,7 @@ Replaced the branches of the old `gcodeParser.ts` with a generic runner. Tool en
 ## Profile editor
 `P2 · M · Core`
 
-**Status:** a lean editor shipped in M13: the JSON in a tab, a Profiles page in the settings dialog (new from a profile, open, import, export, remove, reload) and *Test Profile on Document*, the pattern tester described below. The form generated from a schema and the live preview are deferred to Phase 4.
+**Status:** a lean editor shipped in M13 (the JSON in a tab, a Profiles page, *Test Profile on Document*, the pattern tester described below). The form generated from the schema and the live preview shipped in P4h as *Edit Profile in Form* (`profile.editInForm`; the form is shown inline on the Profiles page, because the Settings dialog is a modal and cannot open another over itself; the palette opens it as a dialog). Deviations from this note: `extends` and `id` are not editable in the form, the members that are long rule lists (variants, channels, numbering references and calls, compare cycle names) are shown as JSON with *Open as JSON*, and a profile built on another keeps its own `name` and `shortName`. Settings asks before it drops unsaved form changes. The sample programs are synthetic, one per grammar and machine type (`src/lib/data/samples`).
 
 A page in the settings dialog ([settings-ui.md](settings-ui.md#settings-dialog)):
 
