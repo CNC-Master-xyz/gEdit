@@ -24,8 +24,8 @@
 import { normalizeCode } from '$lib/core/codes/lookup';
 import type { CodeDb } from '$lib/core/codes/types';
 import type { MachineParamsDecl, Profile, VariantDecl } from '$lib/core/profiles/types';
-import { parseWaitCodes } from '$lib/core/channels/codes';
-import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE, type ChannelParams } from '$lib/core/channels/types';
+import { isWaitCode, parseWaitCodes } from '$lib/core/channels/codes';
+import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE, type ChannelParams, type WaitCodeRange } from '$lib/core/channels/types';
 import { t } from '$lib/i18n';
 import { EXTRA_AXIS_NAME, MAX_EXTRA_AXES, patternSubsetProblem } from '$lib/core/profiles/validate';
 import type { MachineConfig, MachineProblem, NumberClass, NumberReading } from './types';
@@ -287,7 +287,7 @@ export function validateMachine(m: MachineConfig, o: ValidateMachineOptions): Ma
     }
   }
 
-  problems.push(...builderProblems(params, decl, m.profile, id, at));
+  problems.push(...builderProblems(params, decl, o.profile, id, at, o.codes));
   return problems;
 }
 
@@ -297,19 +297,107 @@ const STORED_AXIS_NAME = /^[A-Z]{2,8}$/;
 /** The most characters of `params.builderCodes` (§6.10 rule 14). */
 export const MAX_BUILDER_CODES_LENGTH = 1000;
 
+/** The address members of a profile that hold one word, and what the word is there (plain words). */
+const SINGLE_ADDRESSES: readonly [keyof Profile['addresses'], string][] = [
+  ['tool', 'the tool word'],
+  ['feed', 'the feed word'],
+  ['rapid', 'the rapid word'],
+  ['spindle', 'the spindle speed word'],
+];
+
+/** The address members that hold a list of words, and what each word is there. */
+const LIST_ADDRESSES: readonly [keyof Profile['addresses'], string][] = [
+  ['axes', 'an axis'],
+  ['arcCenter', 'an arc centre word'],
+  ['diameter', 'a diameter axis'],
+  ['angular', 'a rotary axis'],
+  ['speedLimitWords', 'a speed limit word'],
+  ['offsetWords', 'an offset word'],
+];
+
+/** The address members that are maps whose keys are words. */
+const KEYED_ADDRESSES: readonly [keyof Profile['addresses'], string][] = [
+  ['incremental', 'an incremental axis word'],
+  ['feedUnitWords', 'a feed unit word'],
+  ['arcDirectionWords', 'an arc direction word'],
+];
+
+/**
+ * P4h (plan §6.10 rule 13; T123): what the word `name` already is to the profile or its code
+ * database, in plain words, or null when it is free to be an extra axis. Ignoring case, as the
+ * names are stored in capitals. A name that is already a word of the profile would be read
+ * as that word by one rule and as an axis by another, so it is refused rather than guessed:
+ * an address of `addresses`, a keyword, a colon word, a parameter of a code, or a code or
+ * alias made of letters only (`TRANS`, `MCALL`).
+ */
+export function extraAxisClash(name: string, profile: Profile, codes?: CodeDb): string | null {
+  const key = name.toUpperCase();
+  const same = (word: unknown): boolean => typeof word === 'string' && word.toUpperCase() === key;
+  const addresses = (isRecord(profile.addresses) ? profile.addresses : {}) as Record<string, unknown>;
+  for (const [member, what] of SINGLE_ADDRESSES) if (same(addresses[member])) return `"${name}" is already ${what} of this profile`;
+  for (const [member, what] of LIST_ADDRESSES) {
+    const list = addresses[member];
+    if (Array.isArray(list) && list.some(same)) return `"${name}" is already ${what} of this profile`;
+  }
+  for (const [member, what] of KEYED_ADDRESSES) {
+    const map = addresses[member];
+    if (isRecord(map) && (Object.keys(map).some(same) || (member === 'incremental' && Object.values(map).some(same)))) {
+      return `"${name}" is already ${what} of this profile`;
+    }
+  }
+  const syntax = (isRecord(profile.syntax) ? profile.syntax : {}) as Record<string, unknown>;
+  const keywords = Array.isArray(syntax.keywords) ? syntax.keywords : [];
+  if (keywords.some((keyword) => typeof keyword === 'string' && same(keyword.trim().split(/\s+/)[0]))) {
+    return `"${name}" is already a keyword of this profile`;
+  }
+  const colonWords = Array.isArray(syntax.colonWords) ? syntax.colonWords : [];
+  if (colonWords.some(same)) return `"${name}" is already a word written with a colon (${name}:…)`;
+  for (const entry of codes?.codes ?? []) {
+    for (const code of [entry?.code, ...(Array.isArray(entry?.aliases) ? entry.aliases : [])]) {
+      if (typeof code === 'string' && /^[A-Za-z]+$/.test(code) && same(code)) return `"${name}" is already the code ${entry.code}`;
+    }
+    const param = (Array.isArray(entry?.params) ? entry.params : []).find((candidate) => same(candidate?.address));
+    if (param) return `"${name}" is already a parameter of ${entry.code}`;
+  }
+  return null;
+}
+
+/**
+ * P4h (plan §6.10 rule 14; T123): the codes of `ranges` the code database already describes,
+ * as written in the database. A builder code is one gEdit does not know; one it knows would
+ * be named twice, once by the database and once as the builder's.
+ */
+export function knownBuilderCodes(ranges: readonly WaitCodeRange[], codes: CodeDb): string[] {
+  const known: string[] = [];
+  for (const entry of codes.codes ?? []) {
+    for (const code of [entry?.code, ...(Array.isArray(entry?.aliases) ? entry.aliases : [])]) {
+      if (typeof code !== 'string') continue;
+      const match = /^([A-Za-z])0*(\d+)$/.exec(normalizeCode(code));
+      if (match && isWaitCode(ranges, match[1], Number(match[2]))) {
+        known.push(entry.code);
+        break;
+      }
+    }
+  }
+  return known;
+}
+
 /**
  * P4h (plan §6.10 rules 13 and 14; T123): the shape of `params.extraAxes` and
- * `params.builderCodes`, and that the profile offers them. The rules that need the profile's
- * addresses and keywords and the code database (a name the profile already reads, a builder
- * code gEdit knows) are P4.43b's and come on top of these.
+ * `params.builderCodes`, and that the profile offers them (the prelude's), and on top of
+ * those (P4.43b) that no extra axis is a word the profile or its codes already read, that the
+ * machine's names and the profile's own stay within `MAX_EXTRA_AXES`, and that no builder
+ * code is a code the database knows (only where the caller has the database).
  */
 function builderProblems(
   params: Record<string, unknown>,
   decl: MachineParamsDecl,
-  profileId: string,
+  profile: Profile,
   id: string | null,
   at: (member: string) => string,
+  codeDb?: CodeDb,
 ): MachineProblem[] {
+  const profileId = profile.id;
   const out: MachineProblem[] = [];
   const axes = params.extraAxes;
   if (axes !== undefined) {
@@ -334,11 +422,19 @@ function builderProblems(
           out.push(problem(id, `${where}.name`, `"${name}" is already listed`));
         } else {
           seen.add(name);
+          const clash = extraAxisClash(name, profile, codeDb);
+          if (clash !== null) out.push(problem(id, `${where}.name`, clash));
         }
         if (axis.kind !== 'linear' && axis.kind !== 'rotary') {
           out.push(problem(id, `${where}.kind`, 'an extra axis is "linear" or "rotary"'));
         }
       });
+      // The profile's own names and the machine's are one list once applied (`applyMachine`).
+      const own = Array.isArray(profile.syntax?.extraAxisNames) ? profile.syntax.extraAxisNames : [];
+      const all = new Set([...own.map((n) => String(n).toUpperCase()), ...seen]);
+      if (all.size > MAX_EXTRA_AXES) {
+        out.push(problem(id, at('extraAxes'), `with the profile's own extra axes this makes more than ${MAX_EXTRA_AXES}`));
+      }
     }
   }
 
@@ -353,7 +449,13 @@ function builderProblems(
     } else {
       // The wait codes' list reader; its messages speak of wait codes, so the problem has its own words.
       const letters = decl.builderCodes.letters;
-      if (parseWaitCodes(codes, { letters }).errors.length > 0) {
+      const parsed = parseWaitCodes(codes, { letters });
+      const known = parsed.errors.length === 0 && codeDb !== undefined ? knownBuilderCodes(parsed.ranges, codeDb) : [];
+      if (known.length > 0) {
+        const shown = known.slice(0, 3).join(', ') + (known.length > 3 ? ` and ${known.length - 3} more` : '');
+        out.push(problem(id, at('builderCodes'), `${shown} ${known.length === 1 ? 'is a code' : 'are codes'} gEdit already knows, not a code of the machine builder`));
+      }
+      if (parsed.errors.length > 0) {
         out.push(
           problem(
             id,

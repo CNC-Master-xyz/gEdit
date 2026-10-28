@@ -641,3 +641,58 @@ describe('extra axes and builder codes (P4h)', () => {
     }
   });
 });
+
+// P4.43b (plan §6.10 rules 13 and 14; T123): the clash rules on top of the prelude's shape rules.
+describe('extra axes and builder codes: the clash rules (P4.43b)', () => {
+  const SIEMENS = profile('sinumerik');
+  const turn = (params: MachineConfig['params']): MachineConfig => machine({ profile: 'sinumerik', params });
+  const axes = (...names: string[]): MachineConfig['params'] => ({ extraAxes: names.map((name) => ({ name, kind: 'linear' as const })) });
+
+  it('accepts names the profile and its codes do not read', () => {
+    expect(check(turn({ ...axes('AA', 'QQ', 'XYZ'), builderCodes: 'G810-G829' }), SIEMENS)).toEqual([]);
+  });
+
+  it('refuses a name the profile or its codes already read, and says what it is', () => {
+    const rows = (name: string): string[] => check(turn(axes(name)), SIEMENS);
+    // An angular address of the profile, a speed limit word, a keyword, a letters-only code
+    // (`MSG`, the arc radius `CR`), a parameter of a cycle (the retraction plane `RTP`).
+    expect(rows('SF')).toEqual(['machines[0].params.extraAxes[0].name: "SF" is already a rotary axis of this profile']);
+    expect(rows('LIMS')).toEqual(['machines[0].params.extraAxes[0].name: "LIMS" is already a speed limit word of this profile']);
+    expect(rows('TRANS')).toEqual(['machines[0].params.extraAxes[0].name: "TRANS" is already a keyword of this profile']);
+    expect(rows('MSG')).toEqual(['machines[0].params.extraAxes[0].name: "MSG" is already the code MSG']);
+    expect(rows('CR')).toEqual(['machines[0].params.extraAxes[0].name: "CR" is already the code CR']);
+    expect(rows('RTP')[0]).toMatch(/^machines\[0\]\.params\.extraAxes\[0\]\.name: "RTP" is already a parameter of CYCLE/);
+  });
+
+  it('reads the incremental twins, the colon words and the keyed address maps too', () => {
+    const shaped: Profile = {
+      ...SIEMENS,
+      addresses: { ...SIEMENS.addresses, incremental: { UU: 'X' }, feedUnitWords: { FPM: 'per-minute' } },
+      syntax: { ...SIEMENS.syntax, colonWords: ['VC'] },
+    };
+    const rows = (name: string): string[] => check(turn(axes(name)), shaped);
+    expect(rows('UU')).toEqual(['machines[0].params.extraAxes[0].name: "UU" is already an incremental axis word of this profile']);
+    expect(rows('FPM')).toEqual(['machines[0].params.extraAxes[0].name: "FPM" is already a feed unit word of this profile']);
+    expect(rows('VC')).toEqual(['machines[0].params.extraAxes[0].name: "VC" is already a word written with a colon (VC:…)']);
+  });
+
+  it('counts the profile’s own extra axes towards the limit', () => {
+    const own: Profile = { ...SIEMENS, syntax: { ...SIEMENS.syntax, extraAxisNames: ['PA', 'PB', 'PC'] } };
+    const names = Array.from({ length: 14 }, (_, i) => `M${String.fromCharCode(65 + i)}A`);
+    expect(check(turn(axes(...names)), own)).toEqual([
+      'machines[0].params.extraAxes: with the profile’s own extra axes this makes more than 16'.replace('’', "'"),
+    ]);
+    // A name the profile already lists counts once.
+    expect(check(turn(axes('PA', ...names.slice(0, 13))), own)).toEqual([]);
+  });
+
+  it('refuses a builder code the code database knows, naming it', () => {
+    expect(check(turn({ builderCodes: 'G810-G829, G850' }), SIEMENS)).toEqual([]);
+    expect(check(turn({ builderCodes: 'G17' }), SIEMENS)).toEqual([
+      'machines[0].params.builderCodes: G17 is a code gEdit already knows, not a code of the machine builder',
+    ]);
+    const many = check(turn({ builderCodes: 'G0-G99' }), SIEMENS);
+    expect(many).toHaveLength(1);
+    expect(many[0]).toMatch(/^machines\[0\]\.params\.builderCodes: G0, G1, G2 and \d+ more are codes gEdit already knows/);
+  });
+});
