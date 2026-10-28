@@ -1769,7 +1769,7 @@ names; a name in it with no folder is kept in case the folder comes back.
 A problem says where it is, for example *package shop-a: lathe.json*.
 
 **A package script cannot be edited in place.** Its commands in the Scripts tab are listed
-under the package's name. **Edit Script** offers **Copy to My Scripts** instead; the copy goes
+under the package's name. **Edit Script** asks whether to copy it to your scripts folder and edit the copy; the copy goes
 to your own folder, shadows the original, and is yours to change. To change the package itself,
 edit the files in its folder.
 
