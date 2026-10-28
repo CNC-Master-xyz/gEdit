@@ -779,7 +779,8 @@ describe('the machine parameters', () => {
     // M9 (R6): the tool word's offset digits (r6Variants.test.ts); the review round
     // added whether the counter spindle's Y turns (D5-7).
     expect(decl?.variants?.map((v) => v.id)).toEqual(['toolWord', 'counterSpindleY']);
-    expect(okuma.profile.modal?.initial).toEqual({ feedmode: 'G95', distance: 'G90' });
+    // Wave Y data batch: the control selects the plane G18 at power-on and after a reset.
+    expect(okuma.profile.modal?.initial).toEqual({ plane: 'G18', feedmode: 'G95', distance: 'G90' });
     expect(okuma.profile.machineType).toBe('lathe');
     // M12 (P12, §8.9): channel presets are offered, never applied, all `verify`;
     // `channelPresets.test.ts` pins them.
@@ -926,8 +927,8 @@ describe('the machine parameters', () => {
     const applied = applyMachine(okuma.profile, noMachine(okuma.profile)).profile;
     expect(applied.modal?.diameter).toBe('on');
     expect(applied.modal?.units).toBe('mm');
-    expect(applied.modal?.initial).toEqual({ feedmode: 'G95', distance: 'G90' });
-    expect(applied.modal?.sources).toEqual({ feedmode: 'profile', distance: 'profile', units: 'profile', diameter: 'profile' });
+    expect(applied.modal?.initial).toEqual({ plane: 'G18', feedmode: 'G95', distance: 'G90' });
+    expect(applied.modal?.sources).toEqual({ plane: 'profile', feedmode: 'profile', distance: 'profile', units: 'profile', diameter: 'profile' });
     // A machine may say otherwise, and then it is the machine's.
     const inch = applyMachine(okuma.profile, machineWith({ units: 'inch', modalInitial: { feedmode: 'G94' } })).profile;
     expect(inch.modal?.units).toBe('inch');
