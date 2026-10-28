@@ -427,6 +427,27 @@ describe('P3b fix NC: the content', () => {
     expect(templateOf('heidenhain', 'program-start').params?.find((p) => p.id === 'name')?.help).toMatch(/no spaces/i);
   });
 
+  it('T155: the Okuma names are checked as the control takes them (OSP-P300 programming manual)', () => {
+    const start = templateOf('okuma', 'program-start');
+    const lap = templateOf('okuma', 'lap-rough-finish');
+    const keyOf = (t: TemplateDef, id: string, value: string) => validateTemplateValues(t, { ...defaults(t), [id]: value })[id]?.key;
+    // The tape header file name: letters and digits, starting with a letter, at most 16.
+    expect(keyOf(start, 'file', 'PART1')).toBeUndefined();
+    expect(keyOf(start, 'file', 'ABCDEFGHIJKLMNOP')).toBeUndefined();
+    expect(keyOf(start, 'file', 'ABCDEFGHIJKLMNOPQ')).toBe('templates.value.tooLong');
+    expect(keyOf(start, 'file', '1PART')).toBe('templates.value.charsetName');
+    expect(keyOf(start, 'file', 'MY-PART')).toBe('templates.value.charsetName');
+    // The program name after O: at most four letters or digits.
+    expect(keyOf(start, 'prog', '1001')).toBeUndefined();
+    expect(keyOf(start, 'prog', 'AB12')).toBeUndefined();
+    expect(keyOf(start, 'prog', '10001')).toBe('templates.value.tooLong');
+    expect(keyOf(start, 'prog', 'A-1')).toBe('templates.value.charsetLettersDigits');
+    // The LAP contour name: a sequence name, N and at most four letters or digits.
+    expect(keyOf(lap, 'name', 'NLAP1')).toBeUndefined();
+    expect(keyOf(lap, 'name', 'NLAP12')).toBe('templates.value.tooLong');
+    expect(keyOf(lap, 'name', 'N LAP')).toBe('templates.value.charsetName');
+  });
+
   it('NC-17: the R point, the lathe pecks and the tapping feed say what the control does', () => {
     for (const { where, label } of allLabels('fanuc')) expect(label, where).not.toMatch(/^Retract plane$/);
     for (const { where, label } of allLabels('fanuc-lathe')) expect(label, where).not.toMatch(/source controls/);
