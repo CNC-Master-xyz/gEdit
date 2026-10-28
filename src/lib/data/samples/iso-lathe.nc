@@ -5,7 +5,7 @@ O2001 {note:SAMPLE TURNED PART}
 {n30} T0101
 {n40} G0 X60. Z2.
 {n50} G1 Z-20. F0.25
-{n60} G2 X50. Z-25. I5. K0.
+{n60} G2 X50. Z-25. I-5. K0.
 {n70} #101 = 12.5
 {skip}{n80} IF [#101 GT 10.] GOTO 100
 {n90} G0 X100.
