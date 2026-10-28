@@ -271,3 +271,65 @@ describe('compatible', () => {
     expect(compatible(machine(), ['fanuc-gcode'])).toBe(false);
   });
 });
+
+// P4h (plan §6.10 rules 13, 14; T123): a machine's extra axes and builder codes.
+describe('extra axes and builder codes (P4.43b)', () => {
+  const SIEMENS = profile('sinumerik');
+  const siemens = (params: MachineConfig['params']): MachineConfig =>
+    machine({ id: 'turn-5', name: 'Turn 5', profile: 'sinumerik', params });
+  const AXES = [
+    { name: 'AA', kind: 'linear' as const },
+    { name: 'QQ', kind: 'rotary' as const },
+  ];
+
+  it('are offered by the Siemens profiles only', () => {
+    for (const p of PROFILES) {
+      const offered = p.machineParams?.extraAxes !== undefined && p.machineParams?.builderCodes !== undefined;
+      expect(offered, p.id).toBe(p.id === 'sinumerik' || p.id === 'sinumerik-mill');
+    }
+    expect(SIEMENS.machineParams?.builderCodes).toMatchObject({ letters: ['G'], example: 'G810-G829', verify: true });
+    expect(SIEMENS.machineParams?.extraAxes?.verify).toBe(true);
+  });
+
+  it('come from the machine only, and only when it sets them', () => {
+    const eff = effectiveMachine(SIEMENS, siemens({ extraAxes: AXES, builderCodes: 'G810-G829' }), 'document', {});
+    expect(eff.params.extraAxes).toEqual(AXES);
+    expect(eff.params.builderCodes).toBe('G810-G829');
+    expect(noMachine(SIEMENS).params.extraAxes).toBeUndefined();
+    expect(noMachine(SIEMENS).params.builderCodes).toBeUndefined();
+    // Empty is not set; a profile that does not offer them takes nothing.
+    const empty = effectiveMachine(SIEMENS, siemens({ extraAxes: [], builderCodes: '  ' }), 'document', {});
+    expect('extraAxes' in empty.params || 'builderCodes' in empty.params).toBe(false);
+    const fanuc = effectiveMachine(MILL, machine({ profile: 'fanuc-gcode', params: { extraAxes: AXES, builderCodes: 'G810' } }), 'document', {});
+    expect(fanuc.params.extraAxes).toBeUndefined();
+    expect(fanuc.params.builderCodes).toBeUndefined();
+  });
+
+  it('are part of the key, and a machine without them keeps the key it had', () => {
+    const plain = effectiveMachine(SIEMENS, siemens({ units: 'mm' }), 'document', {});
+    const before = effectiveKey('sinumerik', { ...plain.params }, plain.source);
+    expect(plain.key).toBe(before);
+    expect(plain.key).not.toContain('extraAxes');
+    const withAxes = effectiveMachine(SIEMENS, siemens({ units: 'mm', extraAxes: AXES }), 'document', {});
+    const withCodes = effectiveMachine(SIEMENS, siemens({ units: 'mm', builderCodes: 'G810' }), 'document', {});
+    expect(new Set([plain.key, withAxes.key, withCodes.key]).size).toBe(3);
+  });
+
+  it('applyMachine makes the names axes of the profile, a rotary one in degrees', () => {
+    const eff = effectiveMachine(SIEMENS, siemens({ extraAxes: AXES }), 'document', {});
+    const applied = applyMachine(SIEMENS, eff).profile;
+    expect(applied.syntax.extraAxisNames).toEqual(['AA', 'QQ']);
+    expect(applied.addresses.axes).toEqual([...SIEMENS.addresses.axes, 'AA', 'QQ']);
+    expect(applied.addresses.angular).toEqual([...(SIEMENS.addresses.angular ?? []), 'QQ']);
+    expect(validateProfile(applied, { applied: true }).ok).toBe(true);
+    // The builder codes change nothing in the profile: hover and the inspector read them.
+    const codes = applyMachine(SIEMENS, effectiveMachine(SIEMENS, siemens({ builderCodes: 'G810-G829' }), 'document', {}));
+    expect(codes.profile).toEqual(applyMachine(SIEMENS, effectiveMachine(SIEMENS, siemens({}), 'document', {})).profile);
+  });
+
+  it('applyMachine adds a name after the profile’s own and never twice, ignoring case', () => {
+    const own: Profile = { ...SIEMENS, syntax: { ...SIEMENS.syntax, extraAxisNames: ['Aa', 'BB'] } };
+    const eff = effectiveMachine(own, siemens({ extraAxes: [{ name: 'AA', kind: 'linear' }, { name: 'CC', kind: 'linear' }] }), 'document', {});
+    expect(applyMachine(own, eff).profile.syntax.extraAxisNames).toEqual(['Aa', 'BB', 'CC']);
+  });
+});
