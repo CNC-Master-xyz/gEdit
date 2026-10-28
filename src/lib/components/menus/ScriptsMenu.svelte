@@ -38,13 +38,13 @@
 <script lang="ts">
   import { commands } from '$lib/app/registry/commands';
   import { scripts } from '$lib/app/scripts';
+  import { userConfig } from '$lib/app/userConfig';
   import { packageOfRoot, packageTitle } from '$lib/core/packages/packages';
   import { groupScripts, scriptLabel, scriptsForProfile } from '$lib/core/scripting/filter';
   import { docs } from '$lib/stores/documents';
   import { scriptListError } from '$lib/stores/scripts';
   import { t } from '$lib/i18n';
-  import { packagesList, type ScriptEntry } from '$lib/platform/commands';
-  import { isTauriRuntime } from '$lib/utils/platform';
+  import type { ScriptEntry } from '$lib/platform/commands';
 
   type Scope = 'all' | 'bundled' | 'own';
   let { scope = 'all' }: { scope?: Scope } = $props();
@@ -70,21 +70,12 @@
   const pythonMissing = $derived($python !== null && !$python.ok);
   const hasScripts = $derived(mine.some((entry) => !entry.shadowed));
 
-  // A package's scripts are shown under its display name (package.json), found once per scan.
-  let titles = $state<ReadonlyMap<string, string>>(new Map());
-  const hasPackages = $derived($list.some((entry) => packageOfRoot(entry.root) !== null));
-  $effect(() => {
-    if (!hasPackages || !isTauriRuntime()) return;
-    let current = true;
-    packagesList()
-      .then((found) => {
-        if (current) titles = new Map(found.packages.map((info) => [info.name, info.title]));
-      })
-      .catch(() => undefined);
-    return () => {
-      current = false;
-    };
-  });
+  // A package's scripts are shown under its display name (package.json). The list comes from the
+  // user configuration, which refreshes it on every load, so Packages > Reload shows a new name.
+  const packages = userConfig.packages;
+  const titles = $derived<ReadonlyMap<string, string>>(
+    new Map(($packages?.packages ?? []).map((info) => [info.name, info.title])),
+  );
 
   /** The caption of a section: the package (display name) and its subfolder, or the subfolder alone. */
   function captionOf(group: { group: string | null; package?: string }): string {
