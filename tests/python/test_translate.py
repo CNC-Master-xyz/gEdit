@@ -1039,5 +1039,44 @@ class RefusedBlocksAreNotMovedTest(unittest.TestCase):
         self.assertIn("Y2.", result["text"])
 
 
+class LaterVersionTest(unittest.TestCase):
+    """Wave Y, BL-NC-geometry: the later-version transforms under translate. Each test fails
+    without its change."""
+
+    KLARTEXT = ReviewFixTest.KLARTEXT
+
+    def errors(self, result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def test_t021_every_call_at_a_position_moves_the_calls_z_and_keeps_q203(self) -> None:
+        # TNC 640 cycle manual (2019, p.65): the tool-axis coordinate of CYCL CALL POS acts like a
+        # further datum shift, so moving it moves the cycle once; Q203 stays.
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 CYCL CALL POS X+30 Y+10 Z-2 FMAX")
+        result = run_inline(text, "heidenhain-klartext", {"dx": 1, "dz": 1})
+        self.assertEqual(self.errors(result), [])
+        lines = result["text"].split("\n")
+        self.assertIn("  Q203=+0 ;SURFACE COORDINATE", lines)
+        self.assertIn("5 CYCL CALL POS X+11 Y+10 Z+1 FMAX", lines)
+        self.assertIn("6 CYCL CALL POS X+31 Y+10 Z-1 FMAX", lines)
+        self.assertIn("4 L Z+51 R0 FMAX", lines)
+
+    def test_t021_one_other_call_keeps_the_refusal(self) -> None:
+        # The golden b3-klartext-call-pos-z holds M99 and M89 calls; here one CYCL CALL.
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 L X+30 Y+10 R0 FMAX\n66 CYCL CALL")
+        self.assertEqual(self.errors(run_inline(text, "heidenhain-klartext", {"dz": 1})), [(4, "cycle-position"), (8, "cycle-position")])
+
+    def test_t021_a_call_at_a_position_without_the_tool_axis_keeps_the_refusal(self) -> None:
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 CYCL CALL POS X+30 Y+10 FMAX")
+        found = self.errors(run_inline(text, "heidenhain-klartext", {"dz": 1}))
+        self.assertEqual(found, [(4, "cycle-position"), (8, "cycle-position"), (9, "cycle-position")])
+
+    def test_t021_a_selection_with_the_definition_and_its_calls(self) -> None:
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 CYCL CALL POS X+30 Y+10 Z-2 FMAX")
+        lines = text.split("\n")
+        result = run_inline("\n".join(lines[3:9]), "heidenhain-klartext", {"dz": 1}, lines[:3])
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("  Q203=+0 ;SURFACE COORDINATE", result["text"].split("\n"))
+
+
 if __name__ == "__main__":
     unittest.main()
