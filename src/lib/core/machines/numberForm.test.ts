@@ -249,3 +249,30 @@ describe('the inch step of a feed row (NC-5)', () => {
     expect(numberRowProblems(base, rows, 'm', path).map((p) => p.path)).toEqual([`${path}.classes.feedPerMin.incrementInch`]);
   });
 });
+
+describe('a built-in preset is never refused (NC-5)', () => {
+  it('reads every preset of every built-in profile, with each point-less-feed choice, without a problem', () => {
+    for (const profileId of PROFILES) {
+      const decl = profileOf(profileId).machineParams?.numberInput;
+      for (const p of decl?.presets ?? []) {
+        for (const choice of [undefined, ...(decl?.pointlessFeeds?.choices ?? [])]) {
+          const input = withPointlessFeeds(p.value, choice);
+          const rows = numberRows(input);
+          expect(numberRowProblems(input, rows, 'm', 'p'), `${profileId}/${p.id}`).toEqual([]);
+        }
+      }
+    }
+  });
+
+  it('reads the Okuma preset whose feeds write no inch step (metric only, scaled) without a problem, and saves it as it is', () => {
+    const okuma = presetsOf('okuma-osp')[2];
+    const rows = numberRows(okuma.value);
+    expect(okuma.value.classes?.feedPerRev?.incrementInch).toBeUndefined();
+    expect(row(rows, 'feedPerRev')).toMatchObject({ mode: 'scale', increment: '0.01', incrementInch: null });
+    expect(row(rows, 'feedPerMin')).toMatchObject({ mode: 'scale', increment: '1', incrementInch: null });
+    expect(numberRowProblems(okuma.value, rows, 'm', 'p')).toEqual([]);
+    expect(numberInputFromRows(okuma.value, rows)).toEqual(okuma.value);
+    // Changing such a row to a reading in steps is the user's edit, and asks for the inch step.
+    expect(numberRowProblems(okuma.value, edit(rows, 'feedPerRev', { mode: 'increment' }), 'm', 'p')).toHaveLength(1);
+  });
+});
