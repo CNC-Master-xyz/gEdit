@@ -211,7 +211,67 @@ On Windows and Linux some graphics drivers and desktops take `Ctrl+Alt+Arrow` fo
 themselves (they rotate the screen, or switch the workspace); if the copy keys do nothing,
 that is the reason, and the buttons in the comparison do the same. `About gEdit` and this shortcut list are on the View tab.
 
-## Custom shortcuts
+## Your own keys
 
-Not in this version. The keys above are fixed; being able to change them is planned for a
-later version.
+Every command can have a key of your own. Open **Settings ▸ Keyboard** (`Cmd/Ctrl+,`), or
+press **Change keys…** in the shortcut list. The page lists every command, scripts included,
+with its key now and, when you changed it, the built-in key. A search box finds a command by
+name, group or key.
+
+- **Set a key.** Press **Press a key** on the command's row, then press the key. `Esc`
+  cancels. The key is saved at once; there is no Save button on this page.
+- **Remove a key.** **Remove key** leaves the command with no key.
+- **Go back.** **Reset** on a row puts the built-in key back; **Reset all** removes every key
+  you set (it asks first).
+- **Changed** marks a key you set. **Not available** marks a command that does not exist
+  right now, for example a script that was deleted or a [package](scripts.md#script-packages)
+  that is switched off. Its key stays in your file and comes back with the command.
+
+**Which keys you may use.** A key needs `Ctrl`, `Cmd` or `Alt`, or it is a function key
+(`F1`…`F12`). A bare letter, `Shift+K`, `Enter`, `Tab` or an arrow would take typing away, so
+they are refused with the reason. The keys of the clipboard (copy, cut, paste), undo and redo,
+Select All and the system's own keys (`Cmd+Q`, `Cmd+H`, `Cmd+M`, `Cmd+Space` on a Mac,
+`Alt+F4` on Windows and Linux) are not offered. A key that may type a character on some
+keyboards is allowed and carries a notice: `Ctrl+Alt` with a letter, because on Swiss German
+and several other layouts that pair is the AltGr key; and `Option` with a letter on a Mac. If
+you press a key while AltGr is held, the page refuses it and says why. There are no key
+sequences, only one key press.
+
+**When two commands want one key.** Your key wins over a built-in key; the command that loses
+its key shows *Lost its key to …* and none. Two keys of your own on the same key give it to
+neither until you change one. Everything that clashes is listed under *Keys used twice*, for
+Mac and for Windows and Linux both, and nothing is decided silently. Saving still works while
+a clash is open.
+
+**Mac and the others.** Keys are kept separately for a Mac and for Windows and Linux, and the
+page changes the system you are on; the keys of the other system stay as they are. Editor
+commands that belong to the editor itself (clipboard, multiple cursors, the editor's own find)
+are not listed and cannot be moved.
+
+### The file
+
+The keys are in `keybindings.json` in your configuration folder ([Where things
+are](README.md#where-things-are)). The page writes it for you; you can also edit it as a
+document:
+
+```json
+{
+  "$version": 1,
+  "bindings": {
+    "file.save": "Mod+Shift+S",
+    "view.splitEditor": { "mac": "Mod+Alt+D", "other": "Ctrl+Alt+D" },
+    "edit.somethingElse": null
+  }
+}
+```
+
+Each command name has one of three values: a key written as text, which is used on both
+systems (`Mod` means `Cmd` on a Mac and `Ctrl` elsewhere); `null`, which removes the command's
+key on both; or a pair `{ "mac": …, "other": … }` where a missing member keeps the built-in key
+on that system and `null` removes it there. A script's command is `script.run:` followed by the
+script's name. A wrong entry costs that entry (or that one member), never the file; the page
+counts the entries it ignored. Such an entry stays in the file until you change that command.
+A file written by a newer gEdit is shown but never changed.
+
+Your keys are part of the [configuration you can export and import](configuration.md).
+
