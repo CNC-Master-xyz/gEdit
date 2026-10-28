@@ -915,3 +915,33 @@ class LaterVersionTest(unittest.TestCase):
         _, steps = walk("G90\nG0 X40. Z0.\nG3 X80. Z-20. I20. K0.", "okuma-osp", preset="okuma-1mm")
         self.assertEqual(steps[2].arc.plane if steps[2].arc else None, ("Z", "X"))
 
+    #: The skeptic's probes t017y and t017z: the C axis connected (M110), then a plane code.
+    Y_AXIS_MODE = "G90 G18 G50 S2000\nG0 X100. Z5. C0\nM110\n%s\nG1 X40. Y0 Z-2. F100\n%s\nG1 X-40.\nG18\nG0 X200. Z200.\nM02"
+
+    def test_d8_an_okuma_arc_in_the_planes_of_the_y_axis_mode_is_not_resolved(self) -> None:
+        # Okuma OSP-P300 MacTurn/Multus (LG32-163-R10, p.222-223): in the Y-axis mode G00-G03
+        # also move in G17 (XY) and G19 (YZ); G119 is a plane of its own. The tracker reads
+        # the turning plane ZX only, so an arc under them is not resolved.
+        for plane, arc in (
+            ("G17", "G2 X0 Y20. I-20. J0"),
+            ("G17", "G2 X0 Z-22. L20."),
+            ("G19", "G2 X40. Z-22. I0 K-10."),
+            ("G119", "G2 X0 Z-22. L20."),
+        ):
+            with self.subTest(plane=plane, arc=arc):
+                _, steps = walk(self.Y_AXIS_MODE % (plane, arc), "okuma-osp", preset="okuma-1mm")
+                self.assertIsNone(steps[5].arc)
+                self.assertIn("arc", kinds(steps[5]))
+        # G18 written again: the turning plane, and its arcs are computed.
+        _, steps = walk("G90\nG17\nG18\nG0 X40. Z0.\nG3 X80. Z-20. I20. K0.", "okuma-osp", preset="okuma-1mm")
+        self.assertEqual(steps[4].arc.plane if steps[4].arc else None, ("Z", "X"))
+
+    def test_d8_the_extents_report_an_okuma_arc_in_g17_as_not_resolved(self) -> None:
+        # t017y: before the fix the arc was computed in ZX, Y read 0 to 20 with nothing
+        # unresolved; the arc from Y0 to Y20 about X0 Y0 reaches below Y0 in XY.
+        context = helpers.effective_context("okuma-osp", preset="okuma-1mm")
+        program = self.Y_AXIS_MODE % ("G17", "G2 X0 Y20. I-20. J0") + "\n"
+        report = helpers.run_script("extents.py", stdin=program, context=context).json()
+        y = next(r for r in report["rows"] if r["axisId"] == "Y" and r["scope"] == "program")
+        self.assertGreaterEqual(y["unresolved"], 1)
+        self.assertIn("arc", [f["reason"] for f in report["findings"]])

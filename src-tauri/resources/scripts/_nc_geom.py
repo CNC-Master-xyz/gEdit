@@ -1398,6 +1398,14 @@ class _Block:
         self.plane = plane if plane in _nc_path.PLANE_AXES else None
         if self.plane is None and data.lathe and not data.plane_codes:
             self.plane = "ZX"
+        #: Wave Y (D8): the plane code in force on a turning database whose plane codes only
+        #: choose the compensation plane, when it is not the turning plane's (Okuma `G17`, `G19`,
+        #: `G119`: the Y-axis mode moves G00-G03 in XY or YZ, LG32-163-R10 p.222-223); `None`
+        #: under G18 or with no plane code. An arc there is not resolved, and a turn or a mirror
+        #: refuses it (`arc-unsupported`).
+        self.off_turning_plane: Optional[str] = None
+        if data.lathe and not data.plane_codes and not _nc_path.turning_plane_in_force(state):
+            self.off_turning_plane = str(_dict(_dict(state.get("groups")).get("plane")).get("code"))
         self.tool_axis = _nc_path.PLANE_NORMAL.get(self.plane or "XY", "Z")
         self.distance = state.get("distance")
         self._reads: Optional[Dict[int, Any]] = None
@@ -2921,6 +2929,12 @@ def refusals_of(
     arc = block.arc
     if arc is not None and moving:
         code = str(arc.get("code"))
+        if block.off_turning_plane is not None and name in TURNING:
+            # Wave Y (D8): an arc in the XY or YZ plane of a lathe's Y-axis mode (Okuma `G17`,
+            # `G19`, `G119`): the tracker reads the turning plane ZX only, so neither the arc
+            # nor the effect of the turn or mirror on its direction is known. A translate moves
+            # its end points and keeps the arc, as on any plane.
+            add("arc-unsupported", "%s (%s in force)" % (code, block.off_turning_plane))
         if code in _nc_path.UNRESOLVED_ARCS:
             # Wave Y (T016): a tangential arc (Klartext `CT`, `CTP`, Sinumerik `CT`) and an arc
             # through an intermediate point (`CIP`) follow from the path around them: the

@@ -615,6 +615,36 @@ def upper_list(value: Any) -> List[str]:
     return [str(item).upper() for item in value if isinstance(item, str)] if isinstance(value, list) else []
 
 
+#: Wave Y (D8): the plane code of a turning database (plane codes that only choose the
+#: compensation plane, :attr:`PathTracker.turning_plane`) under which its moves are in the
+#: turning plane ZX. The Y-axis mode of a lathe also moves G00-G03 in G17 (XY) and G19 (YZ),
+#: and G119 (C-X-Z) is a plane of its own (Okuma OSP-P300 MacTurn/Multus LG32-163-R10
+#: p.222-223); there an arc is left not resolved, and the transforms refuse it.
+TURNING_PLANE_CODES = frozenset({"G18"})
+
+
+def turning_plane_in_force(state: Any) -> bool:
+    """Wave Y (D8): whether the plane code in force (the modal ``plane`` group) is the turning
+    plane's (:data:`TURNING_PLANE_CODES`), or no plane code is in force yet (the control
+    starts in G18)."""
+    code = as_dict(as_dict(as_dict(state).get("groups")).get("plane")).get("code")
+    return not isinstance(code, str) or code.strip().upper() in TURNING_PLANE_CODES
+
+
+def plane_codes_held(codes: Sequence[Any]) -> List[Any]:
+    """Wave Y (D8): ``codes`` with every code of the ``plane`` group held in force until another
+    one is written (``modal``), for the tracker of a turning database whose plane codes only
+    choose the compensation plane: the walk reads which one is in force from the modal state
+    (:func:`turning_plane_in_force`). The control keeps it until another plane code, a reset or
+    a program end (G18 again); the database itself is left as it is."""
+    out: List[Any] = []
+    for entry in codes:
+        if isinstance(entry, dict) and entry.get("group") == "plane" and entry.get("modal") is not True:
+            entry = dict(entry, modal=True)
+        out.append(entry)
+    return out
+
+
 #: The parameter units of a value that is no coordinate: a time, a count, a step, an angle.
 NOT_A_COORDINATE = ("dwell", "count", "increment", "angle")
 
@@ -1360,7 +1390,12 @@ class PathTracker:
         self.profile = as_dict(context.get("profile"))
         self.cp = cp
         self.codes = context.get("codes") if isinstance(context.get("codes"), list) else []
-        self.interp = gedit_nc.ModalInterpreter(cp, self.codes)
+        #: Wave Y (T112): a turning profile whose database has no code that sets a working plane
+        #: (its plane codes choose the compensation plane only) works in the turning plane ZX.
+        self.turning_plane = gedit_nc.machine_type_of(self.profile) == "lathe" and not any(
+            isinstance(e, dict) and as_dict(e.get("sets")).get("plane") in PLANE_AXES for e in self.codes
+        )
+        self.interp = gedit_nc.ModalInterpreter(cp, plane_codes_held(self.codes) if self.turning_plane else self.codes)
         self.machine = gedit_nc.machine_params(context)
         self.axes = PathAxes(self.profile)
         #: The context the tracker was made for (``_nc_geom`` shares ``readings`` with a caller of the same context).
@@ -1381,11 +1416,6 @@ class PathTracker:
         for e in self.codes:
             for alias in (e.get("aliases") or []) if isinstance(e, dict) else []:
                 self.all_heads = self.all_heads | {head_of(alias)}
-        #: Wave Y (T112): a turning profile whose database has no code that sets a working plane
-        #: (its plane codes choose the compensation plane only) works in the turning plane ZX.
-        self.turning_plane = gedit_nc.machine_type_of(self.profile) == "lathe" and not any(
-            isinstance(e, dict) and as_dict(e.get("sets")).get("plane") in PLANE_AXES for e in self.codes
-        )
         #: The position of every axis, in column values, or `None` while it is not known.
         self.pos: Dict[str, Optional[Decimal]] = {axis: None for axis in self.axes.order}
         #: The pole (Klartext `CC`), by axis, and the last polar radius and angle about it.
@@ -1604,10 +1634,11 @@ class PathTracker:
         )
         data = [(e, c) for f, e, c in flags if f == "data"]
         plane = state["plane"]
-        if plane not in PLANE_AXES and self.turning_plane:
+        if plane not in PLANE_AXES and self.turning_plane and turning_plane_in_force(state):
             # Wave Y (T112): a turning database whose plane codes only choose the compensation
-            # plane (Okuma `G17`-`G19`) has one working plane, the turning plane ZX, as
-            # `_nc_geom` reads it; its arcs are computed in it.
+            # plane (Okuma `G17`-`G19`) works in the turning plane ZX, as `_nc_geom` reads it;
+            # its arcs are computed in it. Wave Y (D8): only while G18 (or no plane code) is in
+            # force; under G17, G19 or G119 an arc is not resolved (`turning_plane_in_force`).
             plane = "ZX"
 
         if machine is not None:
