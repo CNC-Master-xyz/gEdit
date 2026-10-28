@@ -2,8 +2,9 @@
 // that default-exports nested messages. A key is '<namespace>.<path>', e.g. 'common.cancel'.
 // Messages take `{name}` placeholders. A numeric `count` param selects the plural form:
 // '<key>_<category>' (Intl plural category: one, other, ...), then '<key>_other', then '<key>'.
-// English is the only locale for now.
+// English is always loaded; another language is installed once at startup by `app/language.ts` (plan §6.9).
 
+import { installedTranslator, reportMissingKey } from './locale';
 import type { Messages, Params, Translator } from './types';
 
 export type { Messages, Params, Translator } from './types';
@@ -71,26 +72,15 @@ export const namespaces: Readonly<Record<string, Messages>> = Object.fromEntries
   Object.entries(modules).map(([path, module]) => [path.slice(path.lastIndexOf('/') + 1, -'.ts'.length), module.default]),
 );
 
-const warned = new Set<string>();
-const LOOKS_LIKE_KEY = /^[A-Za-z][\w-]*(?:\.[\w-]+)+$/;
-const en = createTranslator(namespaces, 'en', {
-  onMissing(key) {
-    // Dynamic keys (command and panel titles) are not covered by keys.test.ts, so dev builds say so once.
-    // Only a text shaped like a key (`namespace.name`) is reported: anything else is data shown as it
-    // is, such as a template's label used as a command title ("Program start", "Facing").
-    if (import.meta.env.DEV && LOOKS_LIKE_KEY.test(key) && !warned.has(key)) {
-      warned.add(key);
-      console.warn(`i18n: no message for "${key}"`);
-    }
-  },
-});
+// English is complete and the last of every fallback; a key no set has is reported once in a development build.
+const en = createTranslator(namespaces, 'en', { onMissing: reportMissingKey });
 
 /** The message for `key` with its placeholders filled from `params`, or the key itself when there is none. */
 export function t(key: string, params?: Params): string {
-  return en.t(key, params);
+  return (installedTranslator() ?? en).t(key, params);
 }
 
 /** True when `t(key)` finds a message. A plural key counts when its `_other` form exists. */
 export function hasKey(key: string): boolean {
-  return en.hasKey(key);
+  return (installedTranslator() ?? en).hasKey(key);
 }

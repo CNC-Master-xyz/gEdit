@@ -102,6 +102,9 @@ export default {
   openBundledTitle: 'Bundled script',
   openBundledMessage:
     '{script} ships with gEdit and cannot be edited in place. Copy it to your scripts folder and edit the copy?',
+  openPackageTitle: 'Package script',
+  openPackageMessage:
+    '{script} is a package script (package {package}) and cannot be edited in place. Copy it to your scripts folder and edit the copy?',
   copyButton: 'Copy and edit',
   addFolderTitle: 'Select a folder with Python scripts',
   // The folder *dialog* could not be opened, as opposed to `folderAddFailed` (the dialog

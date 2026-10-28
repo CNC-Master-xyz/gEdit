@@ -38,6 +38,8 @@
 <script lang="ts">
   import { commands } from '$lib/app/registry/commands';
   import { scripts } from '$lib/app/scripts';
+  import { userConfig } from '$lib/app/userConfig';
+  import { packageOfRoot, packageTitle } from '$lib/core/packages/packages';
   import { groupScripts, scriptLabel, scriptsForProfile } from '$lib/core/scripting/filter';
   import { docs } from '$lib/stores/documents';
   import { scriptListError } from '$lib/stores/scripts';
@@ -67,6 +69,20 @@
 
   const pythonMissing = $derived($python !== null && !$python.ok);
   const hasScripts = $derived(mine.some((entry) => !entry.shadowed));
+
+  // A package's scripts are shown under its display name (package.json). The list comes from the
+  // user configuration, which refreshes it on every load, so Packages > Reload shows a new name.
+  const packages = userConfig.packages;
+  const titles = $derived<ReadonlyMap<string, string>>(
+    new Map(($packages?.packages ?? []).map((info) => [info.name, info.title])),
+  );
+
+  /** The caption of a section: the package (display name) and its subfolder, or the subfolder alone. */
+  function captionOf(group: { group: string | null; package?: string }): string {
+    if (group.package === undefined) return group.group ?? t('scripts.ungrouped');
+    const name = packageTitle(titles, group.package);
+    return group.group === null ? name : `${name} / ${group.group}`;
+  }
 
   function commandId(entry: ScriptEntry): string {
     return `script.run:${entry.id}`;
@@ -110,10 +126,15 @@
       <p class="hint">{t('scripts.noneAtAll')}</p>
     {/if}
   {:else}
-    {#each groups as group (group.group ?? '')}
-      <div class="group" data-testid="scripts-group" data-group={group.group ?? ''}>
-        {#if group.group !== null || groups.length > 1 || scope === 'all'}
-          <span class="caption">{group.group ?? t('scripts.ungrouped')}</span>
+    {#each groups as group (`${group.package ?? ''}\u0000${group.group ?? ''}`)}
+      <div
+        class="group"
+        data-testid="scripts-group"
+        data-group={group.group ?? ''}
+        data-package={group.package ?? ''}
+      >
+        {#if group.group !== null || group.package !== undefined || groups.length > 1 || scope === 'all'}
+          <span class="caption">{captionOf(group)}</span>
         {/if}
         <div class="items">
           {#each group.scripts as entry (entry.id)}

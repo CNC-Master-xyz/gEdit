@@ -97,6 +97,7 @@ Each row names the owning work package and the feature.
 | `bookmarks.ts` | WP4.4, P4.13 | `bookmark.toggle` / `next` / `prev` / `clear` and the F2 removals; P4.13: named bookmarks (`bookmark.rename`), `bookmark.addAllMatches`, the Bookmarks panel (left region) and `view.toggleBookmarks` (Edit tab group Bookmarks, View tab group Panels; no new key) (Phase 4, P4c) |
 | `channels.ts` | WP12.5 | multi-channel programs: channel status item, sync-point navigation (`Alt+F7`, `Shift+Alt+F7`, `Mod+Alt+P`), `channels.checkSync`, `channels.assign`, `channels.splitToDocuments`, the `togglePreserveCase` removal |
 | `compare.ts` | WP2.5 | compare with a document, a file or the saved version (overlay) |
+| `configuration.ts` | P4.36 | `config.export` and `config.import` (palette category Configuration; no key): the whole configuration folder as one zip, and a zip taken in after a preview of what it would change (the same actions as Settings ▸ Configuration); the zip is read, checked and written by Rust (`src-tauri/src/configzip.rs`), never extracted, and code in it needs the "I trust this file" tick (Phase 4, P4g; §6.9 rules 16–36) |
 | `cursor.ts` | WP1.2 | cursor status item |
 | `cycleForms.ts` | P3.5 | Edit Cycle: the form of the cycle at the cursor, or a new cycle, `nc.editCycle` (Phase 3, P3b; the prelude pinned it; engine `core/templates/cycleForm.ts`, P3.8) |
 | `editing.ts` | WP4.4 | Edit-tab "Edit" and View-tab wrappers around Monaco actions |

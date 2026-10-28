@@ -983,4 +983,6 @@ export interface ProfileProblem {
   kind?: 'profiles' | 'codes';
   /** Which source it was, for a file that has no id and no name to be called by. */
   index?: number;
+  /** P4g (§6.9 rule 11): the script package the file is in, for "in package shop-a: lathe.json"; `origin` stays `'user'`. */
+  package?: string;
 }

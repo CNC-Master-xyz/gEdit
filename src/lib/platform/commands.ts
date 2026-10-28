@@ -676,3 +676,196 @@ export function scriptCopyToUser(scriptId: string): Promise<string> {
 export function scriptSourcePath(scriptId: string): Promise<string> {
   return invoke<string>('script_source_path', { scriptId });
 }
+
+// ---------------------------------------------------------------------------
+// P4g: keys, packages and the configuration zip (Phase 4 plan §6.9)
+//
+// Written by the P4g prelude. `keybindings_*` (src-tauri/src/keybindings.rs, P4.34): the file
+// `<config>/keybindings.json`, loaded and saved whole, never by path. `packages_list` and
+// `package_files_list` (src-tauri/src/packages.rs, P4.35): the folders under `<config>/packages`.
+// `config_export`, `config_import_preview` and `config_import_apply` (src-tauri/src/configzip.rs,
+// P4.36): the paths are files the user picked in the save or open dialog, and the fs scope has
+// to allow them; nothing is granted by any of them.
+// ---------------------------------------------------------------------------
+
+/** What `keybindings_load` answers. `keybindings` is `{}` for a missing or unusable file. */
+export interface KeybindingsLoad {
+  keybindings: Record<string, unknown>;
+  /** English detail for a file that could not be used (AD-14). */
+  error: string | null;
+  /** Written by a newer gEdit: read, never overwritten. */
+  readOnly: boolean;
+}
+
+/** Reads `<config>/keybindings.json` (the whole object, `$version` included). */
+export function keybindingsLoad(): Promise<KeybindingsLoad> {
+  return invoke<KeybindingsLoad>('keybindings_load');
+}
+
+/**
+ * Replaces `<config>/keybindings.json` with `keybindings` (an object of at most 1 MiB whose
+ * `bindings` member is an object of at most 1000 entries), atomically; rejects when the file on
+ * disk is from a newer gEdit. An unusable previous file is kept as `keybindings.json.bak`.
+ */
+export function keybindingsSave(keybindings: Record<string, unknown>): Promise<void> {
+  return invoke<void>('keybindings_save', { keybindings });
+}
+
+/** One script package folder, enabled or not. */
+export interface PackageInfo {
+  /** The folder name: the identity of the package and what `packages.disabled` lists. */
+  name: string;
+  /** The display name from `package.json`, or the folder name. */
+  title: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  scripts: number;
+  profiles: number;
+  codes: number;
+  /** Why the folder is not a usable package; nothing of it loads then. */
+  error: string | null;
+  /** Problems with `package.json` (the package still loads). */
+  problems: string[];
+}
+
+/** Every package folder, by name. */
+export interface PackageList {
+  /** `<config>/packages`, to show where a package folder goes. */
+  folder: string;
+  packages: PackageInfo[];
+  problems: string[];
+}
+
+/** One profile or code file of an enabled package; `text` is null when it could not be read. */
+export interface PackageFile {
+  package: string;
+  name: string;
+  text: string | null;
+  error: string | null;
+}
+
+/** The package folders with their manifests and counts (Packages page). */
+export function packagesList(): Promise<PackageList> {
+  return invoke<PackageList>('packages_list');
+}
+
+/** The profile or code files of the enabled packages, read under the user-file limits. */
+export function packageFilesList(kind: UserFileKind): Promise<PackageFile[]> {
+  return invoke<PackageFile[]>('package_files_list', { kind });
+}
+
+/** Why an archive or one entry is refused; the ids of `configuration.refusal.<id>` messages. */
+export type ConfigRefusalReason =
+  | 'not-zip'
+  | 'archive-too-big'
+  | 'too-many-entries'
+  | 'name-encoding'
+  | 'name-too-long'
+  | 'too-deep'
+  | 'absolute'
+  | 'backslash'
+  | 'colon'
+  | 'control'
+  | 'parent-dir'
+  | 'empty-segment'
+  | 'bad-segment'
+  | 'duplicate'
+  | 'link'
+  | 'special-file'
+  | 'encrypted'
+  | 'method'
+  | 'too-big'
+  | 'total-too-big'
+  | 'ratio'
+  | 'inconsistent'
+  | 'corrupt'
+  | 'no-manifest'
+  | 'bad-manifest'
+  | 'newer-format';
+
+export interface ConfigRefusal {
+  /** The entry; empty for the archive as a whole. */
+  path: string;
+  reason: ConfigRefusalReason;
+}
+
+/** What an import does to a file. */
+export type ConfigFileAction = 'new' | 'replace' | 'same';
+
+/** One line inside a file: a settings key or a machine, as text. */
+export interface ConfigImportItem {
+  label: string;
+  from: string | null;
+  to: string | null;
+}
+
+export interface ConfigImportFile {
+  /** The entry name, which is also the path below the configuration folder. */
+  path: string;
+  action: ConfigFileAction;
+  bytes: number;
+  items: ConfigImportItem[];
+  notes: string[];
+}
+
+/** `settings`, `keys`, `machines`, `profiles`, `codes`, `scripts` or `package:<name>`. */
+export interface ConfigImportGroup {
+  id: string;
+  /** Holds a script: the import needs the user's trust. */
+  runnable: boolean;
+  files: ConfigImportFile[];
+}
+
+/** The answer of `config_import_preview`. Nothing was written. */
+export interface ConfigImportPreview {
+  /** False when the archive is refused as a whole. */
+  ok: boolean;
+  fingerprint: string;
+  manifest: { appVersion: string; created: string; platform: string };
+  groups: ConfigImportGroup[];
+  /** `"<path>: <reason>"`, at most 50. */
+  ignored: string[];
+  ignoredCount: number;
+  refusals: ConfigRefusal[];
+  needsTrust: boolean;
+  /** Settings keys the zip holds and the import never takes (the interpreter and extra script folders). */
+  keptSettings: string[];
+}
+
+export interface ConfigImportResult {
+  written: number;
+  unchanged: number;
+  /** The backup zip's file name in the data folder, or null when nothing was replaced. */
+  backup: string | null;
+}
+
+export interface ConfigExportResult {
+  files: number;
+  bytes: number;
+  skipped: { path: string; reason: string }[];
+}
+
+/** Writes the configuration zip to `dest`, a path the user picked in the save dialog. */
+export function configExport(dest: string): Promise<ConfigExportResult> {
+  return invoke<ConfigExportResult>('config_export', { dest });
+}
+
+/** Step 1 of an import: what the zip at `src` would do. Writes nothing. */
+export function configImportPreview(src: string): Promise<ConfigImportPreview> {
+  return invoke<ConfigImportPreview>('config_import_preview', { src });
+}
+
+/**
+ * Step 2: applies the ticked `groups` of the zip at `src` whose preview had `fingerprint`.
+ * `acceptScripts` is the user's trust, required when a ticked group is runnable. Writes a backup
+ * zip of everything it replaces first.
+ */
+export function configImportApply(
+  src: string,
+  fingerprint: string,
+  groups: string[],
+  acceptScripts: boolean,
+): Promise<ConfigImportResult> {
+  return invoke<ConfigImportResult>('config_import_apply', { src, fingerprint, groups, acceptScripts });
+}
