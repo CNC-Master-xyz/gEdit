@@ -84,7 +84,7 @@ profiles and code files needs no tick.
 - Keyboard shortcuts are merged by command. A key given as text, or `null`, in the file replaces
   your whole entry for that command. An entry with separate members for Mac and for Windows and
   Linux is merged member by member, so the system the file does not mention keeps your key.
-- Machines are merged by machine name: a machine in the file replaces yours of the same id,
+- Machines are merged by machine: a machine in the file replaces yours of the same id,
   new ones are added, your other machines stay. A file from a newer version of the machine
   format is refused.
 - Every other file (a profile, a code file, a script, a package file) replaces your file of the
