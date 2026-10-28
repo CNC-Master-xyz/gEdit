@@ -267,12 +267,12 @@ describe('the P4e scenarios (H4e) and the suites around them', () => {
     });
 
     it('runs the whole list, unchanged, when the field is empty (a push to main never has it)', () => {
-      expect(step).toContain('tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e}.txt 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"');
+      expect(step).toContain('tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e,p4f,p4g,p4h}.txt 2>&1 | tee "$RUNNER_TEMP/logs/suite.log"');
       for (const empty of ['', '   ']) {
         const { code, stdout } = run(empty);
         expect(code).toBe(0);
         expect(stdout.trim()).toBe(
-          `SUITE ${['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12', 'rp', 'm13', 'p3a', 'p3b', 'b1', 'p4a', 'p4b', 'p4c', 'p4d', 'p4e'].map((n) => `tests/runtime/suites/${n}.txt`).join(' ')}`,
+          `SUITE ${['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12', 'rp', 'm13', 'p3a', 'p3b', 'b1', 'p4a', 'p4b', 'p4c', 'p4d', 'p4e', 'p4f', 'p4g', 'p4h'].map((n) => `tests/runtime/suites/${n}.txt`).join(' ')}`,
         );
       }
     });

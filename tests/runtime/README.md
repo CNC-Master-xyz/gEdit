@@ -81,7 +81,7 @@ tests/runtime/suite.sh tests/runtime/suites/m0.txt   # run a suite and print the
 
 ## On a hosted runner
 
-`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e,p4g}.txt` on `macos-14`
+`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e,p4f,p4g,p4h}.txt` on `macos-14`
 (150 minute limit since P4a; it was 45: `p4-perf` runs five scripts on 300,000 lines, about 100 minutes for the job, see the comment in `harness.yml`; its P4e sections D to F add about ten minutes of key presses and three programs opened), always uploads `$GEDIT_RH_DIR/out`, the app logs and the sync logs, and
 caches the build directory. A run started by hand can be limited to some scenarios or suites (the
 `scenarios` input: space-separated names, scenario names and/or suite names such as `p4e`, letters, digits, `.`, `_`, `-` only;
@@ -115,11 +115,11 @@ What differs from the owner's Mac, and how the scenarios deal with it:
 
 ## Suites
 
-One file per milestone, `suites/m0.txt` … `suites/m12.txt`, then `suites/rp.txt` (M12.5, "Real programs, second pass"), `suites/m13.txt` (M13 and the Phase 2 exit criteria), `suites/p3a.txt` (Phase 3, P3a "Understand a block"), `suites/p3b.txt` (Phase 3, P3b "Write with templates"), `suites/b1.txt` (the bug-fix round B1) `suites/p4a.txt` (Phase 4, P4a "Move the path"), `suites/p4b.txt` (Phase 4, P4b "Drilling cycles and time"), `suites/p4c.txt` (Phase 4, P4c "Typing help and bookmarks"), `suites/p4d.txt` (Phase 4, P4d "Renumber, all of it") and `suites/p4e.txt` (Phase 4, P4e "Side by side") and `suites/p4g.txt` (Phase 4, P4g "Settings, keys and packages"): one scenario name per line, `#`
+One file per milestone, `suites/m0.txt` … `suites/m12.txt`, then `suites/rp.txt` (M12.5, "Real programs, second pass"), `suites/m13.txt` (M13 and the Phase 2 exit criteria), `suites/p3a.txt` (Phase 3, P3a "Understand a block"), `suites/p3b.txt` (Phase 3, P3b "Write with templates"), `suites/b1.txt` (the bug-fix round B1) `suites/p4a.txt` (Phase 4, P4a "Move the path"), `suites/p4b.txt` (Phase 4, P4b "Drilling cycles and time"), `suites/p4c.txt` (Phase 4, P4c "Typing help and bookmarks"), `suites/p4d.txt` (Phase 4, P4d "Renumber, all of it") and `suites/p4e.txt` (Phase 4, P4e "Side by side"), `suites/p4f.txt` (Phase 4, P4f "Folders, files from the system and channel files"), `suites/p4g.txt` (Phase 4, P4g "Settings, keys and packages") and `suites/p4h.txt` (Phase 4, P4h "Profiles and machines"): one scenario name per line, `#`
 starts a comment. A cumulative run is all of them in order:
 
 ```sh
-tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e,p4g}.txt
+tests/runtime/suite.sh tests/runtime/suites/{m{0,1,2,3,4,5,6,7,8,9,10,11,12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e,p4f,p4g,p4h}.txt
 ```
 
 The Phase 2 exit criteria (plan §2.2) and where each is proven; `suites/m13.txt` has the same table in its comments:
@@ -169,6 +169,17 @@ The Phase 4 criteria of P4c "Typing help and bookmarks" that the running app pro
 | X27 (bookmarks) named bookmarks across a restart: a tab nobody has shown is listed from its waiting memo, a click shows it and jumps, a delete changes the memo | `p4-comfort-names-1`, `p4-comfort-names-2` |
 | X27 (ranges, files, print) Select and Delete Block Range (the form's refusals, the remembered kind, a block with continuation lines whole, one undo), Insert File and Append File (placement, at line 1 below the leading `%` and the program start, Append before the closing `%` or `END PGM`, selected lines, the program-end and tape-end warnings, the file's `%` lines left out, a program start where blocks follow, Klartext renumbering as one undo, the refusals), Print (Mod+P, the view's pages, rows, colours and numbers, a selection, the 20,000-line limit, the view removed at `afterprint`, at the next print and with the document) and Export as HTML (the stubbed save dialog, escaping, one section per page) | `p4-comfort` (E, F, G, H) |
 
+The scenarios of P4f "Folders, files from the system and channel files" (`suites/p4f.txt`, plan `docs/planning/phase-4-implementation.md` §5 P4f and §6.8; none of them has been run on a runner yet): `gh workflow run harness.yml --ref <branch> -f scenarios="p4f"` runs the suite.
+
+| Rule | Scenario |
+|---|---|
+| Find in Folder: the counted tree and its skips, rows that open, the older-search rule, Stop, the guard against a runaway regular expression, one search at a time | `p4f-folder`, `p4f-folder-stop`, `p4f-folder-regex`, `p4f-folder-busy` |
+| files the system opens in the running window, and what is refused | `p4f-system` |
+| machine folders: the longest folder wins, two machines on one folder choose none, a duplicate has no folders | `p4f-machine-folders` |
+| channel files: Save Channel Files, Merge Channels Back, Find All and Compare by channel | `p4f-channel-files`, `p4f-channel-scope` |
+| the check follows jumps (inside IF, over an IF block, a counted REPEAT, a forward GOTO, into a subprogram) | `p4f-flow` |
+| the Siemens job list and the path-1 file name | `p4f-joblist`, `p4f-siblings` |
+
 The scenarios of P4g "Settings, keys and packages" (`suites/p4g.txt`, plan `docs/planning/phase-4-implementation.md` §5 P4g and §6.9; none of them has been run on a runner yet): `gh workflow run harness.yml --ref <branch> -f scenarios="p4g"` runs the suite. A second message set does not ship (owner answer Q4-18), so the switch to another language and the fall back from a broken set are held by the unit tests only.
 
 | Rule | Scenario |
@@ -179,6 +190,17 @@ The scenarios of P4g "Settings, keys and packages" (`suites/p4g.txt`, plan `docs
 | configuration zip: an import while Settings is open, a file that cannot switch a package on, the trust tick, a failing write put back | `p4g-config-import` |
 | settings search: focus, finding, at most 20, Enter, Escape, the arrow down, a click, a page by its heading | `p4g-settings` |
 | language: a tag with no message set behind it, a value that is no tag | `p4g-language`, `p4g-language-bad` |
+
+The scenarios of P4h "Profiles and machines" (`suites/p4h.txt`, plan `docs/planning/phase-4-implementation.md` §5 P4h and §6.10; none of them has been run on a runner yet): `gh workflow run harness.yml --ref <branch> -f scenarios="p4h"` runs the suite.
+
+| Rule | Scenario |
+|---|---|
+| the profile form (command and inline on Settings > Profiles): live preview, a colour for the profile, refusals, the ruler link, the layout of the file kept, built-in read-only, the `$schema` line | `p4-profiles-form`, `p4-profiles-form-page` |
+| Settings asks before the changes in the profile form are lost | `p4-profiles-leave` |
+| code colours: set, refused when too faint, shown live, reset, print and export, and a drag of the picker on a large program | `p4-profiles-colours`, `p4-profiles-colours-drag` |
+| a profile's own tab width and rulers, also in two split panes | `p4-profiles-editing` |
+| the machine form's table Numbers (presets, inch step, Custom) | `p4-machines-numbers` |
+| Siemens extra axes and builder codes, and Translate's row for a linear extra axis | `p4-machines-axes` |
 
 The Phase 4 criteria of P4e "Side by side" that the running app proves (`suites/p4e.txt`, plan `docs/planning/phase-4-implementation.md` §2.2 and §5 P4e; the three `p4-perf` rows at the end stay in `suites/p4a.txt`, with the rest of that scenario, and have not been run on a runner yet):
 
