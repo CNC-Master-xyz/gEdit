@@ -1629,8 +1629,10 @@ def _classify(block: _Block, token: Any) -> Tuple[str, Optional[str], Optional[D
             return ("centre" if absolute else "centre-inc"), _nc_path.CENTRE_AXIS[address], arc
         if address in _nc_path.RADIUS_WORDS:
             return "radius", None, arc
-        if found is not None and axis is None and block.number_class(address) == "length":
-            return "radius", None, arc  # a radius the arc code declares (Okuma `L`)
+        if found is not None and axis is None and address == _nc_path.declared_radius(arc) and block.number_class(address) == "length":
+            # A radius the arc code declares (Okuma `L`). FZ-8 (Wave Y): only that one; another
+            # length of the arc code (the Fanuc corner words `,C` and `,R`) keeps its value.
+            return "radius", None, arc
 
     if axis is not None:
         incremental = block.incremental(token, address)

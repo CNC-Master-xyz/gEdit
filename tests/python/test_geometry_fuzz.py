@@ -2583,8 +2583,8 @@ class KnownFindingTest(unittest.TestCase):
     """One minimal repro per finding of the fuzz review (the report of BL-NC-fuzz). Each holds
     the behaviour the plan asks for; an open one fails today, and the batch that fixes FZ-n
     removes its ``expectedFailure`` (and the generator gate in ``OPEN_FINDINGS``, where it has
-    one). Fixed in v1.2.0 (NCF-A, NCF-B; flipped at integration, NCF-C): FZ-4, FZ-6, FZ-7, FZ-9.
-    Open: FZ-5 and FZ-8."""
+    one). Fixed in v1.2.0 (NCF-A, NCF-B; flipped at integration, NCF-C): FZ-4, FZ-6, FZ-7, FZ-9;
+    in Wave Y (BL-NC-geometry): FZ-8. Open: FZ-5."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -2644,7 +2644,6 @@ class KnownFindingTest(unittest.TestCase):
         self.assertWritten(self.scripts.run("translate", text, context, {"dx": 1}))
         self.assertWritten(self.scripts.run("rotate", text, context, {"angle": 90}))
 
-    @unittest.expectedFailure
     def test_fz8_fanuc_corner_words(self) -> None:
         """FZ-8: a Fanuc chamfer or corner rounding between two moves (``,C1.``, ``,R2.``) has no
         sign and keeps its value under every transform; the code sets do not describe it, so
@@ -2654,6 +2653,16 @@ class KnownFindingTest(unittest.TestCase):
         self.assertWritten(self.scripts.run("mirror", lathe, self.context("fanuc-lathe-a", "no machine"), {"about": "z"}))
         mill = "G21 G17 G90\nG0 X0. Y0. Z5.\nG1 X20. Y0. ,R2. F100.\nG1 X20. Y20. ,C1.\nG1 X0. Y20.\nM30"
         self.assertWritten(self.scripts.run("rotate", mill, self.context("fanuc-mill", "no machine"), {"angle": 90}))
+        # Wave Y (FZ-8): described on G1, G2 and G3 (FANUC 0i-D milling manual p.86-89, 0i-F lathe
+        # manual p.150-154), they keep their value; on an arc they are no radius of it.
+        arc = "G21 G17 G90\nG0 X0. Y0. Z5.\nG1 X20. Y0. F100.\nG2 X0. Y20. I-10. J10. ,R3.\nG1 X0. Y0.\nM30"
+        out = self.scripts.run("mirror", arc, self.context("fanuc-mill", "no machine"), {"about": "y-axis"})
+        self.assertWritten(out)
+        self.assertIn("G3 X0. Y20. I10. J10. ,R3.", out.text.split("\n"))
+        # The angle of a drawing dimension (`,A`) is still a word nobody describes.
+        angle = lathe.replace("X40. Z-20. ,R2.", "X40. ,A30.")
+        refused = self.scripts.run("mirror", angle, self.context("fanuc-lathe-a", "no machine"), {"about": "z"})
+        self.assertTrue(refused.refused)
 
     def test_fz9_a_length_offset_number_without_its_code(self) -> None:
         """FZ-9: ``H1`` without ``G43`` is the length offset number (the address only the
