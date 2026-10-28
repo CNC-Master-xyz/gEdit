@@ -4,10 +4,21 @@
 // covered by the M2 runtime scenarios.
 
 import { render } from 'svelte/server';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ShortcutsDialog, { groupRows, shortcutRows, visibleRows, type ShortcutRow } from './ShortcutsDialog.svelte';
 import { commands } from '$lib/app/registry/commands';
 import type { CommandDef, Disposable } from '$lib/app/types';
+import type { UserBindings } from '$lib/core/keys/userKeys';
+
+// The user's entries as the dialog reads them (the service is mocked; the registry takes the keys).
+const userState = vi.hoisted(() => ({ store: null as null | { set(v: unknown): void } }));
+vi.mock('$lib/app/keys/userKeys', async () => {
+  const { writable } = await import('svelte/store');
+  const store = writable({ bindings: {} });
+  userState.store = store;
+  return { userKeys: { state: store, platform: 'other' } };
+});
+const setUserBindings = (bindings: UserBindings): void => userState.store?.set({ bindings });
 
 function def(over: Partial<CommandDef> & { id: string }): CommandDef {
   return { title: `t.${over.id}`, run: () => {}, ...over };
@@ -92,6 +103,20 @@ describe('shortcutRows with the declared keys (P4g, §6.9 rule 6)', () => {
     expect(otherPlatform[0].changed).toBeUndefined();
   });
 
+  // CODE-9 (P4g review): a default that lost its key to a user key on the same keys is not the user's entry.
+  it('marks only commands the user has an entry for, when it is told which', () => {
+    const userSet = (id: string) => id === 'mine';
+    const rows = shortcutRows(
+      [def({ id: 'displaced' }), def({ id: 'mine', keys: 'Mod+Shift+K' })],
+      false,
+      declared('Mod+K'),
+      userSet,
+    );
+    expect(rows.find((r) => r.id === 'displaced')?.changed).toBeUndefined();
+    expect(rows.find((r) => r.id === 'displaced')?.builtIn).toBeUndefined();
+    expect(rows.find((r) => r.id === 'mine')).toMatchObject({ changed: true, builtIn: 'Ctrl+K' });
+  });
+
   it('marks nothing when no declared keys are given', () => {
     expect(shortcutRows([def({ id: 'a', keys: 'Mod+K' })], false)[0].changed).toBeUndefined();
   });
@@ -147,6 +172,7 @@ describe('ShortcutsDialog markup', () => {
     registered?.();
     registered = undefined;
     commands.setKeyOverrides({});
+    setUserBindings({});
   });
 
   function markup(showUnbound = false): string {
@@ -197,12 +223,27 @@ describe('ShortcutsDialog markup', () => {
       def({ id: 'help.about', title: 'help.about', category: 'help.category', keys: 'Mod+J' }),
     ]);
     commands.setKeyOverrides({ 'help.shortcuts': 'Mod+Shift+K' });
+    setUserBindings({ 'help.shortcuts': 'Mod+Shift+K' });
     const html = markup();
     expect(html).toMatch(/data-command="help\.shortcuts"[^>]*data-keys="(⇧⌘K|Ctrl\+Shift\+K)"/);
     expect(html.match(/data-testid="shortcuts-changed"/g)).toHaveLength(1);
     expect(html).toContain('You set this key. The built-in key is');
     expect(html).toContain('data-testid="shortcuts-change"');
     expect(html).toContain('Change keys…');
+  });
+
+  it('does not say "You set this key" on a command that lost its key to the user\'s key on the same keys', () => {
+    registered = commands.register([
+      def({ id: 'help.shortcuts', title: 'help.shortcuts', keys: 'Mod+K' }),
+      def({ id: 'help.about', title: 'help.about', keys: 'Mod+J' }),
+    ]);
+    // The user bound Mod+K to help.about: help.shortcuts has no key now, and nothing of it is the user's.
+    commands.setKeyOverrides({ 'help.about': 'Mod+K' });
+    setUserBindings({ 'help.about': 'Mod+K' });
+    const html = markup(true);
+    expect(html.match(/data-testid="shortcuts-changed"/g)).toHaveLength(1);
+    expect(html).toMatch(/data-command="help\.about"[\s\S]*?shortcuts-changed/);
+    expect(html).not.toMatch(/data-command="help\.shortcuts"[\s\S]*?shortcuts-changed/);
   });
 
   it('marks nothing while no key is changed', () => {
