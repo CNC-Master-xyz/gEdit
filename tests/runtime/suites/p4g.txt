@@ -1,0 +1,36 @@
+# P4g: "Settings, keys and packages" - your own keys, script packages, the export and import of the whole configuration, the settings search box and the
+# language setting (plan docs/planning/phase-4-implementation.md section 5 P4g and section 6.9, H4g; P4.34 to P4.37).
+# Run with: tests/runtime/suites/m0.txt tests/runtime/suites/m1.txt tests/runtime/suites/m2.txt tests/runtime/suites/m3.txt tests/runtime/suites/m4.txt tests/runtime/suites/m5.txt tests/runtime/suites/m6.txt tests/runtime/suites/m7.txt tests/runtime/suites/m8.txt tests/runtime/suites/m9.txt tests/runtime/suites/m10.txt tests/runtime/suites/m11.txt tests/runtime/suites/m12.txt tests/runtime/suites/rp.txt tests/runtime/suites/m13.txt tests/runtime/suites/p3a.txt tests/runtime/suites/p3b.txt tests/runtime/suites/b1.txt tests/runtime/suites/p4a.txt tests/runtime/suites/p4b.txt tests/runtime/suites/p4c.txt tests/runtime/suites/p4d.txt tests/runtime/suites/p4e.txt tests/runtime/suites/p4g.txt
+# On a runner, by hand: gh workflow run harness.yml --ref <branch> -f scenarios="p4g"
+#
+# The files that must be in the config folder when gEdit starts (keybindings.json, the package folders, a loose profile, a settings file) are written by
+# the scenarios' `files` option; the zips an import reads are built in the page (p4g-common.js `writeZip`, a stored zip with the layout the zip crate
+# writes). Every expected text is ctx.t(...) of the key. Nothing here has run on a runner yet.
+#
+# What cannot be run: the switch to a second language and the fall back from a broken message set. No second message set ships (Q4-18), so the
+# harness build has none and the language row is off; app/language.test.ts and i18n/locale.test.ts hold both with sets that do not ship. p4g-language
+# runs what a build with English alone can show (a tag with no set behind it, a value that is no tag).
+
+# P4.34: a keybindings.json read at start (Mod+S and Mod+D on other commands win over the editor's own, with real key presses), the shortcut reference
+# marks only the keys the user set, the Keyboard page (rows, conflicts, unused commands, the entry that could not be read, search, Press a key with its
+# refusals, an F-key and an Option key, Remove key, Reset, Reset all) and the file keeping what it could not use.
+p4g-keys
+
+# P4.35: the Packages page, the problem of a package told apart from the user's own file of the same name, a package's scripts in the Scripts menu under
+# its display name, switching off and on without a restart, Reload, and the question for a package script that is edited.
+p4g-packages
+
+# P4.36: export (the layout, the count, nothing outside it), the round trip showing every group as the same, backup and undo through the backup zip,
+# the refusals in words, and the two commands.
+p4g-config
+
+# P4.36: an import while Settings is open (the dialog follows, an edit stays, Save does not write the old value back, closing asks nothing), a file that
+# cannot switch a package on, scripts that need the trust tick, and a write that fails and is put back.
+p4g-config-import
+
+# P4.37: the settings search box (focus, finding, 20 results, Enter, Escape, the arrow down, a click, a page by its heading).
+p4g-settings
+
+# P4.37: the language setting as far as a build with English alone shows it.
+p4g-language
+p4g-language-bad
