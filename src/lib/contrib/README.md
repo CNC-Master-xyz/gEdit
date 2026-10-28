@@ -116,6 +116,7 @@ Each row names the owning work package and the feature.
 | `ncNumbering.ts` | WP4.2 | NC tab "Numbering": `nc.renumber`, `nc.removeBlockNumbers` |
 | `renumberOthers.ts` | P4.20b | NC tab "Numbering": `nc.updateOtherReferences` (Update References in Other Documents…; no key; enabled while a list from the last Renumber Blocks is pending): rewrites the references into the renumbered program that other open documents of the dialect still hold, one confirmation, each document its own undo step, all or nothing (Phase 4, P4d; the prelude pinned it; service `app/renumberOthers.ts`, rules `core/transforms/otherReferences.ts`, P4.20a) |
 | `palette.ts` | WP1.1 | `view.commandPalette` (F1) |
+| `profileForm.ts` | P4.40 | `profile.editInForm` ("Edit Profile in Form", palette and a button per profile on Settings ▸ Profiles; no key): the profile of the active program when it is one of yours, a built-in one read-only; the form comes from `schemas/profile.schema.json`, saves through the file's document, shows a live preview on a sample program (Phase 4, P4h; model `app/profileForm.ts`) |
 | `profileSelect.ts` | WP1.6 | dialect profile status item and picker |
 | `programMap.ts` | WP1.5 | program map (left panel) |
 | `quitGuard.ts` | WP6.5 | reports "any document dirty" to the macOS quit guard |

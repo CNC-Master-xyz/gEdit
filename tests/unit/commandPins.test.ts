@@ -141,6 +141,9 @@ const PINNED: { id: string; keys?: Keys; title: string; owner: string; pending?:
   { id: 'profile.testOnDocument', title: 'userConfig.testOnDocument', owner: 'userConfig.ts' },
   { id: 'machines.import', title: 'machines.import', owner: 'userConfig.ts' },
   { id: 'machines.export', title: 'machines.export', owner: 'userConfig.ts' },
+  // P4.40, plan §6.10 rule 7 (palette, category `profileForm.category`, and a button per profile on
+  // Settings ▸ Profiles; no key)
+  { id: 'profile.editInForm', title: 'profileForm.edit', owner: 'profileForm.ts' },
   // M13, WP13.4 (P13; registered by WP13.4, `contrib/typing.ts`): Home tab, group
   // `typing.group`, after the Edit group; no default key (a toggle that silently changes what
   // every keystroke does should not be one key press away).
