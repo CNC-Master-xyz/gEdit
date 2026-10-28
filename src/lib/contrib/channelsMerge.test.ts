@@ -35,8 +35,8 @@ function world(o: { readOnly?: boolean } = {}) {
   ]);
   const meta = new Map<string, Partial<DocMeta>>([
     ['toy', { id: 'toy', title: 'prog.nc', readOnly: o.readOnly === true }],
-    ['c1', { id: 'c1', title: 'prog — Channel 1.nc' }],
-    ['c2', { id: 'c2', title: 'prog — Channel 2.nc' }],
+    ['c1', { id: 'c1', title: 'prog_1.nc' }],
+    ['c2', { id: 'c2', title: 'prog_2.nc' }],
   ]);
   const said: { msg: Msg; error: boolean }[] = [];
   const writes: { id: string; start: number; end: number; lines: string[] }[] = [];

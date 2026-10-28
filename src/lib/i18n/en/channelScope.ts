@@ -18,6 +18,8 @@ export default {
     /** The status line after the last dialog; `{count}` of `{total}` documents were written. */
     saved: 'Saved {count} of {total} channel files.',
     /** Appended when some channels got the usual name because the machine has no usable file name for them. `{channels}` is a list of channel names. */
+    /** After the last dialog, when at least one file was written: the files are for editing (owner decision Q4, 2026-10-28). */
+    copies: 'These channel files are copies for editing. Send the program to the machine in the form it reads; Merge Channels Back makes it one file again.',
     usualName: 'The machine has no usable file name for {channels}, so the usual name was proposed.',
   },
 
