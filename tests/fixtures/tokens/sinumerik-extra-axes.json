@@ -1,0 +1,32 @@
+{
+ "$comment": "P4h (plan section 6.10 rule 13; T123): the extra axes of a machine, read by tokenizer.ts and _nc_lex.py alike. tokens: with syntax.extraAxisNames as below (what applyMachine writes for a machine with these axes); plain: the profile as shipped. Every line is synthetic, written for gEdit.",
+ "profiles": ["sinumerik", "sinumerik-mill"],
+ "extraAxisNames": ["AA", "BB", "QQ"],
+ "lines": [
+  {"line":"N10 G0 AA90 X10","tokens":[{"kind":"blockNumber","text":"N10","address":"N","valueText":"10"},{"kind":"word","text":"G0","address":"G","valueText":"0"},{"kind":"word","text":"AA90","address":"AA","valueText":"90"},{"kind":"word","text":"X10","address":"X","valueText":"10"}],"plain":[{"kind":"blockNumber","text":"N10","address":"N","valueText":"10"},{"kind":"word","text":"G0","address":"G","valueText":"0"},{"kind":"unknown","text":"AA90"},{"kind":"word","text":"X10","address":"X","valueText":"10"}]},
+  {"line":"AA-5.5","tokens":[{"kind":"word","text":"AA-5.5","address":"AA","valueText":"-5.5"}],"plain":[{"kind":"unknown","text":"AA"},{"kind":"operator","text":"-"},{"kind":"word","text":"5.5","valueText":"5.5"}]},
+  {"line":"BB.5","tokens":[{"kind":"word","text":"BB.5","address":"BB","valueText":".5"}],"plain":[{"kind":"unknown","text":"BB"},{"kind":"word","text":".5","valueText":".5"}]},
+  {"line":"AA90X10","tokens":[{"kind":"word","text":"AA90","address":"AA","valueText":"90"},{"kind":"word","text":"X10","address":"X","valueText":"10"}],"plain":[{"kind":"call","text":"AA90X10","address":"AA90X10"}]},
+  {"line":"QQ0","tokens":[{"kind":"word","text":"QQ0","address":"QQ","valueText":"0"}],"plain":[{"kind":"call","text":"QQ0","address":"QQ0"}]},
+  {"line":"N20 QQ-.5","tokens":[{"kind":"blockNumber","text":"N20","address":"N","valueText":"20"},{"kind":"word","text":"QQ-.5","address":"QQ","valueText":"-.5"}],"plain":[{"kind":"blockNumber","text":"N20","address":"N","valueText":"20"},{"kind":"unknown","text":"QQ"},{"kind":"operator","text":"-"},{"kind":"word","text":".5","valueText":".5"}]},
+  {"line":"aa12.5","tokens":[{"kind":"word","text":"aa12.5","address":"AA","valueText":"12.5"}],"plain":[{"kind":"unknown","text":"aa12"},{"kind":"word","text":".5","valueText":".5"}]},
+  {"line":"G1 X10 AA+1.5 F200","tokens":[{"kind":"word","text":"G1","address":"G","valueText":"1"},{"kind":"word","text":"X10","address":"X","valueText":"10"},{"kind":"word","text":"AA+1.5","address":"AA","valueText":"+1.5"},{"kind":"word","text":"F200","address":"F","valueText":"200"}],"plain":[{"kind":"word","text":"G1","address":"G","valueText":"1"},{"kind":"word","text":"X10","address":"X","valueText":"10"},{"kind":"unknown","text":"AA"},{"kind":"operator","text":"+"},{"kind":"word","text":"1.5","valueText":"1.5"},{"kind":"word","text":"F200","address":"F","valueText":"200"}]},
+  {"line":"AA90BB10","tokens":[{"kind":"word","text":"AA90","address":"AA","valueText":"90"},{"kind":"word","text":"BB10","address":"BB","valueText":"10"}],"plain":[{"kind":"call","text":"AA90BB10","address":"AA90BB10"}]},
+  {"line":"BB1EX3","tokens":[{"kind":"word","text":"BB1EX3","address":"BB","valueText":"1EX3"}],"plain":[{"kind":"call","text":"BB1EX3","address":"BB1EX3"}]},
+  {"line":"AA90 ; AXIS AA","tokens":[{"kind":"word","text":"AA90","address":"AA","valueText":"90"},{"kind":"comment","text":"; AXIS AA"}],"plain":[{"kind":"call","text":"AA90","address":"AA90"},{"kind":"comment","text":"; AXIS AA"}]},
+  {"line":"AA=10","tokens":[{"kind":"word","text":"AA=10","address":"AA","valueText":"10"}],"plain":[{"kind":"word","text":"AA=10","address":"AA","valueText":"10"}]},
+  {"line":"AA1=5","tokens":[{"kind":"word","text":"AA1=5","address":"AA1","valueText":"5"}],"plain":[{"kind":"word","text":"AA1=5","address":"AA1","valueText":"5"}]},
+  {"line":"AA=IC(5)","tokens":[{"kind":"word","text":"AA=IC(5)","address":"AA","valueText":"IC(5)"}],"plain":[{"kind":"word","text":"AA=IC(5)","address":"AA","valueText":"IC(5)"}]},
+  {"line":"AA(1)","tokens":[{"kind":"call","text":"AA(1)","address":"AA","valueText":"1"}],"plain":[{"kind":"call","text":"AA(1)","address":"AA","valueText":"1"}]},
+  {"line":"AAX1","tokens":[{"kind":"call","text":"AAX1","address":"AAX1"}],"plain":[{"kind":"call","text":"AAX1","address":"AAX1"}]},
+  {"line":"AA","tokens":[{"kind":"call","text":"AA","address":"AA"}],"plain":[{"kind":"call","text":"AA","address":"AA"}]},
+  {"line":"G1 AA","tokens":[{"kind":"word","text":"G1","address":"G","valueText":"1"},{"kind":"unknown","text":"AA"}],"plain":[{"kind":"word","text":"G1","address":"G","valueText":"1"},{"kind":"unknown","text":"AA"}]},
+  {"line":"AA 90","tokens":[{"kind":"unknown","text":"AA"},{"kind":"word","text":"90","valueText":"90"}],"plain":[{"kind":"unknown","text":"AA"},{"kind":"word","text":"90","valueText":"90"}]},
+  {"line":"AA-X","tokens":[{"kind":"unknown","text":"AA"},{"kind":"operator","text":"-"},{"kind":"word","text":"X","address":"X"}],"plain":[{"kind":"unknown","text":"AA"},{"kind":"operator","text":"-"},{"kind":"word","text":"X","address":"X"}]},
+  {"line":"XAA90","tokens":[{"kind":"call","text":"XAA90","address":"XAA90"}],"plain":[{"kind":"call","text":"XAA90","address":"XAA90"}]},
+  {"line":"CC90","tokens":[{"kind":"call","text":"CC90","address":"CC90"}],"plain":[{"kind":"call","text":"CC90","address":"CC90"}]},
+  {"line":"; AA90 IN A COMMENT","tokens":[{"kind":"comment","text":"; AA90 IN A COMMENT"}],"plain":[{"kind":"comment","text":"; AA90 IN A COMMENT"}]},
+  {"line":"MSG(\"AA90\")","tokens":[{"kind":"call","text":"MSG(\"AA90\")","address":"MSG","valueText":"\"AA90\""}],"plain":[{"kind":"call","text":"MSG(\"AA90\")","address":"MSG","valueText":"\"AA90\""}]},
+  {"line":"AA_1","tokens":[{"kind":"call","text":"AA_1","address":"AA_1"}],"plain":[{"kind":"call","text":"AA_1","address":"AA_1"}]}
+ ]
+}
