@@ -1,12 +1,6 @@
 {
-  "message": "Nothing was changed: 10 blocks cannot be rotated: 2 blocks in a frame, 1 coordinate setting or shift, 2 subprogram or macro calls, 1 block with a variable or a calculation, 1 block with a word gEdit cannot place, 1 cycle not reviewed, 1 cycle with positions of its own, 1 tangential arc or arc through a point. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "message": "Nothing was changed: 9 blocks cannot be rotated: 2 blocks in a frame, 1 coordinate setting or shift, 2 subprogram or macro calls, 1 block with a variable or a calculation, 1 block with a word gEdit cannot place, 1 cycle not reviewed, 1 cycle with positions of its own. No machine chosen: a word whose reading depends on the machine would refuse the run.",
   "findings": [
-    {
-      "line": 4,
-      "severity": "error",
-      "message": "N30 CT X10 Y10: a tangential arc or an arc through a point; gEdit cannot check it after the transform.",
-      "reason": "arc-tangential"
-    },
     {
       "line": 5,
       "severity": "error",

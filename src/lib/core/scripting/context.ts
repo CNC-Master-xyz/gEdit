@@ -83,6 +83,25 @@ export function primingLines(
   return [...above];
 }
 
+/**
+ * v1.2.0 (FZ-5): the lines to send as `input.followingLines`, or `undefined`: only for a
+ * selection, all of them or none of them under the same caps as the lines above. An empty list
+ * is kept: the selection ends at the end of the document.
+ */
+export function followingLines(
+  input: { scope: ScriptContextInput['scope'] },
+  below: readonly string[],
+): string[] | undefined {
+  if (input.scope !== 'selection') return undefined;
+  if (below.length > MAX_PRECEDING_LINES) return undefined;
+  let chars = 0;
+  for (const line of below) {
+    chars += line.length + 1;
+    if (chars > MAX_PRECEDING_CHARS) return undefined;
+  }
+  return [...below];
+}
+
 /** The input range, normalised: whole numbers, `start <= end`, and `none` pinned to 0..0. */
 function inputOf(input: ScriptContextInput): ScriptContextInput {
   if (input.scope === 'none') return { scope: 'none', startLine: 0, endLine: 0 };
@@ -93,6 +112,10 @@ function inputOf(input: ScriptContextInput): ScriptContextInput {
 
   const preceding = primingLines({ scope: input.scope, startLine }, input.precedingLines ?? []);
   if (preceding !== undefined) out.precedingLines = preceding;
+  if (input.followingLines !== undefined) {
+    const following = followingLines({ scope: input.scope }, input.followingLines);
+    if (following !== undefined) out.followingLines = following;
+  }
   return out;
 }
 

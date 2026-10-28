@@ -118,7 +118,8 @@
       "modal": true,
       "sets": { "motion": "feed" },
       "label": "Linear feed move",
-      "description": "Straight move to the target at the active feed."
+      "description": "Straight move to the target at the active feed. A chamfer (,C) or a corner rounding (,R) written at its end is cut between it and the next move.",
+      "params": [{ "address": ",C", "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign", "min": 0, "unit": "length" }, { "address": ",R", "label": "Corner rounding between this move and the next: its radius, without sign", "min": 0, "unit": "length" }]
     },
     {
       "code": "G2",
@@ -128,7 +129,7 @@
       "review": "pending",
       "label": "Circular move, clockwise",
       "description": "Arc to the target in the active plane, turning clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
-      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }]
+      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }, { "address": ",C", "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign", "min": 0, "unit": "length" }, { "address": ",R", "label": "Corner rounding between this move and the next: its radius, without sign", "min": 0, "unit": "length" }]
     },
     {
       "code": "G3",
@@ -138,7 +139,7 @@
       "review": "pending",
       "label": "Circular move, counter-clockwise",
       "description": "Arc to the target in the active plane, turning counter-clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
-      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }]
+      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }, { "address": ",C", "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign", "min": 0, "unit": "length" }, { "address": ",R", "label": "Corner rounding between this move and the next: its radius, without sign", "min": 0, "unit": "length" }]
     },
     {
       "code": "G4",

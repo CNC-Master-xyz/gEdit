@@ -112,9 +112,7 @@ GENERATE_OPEN = os.environ.get("GEDIT_FUZZ_OPEN", "") not in ("", "0")
 
 #: The findings of the review that are still open: id -> the generator feature that shows it
 #: (left out of the random run while the finding is open; see the module docstring).
-OPEN_FINDINGS: Dict[str, str] = {
-    "FZ-5": "rotary-mid-program",  # a rotary word below a selection: the whole run refuses, the selection writes
-}
+OPEN_FINDINGS: Dict[str, str] = {}
 
 
 def feature_on(name: str) -> bool:
@@ -183,15 +181,21 @@ class Scripts:
             cls._instance = Scripts()
         return cls._instance
 
-    def run(self, name: str, text: str, context: Dict[str, Any], params: Optional[Dict[str, Any]] = None, preceding: Optional[List[str]] = None) -> Outcome:
+    def run(
+        self, name: str, text: str, context: Dict[str, Any], params: Optional[Dict[str, Any]] = None,
+        preceding: Optional[List[str]] = None, following: Optional[List[str]] = None,
+    ) -> Outcome:
         """``name``'s ``main()`` on ``text`` with ``params``: the whole document, or (with
-        ``preceding``, the lines above it) a selection that starts below those lines."""
+        ``preceding``, the lines above it) a selection that starts below those lines; ``following``
+        are the lines below it (``input.followingLines``, FZ-5), left out when ``None``."""
         run_context = dict(context)
         run_context["params"] = dict(params or {})
         run_context["input"] = {"scope": "document", "startLine": 1, "endLine": len(text.split("\n"))}
         if preceding is not None:
             start = len(preceding) + 1
             run_context["input"] = {"scope": "selection", "startLine": start, "endLine": start + len(text.split("\n")) - 1, "precedingLines": list(preceding)}
+            if following is not None:
+                run_context["input"]["followingLines"] = list(following)
         captured: List[Dict[str, Any]] = []
         nc = self.nc
         saved = (nc.load_context, nc.read_input, nc._write_json)
@@ -1588,7 +1592,16 @@ def klartext_extra(g: Gen) -> bool:
         x, y = g.coord(-80, 80), g.coord(-80, 80)
         side = rng.choice(["RL", "RR"])
         form = rng.random()
-        if form < 0.35:
+        polar = g.pole is not None and g.chance(0.4)
+        if polar:
+            # Wave Y (T018): the polar forms, the contour point about the pole CC.
+            where = "PR%s PA%s" % (g.num(abs(g.coord(5, 40))), g.num(q(rng.uniform(-180, 180), 1)))
+            kind = rng.choice(["PLT LEN%s" % g.num(abs(g.coord(5, 20))), "PLN LEN%s" % g.num(abs(g.coord(5, 20))), "PLCT R%s" % g.num(abs(g.coord(2, 10))), "PCT CCA%s R%s" % (g.num(Decimal(rng.choice([90, 180]))), g.num(abs(g.coord(2, 10))))])
+            head, _, rest = kind.partition(" ")
+            g.emit("APPR %s %s %s %s F%d" % (head, where, rest, side, rng.randint(100, 900)))
+            g.forget("X", "Y")
+            g.features["appr-dep-polar"] += 1
+        elif form < 0.35:
             g.emit("APPR LT X%s Y%s LEN%s %s F%d" % (g.num(x), g.num(y), g.num(abs(g.coord(5, 20))), side, rng.randint(100, 900)))
         elif form < 0.7:
             g.emit("APPR LCT X%s Y%s R%s %s F%d" % (g.num(x), g.num(y), g.num(abs(g.coord(2, 10))), side, rng.randint(100, 900)))
@@ -1597,7 +1610,10 @@ def klartext_extra(g: Gen) -> bool:
         x2, y2 = g.coord(-80, 80), g.coord(-80, 80)
         g.emit("L X%s Y%s" % (g.num(x2), g.num(y2)))
         dep = rng.random()
-        if dep < 0.5:
+        if polar and dep < 0.5:
+            g.emit("DEP PLCT PR%s PA%s R%s F%d" % (g.num(abs(g.coord(5, 40))), g.num(q(rng.uniform(-180, 180), 1)), g.num(abs(g.coord(2, 10))), rng.randint(100, 900)))
+            g.forget("X", "Y")
+        elif dep < 0.5:
             g.emit("DEP LT LEN%s F%d" % (g.num(abs(g.coord(5, 20))), rng.randint(100, 900)))
             g.forget("X", "Y")
         else:
@@ -2163,7 +2179,7 @@ class Checker:
         end = rng.randint(start, min(len(lines), start + rng.randint(1, 12)))
         part = "\n".join(lines[start - 1:end])
         label = "%s on lines %d to %d %s" % (script, start, end, json.dumps(params, sort_keys=True))
-        out = self.scripts.run(script, part, self.context, params, preceding=lines[: start - 1])
+        out = self.scripts.run(script, part, self.context, params, preceding=lines[: start - 1], following=lines[end:])
         if out.crash:
             self.fail("crash", label, out.crash, params)
             return
@@ -2499,7 +2515,7 @@ class GeneratorSelfTest(unittest.TestCase):
             "fanuc-mill": {"line-abs", "line-inc", "arc-centre", "arc-radius", "arc-full", "arc-modal", "helix", "comp-on", "drill", "drill-inc", "expression", "plane-G18", "g53", "g28-inc", "work-offset", "frame", "call", "reset", "plane-in-arc", "arc-one-axis", "loop", "word-order", "trailing-comment", "plus-sign", "leading-zero", "trailing-zero", "blank-after-address"},
             "fanuc-lathe-a": {"line", "arc-centre", "arc-radius", "comp-on", "cycle-pass", "cycle-taper", "thread", "roughing", "corner", "face-to-centre", "g28-uw"},
             "fanuc-lathe-b": {"line", "arc-centre", "arc-radius", "comp-on", "cycle-pass", "thread", "roughing"},
-            "klartext": {"l", "l-inc", "c", "cc-inc", "cr", "lp", "cp", "rnd-chf", "cycle", "call-pos", "blk-form", "ct", "expression", "c-one-axis", "cp-helix", "lp-ipa", "appr-dep", "m89", "reset", "decimal-comma", "unsigned"},
+            "klartext": {"l", "l-inc", "c", "cc-inc", "cr", "lp", "cp", "rnd-chf", "cycle", "call-pos", "blk-form", "ct", "expression", "c-one-axis", "cp-helix", "lp-ipa", "appr-dep", "appr-dep-polar", "m89", "reset", "decimal-comma", "unsigned"},
             "okuma": {"line", "line-inc", "arc-centre", "comp", "arc-l", "expression"},
             "sinumerik-turn": {"line", "arc-centre", "arc-centre-ac", "arc-cr", "comp", "diam-DIAMOF", "diam-DIAM90", "expression"},
             "sinumerik-mill": {"line", "arc-centre", "arc-centre-ac", "arc-cr", "helix", "comp", "mcall", "cycle-call", "machine", "frame", "expression", "reset", "turn", "arc-ar", "rnd-chr", "ct-cip"},
@@ -2523,11 +2539,14 @@ class GeneratorSelfTest(unittest.TestCase):
                 self.__dict__.update(real.__dict__)
                 self.fault = fault
 
-            def run(self, name: str, text: str, context: Dict[str, Any], params: Optional[Dict[str, Any]] = None, preceding: Optional[List[str]] = None) -> Outcome:
+            def run(
+                self, name: str, text: str, context: Dict[str, Any], params: Optional[Dict[str, Any]] = None,
+                preceding: Optional[List[str]] = None, following: Optional[List[str]] = None,
+            ) -> Outcome:
                 params = dict(params or {})
                 if name == "translate" and self.fault == "forgot-z":
                     params["dz"] = 0
-                out = Scripts.run(self, name, text, context, params, preceding)
+                out = Scripts.run(self, name, text, context, params, preceding, following)
                 if name == "mirror" and self.fault == "no-swap" and out.payload is not None and not out.refused:
                     out.payload["text"] = out.text.replace("G2 ", "G#").replace("G3 ", "G2 ").replace("G#", "G3 ")
                 if name == "translate" and self.fault == "partial" and out.payload is not None:
@@ -2583,8 +2602,8 @@ class KnownFindingTest(unittest.TestCase):
     """One minimal repro per finding of the fuzz review (the report of BL-NC-fuzz). Each holds
     the behaviour the plan asks for; an open one fails today, and the batch that fixes FZ-n
     removes its ``expectedFailure`` (and the generator gate in ``OPEN_FINDINGS``, where it has
-    one). Fixed in v1.2.0 (NCF-A, NCF-B; flipped at integration, NCF-C): FZ-4, FZ-6, FZ-7, FZ-9.
-    Open: FZ-5 and FZ-8."""
+    one). Fixed in v1.2.0 (NCF-A, NCF-B; flipped at integration, NCF-C): FZ-4, FZ-6, FZ-7, FZ-9;
+    in Wave Y (BL-NC-geometry): FZ-5, FZ-8. None is open."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -2610,17 +2629,25 @@ class KnownFindingTest(unittest.TestCase):
         x = [r for r in report.get("rows", []) if r.get("scope") == "program" and r.get("axisId") == "X"][0]
         self.assertEqual((steps[3].arc, x.get("max")), (None, "20"))
 
-    @unittest.expectedFailure
     def test_fz5_a_selection_refuses_what_the_whole_run_refuses(self) -> None:
         """FZ-5: the whole run refuses the Y moves before the program first turns A (lines 3 and
-        4, ``rotary-turned``); the same lines as a selection are moved, because the rotary word
-        is below the selection."""
+        4, ``rotary-turned``); the same lines as a selection were moved, because the rotary word
+        is below the selection. Fixed in Wave Y (plan section 7 #503): the selection gets the
+        lines below it (``input.followingLines``), and without them refuses such a move."""
         lines = ["G21 G17 G90", "G0 X0. Y0. Z5.", "G1 Y10. F100.", "G1 Y20.", "G0 A10.", "G0 A0.", "M30"]
         context = self.context("fanuc-mill", "no machine")
         whole = self.scripts.run("translate", "\n".join(lines), context, {"dy": 1})
         self.assertEqual(sorted({f["line"] for f in whole.findings if f.get("severity") == "error"}), [2, 3, 4])
-        part = self.scripts.run("translate", "\n".join(lines[2:4]), context, {"dy": 1}, preceding=lines[:2])
+        part = self.scripts.run("translate", "\n".join(lines[2:4]), context, {"dy": 1}, preceding=lines[:2], following=lines[4:])
         self.assertTrue(part.refused, part.text)
+        self.assertEqual([(f["line"], f["reason"]) for f in part.findings if f.get("severity") == "error"], [(3, "rotary-turned"), (4, "rotary-turned")])
+        # Lines below that never turn A: moved, as the whole run moves them.
+        never = lines[:4] + ["G0 Z50.", "M30"]
+        self.assertFalse(self.scripts.run("translate", "\n".join(never), context, {"dy": 1}).refused)
+        self.assertFalse(self.scripts.run("translate", "\n".join(never[2:4]), context, {"dy": 1}, preceding=never[:2], following=never[4:]).refused)
+        # Without the lines below, such a move is refused rather than guessed.
+        blind = self.scripts.run("translate", "\n".join(never[2:4]), context, {"dy": 1}, preceding=never[:2])
+        self.assertEqual({f["reason"] for f in blind.findings if f.get("severity") == "error"}, {"selection-below"})
 
     def test_fz6_klartext_approach_and_departure_turn(self) -> None:
         """FZ-6: plan §5 P4a item 5 allows APPR LT, LN, CT and DEP LT under rotate and mirror (LEN
@@ -2644,7 +2671,6 @@ class KnownFindingTest(unittest.TestCase):
         self.assertWritten(self.scripts.run("translate", text, context, {"dx": 1}))
         self.assertWritten(self.scripts.run("rotate", text, context, {"angle": 90}))
 
-    @unittest.expectedFailure
     def test_fz8_fanuc_corner_words(self) -> None:
         """FZ-8: a Fanuc chamfer or corner rounding between two moves (``,C1.``, ``,R2.``) has no
         sign and keeps its value under every transform; the code sets do not describe it, so
@@ -2654,6 +2680,16 @@ class KnownFindingTest(unittest.TestCase):
         self.assertWritten(self.scripts.run("mirror", lathe, self.context("fanuc-lathe-a", "no machine"), {"about": "z"}))
         mill = "G21 G17 G90\nG0 X0. Y0. Z5.\nG1 X20. Y0. ,R2. F100.\nG1 X20. Y20. ,C1.\nG1 X0. Y20.\nM30"
         self.assertWritten(self.scripts.run("rotate", mill, self.context("fanuc-mill", "no machine"), {"angle": 90}))
+        # Wave Y (FZ-8): described on G1, G2 and G3 (FANUC 0i-D milling manual p.86-89, 0i-F lathe
+        # manual p.150-154), they keep their value; on an arc they are no radius of it.
+        arc = "G21 G17 G90\nG0 X0. Y0. Z5.\nG1 X20. Y0. F100.\nG2 X0. Y20. I-10. J10. ,R3.\nG1 X0. Y0.\nM30"
+        out = self.scripts.run("mirror", arc, self.context("fanuc-mill", "no machine"), {"about": "y-axis"})
+        self.assertWritten(out)
+        self.assertIn("G3 X0. Y20. I10. J10. ,R3.", out.text.split("\n"))
+        # The angle of a drawing dimension (`,A`) is still a word nobody describes.
+        angle = lathe.replace("X40. Z-20. ,R2.", "X40. ,A30.")
+        refused = self.scripts.run("mirror", angle, self.context("fanuc-lathe-a", "no machine"), {"about": "z"})
+        self.assertTrue(refused.refused)
 
     def test_fz9_a_length_offset_number_without_its_code(self) -> None:
         """FZ-9: ``H1`` without ``G43`` is the length offset number (the address only the

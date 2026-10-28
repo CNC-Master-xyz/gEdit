@@ -1,0 +1,86 @@
+{
+  "title": "Extents",
+  "columns": [
+    {
+      "key": "where",
+      "label": "Where"
+    },
+    {
+      "key": "axis",
+      "label": "Axis"
+    },
+    {
+      "key": "min",
+      "label": "Min"
+    },
+    {
+      "key": "minLine",
+      "label": "At line"
+    },
+    {
+      "key": "max",
+      "label": "Max"
+    },
+    {
+      "key": "maxLine",
+      "label": "At line"
+    },
+    {
+      "key": "unresolved",
+      "label": "Not resolved"
+    }
+  ],
+  "rows": [
+    {
+      "where": "Program",
+      "scope": "program",
+      "axis": "X",
+      "axisId": "X",
+      "min": "0",
+      "minLine": 4,
+      "max": "110",
+      "maxLine": 6,
+      "unresolved": 1,
+      "line": 6
+    },
+    {
+      "where": "Program",
+      "scope": "program",
+      "axis": "Y",
+      "axisId": "Y",
+      "min": "-20",
+      "minLine": 16,
+      "max": "0",
+      "maxLine": 4,
+      "unresolved": 1,
+      "line": 4
+    },
+    {
+      "where": "Program",
+      "scope": "program",
+      "axis": "Z",
+      "axisId": "Z",
+      "min": "-5",
+      "minLine": 17,
+      "max": "50",
+      "maxLine": 4,
+      "unresolved": 0,
+      "line": 4
+    }
+  ],
+  "message": "No machine: readings assumed from the profile defaults, and a word whose reading depends on the machine is not resolved. 2 positions not resolved; the findings say why.",
+  "findings": [
+    {
+      "line": 8,
+      "severity": "warning",
+      "message": "2 subprogram calls, first M98 P3000 (line 8): the called program is not in this document, or gEdit does not follow this call (a repeat, a jump into the program, a macro with arguments, a call inside the called program), so where it leaves the tool is not known; the positions after it are not resolved until a block writes them.",
+      "reason": "call"
+    },
+    {
+      "line": 9,
+      "severity": "warning",
+      "message": "2 incremental words, first Y5. (line 9), move from a position the program does not state (the start, or after a machine position, a cycle, a frame or a value that was not resolved): not resolved.",
+      "reason": "incremental-start"
+    }
+  ]
+}

@@ -184,7 +184,10 @@ class TestPointlessFeedsT084(unittest.TestCase):
 
 
 class TestFkContour(unittest.TestCase):
-    """B1 fix NC (NC-03): the absolute points of a Klartext FK contour are left and listed."""
+    """B1 fix NC (NC-03): the absolute points of a Klartext FK contour were left and listed.
+    v1.2.0 Wave Y (T121): with every FK word classified (TNC 640 Klartext manual 2019, free
+    contour programming, p.175-189), a shift moves them with their axis; a scale, or a block with
+    a word nobody classified, still leaves them and lists them."""
 
     PROGRAM = "\n".join([
         "0 BEGIN PGM FK MM",
@@ -195,19 +198,38 @@ class TestFkContour(unittest.TestCase):
         "5 END PGM FK MM",
     ])
 
-    def test_an_x_shift_leaves_the_x_points_and_says_so(self):
+    def test_an_x_shift_moves_the_x_points(self):
         payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="add", operand=5, addresses=["X"])
         text = lines_of(payload)
         self.assertEqual(text[2], "2 FL X+85 Y+20 AN+0")
-        self.assertEqual(text[3], "3 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60")
+        self.assertEqual(text[3], "3 FC DR+ R30 CCX+55 CCY+50 P1X+75 P1Y+60")
+        self.assertEqual(text[4], "4 FCT DR- R15 P1X+35 P1Y+40 P2X+45 P2Y+50")
+        self.assertEqual([f for f in payload["findings"] if f["reason"] == "fk-point"], [])
+
+    def test_a_y_shift_moves_the_y_points_only(self):
+        payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="add", operand=5, addresses=["Y"])
+        self.assertEqual(lines_of(payload)[3], "3 FC DR+ R30 CCX+50 CCY+55 P1X+70 P1Y+65")
+
+    def test_the_relative_polar_and_beside_the_contour_words(self):
+        program = "\n".join([
+            "0 BEGIN PGM FK MM", "1 FPOL X+10 Y+10", "2 FL PR+20 PA+20", "3 FL AN+45",
+            "4 FCT IX+20 DR- R20 CCA+90 RX 3", "5 FLT AN-70 PDX+50 PDY+53 D10", "6 FL PAR 5 DP 12.5", "7 FSELECT 2",
+            "8 FC DR- R10 CCA+0 ICCX+20 ICCY-15 RCCX12 RCCY14", "9 END PGM FK MM",
+        ])
+        payload = run(program, profile="heidenhain-klartext", operation="add", operand=5, addresses=["X", "Y"])
+        text = lines_of(payload)
+        self.assertEqual((text[1], text[5]), ("1 FPOL X+15 Y+15", "5 FLT AN-70 PDX+55 PDY+58 D10"))
+        self.assertEqual(text[2:5] + text[6:9], program.split("\n")[2:5] + program.split("\n")[6:9])
+        self.assertEqual([f for f in payload["findings"] if f["reason"] == "fk-point"], [])
+
+    def test_a_scale_or_a_word_nobody_classified_leaves_them_and_says_so(self):
+        payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["X"])
         fk = [(f["line"], f["message"].split(":")[0], f["severity"]) for f in payload["findings"] if f["reason"] == "fk-point"]
         self.assertEqual(fk, [(4, "CCX+50", "warning"), (4, "P1X+70", "warning"), (5, "P1X+30", "warning"), (5, "P2X+40", "warning")])
-        self.assertIn("4 FK contour points", payload["message"])
-
-    def test_a_y_shift_lists_the_y_points_only(self):
-        payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="add", operand=5, addresses=["Y"])
-        words = [f["message"].split(":")[0] for f in payload["findings"] if f["reason"] == "fk-point"]
-        self.assertEqual(words, ["CCY+50", "P1Y+60", "P1Y+40", "P2Y+50"])
+        unclassified = self.PROGRAM.replace("P1Y+60", "P1Y+60 XYZ5")
+        payload = run(unclassified, profile="heidenhain-klartext", operation="add", operand=5, addresses=["X"])
+        self.assertIn("3 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60 XYZ5", lines_of(payload))
+        self.assertIn((4, "CCX+50"), [(f["line"], f["message"].split(":")[0]) for f in payload["findings"] if f["reason"] == "fk-point"])
 
     def test_a_z_shift_touches_no_fk_point(self):
         payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="add", operand=5, addresses=["Z"])

@@ -27,7 +27,7 @@
 # id = "dz"
 # type = "number"
 # label = "Z shift"
-# help = "In the program's units (mm or inch). Also moves the cycle positions on the tool axis (the R plane of a drilling cycle, Q203, RTP, RFP, DP). A Klartext cycle called with CYCL CALL POS cannot be moved in Z (the call's Z adds to the cycle's surface)."
+# help = "In the program's units (mm or inch). Also moves the cycle positions on the tool axis (the R plane of a drilling cycle, Q203, RTP, RFP, DP). A Klartext cycle called with CYCL CALL POS is moved in Z only when every call of it is one: then the calls' Z moves and Q203 stays (the call's Z adds to the cycle's surface)."
 # default = 0
 # decimals = 6
 #
@@ -97,8 +97,11 @@ that states them; a block in the other units gets it converted (25.4 exactly).
 **A cycle called at a position** (Klartext `CYCL CALL POS X… Y… Z…`) moves with a shift in
 X and Y. Its tool-axis position adds to the surface coordinate the definition gives (`Q203`),
 so a shift along the tool axis refuses the call and the definition it runs
-(`cycle-position`), as address arithmetic refuses such a call: moving both would move the
-cycle twice, moving one would leave the other where it was.
+(`cycle-position`): moving both would move the cycle twice, moving one would leave the other
+where it was. v1.2.0 (T021): when **every** call of the definition in the run is a
+`CYCL CALL POS` that writes the tool axis, the shift moves the calls' coordinate on the tool
+axis and leaves the definition's (`Q203`) as written, so the cycle moves once; any other call
+of it (`M99`, `CYCL CALL`, a block under `M89`) keeps the refusal.
 
 **Rotary axes.** A block moved while a rotary axis that turns its axes stands turned (tool
 centre point control off) is refused (`rotary-turned`); so is one moved before the axis is
@@ -128,6 +131,11 @@ only, and an information row says so (`word-added`: "Z55. added: the move starte
 unmoved Z of the lines above"). A cycle that runs while the tool axis
 still stands at the level of the lines above is refused (`selection-start`): it moves to its
 holes at that level and, in `G98`, returns to it (`G98`/`G99` are no data, so both).
+
+v1.2.0 (FZ-5, plan section 7 #503): a selection is judged as the whole run judges its blocks,
+so it reads the lines below it too (`input.followingLines`) for the one rule that looks ahead:
+a move made before a rotary axis that turns it is first written, when the program turns that
+axis later (`rotary-turned`). Without those lines such a move is refused (`selection-below`).
 
 Two refusals concern the whole run rather than a block, with reasons of their own: a run
 with no code database (`no-database`: a move cannot be told from a machine position or a
@@ -197,11 +205,19 @@ REASON_TEXT = {
     "pole-unknown": ("move around a pole that is not known", "moves around a pole that is not known"),
     "resolution": ("block with a word that cannot hold the shift", "blocks with a word that cannot hold the shift"),
     "selection-start": ("first move of the selection that would miss the moved path", "first moves of the selection that would miss the moved path"),
+    "selection-below": ("move that waits on a rotary axis the lines below may turn", "moves that wait on a rotary axis the lines below may turn"),
 }
 
 #: The refusals of the run itself, beside ``_nc_geom.REASONS``: id -> the plain text after
 #: "<as written>: " (v1.2.0, NCR-3; the same id as rotate's and mirror's).
 RUN_REASONS = {
+    # v1.2.0 (FZ-5, plan section 7 #503).
+    "selection-below": (
+        "this move waits on a rotary axis the program has not written above it, and the lines "
+        "below the selection were not available, so whether the program turns that axis later "
+        "(which would make this move unsafe to shift) is not known. Run Translate on the whole "
+        "program"
+    ),
     "selection-start": (
         "the selection starts where the lines above it leave the tool, and that point is not "
         "moved with the selection. An arc, an incremental move, a turning or facing pass (which "
@@ -294,7 +310,7 @@ class Params:
 class Line:
     """One line of the selection or the document, and what the run makes of it."""
 
-    __slots__ = ("index", "number", "text", "block", "edits", "refusals", "notes", "added")
+    __slots__ = ("index", "number", "text", "block", "edits", "refusals", "notes", "added", "tool_edits")
 
     def __init__(self, index: int, number: int, text: str, block: int) -> None:
         self.index = index
@@ -308,6 +324,10 @@ class Line:
         #: v1.2.0 (owner decision 2026-10-19): the words added to the selection's first move,
         #: as (axis, the word as written).
         self.added: List[Tuple[str, str]] = []
+        #: v1.2.0 (T021): the edits of the words of a cycle definition on the tool axis (`Q203`),
+        #: which a run whose every call of that definition is a call at a position takes back out
+        #: (``settle_called_at``).
+        self.tool_edits: List[Tuple[int, int, str]] = []
 
 
 class Run:
@@ -350,6 +370,13 @@ class Run:
         #: NC-3: the cycle definitions called at a position along a shifted tool axis, as
         #: (line of the definition, the call's line, the call's code, the tool axis).
         self.called_at: List[Tuple[int, int, str, str]] = []
+        #: v1.2.0 (T021): every call of a definition in the run, by the line of the definition:
+        #: (the call's line, whether it is a call at a position that writes the tool axis).
+        self.calls_of: Dict[int, List[Tuple[int, bool]]] = {}
+        #: v1.2.0 (T019): the labels of the run's lines (upper case -> their line numbers) and of
+        #: the lines above it, for a contour written between two labels (`CYCLE95("A:B", …)`).
+        self.labels: Dict[str, List[int]] = {}
+        self.labels_above: set = set()
         #: v1.2.0 (NCR-3): the shifted axes on which the tool still stands where the lines above
         #: a selection left it (a point the run does not move), until a block moves it to a
         #: written position on all of them; and the axes a single pass of the selection wrote
@@ -379,7 +406,7 @@ class Run:
 
     # -- the walk ---------------------------------------------------------------
 
-    def walk(self, preceding: Sequence[str], lines: Sequence[str], base_line: int) -> None:
+    def walk(self, preceding: Sequence[str], lines: Sequence[str], base_line: int, following: Optional[Sequence[str]] = None) -> None:
         tracker = self.tracker
         cp = self.cp
         state = None
@@ -388,6 +415,7 @@ class Run:
         first_number = base_line - len(preceding)
         for offset, text in enumerate(preceding):
             state, step = tracker.line(text, first_number + offset, state, False)
+            self.labels_above.update((t.address or "").upper() for t in step.tokens if t.kind == "label")
             continued = any(t.kind == "continuation" for t in step.tokens)
             self.note_rotary(step, record=False)
             if self.is_selection:
@@ -416,6 +444,10 @@ class Run:
                 self.units = step.units
             self.judge(line, step)
             self.call_position(line, step)
+            self.note_call(line, step)
+            for token in step.tokens:
+                if token.kind == "label":
+                    self.labels.setdefault((token.address or "").upper(), []).append(number)
             self.note_rotary(step, record=True, line=line)
             self.selection_start(line, step)
             if self.is_selection:
@@ -431,12 +463,37 @@ class Run:
                 last_line = line
                 selection_continued = continues
             last_continued = continues
+        # T021: a definition whose calls are all calls at a position keeps its values on the
+        # tool axis, which the end of a selection reads (a definition the run left as written
+        # may be called below it).
+        self.settle_called_at()
+        self.settle_contours()
         if self.is_selection:
             # CODE-3: every selection, from line 1 too (a cycle started in it can still be in
             # force below it).
             self.selection_end(last_line, selection_continued)
-        self.settle_called_at()
+            # FZ-5 (plan section 7 #503): what the program does below the selection decides,
+            # as it does for the whole run, whether a rotary axis the selection's moves wait on
+            # is ever turned (`settle_rotary`).
+            self.walk_below(state, following, base_line + len(lines))
         self.settle_rotary()
+
+    def walk_below(self, state: Any, following: Optional[Sequence[str]], first: int) -> None:
+        """v1.2.0 (FZ-5): the lines below a selection, read for the rotary axes only (where the
+        program turns one the selection's moves wait on). Without them, a move that waits on such
+        an axis is refused (``selection-below``): the whole run might refuse it."""
+        if not self.pending_rotary:
+            return
+        if following is None:
+            for line, axes in self.pending_rotary:
+                if not any(r.reason in ("rotary-turned", "selection-below") for r in line.refusals):
+                    line.refusals.append(_nc_geom.Refusal(line.number, "selection-below", _quote(line.text), ", ".join(sorted(axes))))
+            self.pending_rotary = []
+            return
+        tracker = self.tracker
+        for offset, text in enumerate(following):
+            state, step = tracker.line(text, first + offset, state, False)
+            self.note_rotary(step, record=False)
 
     def note_last_words(self, step: _nc_path.Step) -> None:
         """The last absolute word on each axis above the selection, for the form of a word the
@@ -525,6 +582,8 @@ class Run:
             token = role.token
             if written.text != token.text:
                 edits.append((token.start, token.end, written.text))
+                if role.role == "tool-axis":
+                    line.tool_edits.append(edits[-1])
         line.edits = edits
         line.refusals.extend(refusals)
         line.notes = list(notes)
@@ -560,7 +619,25 @@ class Run:
 
     _missing = object()
 
-    # -- a cycle called at a position (NC-3) ---------------------------------------
+    # -- a cycle called at a position (NC-3, T021) ----------------------------------
+
+    def note_call(self, line: Line, step: _nc_path.Step) -> None:
+        """v1.2.0 (T021): a block that runs the cycle defined last (`M99`, `CYCL CALL`, a
+        positioning block under `M89`, `CYCL CALL POS`), by the line of the definition."""
+        running = step.cycle
+        if not running:
+            return
+        defined = as_dict(self.tracker.interp.state.get("definedCycle"))
+        start = defined.get("line")
+        if defined.get("code") != running or not isinstance(start, int) or isinstance(start, bool):
+            return
+        # A call at a position that leaves the tool axis out (the manual asks for all three
+        # axes) has no coordinate the shift could move: it counts as any other call.
+        token = (step.words or {}).get(self.tool_axis())
+        written = token is not None and (token.value_text or "") != ""
+        at_position = written and any(r.reason == "cycle-position" and r.detail.startswith(CALL_POSITION + ":") for r in line.refusals)
+        self.calls_of.setdefault(start, []).append((line.number, at_position))
+
 
     def call_position(self, line: Line, step: _nc_path.Step) -> None:
         """A cycle call that writes its own position (Klartext `CYCL CALL POS X… Y… Z…`: a
@@ -600,17 +677,67 @@ class Run:
 
     def settle_called_at(self) -> None:
         """The definition a cycle call at a position runs is refused with it, when it is in
-        the run (one above a selection refuses the call as `selection-inside`)."""
+        the run (one above a selection refuses the call as `selection-inside`).
+
+        v1.2.0 (T021): unless **every** call of that definition in the run is a call at a
+        position that writes the tool axis. The tool-axis coordinate of such a call acts like
+        a further datum shift on the cycle (TNC 640 cycle manual, cycle call with CYCL CALL
+        POS), so the shift moves the calls' coordinate and leaves the definition's own values
+        on the tool axis (`Q203`) as written: the cycle moves once. The approach compares the
+        tool's position on the tool axis with the surface of the cycle; under that datum shift
+        the call's coordinate, the tool and so the comparison move together."""
         by_number = {line.number: line for line in self.lines}
+        settled: set = set()
         for start, call_line, code, axis in self.called_at:
+            if start in settled:
+                continue
             target = by_number.get(start)
             if target is None:
+                continue
+            if self.calls_at_positions(start):
+                settled.add(start)
+                for member in self.lines:
+                    if member.number >= start and member.block == target.block and member.tool_edits:
+                        member.edits = [e for e in member.edits if e not in member.tool_edits]
+                for number, _ in self.calls_of.get(start, []):
+                    call = by_number.get(number)
+                    if call is not None:
+                        call.refusals = [r for r in call.refusals if not (r.reason == "cycle-position" and r.detail.startswith(CALL_POSITION + ":"))]
                 continue
             if any(r.reason == "cycle-position" and r.detail.startswith(CALLED_AT_POSITION) for r in target.refusals):
                 continue
             target.refusals.append(
                 _nc_geom.Refusal(start, "cycle-position", _quote(target.text), "%s:%s:%d:%s" % (CALLED_AT_POSITION, code, call_line, axis))
             )
+
+    def settle_contours(self) -> None:
+        """v1.2.0 (T019): a cycle whose only positions of its own are a contour written in the
+        program between two labels (`CYCLE95("START:END", …)`; SINUMERIK cycles manual, CYCLE95,
+        the contour name) moves with that contour when the run moves its blocks: each label
+        stands once in the run, on no line above it, the first above the last. Its refusal is
+        taken back then; a contour in a subprogram, or one the run does not hold, keeps it."""
+        prefix = _nc_geom.CONTOUR_LABELS
+        for line in self.lines:
+            kept = []
+            for refusal in line.refusals:
+                if refusal.reason == "cycle-position" and refusal.detail.startswith(prefix) and self.labels_in_run(refusal.detail[len(prefix):]):
+                    continue
+                kept.append(refusal)
+            line.refusals = kept
+
+    def labels_in_run(self, detail: str) -> bool:
+        for pair in detail.split(";"):
+            first, _, last = pair.partition(":")
+            a, b = self.labels.get(first, []), self.labels.get(last, [])
+            if len(a) != 1 or len(b) != 1 or first in self.labels_above or last in self.labels_above or a[0] >= b[0]:
+                return False
+        return True
+
+    def calls_at_positions(self, start: int) -> bool:
+        """v1.2.0 (T021): every call of the definition on line ``start`` is a call at a position
+        that writes the tool axis."""
+        calls = self.calls_of.get(start, [])
+        return bool(calls) and all(at for _, at in calls)
 
     # -- rotary axes not written yet (refusals_of leaves them to the walk) --------
 
@@ -1110,7 +1237,7 @@ def main() -> int:
         return 0
 
     run.is_selection = selection
-    run.walk(preceding, lines, base_line)
+    run.walk(preceding, lines, base_line, _nc_run.following_lines(context))
     findings = Findings()
     refused, info, blocks_refused = collect(run, findings)
     out = lines if blocks_refused else apply_edits(lines, run)

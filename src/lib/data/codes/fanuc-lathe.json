@@ -326,7 +326,7 @@
       "label": "Roughing cycle along Z",
       "description": "Roughs an outside or inside contour in passes along Z and leaves a finishing allowance for G70. Written in two blocks: the depth of cut and the retract first, then the profile range, the allowances and the feed. The block with P and Q runs the cycle; the same U means the depth of cut in the first block and the allowance on X in the second. The first block's values are machine parameters that the block overwrites, so they stay in force until written again. The addresses are those of the usual ZX plane (G18); in another plane the control reads other ones.",
       "params": [
-        { "address": "U", "label": "Depth of cut per pass, a radius value without sign", "block": 1 },
+        { "address": "U", "label": "Depth of cut per pass, a radius value without sign", "min": 0, "block": 1 },
         { "address": "R", "position": "none", "label": "Retract after each pass, a radius value without sign", "block": 1 },
         { "address": "P", "position": "none", "label": "Block number of the first profile block", "required": true, "min": 0, "unit": "count", "block": 2 },
         { "address": "Q", "position": "none", "label": "Block number of the last profile block", "required": true, "min": 0, "unit": "count", "block": 2 },
@@ -358,7 +358,7 @@
       "label": "Roughing cycle along X (facing)",
       "description": "The same as G71, but the passes run along X, so it roughs a face instead of a diameter. Written in two blocks: the depth of cut (W) and the retract first, then the profile range, the allowances and the feed. The block with P and Q runs the cycle; the same W means the depth of cut in the first block and the allowance on Z in the second. The first block's values are machine parameters that the block overwrites, so they stay in force until written again. The addresses are those of the usual ZX plane (G18); in another plane the control reads other ones.",
       "params": [
-        { "address": "W", "label": "Depth of cut per pass, a radius value without sign", "block": 1 },
+        { "address": "W", "label": "Depth of cut per pass, a radius value without sign", "min": 0, "block": 1 },
         { "address": "R", "position": "none", "label": "Retract after each pass, a radius value without sign", "block": 1 },
         { "address": "P", "position": "none", "label": "Block number of the first profile block", "required": true, "min": 0, "unit": "count", "block": 2 },
         { "address": "Q", "position": "none", "label": "Block number of the last profile block", "required": true, "min": 0, "unit": "count", "block": 2 },

@@ -14,6 +14,7 @@ import {
   MAX_PRECEDING_CHARS,
   MAX_PRECEDING_LINES,
   primingLines,
+  followingLines,
 } from './context';
 import type { DocMeta } from '$lib/app/types';
 import type { CodeEntry } from '$lib/core/codes/types';
@@ -136,6 +137,34 @@ describe('buildContext', () => {
     codes.length = 0;
     expect(context.params).toEqual({ percent: 90 });
     expect(context.codes).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.2.0 (FZ-5): the lines below a selection
+// ---------------------------------------------------------------------------
+
+describe('followingLines', () => {
+  const below = ['N90 G0 A10.', 'N100 M30'];
+
+  it('is carried for a selection, an empty list included', () => {
+    expect(build({ input: input({ startLine: 3, endLine: 9, followingLines: below }) }).input.followingLines).toEqual(below);
+    expect(build({ input: input({ startLine: 3, endLine: 9, followingLines: [] }) }).input.followingLines).toEqual([]);
+  });
+
+  it('is left out for a whole-document run and a `none` scope', () => {
+    expect(build({ input: input({ scope: 'document', startLine: 1, endLine: 9, followingLines: below }) }).input.followingLines).toBeUndefined();
+    expect(build({ input: input({ scope: 'none', startLine: 3, endLine: 9, followingLines: below }) }).input.followingLines).toBeUndefined();
+  });
+
+  it('is dropped, not truncated, past the caps', () => {
+    const many = Array.from({ length: MAX_PRECEDING_LINES + 1 }, () => 'N10');
+    expect(followingLines({ scope: 'selection' }, many)).toBeUndefined();
+    expect(followingLines({ scope: 'selection' }, ['x'.repeat(MAX_PRECEDING_CHARS + 1)])).toBeUndefined();
+  });
+
+  it('absent by default', () => {
+    expect(build({ input: input({ startLine: 3, endLine: 9 }) }).input.followingLines).toBeUndefined();
   });
 });
 

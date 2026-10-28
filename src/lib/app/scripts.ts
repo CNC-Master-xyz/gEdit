@@ -444,6 +444,12 @@ export function createScriptService(deps: ScriptDeps): ScriptService {
     if (input.scope === 'selection' && above > 0 && above <= MAX_PRECEDING_LINES) {
       input.precedingLines = deps.editor.getLines(docId, 1, above);
     }
+    // v1.2.0 (FZ-5): the lines below a selection, for a script that must know what the program
+    // does after it; `buildContext` applies the caps and drops the field when it does not fit.
+    const below = lineCount - endLine;
+    if (input.scope === 'selection' && below >= 0 && below <= MAX_PRECEDING_LINES) {
+      input.followingLines = below > 0 ? deps.editor.getLines(docId, endLine + 1, lineCount) : [];
+    }
 
     return { input, stdin: deps.editor.getLines(docId, startLine, endLine).join('\n') };
   }

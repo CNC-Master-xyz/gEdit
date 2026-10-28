@@ -87,8 +87,9 @@ class ExtractionTest(unittest.TestCase):
 
     def test_the_unknown_kinds_are_the_extents_finding_kinds(self) -> None:
         # `rotary` and `selection` stay the extents' own: the held rotary positions and a
-        # selection without the lines above it are not questions of the path.
-        own = [k for k in extents.KINDS if k not in ("rotary", "selection")]
+        # selection without the lines above it are not questions of the path; nor is `call`
+        # (Wave Y, T110), a subprogram call the extents' walk does not follow.
+        own = [k for k in extents.KINDS if k not in ("rotary", "selection", "call")]
         self.assertEqual(sorted(_nc_path.UNKNOWN_KINDS), sorted(own))
 
     def test_the_number_helpers(self) -> None:
@@ -309,7 +310,7 @@ class DirectionFromDataTest(unittest.TestCase):
                 _, steps = walk(text, profile_id)
                 self.assertEqual((steps[2].arc.direction, steps[3].arc.direction), ("cw", "ccw"))
         # The Okuma database says the same; its `G102`/`G103` carry no direction (§7 #297).
-        tracker, _ = walk("G90", "okuma-osp")
+        tracker, _ = walk("G90", "okuma-osp", preset="okuma-1mm")
         found = {code: gedit_nc.arc_direction_of(tracker.interp.entry(code)) for code in ("G2", "G3", "G102", "G103")}
         self.assertEqual(found, {"G2": "cw", "G3": "ccw", "G102": None, "G103": None})
 
@@ -886,3 +887,31 @@ class PerformanceTest(unittest.TestCase):
             self.assertEqual(b.flow, ())
         self.assertGreater(reached, 3)  # the full walk lists them (the arc's extremes among them)
         self.assertEqual(a.unsure, frozenset({"Y"}))  # and knows what a skipped block leaves unsure
+
+
+class LaterVersionTest(unittest.TestCase):
+    """Wave Y, BL-NC-geometry: what the tracker computes for the later-version transforms. Each
+    test fails without its change."""
+
+    def test_t112_an_okuma_arc_by_its_l_radius_is_computed(self) -> None:
+        # OSP-P300 programming manual (LG33-019-R22, p.44-46): G2/G3 with the radius L, X and Z
+        # both written, the arc of at most 180 degrees. X is a diameter: from (Z0, X r20) to
+        # (Z-20, X r40) with the radius 20 counter-clockwise.
+        _, steps = walk("G90 G18\nG0 X40. Z0.\nG3 X80. Z-20. L20.", "okuma-osp", preset="okuma-1mm")
+        arc = steps[2].arc
+        self.assertIsNotNone(arc)
+        self.assertEqual((arc.plane, arc.form, arc.direction), (("Z", "X"), "radius", "ccw"))
+        self.assertEqual(tuple(round(float(v), 6) for v in arc.centre), (-20.0, 20.0))
+
+    def test_t112_what_stays_not_resolved(self) -> None:
+        for block in ("G3 X80. Z-20. L20. CALRG", "G3 X80. Z-20. L20. I10.", "G3 X80. L20.", "G3 X80. Z-20. L-20."):
+            with self.subTest(block=block):
+                _, steps = walk("G90 G18\nG0 X40. Z0.\n" + block, "okuma-osp", preset="okuma-1mm")
+                self.assertIsNone(steps[2].arc)
+                self.assertIn("arc", [e.kind for e in steps[2].events if isinstance(e, _nc_path.Unknown)])
+
+    def test_t112_okuma_arcs_by_their_centre_are_in_the_turning_plane(self) -> None:
+        # The Okuma plane codes choose the compensation plane only; the turning plane is ZX.
+        _, steps = walk("G90\nG0 X40. Z0.\nG3 X80. Z-20. I20. K0.", "okuma-osp", preset="okuma-1mm")
+        self.assertEqual(steps[2].arc.plane if steps[2].arc else None, ("Z", "X"))
+

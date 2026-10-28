@@ -155,7 +155,8 @@ should survive with defaults, or a clear message, rather than a traceback.
   "input": {
     "scope": "selection",                // selection | document | none
     "startLine": 41, "endLine": 48,      // 1-based, inclusive, whole lines
-    "precedingLines": ["%", "O1234", "…"] // optional; see §6
+    "precedingLines": ["%", "O1234", "…"], // optional; see §6
+    "followingLines": ["N90 M30", "%"]     // optional, a selection only; see §6
   },
   "cursor": { "line": 44, "column": 3 },
   "params": { "percent": 90 },
@@ -326,6 +327,13 @@ state = gedit_nc.prime_tracker(tracker, above, cp)    # also the LineState line 
 
 `prime_tracker` returns the `LineState` to pass to your first `tokenize_line`, so a Klartext
 `~` continuation that begins above the selection is still a continuation inside it.
+
+`input.followingLines` (v1.2.0, FZ-5) carries the document lines **below** `endLine` of a
+selection, under the same caps and the same rule: left out rather than cut, and `[]` for a
+selection that ends at the end of the document. A script whose answer for the selection depends
+on what the program does later reads it (`_nc_run.following_lines`): Translate checks whether a
+rotary axis the selection's moves wait on is turned below, and refuses such a move when the
+field is absent.
 
 Three rules to keep:
 

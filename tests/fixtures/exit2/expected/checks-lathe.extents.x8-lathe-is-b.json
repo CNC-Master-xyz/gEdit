@@ -84,8 +84,8 @@
         "scope": "program",
         "axis": "Z",
         "axisId": "Z",
-        "min": "-20",
-        "minLine": 15,
+        "min": "-21",
+        "minLine": 4,
         "max": "100",
         "maxLine": 21,
         "unresolved": 3,
@@ -108,8 +108,8 @@
         "scope": "tool",
         "axis": "Z",
         "axisId": "Z",
-        "min": "-20",
-        "minLine": 15,
+        "min": "-21",
+        "minLine": 4,
         "max": "100",
         "maxLine": 21,
         "unresolved": 2,
@@ -261,6 +261,12 @@
         "severity": "info",
         "message": "G68.2, 1 block: its axis words are values, not positions; left out of the ranges.",
         "reason": "data"
+      },
+      {
+        "line": 62,
+        "severity": "warning",
+        "message": "1 subprogram call, first G00 G65 P9010 A1. (line 62): the called program is not in this document, or gEdit does not follow this call (a repeat, a jump into the program, a macro with arguments, a call inside the called program), so where it leaves the tool is not known; the positions after it are not resolved until a block writes them.",
+        "reason": "call"
       }
     ]
   }

@@ -775,7 +775,9 @@ describe('B1: the block of a two-block cycle (CodeParam.block) and the review ma
     // v1.2 NC fix round (FZ-6): the approach and departure codes describe LEN, CCA and R.
     expect(marked('heidenhain')).toEqual([
       // The corner and arc words of the contour (CR, RND, CHF), marked lengthAlong.
-      'BLK FORM', 'CR', 'RND', 'CHF', 'APPR LT', 'APPR LN', 'APPR CT', 'APPR LCT', 'DEP LT', 'DEP LN', 'DEP CT', 'DEP LCT', 'RL', 'RR', 'VC', 'LBL', 'FN 9', 'FN 10', 'FN 11', 'FN 12', 'FN 17', 'CYCL DEF 7', 'CYCL DEF 8', 'CYCL DEF 9', 'CYCL DEF 10', 'CYCL DEF 11', 'CYCL DEF 19',
+      'BLK FORM', 'CR', 'RND', 'CHF', 'APPR LT', 'APPR LN', 'APPR CT', 'APPR LCT', 'DEP LT', 'DEP LN', 'DEP CT', 'DEP LCT',
+      // Wave Y (T018): the polar approach and departure codes, with the same words.
+      'APPR PLT', 'APPR PLN', 'APPR PCT', 'APPR PLCT', 'DEP PLCT', 'RL', 'RR', 'VC', 'LBL', 'FN 9', 'FN 10', 'FN 11', 'FN 12', 'FN 17', 'CYCL DEF 7', 'CYCL DEF 8', 'CYCL DEF 9', 'CYCL DEF 10', 'CYCL DEF 11', 'CYCL DEF 19',
       // v1.2 NC fix round (NCF-A follow-up): the bore and thread milling diameters, the centring diameter.
       // P4b fix batch 3 (NC-6): CYCL CALL POS, whose feed counts for its own block only.
       'CYCL DEF 26', 'PATTERN DEF', 'CYCL CALL POS', 'CYCL DEF 200', 'CYCL DEF 201', 'CYCL DEF 208', 'CYCL DEF 240', 'CYCL DEF 262', 'CYCL DEF 251', 'CYCL DEF 252', 'CYCL DEF 253', 'CYCL DEF 254', 'CYCL DEF 256',

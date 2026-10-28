@@ -1,0 +1,11 @@
+{
+  "message": "Mirrored in Z about Z0 for the counter spindle: 12 words and 1 code on 12 blocks (G2 and G3 swapped). No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 5,
+      "severity": "warning",
+      "message": "Mirrored for the counter spindle: the tool nose direction (the cutting edge position in each tool's offset) is not in the program. Set it for the counter spindle before this program runs.",
+      "reason": "tool-nose"
+    }
+  ]
+}

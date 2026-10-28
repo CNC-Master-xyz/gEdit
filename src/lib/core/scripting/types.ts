@@ -80,6 +80,14 @@ export interface ScriptContextInput {
    * the existing loud warning.
    */
   precedingLines?: string[];
+  /**
+   * v1.2.0 (FZ-5, Phase 4 plan section 7 #503): the document lines **below** `endLine`, for a
+   * selection only, with the same caps as `precedingLines` and the same rule: left out rather
+   * than cut when they are too many. `[]` is a selection that ends at the end of the document. A
+   * script that has to know what the program does below the selection (Translate: whether a
+   * rotary axis is turned later) refuses when the field is absent.
+   */
+  followingLines?: string[];
 }
 
 /** The active document, as the script sees it. */
