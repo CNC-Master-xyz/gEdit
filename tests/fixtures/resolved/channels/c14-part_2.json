@@ -220,10 +220,11 @@
         "presets": [
           {
             "id": "fanuc-2path",
-            "label": "Two paths, one file per path (path number at the end of the extension); waits M900-M999 (one builder's range; your machine's range is parameters 8110/8111); P as a bit sum (the control's default, P3 = paths 1 and 2); no P = paths 1 and 2",
-            "source": "Fanuc 30i/31i user manual, multi-path waiting function (parameters 8110, 8111, 8103 bit 1); the range M900-M999 and the file names are each a machine builder's choice, a layout seen in practice",
+            "label": "Two paths, one file per path (path number at the end of the extension); path 1 may also be written without an extension (O0001, with O0001.P-2 for path 2), as the control names its files when parameter 138 bit 0 (MDP) is 1; careful: then every file without an extension in the machine's folder reads as path 1; waits M900-M999 (one builder's range; your machine's range is parameters 8110/8111); P as a bit sum (the control's default, P3 = paths 1 and 2); no P = paths 1 and 2",
+            "source": "Fanuc 30i/31i user manual, multi-path waiting function (parameters 8110, 8111, 8103 bit 1); the range M900-M999 and the file names are each a machine builder's choice, a layout seen in practice; path 1 without an extension and paths 2 to 10 as .P-2 ... .P10: Fanuc 30i-B operator's manual, 8.8 input/output file name for multi-path system (parameter 138 bit 0 (MDP); only with the default file names, not a name the operator types), and the Fanuc 0i-F Plus operator's manual, 4.5 (the program an M198 call reads)",
             "value": {
               "fileName": "^(?<stem>.+)\\.[A-Za-z]*-?(?<channel>\\d{1,2})$",
+              "firstFileName": "^(?<stem>[^.]+)$",
               "layout": "multi-file",
               "list": [
                 {
@@ -264,10 +265,11 @@
           },
           {
             "id": "fanuc-2path-digits",
-            "label": "Two paths, one file per path (path number at the end of the extension); waits M900-M999 (one builder's range; your machine's range is parameters 8110/8111); P as path numbers (parameter 8103 bit 1 = 1, P12 = paths 1 and 2); no P = paths 1 and 2",
-            "source": "Fanuc 30i/31i user manual, multi-path waiting function (parameters 8110, 8111; 8103 bit 1 = 1: P as path numbers; without P, paths 1 and 2 wait)",
+            "label": "Two paths, one file per path (path number at the end of the extension); path 1 may also be written without an extension (O0001, with O0001.P-2 for path 2), as the control names its files when parameter 138 bit 0 (MDP) is 1; careful: then every file without an extension in the machine's folder reads as path 1; waits M900-M999 (one builder's range; your machine's range is parameters 8110/8111); P as path numbers (parameter 8103 bit 1 = 1, P12 = paths 1 and 2); no P = paths 1 and 2",
+            "source": "Fanuc 30i/31i user manual, multi-path waiting function (parameters 8110, 8111; 8103 bit 1 = 1: P as path numbers; without P, paths 1 and 2 wait); path 1 without an extension and paths 2 to 10 as .P-2 ... .P10: Fanuc 30i-B operator's manual, 8.8 input/output file name for multi-path system (parameter 138 bit 0 (MDP); only with the default file names, not a name the operator types), and the Fanuc 0i-F Plus operator's manual, 4.5 (the program an M198 call reads)",
             "value": {
               "fileName": "^(?<stem>.+)\\.[A-Za-z]*-?(?<channel>\\d{1,2})$",
+              "firstFileName": "^(?<stem>[^.]+)$",
               "layout": "multi-file",
               "list": [
                 {
@@ -308,10 +310,11 @@
           },
           {
             "id": "fanuc-3path-digits",
-            "label": "Three paths, one file per path (path number at the end of the extension); waits M900-M999 (one builder's range; your machine's range is parameters 8110/8111); P as path numbers (P12 = paths 1 and 2, 0 = path 10); a wait without P is an error",
-            "source": "Fanuc 30i/31i user manual, multi-path waiting function (parameter 8103 bit 1 = 1; without P only two-path systems wait); P written as path digits is a layout seen in practice",
+            "label": "Three paths, one file per path (path number at the end of the extension); path 1 may also be written without an extension (O0001, with O0001.P-2 for path 2), as the control names its files when parameter 138 bit 0 (MDP) is 1; careful: then every file without an extension in the machine's folder reads as path 1; waits M900-M999 (one builder's range; your machine's range is parameters 8110/8111); P as path numbers (P12 = paths 1 and 2, 0 = path 10); a wait without P is an error",
+            "source": "Fanuc 30i/31i user manual, multi-path waiting function (parameter 8103 bit 1 = 1; without P only two-path systems wait); P written as path digits is a layout seen in practice; path 1 without an extension and paths 2 to 10 as .P-2 ... .P10: Fanuc 30i-B operator's manual, 8.8 input/output file name for multi-path system (parameter 138 bit 0 (MDP); only with the default file names, not a name the operator types), and the Fanuc 0i-F Plus operator's manual, 4.5 (the program an M198 call reads)",
             "value": {
               "fileName": "^(?<stem>.+)\\.[A-Za-z]*-?(?<channel>\\d{1,2})$",
+              "firstFileName": "^(?<stem>[^.]+)$",
               "layout": "multi-file",
               "list": [
                 {
@@ -352,10 +355,11 @@
           },
           {
             "id": "fanuc-3path-bitmask",
-            "label": "Three paths, one file per path (path number at the end of the extension); waits M900-M999 (one builder's range; your machine's range is parameters 8110/8111); P as a bit sum (P7 = paths 1, 2 and 3); a wait without P is an error",
-            "source": "Fanuc 30i/31i user manual, multi-path waiting function (parameter 8103 bit 1 = 0)",
+            "label": "Three paths, one file per path (path number at the end of the extension); path 1 may also be written without an extension (O0001, with O0001.P-2 for path 2), as the control names its files when parameter 138 bit 0 (MDP) is 1; careful: then every file without an extension in the machine's folder reads as path 1; waits M900-M999 (one builder's range; your machine's range is parameters 8110/8111); P as a bit sum (P7 = paths 1, 2 and 3); a wait without P is an error",
+            "source": "Fanuc 30i/31i user manual, multi-path waiting function (parameter 8103 bit 1 = 0); path 1 without an extension and paths 2 to 10 as .P-2 ... .P10: Fanuc 30i-B operator's manual, 8.8 input/output file name for multi-path system (parameter 138 bit 0 (MDP); only with the default file names, not a name the operator types), and the Fanuc 0i-F Plus operator's manual, 4.5 (the program an M198 call reads)",
             "value": {
               "fileName": "^(?<stem>.+)\\.[A-Za-z]*-?(?<channel>\\d{1,2})$",
+              "firstFileName": "^(?<stem>[^.]+)$",
               "layout": "multi-file",
               "list": [
                 {
