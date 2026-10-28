@@ -460,7 +460,7 @@ class FindingTest(unittest.TestCase):
             {
                 "line": 7,
                 "severity": "error",
-                "message": "G71 U2. R0.5: a roughing cycle that works from a contour (its finishing allowance along Z has a direction); gEdit does not mirror it yet.",
+                "message": "G71 U2. R0.5: a roughing cycle that works from a contour (its finishing allowance along Z has a direction): gEdit mirrors G70 to G73 only together with both their blocks and their whole contour, and does not mirror the Okuma LAP.",
                 "reason": "roughing-cycle",
             },
         )
@@ -1185,7 +1185,10 @@ def run_geo(script, text, profile_id, params, preceding=None, preset=None, varia
     lines = text.split("\n")
     if preceding is not None:
         start = len(preceding) + 1
-        context["input"] = {"scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding}
+        # FZ-5 (Wave Y): the selection ends the document, so there are no lines below it.
+        context["input"] = {
+            "scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding, "followingLines": [],
+        }
     else:
         context["input"] = {"scope": "document", "startLine": 1, "endLine": len(lines)}
     out = helpers.run_script(script + ".py", stdin=text, context=context)

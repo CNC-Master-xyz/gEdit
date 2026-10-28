@@ -113,7 +113,8 @@ def run(script: str, text: str, params: Dict[str, Any], profile: str = "heidenha
     context["input"] = {"scope": "document", "startLine": 1, "endLine": len(lines)}
     if selection is not None:
         start, end = selection
-        context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+        # Wave Y (FZ-5): a selection gets the lines below it too.
+        context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1], "followingLines": lines[end:]}
         text = "\n".join(lines[start - 1 : end])
     out = helpers.run_script(script, stdin=text, context=context)
     if not out.ok:

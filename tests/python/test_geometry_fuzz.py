@@ -1592,7 +1592,16 @@ def klartext_extra(g: Gen) -> bool:
         x, y = g.coord(-80, 80), g.coord(-80, 80)
         side = rng.choice(["RL", "RR"])
         form = rng.random()
-        if form < 0.35:
+        polar = g.pole is not None and g.chance(0.4)
+        if polar:
+            # Wave Y (T018): the polar forms, the contour point about the pole CC.
+            where = "PR%s PA%s" % (g.num(abs(g.coord(5, 40))), g.num(q(rng.uniform(-180, 180), 1)))
+            kind = rng.choice(["PLT LEN%s" % g.num(abs(g.coord(5, 20))), "PLN LEN%s" % g.num(abs(g.coord(5, 20))), "PLCT R%s" % g.num(abs(g.coord(2, 10))), "PCT CCA%s R%s" % (g.num(Decimal(rng.choice([90, 180]))), g.num(abs(g.coord(2, 10))))])
+            head, _, rest = kind.partition(" ")
+            g.emit("APPR %s %s %s %s F%d" % (head, where, rest, side, rng.randint(100, 900)))
+            g.forget("X", "Y")
+            g.features["appr-dep-polar"] += 1
+        elif form < 0.35:
             g.emit("APPR LT X%s Y%s LEN%s %s F%d" % (g.num(x), g.num(y), g.num(abs(g.coord(5, 20))), side, rng.randint(100, 900)))
         elif form < 0.7:
             g.emit("APPR LCT X%s Y%s R%s %s F%d" % (g.num(x), g.num(y), g.num(abs(g.coord(2, 10))), side, rng.randint(100, 900)))
@@ -1601,7 +1610,10 @@ def klartext_extra(g: Gen) -> bool:
         x2, y2 = g.coord(-80, 80), g.coord(-80, 80)
         g.emit("L X%s Y%s" % (g.num(x2), g.num(y2)))
         dep = rng.random()
-        if dep < 0.5:
+        if polar and dep < 0.5:
+            g.emit("DEP PLCT PR%s PA%s R%s F%d" % (g.num(abs(g.coord(5, 40))), g.num(q(rng.uniform(-180, 180), 1)), g.num(abs(g.coord(2, 10))), rng.randint(100, 900)))
+            g.forget("X", "Y")
+        elif dep < 0.5:
             g.emit("DEP LT LEN%s F%d" % (g.num(abs(g.coord(5, 20))), rng.randint(100, 900)))
             g.forget("X", "Y")
         else:
@@ -2503,7 +2515,7 @@ class GeneratorSelfTest(unittest.TestCase):
             "fanuc-mill": {"line-abs", "line-inc", "arc-centre", "arc-radius", "arc-full", "arc-modal", "helix", "comp-on", "drill", "drill-inc", "expression", "plane-G18", "g53", "g28-inc", "work-offset", "frame", "call", "reset", "plane-in-arc", "arc-one-axis", "loop", "word-order", "trailing-comment", "plus-sign", "leading-zero", "trailing-zero", "blank-after-address"},
             "fanuc-lathe-a": {"line", "arc-centre", "arc-radius", "comp-on", "cycle-pass", "cycle-taper", "thread", "roughing", "corner", "face-to-centre", "g28-uw"},
             "fanuc-lathe-b": {"line", "arc-centre", "arc-radius", "comp-on", "cycle-pass", "thread", "roughing"},
-            "klartext": {"l", "l-inc", "c", "cc-inc", "cr", "lp", "cp", "rnd-chf", "cycle", "call-pos", "blk-form", "ct", "expression", "c-one-axis", "cp-helix", "lp-ipa", "appr-dep", "m89", "reset", "decimal-comma", "unsigned"},
+            "klartext": {"l", "l-inc", "c", "cc-inc", "cr", "lp", "cp", "rnd-chf", "cycle", "call-pos", "blk-form", "ct", "expression", "c-one-axis", "cp-helix", "lp-ipa", "appr-dep", "appr-dep-polar", "m89", "reset", "decimal-comma", "unsigned"},
             "okuma": {"line", "line-inc", "arc-centre", "comp", "arc-l", "expression"},
             "sinumerik-turn": {"line", "arc-centre", "arc-centre-ac", "arc-cr", "comp", "diam-DIAMOF", "diam-DIAM90", "expression"},
             "sinumerik-mill": {"line", "arc-centre", "arc-centre-ac", "arc-cr", "helix", "comp", "mcall", "cycle-call", "machine", "frame", "expression", "reset", "turn", "arc-ar", "rnd-chr", "ct-cip"},

@@ -74,6 +74,8 @@ function tableUnit(dialect: string, code: string, address: string): Unit | undef
   // Rows without a dialect in §8.2 hold wherever the code is defined.
   if (code === 'G4') return address === 'P' ? 'count' : address === 'X' || address === 'U' ? 'dwell' : undefined;
   if (code === 'M98') return address === 'P' || address === 'L' ? 'count' : undefined;
+  // Wave Y (FZ-8): the optional chamfer and corner rounding between two moves, unsigned lengths.
+  if (['G1', 'G2', 'G3'].includes(code) && (address === ',C' || address === ',R')) return 'length';
   // M9 (WP9.5a): the F of a code that cuts a thread is its lead, a feed per revolution
   // whatever the feed mode says, and the database says so (`numberClassOf` rule 1). A tap's
   // F is not a lead (`G84`, `G74`, `G63`): it follows the feed unit in force.
@@ -362,7 +364,9 @@ describe('the lathe database of G-code system A (§8.2)', () => {
     // R is chosen, as the Klartext CR and the Sinumerik CR= do.
     for (const dialect of FANUC_DIALECTS) {
       for (const code of ['G2', 'G3']) {
-        expect(entry(dialect, code)?.params, `${dialect} ${code}`).toEqual([expect.objectContaining({ address: 'R', lengthAlong: 'plane' })]);
+        // Wave Y (FZ-8): followed by the corner words ,C and ,R, which are no radius of the arc.
+        expect(entry(dialect, code)?.params?.[0], `${dialect} ${code}`).toEqual(expect.objectContaining({ address: 'R', lengthAlong: 'plane' }));
+        expect(entry(dialect, code)?.params?.slice(1).map((p) => p.address), `${dialect} ${code}`).toEqual([',C', ',R']);
         expect((entry(dialect, code) as (CodeEntry & { review?: string }) | undefined)?.review, `${dialect} ${code}`).toBe('pending');
       }
     }

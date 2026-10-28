@@ -87,8 +87,9 @@ class ExtractionTest(unittest.TestCase):
 
     def test_the_unknown_kinds_are_the_extents_finding_kinds(self) -> None:
         # `rotary` and `selection` stay the extents' own: the held rotary positions and a
-        # selection without the lines above it are not questions of the path.
-        own = [k for k in extents.KINDS if k not in ("rotary", "selection")]
+        # selection without the lines above it are not questions of the path; nor is `call`
+        # (Wave Y, T110), a subprogram call the extents' walk does not follow.
+        own = [k for k in extents.KINDS if k not in ("rotary", "selection", "call")]
         self.assertEqual(sorted(_nc_path.UNKNOWN_KINDS), sorted(own))
 
     def test_the_number_helpers(self) -> None:
