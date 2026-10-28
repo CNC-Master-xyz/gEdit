@@ -49,6 +49,12 @@
     isMac: boolean,
     /** The keys a command was registered with; a row whose key differs from it is marked `changed`. */
     declared?: (id: string) => CommandDef['keys'],
+    /**
+     * Has the user an entry for this command on this platform? A key can differ from the declared
+     * one without the user having set it (a default lost to a user key on the same keys); such a row
+     * is not `changed`. Omitted: every difference counts.
+     */
+    userSet?: (id: string) => boolean,
   ): ShortcutRow[] {
     const label = (spec: string | undefined): string | undefined => {
       if (!spec) return undefined;
@@ -63,7 +69,7 @@
       const row: ShortcutRow = { id: def.id, title: def.title, keys };
       if (declared) {
         const builtIn = resolveKeys(declared(def.id), isMac);
-        if (resolveKeys(def.keys, isMac) !== builtIn) {
+        if (resolveKeys(def.keys, isMac) !== builtIn && (userSet === undefined || userSet(def.id))) {
           row.changed = true;
           const builtInLabel = label(builtIn);
           if (builtInLabel) row.builtIn = builtInLabel;
@@ -118,8 +124,11 @@
 
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { get } from 'svelte/store';
   import Modal from '$lib/components/common/Modal.svelte';
   import { commands } from '$lib/app/registry/commands';
+  import { userKeys } from '$lib/app/keys/userKeys';
+  import { bindingOf, valueFor, type KeyPlatform } from '$lib/core/keys/userKeys';
   import { modals } from '$lib/app/modals';
   import { t } from '$lib/i18n';
   import { isMacPlatform } from '$lib/utils/platform';
@@ -138,7 +147,17 @@
   let input = $state<HTMLInputElement | undefined>(undefined);
 
   // The registry does not change while a modal is open, so one snapshot is enough.
-  const rows = shortcutRows(commands.list(), isMacPlatform(), (id) => commands.defaultKeys(id));
+  const bindings = get(userKeys.state).bindings;
+  const platform: KeyPlatform = isMacPlatform() ? 'mac' : 'other';
+  const rows = shortcutRows(
+    commands.list(),
+    isMacPlatform(),
+    (id) => commands.defaultKeys(id),
+    (id) => {
+      const entry = bindingOf(bindings, id);
+      return entry !== undefined && valueFor(entry, platform) !== undefined;
+    },
+  );
 
   /** Closes this dialog and opens Settings on the Keyboard page (one modal at a time). */
   async function openKeyboardPage(): Promise<void> {

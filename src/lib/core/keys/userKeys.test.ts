@@ -111,8 +111,8 @@ describe('parseUserKeys (rule 3)', () => {
   });
 
   it('an empty file or one without bindings is no overrides and no problem', () => {
-    expect(parseUserKeys({})).toEqual({ bindings: {}, problems: [] });
-    expect(parseUserKeys({ $version: 1 })).toEqual({ bindings: {}, problems: [] });
+    expect(parseUserKeys({})).toEqual({ bindings: {}, problems: [], dropped: {} });
+    expect(parseUserKeys({ $version: 1 })).toEqual({ bindings: {}, problems: [], dropped: {} });
   });
 
   it('a file that is not an object, or bindings that is not an object, costs everything with one problem', () => {
@@ -286,6 +286,34 @@ describe('serializeUserKeys and setKeyFor', () => {
   it('what serialize writes, parse reads back', () => {
     const bindings = { a: 'Mod+K', b: null, c: { mac: 'Mod+J' }, d: { other: null } };
     expect(parseUserKeys(serializeUserKeys(bindings)).bindings).toEqual(bindings);
+  });
+
+  // CODE-6: the raw entry of what the reader dropped can be written back.
+  it('answers the raw entry of every command the reader dropped something from, and writes it back while the command is unchanged', () => {
+    const raw = { bad: 'Mod+Shft+K', half: { mac: 'Mod+Shft+J', other: 'Mod+J' }, fine: 'Mod+K', num: 5 };
+    const read = parseUserKeys({ $version: 1, bindings: raw });
+    expect(read.dropped).toEqual({ bad: 'Mod+Shft+K', half: raw.half, num: 5 });
+    expect(serializeUserKeys(read.bindings, { read: read.bindings, dropped: read.dropped })).toEqual({
+      bindings: { half: raw.half, fine: 'Mod+K', bad: 'Mod+Shft+K', num: 5 },
+    });
+    // Without `keep` nothing comes back (the old behaviour).
+    expect(serializeUserKeys(read.bindings)).toEqual({ bindings: { half: { other: 'Mod+J' }, fine: 'Mod+K' } });
+  });
+
+  it('does not write the raw entry of a command whose binding changed since the read, or that was removed', () => {
+    const read = parseUserKeys({ $version: 1, bindings: { half: { mac: 'Mod+Shft+J', other: 'Mod+J' }, bad: 'Mod+Shft+K' } });
+    const keep = { read: read.bindings, dropped: read.dropped };
+    expect(serializeUserKeys({ half: { other: 'Mod+H' } }, keep)).toEqual({ bindings: { half: { other: 'Mod+H' }, bad: 'Mod+Shft+K' } });
+    expect(serializeUserKeys({}, keep)).toEqual({ bindings: { bad: 'Mod+Shft+K' } });
+    // A command the reader dropped whole and the user has now bound is the user's.
+    expect(serializeUserKeys({ half: { other: 'Mod+J' }, bad: 'Mod+K' }, keep)).toEqual({
+      bindings: { half: { mac: 'Mod+Shft+J', other: 'Mod+J' }, bad: 'Mod+K' },
+    });
+  });
+
+  it('never rewrites __proto__ and drops nothing silently past the cap', () => {
+    const read = parseUserKeys(JSON.parse('{"bindings":{"__proto__":"x","ok":"Mod+K"}}'));
+    expect(Object.keys(read.dropped)).toEqual([]);
   });
 
   it('setKeyFor binds one platform and keeps the other as it was', () => {

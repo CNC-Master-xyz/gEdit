@@ -66,11 +66,20 @@ vi.mock('$lib/stores/documents', () => {
   return { docs: { active, setActive: (v: DocMeta | null) => active.set(v) } };
 });
 
+// The package list the menu takes its captions from (`userConfig.packages`, refreshed on every load).
+vi.mock('$lib/app/userConfig', async () => {
+  const { writable } = await import('svelte/store');
+  return { userConfig: { packages: writable(null) } };
+});
+
 const ScriptsMenu = (await import('./ScriptsMenu.svelte')).default;
 const { commands, resetCommandsForTest } = await import('$lib/app/registry/commands');
 const { pythonStatus, resetScriptsForTest, scriptList, scriptListError } = await import(
   '$lib/stores/scripts'
 );
+const { userConfig } = (await import('$lib/app/userConfig')) as unknown as {
+  userConfig: { packages: { set(v: unknown): void } };
+};
 const { docs } = (await import('$lib/stores/documents')) as unknown as {
   docs: { setActive(v: DocMeta | null): void };
 };
@@ -118,6 +127,7 @@ function registerRun(id: string, enabled: boolean): void {
 const menu = (): string => render(ScriptsMenu).body;
 
 beforeEach(() => {
+  userConfig.packages.set(null);
   resetScriptsForTest();
   resetCommandsForTest();
   docs.setActive({ id: 'd1', profileId: 'fanuc-gcode' } as DocMeta);
@@ -281,5 +291,33 @@ describe('the scripts of a package', () => {
     ]);
     const html = render(await Own()).body;
     expect(html.match(/data-testid="scripts-group"/g)).toHaveLength(2);
+  });
+});
+
+// CODE-7 (P4g review): the captions came from a one-off `packages_list` call, so a renamed package
+// kept its old caption after Packages > Reload.
+describe('the caption of a package section', () => {
+  const Own = async () => (await import('./OwnScriptsMenu.svelte')).default;
+  const info = (name: string, title: string) => ({ name, title });
+
+  beforeEach(() => {
+    scriptList.set([entry('pkg-shop-a:facing.py', { meta: meta({ name: 'Facing' }), editable: false })]);
+  });
+
+  it('is the display name of the package list the configuration holds, and follows a new list', async () => {
+    userConfig.packages.set({ folder: '/c/packages', packages: [info('shop-a', 'Shop A tools')], problems: [] });
+    const html = render(await Own()).body;
+    expect(html).toContain('Shop A tools');
+    expect(html).not.toContain('>shop-a<');
+    userConfig.packages.set({ folder: '/c/packages', packages: [info('shop-a', 'Shop A, new name')], problems: [] });
+    const again = render(await Own()).body;
+    expect(again).toContain('Shop A, new name');
+    expect(again).not.toContain('Shop A tools');
+  });
+
+  it('is the folder name while no list is known, or when the package has no title', async () => {
+    expect(render(await Own()).body).toContain('>shop-a<');
+    userConfig.packages.set({ folder: '/c/packages', packages: [info('shop-a', '  ')], problems: [] });
+    expect(render(await Own()).body).toContain('>shop-a<');
   });
 });

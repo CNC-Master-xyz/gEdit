@@ -65,6 +65,11 @@ export interface KeyProblem {
 export interface ParsedUserKeys {
   bindings: UserBindings;
   problems: KeyProblem[];
+  /**
+   * The raw entry (as the file has it) of every command id that lost an entry or a member to a
+   * problem, so a hand-written typo is not deleted by the next save (`serializeUserKeys`).
+   */
+  dropped: Record<string, unknown>;
 }
 
 /**
@@ -211,15 +216,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export function parseUserKeys(raw: unknown): ParsedUserKeys {
   const bindings: UserBindings = {};
   const problems: KeyProblem[] = [];
+  const dropped: Record<string, unknown> = {};
   if (!isRecord(raw)) {
     problems.push({ path: 'bindings', reason: 'wrongType', message: `The key file has to hold an object, not ${kindOf(raw)}.` });
-    return { bindings, problems };
+    return { bindings, problems, dropped };
   }
   const entries = raw.bindings;
-  if (entries === undefined) return { bindings, problems };
+  if (entries === undefined) return { bindings, problems, dropped };
   if (!isRecord(entries)) {
     problems.push({ path: 'bindings', reason: 'wrongType', message: `"bindings" has to be an object, not ${kindOf(entries)}.` });
-    return { bindings, problems };
+    return { bindings, problems, dropped };
   }
 
   const ids = Object.keys(entries);
@@ -234,13 +240,16 @@ export function parseUserKeys(raw: unknown): ParsedUserKeys {
     const path = `bindings.${shortId(id)}`;
     if (id.length === 0 || id.length > MAX_COMMAND_ID_CHARS || id === '__proto__') {
       problems.push({ path, reason: 'badId', message: 'The command id is empty or too long.' });
+      if (id !== '__proto__') dropped[id] = entries[id];
       continue;
     }
     const value = entries[id];
+    const before = problems.length;
     const kept = readEntry(value, path, problems);
     if (kept !== undefined) bindings[id] = kept;
+    if (problems.length > before) dropped[id] = value;
   }
-  return { bindings, problems };
+  return { bindings, problems, dropped };
 }
 
 /** One entry; `undefined` when nothing of it survives. */
@@ -390,11 +399,25 @@ export function mergeKeys(defs: readonly CommandDef[], bindings: UserBindings, p
   return { platform, keys, conflicts };
 }
 
+/** Two entries of the same command say the same (both missing counts). */
+export function sameEntry(a: UserKeyValue | undefined, b: UserKeyValue | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return PLATFORMS.every((platform) => valueFor(a, platform) === valueFor(b, platform));
+}
+
 /**
  * The text of `keybindings.json` for these bindings (without `$version`, which Rust stamps). An
  * entry that says nothing is left out; a pair with one key on both platforms becomes that key.
+ *
+ * `keep` (the answer of `parseUserKeys` for the file as it was read) puts back the raw entry of a
+ * command the reader dropped something from (a typo such as `Mod+Shft+K`), as long as `bindings`
+ * still holds for that command what the reader kept: the user did not change it, so the hand-written
+ * text is not lost by an edit of another command.
  */
-export function serializeUserKeys(bindings: UserBindings): Record<string, unknown> {
+export function serializeUserKeys(
+  bindings: UserBindings,
+  keep?: { read: UserBindings; dropped: Readonly<Record<string, unknown>> },
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const id of Object.keys(bindings)) {
     const value = bindings[id];
@@ -406,6 +429,11 @@ export function serializeUserKeys(bindings: UserBindings): Record<string, unknow
     if (mac === undefined && other === undefined) continue;
     if (mac !== undefined && other !== undefined && mac === other) out[id] = mac;
     else out[id] = { ...(mac === undefined ? {} : { mac }), ...(other === undefined ? {} : { other }) };
+  }
+  if (keep) {
+    for (const id of Object.keys(keep.dropped)) {
+      if (sameEntry(bindingOf(bindings, id), bindingOf(keep.read, id))) out[id] = keep.dropped[id];
+    }
   }
   return { bindings: out };
 }

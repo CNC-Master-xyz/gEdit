@@ -271,6 +271,31 @@
     return values;
   }
 
+  /**
+   * The pending values after the live settings moved from `before` to `after` (a configuration
+   * import, a reset, a change from another window). A key the user did not touch (its pending
+   * value still equals the value at the last sync) follows the live value, so it is not counted as
+   * the user's edit and Save does not write the old value back over the change. A key the user
+   * edited keeps the edit. Returns `current` itself when nothing moves.
+   */
+  export function rebaseValues(
+    current: Record<string, unknown>,
+    before: Settings,
+    after: Settings,
+    metas: readonly SettingFieldMeta[] = SETTING_FIELDS,
+  ): Record<string, unknown> {
+    let next: Record<string, unknown> | null = null;
+    for (const meta of metas) {
+      if (!meta.dialog) continue;
+      if (!Object.prototype.hasOwnProperty.call(current, meta.key)) continue;
+      if (sameValue(before[meta.key], after[meta.key])) continue;
+      if (!sameValue(current[meta.key], before[meta.key])) continue;
+      next ??= { ...current };
+      next[meta.key] = detach(after[meta.key]);
+    }
+    return next ?? current;
+  }
+
   /** The keys of `metas` put back to their defaults, as a patch for the pending values. */
   export function defaultValues(metas: readonly SettingFieldMeta[]): Record<string, unknown> {
     const values: Record<string, unknown> = {};
@@ -495,6 +520,18 @@
   untrack(() => {
     if (model !== undefined) model.leave = () => askToLeave();
   });
+
+  // The live settings can change while the dialog is open (Configuration > Import, a reset). A
+  // value the user has not edited follows them; an edited one stays (`rebaseValues`).
+  let synced = untrack(() => get(settings.values));
+  $effect(() =>
+    settings.values.subscribe((after) => {
+      untrack(() => {
+        current = rebaseValues(current, synced, after);
+        synced = after;
+      });
+    }),
+  );
 
   const errors = $derived(validateFields(everySpec, current));
   const blocked = $derived(Object.keys(errors).length > 0);
