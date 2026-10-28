@@ -627,9 +627,13 @@ export function createChannelService(deps: ChannelServiceDeps): ChannelServiceIn
     ref: ChannelRef,
     asChannel: (d: DocMeta) => ReturnType<typeof docChannel>,
   ): { doc: DocMeta; by: SelfBy } | null {
+    // Siblings are files of one folder (P4f fix E): an untitled document, or one of another folder, is none.
+    const own = deps.docs.get(id)?.path ?? null;
+    if (own === null) return null;
+    const here = dirOf(own).dir;
     let best: { doc: DocMeta; by: SelfBy; score: number } | null = null;
     for (const d of deps.docs.all()) {
-      if (d.id === id) continue;
+      if (d.id === id || d.path === null || !same(dirOf(d.path).dir, here)) continue;
       const found = asChannel(d);
       if (found === null || found.ref.id !== ref.id) continue;
       let score = 1;
