@@ -1077,6 +1077,28 @@ class LaterVersionTest(unittest.TestCase):
         self.assertEqual(self.errors(result), [])
         self.assertIn("  Q203=+0 ;SURFACE COORDINATE", result["text"].split("\n"))
 
+    def test_t019_cycle95_with_its_contour_between_labels_in_the_scope(self) -> None:
+        # SINUMERIK cycles manual, CYCLE95: NPP names the contour, a subprogram or a section of
+        # the program between two labels ("START:END"). The section in the run moves with it.
+        lines = [
+            "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE", "N10 G18 G90 G95 DIAMON", "N20 T1 D1",
+            "N40 G0 X65 Z2", 'N50 CYCLE95("ANFANG:ENDE",2,0.1,0.2,0.1,0.3,0.25,0.1,9,0,0,0.5)', "N60 G0 X100 Z50", "N70 M30",
+            "ANFANG:", "N80 G1 X20 Z0", "N90 Z-20", "ENDE:",
+        ]
+        text = "\n".join(lines)
+        result = run_inline(text, "sinumerik", {"dz": -1})
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N80 G1 X20 Z-1", result["text"].split("\n"))
+        # A contour in a subprogram stays refused.
+        sub = text.replace('"ANFANG:ENDE"', '"KONTUR1"')
+        self.assertEqual(self.errors(run_inline(sub, "sinumerik", {"dz": -1})), [(5, "cycle-position")])
+        # A label that is not in the run, or one written twice.
+        self.assertEqual(self.errors(run_inline(text.replace("ENDE:", "ENDX:"), "sinumerik", {"dz": -1})), [(5, "cycle-position")])
+        self.assertEqual(self.errors(run_inline(text + "\nANFANG:", "sinumerik", {"dz": -1})), [(5, "cycle-position")])
+        # A selection that holds the cycle and not its contour.
+        found = self.errors(run_inline("\n".join(lines[3:7]), "sinumerik", {"dz": -1}, lines[:3]))
+        self.assertIn((5, "cycle-position"), found)
+
 
 if __name__ == "__main__":
     unittest.main()

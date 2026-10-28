@@ -2352,17 +2352,47 @@ def _lathe_reasons(block: _Block, moving: bool, tracker: Any = None) -> List[Tup
     return out
 
 
-def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any) -> None:
-    """Contract item 6: a cycle the database describes, whose every value has a reviewed role."""
+#: Wave Y (T019): the detail of a ``cycle-position`` refusal whose only positions are a contour
+#: written in the program between two labels (``CYCLE95("START:END", …)``), followed by the
+#: labels; a script whose walk sees both labels in its scope takes the refusal back.
+CONTOUR_LABELS = "contour between the labels "
+
+_LABEL_RANGE = re.compile(r'^"\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*"$')
+
+
+def contour_labels(text: str) -> Optional[Tuple[str, str]]:
+    """Wave Y (T019): the two labels of a contour written as a section of the program
+    (``"START:END"``, SINUMERIK cycles manual, CYCLE95 NPP), upper case, or ``None`` for any
+    other form (a subprogram name, a path with block numbers)."""
+    found = _LABEL_RANGE.match(text.strip())
+    return (found.group(1).upper(), found.group(2).upper()) if found is not None else None
+
+
+def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any, op: Optional[Op] = None) -> List[Tuple[str, str]]:
+    """Contract item 6: a cycle the database describes, whose every value has a reviewed role.
+    Returns the contours written as a section of the program between two labels that are the
+    only positions of its own a cycle has here (T019, under a translate only)."""
     data = block.data
+    sections: List[Tuple[str, str]] = []
     for name in block.unknown_family:
         add("cycle-not-reviewed", name)
     for entry in block.judged:
         if not any(gedit_nc.position_of(p) is not None for p in _params(entry)):
             add("cycle-not-reviewed", str(entry.get("code")))
     written = {(t.address or "").upper() for t in block.tokens if t.kind == "word" and t.address and (t.value_text or "")}
+    # T019: the arguments written as a contour between two labels of this program, by their
+    # entry and address (under a translate only): the role loop below judges them.
+    in_program = {
+        (id(r.entry), (r.token.address or "").upper())
+        for r in roles
+        if r.role == "cycle-position" and r.axis is None and isinstance(op, Translate) and contour_labels(r.token.text) is not None
+    }
     for entry in block.judged + block.call_entries:
-        others = [p["address"] for p in _params(entry) if gedit_nc.position_of(p) == "other" and data.axis_of(p["address"]) is None]
+        others = [
+            p["address"]
+            for p in _params(entry)
+            if gedit_nc.position_of(p) == "other" and data.axis_of(p["address"]) is None and (id(entry), p["address"].upper()) not in in_program
+        ]
         # Positions named after an axis are the call's position in this block (`CYCL CALL
         # POS X… Y… Z…`); a call that writes none of them runs at positions kept elsewhere
         # (`CYCL CALL PAT`: a pattern or a point table), which the transform does not move.
@@ -2389,7 +2419,13 @@ def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any) -> None:
     for role in roles:
         entry = role.entry
         if role.role == "cycle-position" and role.axis is None:
-            add("cycle-position", role.token.text.strip())
+            labels = contour_labels(role.token.text) if isinstance(op, Translate) else None
+            if labels is not None:
+                # T019: a contour in this program, moved by the run with its blocks when they
+                # are in its scope (the script's walk decides).
+                sections.append(labels)
+            else:
+                add("cycle-position", role.token.text.strip())
         if entry is None or (entry not in block.judged and entry is not block.defined):
             continue
         address = (role.token.address or "").upper()
@@ -2407,6 +2443,7 @@ def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any) -> None:
                 add("cycle-not-reviewed", role.token.text.strip())
     if any(r.role == "tool-axis" for r in roles) and block.plane != "XY":
         add("cycle-plane", block.plane or "")
+    return sections
 
 
 # ---------------------------------------------------------------------------
@@ -2863,7 +2900,10 @@ def refusals_of(
             if signed:
                 add("chamfer-sign", "%s %s" % (entry.get("code"), signed[0]))
     else:
-        _judge_cycles(block, roles, add)
+        sections = _judge_cycles(block, roles, add, op)
+        if sections and "cycle-position" not in found:
+            # Only when no other position of its own refuses the block (that refusal stays).
+            add("cycle-position", CONTOUR_LABELS + ";".join("%s:%s" % pair for pair in sections))
         # P4a fix B1 (NC-2, plan §7 #311): a pocket, slot or stud turned or placed by an angle or
         # a corner of its own; refused where it is defined and where it is called.
         cycles = list(block.judged)
@@ -3073,6 +3113,7 @@ __all__ = [
     "FK_WORDS",
     "INCREMENTAL_ROLES",
     "INFO",
+    "CONTOUR_LABELS",
     "COUNTER_SPINDLE_VARIANT",
     "COUNTER_SPINDLE_Y_STAYS",
     "LATHE_MIRROR_AXES",
@@ -3097,6 +3138,7 @@ __all__ = [
     "check_arcs",
     "check_chord",
     "contour_flips",
+    "contour_labels",
     "counter_spindle_y_turns",
     "finding_of",
     "is_exact",

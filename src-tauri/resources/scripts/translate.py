@@ -360,6 +360,10 @@ class Run:
         #: v1.2.0 (T021): every call of a definition in the run, by the line of the definition:
         #: (the call's line, whether it is a call at a position that writes the tool axis).
         self.calls_of: Dict[int, List[Tuple[int, bool]]] = {}
+        #: v1.2.0 (T019): the labels of the run's lines (upper case -> their line numbers) and of
+        #: the lines above it, for a contour written between two labels (`CYCLE95("A:B", …)`).
+        self.labels: Dict[str, List[int]] = {}
+        self.labels_above: set = set()
         #: v1.2.0 (NCR-3): the shifted axes on which the tool still stands where the lines above
         #: a selection left it (a point the run does not move), until a block moves it to a
         #: written position on all of them; and the axes a single pass of the selection wrote
@@ -398,6 +402,7 @@ class Run:
         first_number = base_line - len(preceding)
         for offset, text in enumerate(preceding):
             state, step = tracker.line(text, first_number + offset, state, False)
+            self.labels_above.update((t.address or "").upper() for t in step.tokens if t.kind == "label")
             continued = any(t.kind == "continuation" for t in step.tokens)
             self.note_rotary(step, record=False)
             if self.is_selection:
@@ -427,6 +432,9 @@ class Run:
             self.judge(line, step)
             self.call_position(line, step)
             self.note_call(line, step)
+            for token in step.tokens:
+                if token.kind == "label":
+                    self.labels.setdefault((token.address or "").upper(), []).append(number)
             self.note_rotary(step, record=True, line=line)
             self.selection_start(line, step)
             if self.is_selection:
@@ -446,6 +454,7 @@ class Run:
         # tool axis, which the end of a selection reads (a definition the run left as written
         # may be called below it).
         self.settle_called_at()
+        self.settle_contours()
         if self.is_selection:
             # CODE-3: every selection, from line 1 too (a cycle started in it can still be in
             # force below it).
@@ -666,6 +675,29 @@ class Run:
             target.refusals.append(
                 _nc_geom.Refusal(start, "cycle-position", _quote(target.text), "%s:%s:%d:%s" % (CALLED_AT_POSITION, code, call_line, axis))
             )
+
+    def settle_contours(self) -> None:
+        """v1.2.0 (T019): a cycle whose only positions of its own are a contour written in the
+        program between two labels (`CYCLE95("START:END", …)`; SINUMERIK cycles manual, CYCLE95,
+        the contour name) moves with that contour when the run moves its blocks: each label
+        stands once in the run, on no line above it, the first above the last. Its refusal is
+        taken back then; a contour in a subprogram, or one the run does not hold, keeps it."""
+        prefix = _nc_geom.CONTOUR_LABELS
+        for line in self.lines:
+            kept = []
+            for refusal in line.refusals:
+                if refusal.reason == "cycle-position" and refusal.detail.startswith(prefix) and self.labels_in_run(refusal.detail[len(prefix):]):
+                    continue
+                kept.append(refusal)
+            line.refusals = kept
+
+    def labels_in_run(self, detail: str) -> bool:
+        for pair in detail.split(";"):
+            first, _, last = pair.partition(":")
+            a, b = self.labels.get(first, []), self.labels.get(last, [])
+            if len(a) != 1 or len(b) != 1 or first in self.labels_above or last in self.labels_above or a[0] >= b[0]:
+                return False
+        return True
 
     def calls_at_positions(self, start: int) -> bool:
         """v1.2.0 (T021): every call of the definition on line ``start`` is a call at a position
