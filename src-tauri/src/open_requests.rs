@@ -27,6 +27,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri_plugin_fs::FsExt;
 
 use crate::{paths, state};
 
@@ -210,17 +211,68 @@ fn candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
-/// What the checks kept (canonical paths of existing regular files, in order, no duplicates) and
-/// how many arguments they refused or ignored.
+/// What the checks kept and how many arguments they refused or ignored. The files are existing
+/// regular files, in order, with no duplicates (two spellings of one file count once).
+///
+/// `paths` are delivered to the webview as the argument wrote them: absolute, with `.` segments
+/// taken out, not resolved. A machine folder is matched by its text, so the spelling the user
+/// double-clicked (a mapped drive, a link) must reach the rules unchanged. `canonical` holds the
+/// resolved path of each, at the same index; both are granted.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Checked {
     pub paths: Vec<PathBuf>,
+    pub canonical: Vec<PathBuf>,
     pub refused: u32,
 }
 
+/// Windows prefixes that name a device or an object namespace, not a file (S7, item 4). Platform
+/// independent text rules; the caller applies them only on Windows. Refused: `\\.\` (devices and
+/// named pipes), `\??\` (the object namespace) and `\\?\` (verbatim) unless it is `\\?\X:\` or
+/// `\\?\UNC\`. A plain `\\server\share` path stays allowed (DNC shares). `/` counts as `\`.
+pub fn is_device_prefix(arg: &str) -> bool {
+    let text = arg.replace('/', "\\");
+    if text.starts_with("\\??\\") || text.starts_with("\\\\.\\") {
+        return true;
+    }
+    let Some(rest) = text.strip_prefix("\\\\?\\") else {
+        return false;
+    };
+    let bytes = rest.as_bytes();
+    let drive =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\';
+    let unc = rest
+        .get(..4)
+        .is_some_and(|head| head.eq_ignore_ascii_case("UNC\\"));
+    !(drive || unc)
+}
+
+/// The spelling an argument wrote: absolute, `.` and doubled separators taken out. A path with a
+/// `..` is delivered resolved (`canonical`): taking `..` out by text would name another file
+/// when a folder before it is a link.
+fn written_spelling(wanted: &Path, canonical: &Path) -> PathBuf {
+    if wanted
+        .components()
+        .any(|part| matches!(part, Component::ParentDir))
+    {
+        return canonical.to_path_buf();
+    }
+    let plain = paths::plain(wanted);
+    let written: PathBuf = plain.components().collect();
+    if written.to_str().is_some() {
+        written
+    } else {
+        canonical.to_path_buf()
+    }
+}
+
 /// One argument that passed the text rules: resolved, an existing regular file, not `state.json`
-/// (S7, item 4). `None` when any step fails.
-fn check_one(arg: &str, cwd: Option<&Path>, state_file: &Path) -> Option<PathBuf> {
+/// (S7, item 4). Answers the written spelling and the canonical path; `None` when any step fails.
+fn check_one(arg: &str, cwd: Option<&Path>, state_file: &Path) -> Option<(PathBuf, PathBuf)> {
+    // Device and namespace prefixes are refused before the file system is asked: resolving them
+    // would already open a pipe or a device.
+    if cfg!(windows) && is_device_prefix(arg) {
+        return None;
+    }
     let wanted = candidate(arg, cwd)?;
     // A DOS device name is not a file on Windows, and opening it could block.
     if cfg!(windows)
@@ -241,7 +293,8 @@ fn check_one(arg: &str, cwd: Option<&Path>, state_file: &Path) -> Option<PathBuf
     if state::is_state_file(&canonical, state_file) {
         return None;
     }
-    Some(canonical)
+    let written = written_spelling(&wanted, &canonical);
+    Some((written, canonical))
 }
 
 /// Applies S7 to the arguments of one hand-over (the executable is already taken off). `cwd` is
@@ -270,8 +323,11 @@ pub fn check_arguments(args: &[String], cwd: Option<&str>, state_file: &Path) ->
                 .as_deref()
         };
         match check_one(arg, dir, state_file) {
-            Some(path) if checked.paths.contains(&path) => {}
-            Some(path) => checked.paths.push(path),
+            Some((_, canonical)) if checked.canonical.contains(&canonical) => {}
+            Some((written, canonical)) => {
+                checked.paths.push(written);
+                checked.canonical.push(canonical);
+            }
             None => checked.refused = checked.refused.saturating_add(1),
         }
     }
@@ -332,6 +388,23 @@ pub fn deliver_granted<R: Runtime>(app: &AppHandle<R>, paths: Vec<String>, refus
     raise && raise_main_window(app)
 }
 
+/// Grants each checked file to the fs scope, by its canonical path and by the spelling that is
+/// delivered (the scope may be asked for either). Answers the texts to deliver: the written
+/// spellings, in order.
+pub fn grant_checked(scope: &tauri::fs::Scope, checked: &Checked) -> Vec<String> {
+    let mut texts = Vec::with_capacity(checked.paths.len());
+    for (written, canonical) in checked.paths.iter().zip(&checked.canonical) {
+        state::grant_in(scope, canonical);
+        if written != canonical {
+            state::grant_in(scope, written);
+        }
+        if let Some(text) = written.to_str() {
+            texts.push(text.to_owned());
+        }
+    }
+    texts
+}
+
 /// The whole of S7 for one hand-over: check, grant each file, deliver. Blocking (the file system
 /// may be a share that has gone away): callers run it off the plugin's and the main thread.
 fn handle(app: &AppHandle, args: &[String], cwd: Option<&str>, already_refused: u32) {
@@ -341,13 +414,7 @@ fn handle(app: &AppHandle, args: &[String], cwd: Option<&str>, already_refused: 
         return;
     };
     let checked = check_arguments(args, cwd, &dirs.state_file());
-    let mut texts = Vec::with_capacity(checked.paths.len());
-    for path in &checked.paths {
-        state::grant_file(app, path);
-        if let Some(text) = path.to_str() {
-            texts.push(text.to_owned());
-        }
-    }
+    let texts = grant_checked(&app.fs_scope(), &checked);
     deliver_granted(app, texts, checked.refused.saturating_add(already_refused));
 }
 
@@ -647,7 +714,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_link_is_delivered_as_the_file_it_points_to_and_a_fifo_is_refused() {
+    fn a_link_is_delivered_as_written_and_resolved_for_the_grant_and_a_fifo_is_refused() {
         let root = scratch("links");
         let target = root.join("real.nc");
         fs::write(&target, "x").unwrap();
@@ -656,7 +723,8 @@ mod tests {
         let fifo = root.join("pipe.nc");
         let made = std::process::Command::new("mkfifo").arg(&fifo).status();
         let checked = check(&[text(&link), text(&fifo)], None, &root);
-        assert_eq!(checked.paths, vec![target]);
+        assert_eq!(checked.paths, vec![link]);
+        assert_eq!(checked.canonical, vec![target]);
         // Only counted when the fifo could be made here.
         assert_eq!(checked.refused, u32::from(made.is_ok_and(|s| s.success())));
         // A link to the state file is the state file.
@@ -668,6 +736,93 @@ mod tests {
             check(&[text(&state_link)], None, &root).paths,
             Vec::<PathBuf>::new()
         );
+    }
+
+    /// CODE-1: a folder reached through a link (a mapped drive on Windows) is delivered under the
+    /// spelling that was opened, so a machine folder written the same way still matches it. The
+    /// canonical path is kept for the grant, and two spellings of one file count once.
+    #[cfg(unix)]
+    #[test]
+    fn the_written_spelling_is_delivered_and_the_resolved_one_is_kept_for_the_grant() {
+        let root = scratch("written");
+        fs::create_dir_all(root.join("real").join("L1")).unwrap();
+        let file = root.join("real").join("L1").join("a.nc");
+        fs::write(&file, "x").unwrap();
+        let mapped = root.join("Z");
+        std::os::unix::fs::symlink(root.join("real"), &mapped).unwrap();
+        let written = mapped.join("L1").join("a.nc");
+        let checked = check(&[text(&written)], None, &root);
+        assert_eq!(checked.paths, vec![written.clone()]);
+        assert_eq!(checked.canonical, vec![file.clone()]);
+        assert_eq!(checked.refused, 0);
+
+        // `.` segments and doubled separators are taken out; the folder stays as written.
+        let dotted = format!("{}/./L1//./a.nc", text(&mapped));
+        assert_eq!(check(&[dotted], None, &root).paths, vec![written.clone()]);
+
+        // A relative argument is joined to the working folder and keeps its spelling.
+        let relative = check(&["Z/L1/a.nc".to_owned()], Some(&text(&root)), &root);
+        assert_eq!(relative.paths, vec![written.clone()]);
+
+        // With a `..` the text would name another file when a folder before it is a link: that
+        // one is delivered resolved.
+        let climbing = format!("{}/L1/../L1/a.nc", text(&mapped));
+        let resolved = check(&[climbing], None, &root);
+        assert_eq!(resolved.paths, vec![file.clone()]);
+
+        // Both spellings of one file are one file.
+        let twice = check(&[text(&written), text(&file)], None, &root);
+        assert_eq!(twice.paths, vec![written.clone()]);
+        assert_eq!(twice.refused, 0);
+
+        // The grant covers the resolved path and the delivered one, and delivers the written text.
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_fs::init())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let scope = app.fs_scope();
+        assert!(!scope.is_allowed(&file));
+        let texts = grant_checked(&scope, &checked);
+        assert_eq!(texts, vec![text(&written)]);
+        assert!(scope.is_allowed(&file));
+        assert!(scope.is_allowed(&written));
+        assert!(!scope.is_allowed(root.join("real").join("L1").join("b.nc")));
+    }
+
+    /// SEC-2: the prefixes that name a device or the object namespace are told apart by text, on
+    /// every platform; a plain share path and the two ordinary verbatim forms pass.
+    #[test]
+    fn device_and_namespace_prefixes_are_told_apart_by_text() {
+        for refused in [
+            r"\\.\pipe\x",
+            r"\\.\PhysicalDrive0",
+            r"//./pipe/x",
+            r"\\?\GLOBALROOT\Device\x",
+            r"\\?\Volume{1234}\a.nc",
+            r"\\?\pipe\x",
+            r"\\?\C:",
+            r"\\?\UNCx\a",
+            r"\\?\",
+            r"\??\C:\Windows\x.nc",
+            r"\??\UNC\h\s\a.nc",
+        ] {
+            assert!(is_device_prefix(refused), "{refused}");
+        }
+        for allowed in [
+            r"\\?\C:\dnc\a.nc",
+            r"\\?\c:\a.nc",
+            r"\\?\UNC\server\share\a.nc",
+            r"\\?\unc\server\share\a.nc",
+            r"\\server\share\a.nc",
+            r"C:\dnc\a.nc",
+            r"\\.hidden\share\a.nc",
+            "/tmp/a.nc",
+            "part.nc",
+            "",
+            "\u{e4}\u{e4}\u{e4}\u{e4}\u{e4}",
+        ] {
+            assert!(!is_device_prefix(allowed), "{allowed}");
+        }
     }
 
     #[test]
