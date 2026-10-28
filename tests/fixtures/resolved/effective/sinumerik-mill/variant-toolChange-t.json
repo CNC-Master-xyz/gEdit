@@ -1,5 +1,5 @@
 {
-  "codes": "sinumerik",
+  "codes": "sinumerik-mill",
   "machine": {
     "choice": "document",
     "id": "review",
@@ -70,7 +70,7 @@
       "spindle": "S",
       "tool": "T"
     },
-    "codes": "sinumerik",
+    "codes": "sinumerik-mill",
     "compare": {
       "ignoreBlockNumbers": true,
       "ignoreCase": true,

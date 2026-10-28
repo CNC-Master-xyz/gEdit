@@ -2775,19 +2775,23 @@
       "label": "Program start",
       "params": [
         {
+          "charset": "name",
           "help": "Letters and digits, starting with a letter, at most 16. Writes the header line $NAME.MIN%; leave empty for none.",
           "id": "file",
           "label": "File name for the tape header",
+          "maxLength": 16,
           "prefix": "$",
           "suffix": ".MIN%",
           "type": "text",
           "uppercase": true
         },
         {
+          "charset": "letters-digits",
           "default": "1001",
           "help": "At most four letters or digits after O; leave empty for none.",
           "id": "prog",
           "label": "Program name (O)",
+          "maxLength": 4,
           "prefix": "O",
           "type": "text",
           "uppercase": true
@@ -3237,10 +3241,12 @@
       "label": "LAP roughing and finishing (G85, G87)",
       "params": [
         {
+          "charset": "name",
           "default": "NLAP1",
           "help": "N followed by at most four letters or digits, for example NLAP1; the same in all three places. The form offers a name the program does not use yet.",
           "id": "name",
           "label": "Contour name",
+          "maxLength": 5,
           "required": true,
           "type": "text",
           "uppercase": true

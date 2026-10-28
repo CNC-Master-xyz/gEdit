@@ -5098,11 +5098,12 @@
   "dialect": "sinumerik",
   "templates": [
     {
-      "body": "{{title}}\n{{N}}{{setup}} {{units}}\n{{N}}{{offset}}",
-      "description": "A description, the safe-start line for turning or milling, the units and the work offset.",
+      "body": "{{title}}\n{{N}}G18 G90 G95 DIAMON {{units}}\n{{N}}{{offset}}",
+      "description": "A description, the safe-start line for turning (G18 plane, absolute, feed per revolution, X as a diameter), the units and the work offset.",
       "group": "Program",
       "id": "program-start",
       "label": "Program start",
+      "machineType": "lathe",
       "params": [
         {
           "comment": true,
@@ -5110,23 +5111,6 @@
           "id": "title",
           "label": "Program description",
           "type": "text"
-        },
-        {
-          "choices": [
-            {
-              "label": "Turning: G18, feed per revolution, X as a diameter",
-              "value": "G18 G90 G95 DIAMON"
-            },
-            {
-              "label": "Milling: G17, feed per minute, no radius compensation",
-              "value": "G17 G90 G94 G40"
-            }
-          ],
-          "help": "The turning and the milling profile share this template; choose the line for your machine. Nothing is chosen until you pick one.",
-          "id": "setup",
-          "label": "Machining",
-          "required": true,
-          "type": "choice"
         },
         {
           "choices": [
