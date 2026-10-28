@@ -99,6 +99,23 @@ describe('createPreviewController', () => {
     expect(themeRules(raw, 0).filter((token) => token.endsWith('.fanuc-gcode'))).toEqual([]);
   });
 
+  // CODE-4: each theme definition rebuilds Monaco's colour map and repaints every open editor.
+  it('defines the themes only when the draft’s or the user’s colours changed, not for every keystroke', () => {
+    const { monaco, raw } = fakeMonaco();
+    let user = {};
+    const controller = createPreviewController(monaco, host, { ...sources, userColors: () => user });
+    controller.update(withColors);
+    expect(raw.editor.defineTheme).toHaveBeenCalledTimes(2);
+    controller.update({ ...withColors, name: 'Renamed' } as Profile);
+    controller.update({ ...withColors, name: 'Renamed again' } as Profile);
+    expect(raw.editor.defineTheme).toHaveBeenCalledTimes(2);
+    controller.update({ ...withColors, colors: { dark: { feed: '#ffbb00' } } } as Profile);
+    expect(raw.editor.defineTheme).toHaveBeenCalledTimes(4);
+    user = { dark: { feed: '#00ccff' } };
+    controller.update({ ...withColors, colors: { dark: { feed: '#ffbb00' } } } as Profile);
+    expect(raw.editor.defineTheme).toHaveBeenCalledTimes(6);
+  });
+
   it('gives the editor a new sample only when the program differs, so a typed draft does not reset the view', () => {
     const { monaco, editor } = fakeMonaco();
     const controller = createPreviewController(monaco, host, sources);

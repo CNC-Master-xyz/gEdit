@@ -320,6 +320,39 @@ let previewColors: ProfileColors | null = null;
  */
 export function previewRoleColors(palette: ProfileColors | null): void {
   previewColors = palette;
+  if (palette === null) {
+    // Cancel / Save: put the saved colours back at once, and drop a draft that was waiting.
+    cancelPreviewFrame();
+    showPreviewColors();
+    return;
+  }
+  // A colour picker fires `input` many times a second; each theme definition makes Monaco rebuild
+  // its colour map and repaint every open editor, so the drafts of one frame share one definition.
+  if (previewFrame !== null) return;
+  previewFrame = frameScheduler()(() => {
+    previewFrame = null;
+    showPreviewColors();
+  });
+}
+
+/** The handle of the animation frame that will define the themes with the newest draft, if one is waiting. */
+let previewFrame: number | null = null;
+
+function frameScheduler(): (run: () => void) => number {
+  return typeof requestAnimationFrame === 'function'
+    ? (run) => requestAnimationFrame(run)
+    : (run) => setTimeout(run, 16) as unknown as number;
+}
+
+function cancelPreviewFrame(): void {
+  if (previewFrame === null) return;
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(previewFrame);
+  else clearTimeout(previewFrame);
+  previewFrame = null;
+}
+
+/** Defines the themes with the colours `previewColors` holds now (or the saved ones). */
+function showPreviewColors(): void {
   if (lastRegistration === null) return;
   try {
     refreshThemes(lastRegistration.monaco, lastRegistration.sources, lastRegistration.sources.list(), false);
