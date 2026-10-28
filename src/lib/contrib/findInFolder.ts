@@ -168,6 +168,9 @@ function newId(): string {
 /** Runs one search to its end and shows the report. Never rejects. */
 export function startSearch(form: FolderForm, prepared: Prepared): Running {
   const id = newId();
+  // A search Rust refuses (busy, stuck) sent no file, so the earlier rows keep their grant: the
+  // previous id comes back below when the walk is rejected.
+  const previousSearch = latestSearch;
   latestSearch = id;
   let halted = false;
   let stoppedByUser = false;
@@ -277,6 +280,7 @@ export function startSearch(form: FolderForm, prepared: Prepared): Running {
     halted = true;
 
     if (failure !== null) {
+      if (latestSearch === id) latestSearch = previousSearch;
       status.show(t('findInFolder.failed'), { error: true, detail: failure instanceof Error ? failure.message : String(failure) });
       return;
     }
@@ -329,14 +333,26 @@ export function reportOf(form: FolderForm, prepared: Prepared, rows: FolderRow[]
   return { title, ...(message === '' ? {} : { message }), columns, rows: rows as unknown as Record<string, unknown>[], openRow };
 }
 
+/** The row's file under the folder as it was picked: the folder text, its separator, the relative path (`/` parts). */
+function writtenPath(root: string, rel: string, fallback: string): string {
+  if (root === '' || rel === '') return fallback;
+  const sep = root.includes('\\') ? '\\' : '/';
+  const base = root.replace(/[\\/]+$/, '');
+  const tail = sep === '\\' ? rel.replace(/\//g, '\\') : rel;
+  return base === '' ? `${sep}${tail}` : `${base}${sep}${tail}`;
+}
+
 /** What a click on a row does: grant the one file (only if the last search sent it), open it (or find the open tab) and show the line. */
 export async function openRow(row: Record<string, unknown>): Promise<void> {
   const path = typeof row.path === 'string' ? row.path : '';
   const root = typeof row.root === 'string' ? row.root : '';
   if (path === '') return;
   const line = typeof row.line === 'number' && Number.isFinite(row.line) && row.line >= 1 ? Math.floor(row.line) : null;
+  // The file as the user's folder spells it: the folder rules compare the text of the path, so
+  // the row opens like File > Open would (a mapped drive stays `Z:\DNC`, not the share Rust saw).
+  const written = writtenPath(root, typeof row.file === 'string' ? row.file : '', path);
   // An open document needs no grant: it was opened with its own.
-  let id = docs.byPath(path)?.id;
+  let id = (docs.byPath(path) ?? docs.byPath(written))?.id;
   if (id === undefined) {
     // Only the last search's files open: a row of an earlier search says so and asks nothing of Rust.
     if (typeof row.search === 'string' && row.search !== latestSearch) {
@@ -352,7 +368,7 @@ export async function openRow(row: Record<string, unknown>): Promise<void> {
       });
       return;
     }
-    id = (await files.open([path]))[0];
+    id = (await files.open([written]))[0];
   }
   if (id !== undefined && line !== null) editor.reveal(id, line);
 }

@@ -539,6 +539,41 @@ describe('a click on a row', () => {
     expect(fake.opened).toHaveLength(1);
   });
 
+  it('opens the file under the folder as it was picked, not the share Rust resolved it to (a mapped drive)', async () => {
+    const mapped = { file: 'sub/a.nc', path: '\\\\server\\share\\DNC\\sub\\a.nc', root: 'Z:\\DNC', line: 3 };
+    await finder.openRow(mapped);
+    expect(fake.grants).toEqual([{ root: 'Z:\\DNC', path: '\\\\server\\share\\DNC\\sub\\a.nc' }]);
+    expect(fake.opened).toEqual([['Z:\\DNC\\sub\\a.nc']]);
+  });
+
+  it('joins a root that ends in a separator once, and a folder from / with /', async () => {
+    await finder.openRow({ file: 'a.nc', path: '/private/nc/a.nc', root: '/nc/', line: 1 });
+    await finder.openRow({ file: 'a.nc', path: 'C:\\real\\a.nc', root: 'Z:\\', line: 1 });
+    expect(fake.opened).toEqual([['/nc/a.nc'], ['Z:\\a.nc']]);
+  });
+
+  it('a folder rule written with the mapped drive matches the opened path', async () => {
+    const { machineForPath } = await import('$lib/core/machines/folderRules');
+    const m = [{ id: 'lathe1', name: 'l', profile: 'fanuc-lathe', params: {}, folders: [{ path: 'Z:\\DNC' }] }] as never;
+    await finder.openRow({ file: 'sub/a.nc', path: '\\\\server\\share\\DNC\\sub\\a.nc', root: 'Z:\\DNC', line: 1 });
+    const opened = fake.opened[0][0];
+    expect(machineForPath(opened, m, { caseInsensitive: true })).toMatchObject({ kind: 'machine', machineId: 'lathe1' });
+  });
+
+  it('keeps the earlier rows openable when a later search is refused', async () => {
+    fake.walk = walkOf([file('a.nc', TEXT)]);
+    const first = await search({ query: 'T17', wholeAddress: false });
+    fake.walk = () => Promise.reject(new Error('E_STUCK: a search is still running'));
+    fake.answers.push({ ...FORM });
+    await command.run({ activeDocId: null } as never);
+    await finder.folderSearchIdle();
+    expect(fake.said.at(-1)).toMatchObject({ text: t('findInFolder.failed'), error: true });
+    await finder.openRow(first.rows[0]);
+    expect(fake.said.at(-1)).not.toMatchObject({ text: t('findInFolder.olderSearch', { file: 'a.nc' }) });
+    expect(fake.grants).toHaveLength(1);
+    expect(fake.opened).toHaveLength(1);
+  });
+
   it('ignores a row with no path', async () => {
     await finder.openRow({ file: 'x', line: 1 });
     expect(fake.grants).toHaveLength(0);
