@@ -1650,3 +1650,124 @@ class TestSpeedOnlyToolCallT113(unittest.TestCase):
         states = self.walk(profile, ["1 TOOL CALL 5 Z S1000", "2 TOOL CALL Z S2000", "3 TOOL CALL S2500"])
         self.assertEqual([s["block"]["toolChange"] for s in states], [True, False, False])
         self.assertEqual([(s["tool"] or {}).get("line") for s in states], [1, 1, 1])
+
+
+class TestBlockCodesT137(unittest.TestCase):
+    """T137 (Wave Y): the interpreter finds a block's codes once per line and skips the words no
+    code can start with. The shortcuts must answer what the long way answers, and they must be
+    taken: the call counts below fail when a word under `X` is normalized again or an entry is
+    read again for every block that writes it (a wall-clock budget would flake under load)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from tests.python import lex_fuzz
+
+        cls.lines = lex_fuzz.golden_lines() + list(lex_fuzz.random_lines(20261027, 400))
+        cls.lines += list(lex_fuzz.mutated_lines(20261028, cls.lines, 400))
+
+    def interp(self, profile_id: str):
+        context = helpers.effective_context(profile_id)
+        cp = gedit_nc.compile_profile(context["profile"])
+        return cp, gedit_nc.ModalInterpreter(cp, context["codes"])
+
+    def test_the_block_codes_are_the_written_codes_that_have_an_entry(self) -> None:
+        from tests.python import lex_fuzz
+        from _nc_modal import _written_codes
+
+        for profile_id in lex_fuzz.BUILTIN_IDS:
+            cp, interp = self.interp(profile_id)
+            index = interp._entries
+            state = None
+            for line in self.lines:
+                tokens, state = gedit_nc.tokenize_line(line, cp, state)
+                want = [
+                    (code, index[gedit_nc.normalize_code(code)])
+                    for code, _ in _written_codes(tokens, index)
+                    if gedit_nc.normalize_code(code) in index
+                ]
+                codes, continued = interp._block_codes(tokens)
+                with self.subTest(profile=profile_id, line=line):
+                    self.assertEqual([(code, id(entry)) for code, entry in codes], [(code, id(entry)) for code, entry in want])
+                    self.assertEqual(continued, any(token.kind == "continuation" for token in tokens))
+
+    def test_a_word_entry_is_the_entry_of_the_normalized_code(self) -> None:
+        # The head shortcut holds only for a plain ASCII address with a value that starts
+        # with neither a letter nor a blank; every other spelling takes the long way.
+        codes = [
+            {"code": "G1", "label": "x"}, {"code": "FQ50", "label": "x"}, {"code": "X", "label": "x"},
+            {"code": "ROT", "label": "x"}, {"code": "G83", "label": "x"}, {"code": "ÄB1", "label": "x"},
+        ]
+        from _nc_lex import CompiledProfile
+
+        interp = gedit_nc.ModalInterpreter(CompiledProfile(profile={}), codes)
+        pairs = [
+            ("G", "01"), ("g", "1"), ("G", "1."), ("G", " 83"), ("G", "83 "), ("F", "Q50"), ("F", "q50"), ("FQ", "50"),
+            ("X", ""), ("x", ""), ("X", "1"), ("X", "#1"), ("Y", "1"), ("ROT", ""), ("R", "OT"), ("ROT", "1"),
+            ("Ä", "B1"), ("äb", "1"), ("ÄB", "1"), ("G", " 1"), ("ß", "1"), ("M", "[2]"), ("G", ""),
+        ]
+        for profile_id in ["fanuc-gcode", "heidenhain-klartext", "sinumerik"]:
+            _, other = self.interp(profile_id)
+            pairs += [(code[:1], code[1:]) for code in list(other._entries)[:40]]
+        for address, value in pairs:
+            with self.subTest(address=address, value=value):
+                self.assertIs(interp._word_entry(address, value), interp._entries.get(gedit_nc.normalize_code(address + value)))
+
+    def test_a_word_no_code_starts_with_is_never_normalized(self) -> None:
+        import _nc_modal
+
+        cp, interp = self.interp("fanuc-gcode")
+        lines = ["G1 X1. Y2. Z-3. F800.", "X1.5 Y2.5 Z-3.5", "G1 X2. Y3. Z-4. F800."]
+        asked: List[str] = []
+        original = _nc_modal.normalize_code
+
+        def counting(code: str) -> str:
+            asked.append(code)
+            return original(code)
+
+        _nc_modal.normalize_code = counting
+        self.addCleanup(setattr, _nc_modal, "normalize_code", original)
+        for number, line in enumerate(lines, 1):
+            tokens, _ = gedit_nc.tokenize_line(line, cp)
+            interp.update(tokens, number, gedit_nc.mask_comments(line, cp))
+        self.assertEqual([code for code in asked if code[:1] in "XYZF"], [])
+        self.assertEqual(interp.state["groups"]["motion"]["code"], "G1")
+        self.assertEqual(interp.state["feed"]["valueText"], "800.")
+
+    def test_an_entry_is_read_once_however_often_it_is_written(self) -> None:
+        import _nc_modal
+
+        cp, interp = self.interp("fanuc-gcode")
+        reads: List[Any] = []
+        original = _nc_modal._sets_of
+
+        def counting(entry: Any) -> Any:
+            reads.append(entry.get("code") if isinstance(entry, dict) else None)
+            return original(entry)
+
+        _nc_modal._sets_of = counting
+        self.addCleanup(setattr, _nc_modal, "_sets_of", original)
+        for number in range(1, 6):
+            tokens, _ = gedit_nc.tokenize_line("G1 X%d." % number, cp)
+            interp.update(tokens, number, "")
+        self.assertEqual(reads.count("G1"), 1)
+        self.assertEqual(interp.state["groups"]["motion"], {"code": "G1", "line": 5, "assumed": False, "from": None})
+
+    def test_an_axis_word_never_asks_whether_it_names_the_main_spindle(self) -> None:
+        import _nc_modal
+
+        cp, interp = self.interp("sinumerik")
+        asked: List[str] = []
+        original = _nc_modal.names_main_spindle
+
+        def counting(token: Any, speed: str, main: Any) -> bool:
+            asked.append(token.address)
+            return original(token, speed, main)
+
+        _nc_modal.names_main_spindle = counting
+        self.addCleanup(setattr, _nc_modal, "names_main_spindle", original)
+        for number, line in enumerate(["G1 X10 Z-5 F0.2", "S1=900 S2=500 X20", "SB=300 Z-6"], 1):
+            tokens, _ = gedit_nc.tokenize_line(line, cp)
+            interp.update(tokens, number, gedit_nc.mask_comments(line, cp))
+        self.assertEqual(sorted(a for a in asked if a not in ("F", "S")), ["S1", "S2", "SB"])
+        self.assertEqual(interp.state["speed"]["valueText"], "900")
+        self.assertEqual(interp.state["feed"]["valueText"], "0.2")
