@@ -251,14 +251,15 @@ INFO_TEXT = {
     # Review round (NC-9, D6-4).
     "cycle-r-left": ("drilling R point (Series 15 format)", "drilling R points (Series 15 format)"),
     "tcp-table": ("block under tool centre point control", "blocks under tool centre point control"),
-    # P4h fix round (Q-5): the words of a linear extra axis of the machine.
-    "extra-axis": ("word of an extra axis of the machine", "words of an extra axis of the machine"),
 }
 #: P4h fix round (Q-5): the information row of a linear extra axis of the machine.
 EXTRA_AXIS_TEXT = (
     "%s is an extra axis of the machine, and Translate moves only X, Y and Z, so it left %s as written. "
     "If %s moves along X, Y or Z on this machine, change %s by hand"
 )
+#: The words of a linear extra axis, an information row of this script's own (`OWN_INFO`).
+OWN_INFO["extra-axis"] = (("word of an extra axis of the machine", "words of an extra axis of the machine"), EXTRA_AXIS_TEXT)
+INFO_TEXT["extra-axis"] = OWN_INFO["extra-axis"][0]
 #: At most this many words of one extra axis are named in its row; the rest are counted.
 EXTRA_AXIS_NAMED = 5
 #: Review round (D6-4): the run's sentence when a block it moved stands under tool centre point
