@@ -60,7 +60,7 @@ scenario('p4g-keys', { timeout: 420, files: seed({ 'keybindings.json': json(STAR
   /** The bindings now in the file. */
   const bindings = async () => JSON.parse(await h.disk.read(keysFile)).bindings
   const row = (/** @type {string} */ id) => h.q('keyboard-row', { command: id })
-  const inRow = (/** @type {string} */ id, /** @type {string} */ testId) => row(id)?.querySelector(`[data-testid="${testId}"]`) ?? null
+  const inRow = (/** @type {string} */ id, /** @type {string} */ testId) => /** @type {HTMLElement | null} */ (row(id)?.querySelector(`[data-testid="${testId}"]`) ?? null)
   const press = (/** @type {Parameters<Harness['nativeKeys']>[0]} */ keys) => h.nativeKeys(keys)
 
   // ============================================================ A. the keys in force at start

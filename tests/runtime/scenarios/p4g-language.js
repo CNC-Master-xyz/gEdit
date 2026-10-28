@@ -21,7 +21,7 @@ scenario('p4g-language', { timeout: 240, files: seed({ 'settings.json': json({ $
   const ctx = context(h)
   await ready(h)
   const file = async () => /** @type {any} */ (await h.config.read('settings.json'))
-  const report = () => ctx.settings.report()
+  const report = () => /** @type {any} */ (ctx.settings).report()
 
   h.check('a language tag without a message set is a valid value and is kept', ctx.settings.get('ui.language') === 'de' && report().warnings.length === 0 && report().error === undefined, report())
   h.check('English is in use: the texts are the English ones', ctx.t('common.cancel') === 'Cancel' && ctx.t('settings.title') === 'Settings', ctx.t('settings.title'))
@@ -55,7 +55,7 @@ scenario('p4g-language', { timeout: 240, files: seed({ 'settings.json': json({ $
 scenario('p4g-language-bad', { timeout: 240, files: seed({ 'settings.json': json({ $version: 1, 'ui.language': 'Deutsch!', 'editor.tabWidth': 6 }) }) }, async (h) => {
   const ctx = context(h)
   await ready(h)
-  const report = ctx.settings.report()
+  const report = /** @type {any} */ (ctx.settings).report()
 
   h.check('the app starts although the value is not a language tag', h.q('app-shell')?.dataset.ready === '1')
   h.check('the value is dropped with the usual warning, one warning, and no error', report.warnings.length === 1 && /ui\.language/.test(report.warnings[0]) && report.error === undefined, report)
