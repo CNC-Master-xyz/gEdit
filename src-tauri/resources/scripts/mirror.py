@@ -211,7 +211,7 @@ class Params:
 #: on milling programs only; the mirror's Z mirror also names the single passes (v1.2.0, NCR-3).
 SELECTION_START = (
     "this first move of the selection starts where the lines above the selection leave the "
-    "tool, and that point is not moved with the selection, so an arc, an incremental move or "
+    "tool, and that point is not moved with the selection, so an arc, a move that continues the direction of the block before it (CT, DEP), an incremental move or "
     "(on a lathe) a move without Z, or without Y away from the turning axis, or a turning or "
     "facing pass (which goes back to that point) from there would miss the moved path, and so "
     "would a pass that takes its Z from a block above the selection. Start the selection at a "
