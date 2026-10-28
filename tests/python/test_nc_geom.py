@@ -813,6 +813,10 @@ class HandRolesTest(RolesCases, unittest.TestCase):
 TRANSLATE = _nc_geom.Translate({"X": D(1), "Y": D(1), "Z": D(1)})
 ROTATE = _nc_geom.Rotate((D(0), D(0)), D(90))
 MIRROR = _nc_geom.Mirror((D(0), D(0)), D(90))
+#: Wave Y (T016): the rounding operations, under which a tangential arc or an arc through a
+#: point is still refused.
+ROTATE_30 = _nc_geom.Rotate((D(0), D(0)), D(30))
+MIRROR_30 = _nc_geom.Mirror((D(0), D(0)), D(30))
 LATHE = _nc_geom.LatheZMirror()
 
 
@@ -835,7 +839,7 @@ class ReasonsCases:
         ("rotary-word", "fanuc-gcode", "G90 G17 G21\nG0 X0. Y0. B0.\nG1 X10. B30. F100.", 3, ROTATE),
         ("cycle-position", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 TOOL CALL 1 Z S3000\n2 CYCL DEF 254 CIRCULAR SLOT ~\n  Q216=+50 ~\n  Q217=+50\n3 END PGM P MM", 3, TRANSLATE),
         ("fk-contour", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 TOOL CALL 1 Z S3000\n2 L X+0 Y+0 RL F100\n3 FL LEN 10 AN+0\n4 END PGM P MM", 4, ROTATE),
-        ("arc-tangential", "sinumerik-mill", "G90 G17 G71\nG0 X0 Y0\nCIP X10 Y0 I1=5 J1=5", 3, MIRROR),
+        ("arc-tangential", "sinumerik-mill", "G90 G17 G71\nG0 X0 Y0\nCIP X10 Y0 I1=5 J1=5", 3, MIRROR_30),
         ("arc-unsupported", "okuma-osp", "G90 G18\nG0 X40 Z2\nG2 X50 Z-10 L20", 3, LATHE),
         ("plane", "fanuc-gcode", "G90 G18 G21\nG0 X0. Z0.\nG1 X10. F100.", 3, ROTATE),
         ("lathe-rotate", "fanuc-lathe", "G18 G21\nG0 X40. Z2.", 2, ROTATE),
@@ -871,7 +875,7 @@ class ReasonsCases:
         ("cycle-plane", "fanuc-gcode", "G90 G18 G21\nG0 X0. Y0. Z5.\nG81 X10. Z-5. R2. F100.", 3, TRANSLATE),
         # v1.2.0 (NCR-9b): an empty retract plane is 0, which a Z shift cannot move.
         ("cycle-level-empty", "sinumerik-mill", "G17 G90 G71\nG0 X0 Y0 Z50\nCYCLE81(,0,2,-10)", 3, TRANSLATE),
-        ("arc-tangential", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 L X+0 Y+0 R0 FMAX\n2 CT X+10 Y+10\n3 END PGM P MM", 3, ROTATE),
+        ("arc-tangential", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 L X+0 Y+0 R0 FMAX\n2 CT X+10 Y+10\n3 END PGM P MM", 3, ROTATE_30),
         ("arc-unsupported", "okuma-osp", "G90 G18\nG0 X40 Z2 C0\nG102 X30 C90 L5 F100", 3, TRANSLATE),
         ("swap-unknown", "fanuc-gcode", "G90 G17 G21\nG0 X0. Y0.\nG41.2 D1 G1 X10. Y0. F100.", 3, MIRROR),
         ("pole-unknown", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 L X+0 Y+0 R0 FMAX\n2 LP PR+5 PA+30\n3 END PGM P MM", 3, ROTATE),
@@ -2249,4 +2253,17 @@ class LaterVersionTest(unittest.TestCase):
         # Without the pole the polar contour point is not known.
         nopole = plt.replace("1 CC X+50 Y+50\n", "1 L Z+5 FMAX\n")
         self.assertIn("pole-unknown", self.refusals("heidenhain-klartext", nopole, 4, ROTATE))
+
+    def test_t016_tangential_arcs_and_arcs_through_a_point_turn_under_the_exact_operations(self) -> None:
+        cip = "G90 G17 G71\nG0 X0 Y0\nG1 X5 Y0 F100\nCIP X10 Y0 I1=5 J1=5"
+        ct = "0 BEGIN PGM P MM\n1 L X+0 Y+0 R0 FMAX\n2 L X+5 Y+0 F100\n3 CT X+10 Y+10\n4 END PGM P MM"
+        for op in (ROTATE, MIRROR, _nc_geom.Rotate((D(1), D(2)), D(270)), _nc_geom.Mirror((D(3), D(0)), D(0))):
+            with self.subTest(op=op):
+                self.assertNotIn("arc-tangential", self.refusals("sinumerik-mill", cip, 4, op))
+                self.assertNotIn("arc-tangential", self.refusals("heidenhain-klartext", ct, 4, op))
+        for op in (ROTATE_30, MIRROR_30, _nc_geom.Mirror((D(0), D(0)), D(45))):
+            with self.subTest(op=op):
+                self.assertIn("arc-tangential", self.refusals("sinumerik-mill", cip, 4, op))
+        turning = "G18 G90 G71\nG0 X20 Z2\nG1 X30 Z-5 F0.2\nCT X40 Z-10"
+        self.assertNotIn("arc-tangential", self.refusals("sinumerik", turning, 4, LATHE))
 

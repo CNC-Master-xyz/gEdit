@@ -485,7 +485,8 @@ REASONS = {
     # -- arcs --------------------------------------------------------------------------
     "arc-tangential": (
         TURNING,
-        "a tangential arc or an arc through a point; gEdit cannot check it after the transform",
+        "a tangential arc or an arc through a point; gEdit cannot check it after a turn or a "
+        "mirror that rounds. Turn by 90, 180 or 270 degrees, or mirror in X or Y",
     ),
     "arc-unsupported": (
         ALL_OPS,
@@ -2736,7 +2737,14 @@ def refusals_of(
     if arc is not None and moving:
         code = str(arc.get("code"))
         if code in _nc_path.UNRESOLVED_ARCS:
-            add("arc-tangential", code)
+            # Wave Y (T016): a tangential arc (Klartext `CT`, `CTP`, Sinumerik `CT`) and an arc
+            # through an intermediate point (`CIP`) follow from the path around them: the
+            # tangent of the element before, or the point they pass. Under an exact operation
+            # (a quarter turn, a mirror in an axis, the lathe Z mirror) those turn or reflect
+            # exactly with the path, so the arc is the transformed arc; only a rounding one,
+            # which the arc check cannot follow through such an arc, refuses it.
+            if not is_exact(op):
+                add("arc-tangential", code)
         elif gedit_nc.arc_direction_of(arc) is None and not data.direction_words:
             add("arc-unsupported", code)
         elif gedit_nc.arc_direction_of(arc) is not None and any(

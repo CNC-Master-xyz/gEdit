@@ -397,7 +397,11 @@ class IntegrationGapTest(unittest.TestCase):
             "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE\nN10 G17 G90 G71\nN20 G0 X0 Y0\n"
             "N30 CIP X20 Y0 I1=10 J1=10\nN40 M30"
         )
-        self.assertEqual(self.errors(run_case(SCRIPT, case, text, cx=0, cy=0, angle=90)), [(4, "arc-tangential")])
+        self.assertEqual(self.errors(run_case(SCRIPT, case, text, cx=0, cy=0, angle=30)), [(4, "arc-tangential")])
+        # Wave Y (T016): a quarter turn turns the arc with the path, exactly.
+        result = run_case(SCRIPT, case, text, cx=0, cy=0, angle=90)
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N30 CIP X0 Y20 I1=-10 J1=10", result["text"].split("\n"))
 
 
 #: The top of a synthetic Fanuc milling program, the tool at X5 Y3 (the selections below start under it).

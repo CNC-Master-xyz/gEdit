@@ -529,6 +529,12 @@ class PlaneRun:
         block.arc = arc is not None or any(isinstance(e, _nc_path.Unknown) and e.kind == "arc" for e in step.events)
         if arc is not None and self.swapping:
             block.helix = any(end is not None and start != end for start, end in arc.helix.values())
+        elif block.arc and self.swapping:
+            # Wave Y (T016): an arc the tracker does not compute (a tangential arc, an arc
+            # through a point) that also moves an axis outside the plane is a helix too.
+            plane = ("Z", "X") if self.lathe_z else PLANE
+            rotary = _nc_geom._data(self.tracker).rotary
+            block.helix = any(axis not in plane and axis not in rotary for axis, _ in step.moves)
         return block
 
     def pass_runs(self, step: Any) -> bool:

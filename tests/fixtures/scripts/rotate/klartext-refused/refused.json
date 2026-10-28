@@ -1,5 +1,5 @@
 {
-  "message": "Nothing was changed: 13 blocks cannot be rotated: 2 blocks in a frame, 1 coordinate setting or shift, 1 subprogram or macro call, 1 block with a variable or a calculation, 2 cycles not reviewed, 3 cycles with positions of their own, 1 free contour (FK) block, 1 tangential arc or arc through a point, 1 move around a pole that is not known. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "message": "Nothing was changed: 12 blocks cannot be rotated: 2 blocks in a frame, 1 coordinate setting or shift, 1 subprogram or macro call, 1 block with a variable or a calculation, 2 cycles not reviewed, 3 cycles with positions of their own, 1 free contour (FK) block, 1 move around a pole that is not known. No machine chosen: a word whose reading depends on the machine would refuse the run.",
   "findings": [
     {
       "line": 5,
@@ -12,12 +12,6 @@
       "severity": "error",
       "message": "6 L X+Q1 Y+0 FMAX: a variable or a calculation in a word the transform has to change; gEdit only changes written numbers.",
       "reason": "expression"
-    },
-    {
-      "line": 8,
-      "severity": "error",
-      "message": "7 CT X+10 Y+10: a tangential arc or an arc through a point; gEdit cannot check it after the transform.",
-      "reason": "arc-tangential"
     },
     {
       "line": 10,
