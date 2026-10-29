@@ -76,7 +76,7 @@ scenario('p4-profiles-leave', { timeout: 420 }, async (h) => {
     await h.frame()
     await openForm(h)
     h.check('a change of another tab is free while the form is clean (the Editor tab was left with a changed setting without a question)', (await h.alert.visible()) === null && !!formRoot(h) && !formDirty(h))
-    typeInForm(h, 'name', 'Shop mill changed')
+    await typeInForm(h, 'name', 'Shop mill changed')
     const name = formFileName(h)
     h.check('the form is changed and says which file it is', formDirty(h) && name === 'shop-mill.json', name)
     const kept = async () => !!settingsDialog(h) && h.q('settings-page')?.dataset.category === 'profiles' && formDirty(h) && formValue(h, 'name') === 'Shop mill changed'
@@ -141,7 +141,7 @@ scenario('p4-profiles-leave', { timeout: 420 }, async (h) => {
     const opened = await openSettings(h)
     await openForm(h)
     const name = formFileName(h)
-    typeInForm(h, 'shortName', 'SHOP X')
+    await typeInForm(h, 'shortName', 'SHOP X')
     h.check('a field is changed', formDirty(h))
     h.click(h.q('profile-form-cancel'))
     const text = await alertText(h)

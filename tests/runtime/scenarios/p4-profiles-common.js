@@ -167,16 +167,18 @@ export async function waitForForm(h) {
 }
 
 /**
- * Types into a field of the form (a choice is picked by its value).
+ * Types into a field of the form (a choice is picked by its value), and lets the page draw what the change did: the form is a
+ * Svelte component, so its flags (`data-dirty`, `data-problem`, Save) follow the input one frame later. Callers `await` it.
  * @param {Harness} h
  * @param {string} path
  * @param {string} text
  */
-export function typeInForm(h, path, text) {
+export async function typeInForm(h, path, text) {
   const control = fieldControl(formField(h, path))
   if (!control) throw new Error(`the form has no field ${path}; it has ${[...(formRoot(h)?.querySelectorAll('[data-testid="profile-form-field"]') ?? [])].map((e) => /** @type {HTMLElement} */ (e).dataset.path).join(', ')}`)
   if (control instanceof HTMLSelectElement) h.select(control, text)
   else setInput(control, text)
+  await h.frame()
 }
 
 /** The value a field shows. @param {Harness} h @param {string} path */
@@ -220,6 +222,21 @@ export function previewColour(h, text) {
     if (spans.length === 1) return getComputedStyle(spans[0]).color
   }
   return null
+}
+
+/**
+ * What the preview shows for a word, for the detail of a check that failed: the span's class (Monaco's `mtk<n>` stands for one entry
+ * of the colour map), its colour, how many spans hold the word, and the preview's own problem line.
+ * @param {Harness} h
+ * @param {string} text
+ */
+export function previewSpanInfo(h, text) {
+  const spans = [...(previewHost(h)?.querySelectorAll('.view-line span > span') ?? [])].filter((span) => plain(span.textContent).includes(text))
+  return {
+    spans: spans.map((span) => ({ text: plain(span.textContent), class: span.getAttribute('class'), colour: getComputedStyle(span).color })),
+    problem: h.q('profile-preview-problem')?.textContent ?? null,
+    ready: previewHost(h)?.dataset.ready ?? null,
+  }
 }
 
 // ---------------------------------------------------------------- the open editor's colours
