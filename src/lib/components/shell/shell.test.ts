@@ -210,6 +210,22 @@ describe('StatusBar', () => {
     }
   });
 
+  // The button of a message (Stop in Find in Folder, Choose Machine…) clears the message and then runs
+  // its action. `{@const action}` follows the message, so reading it after `status.clear()` throws
+  // ("null is not an object") and the action never ran. The test has no DOM to click in, so it holds
+  // the order in the source: the action is read before the bar is cleared and never read after.
+  it('reads the action of a message button before it clears the message', () => {
+    const source = readFileSync(fileURLToPath(new URL('./StatusBar.svelte', import.meta.url)), 'utf8');
+    const handler = /data-testid="status-message-action"\s+onclick=\{\(\) => \{([\s\S]*?)\}\}>/.exec(source)?.[1] ?? '';
+    expect(handler, 'the onclick of the button was not found').not.toBe('');
+    const code = handler.replace(/\/\/.*$/gm, '');
+    const clear = code.indexOf('status.clear()');
+    expect(clear).toBeGreaterThan(-1);
+    expect(code.indexOf('action.run'), 'the action is read before the message is cleared').toBeGreaterThan(-1);
+    expect(code.indexOf('action.run')).toBeLessThan(clear);
+    expect(code.slice(clear), 'nothing reads the action after the message is cleared').not.toContain('action');
+  });
+
   // I2: the file name is `contrib/files.ts`'s registered item, not shell chrome. The bar
   // used to hard-code a second one, which put two `data-item="file"` elements in the DOM
   // and made `h.q('status-item', { item: 'file' })` ambiguous.
