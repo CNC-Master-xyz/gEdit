@@ -554,7 +554,8 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    /// A fresh folder under the temp folder, canonical (the temp folder may be a link).
+    /// A fresh folder under the temp folder, canonical (the temp folder may be a link) and in the
+    /// ordinary spelling: the `\\?\` of a Windows canonical path is taken off, as the checks do.
     fn scratch(name: &str) -> PathBuf {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
@@ -564,7 +565,7 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::canonicalize(&dir).unwrap()
+        paths::plain(&fs::canonicalize(&dir).unwrap()).into_owned()
     }
 
     fn text(path: &Path) -> String {
