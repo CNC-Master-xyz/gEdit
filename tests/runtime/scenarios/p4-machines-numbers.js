@@ -106,6 +106,9 @@ scenario('p4-machines-numbers', { timeout: 600, files: REPO_FILE }, async (h) =>
     await h.frame()
     await h.idle()
     h.check('the preset IS-B fills the table: the length in steps of its increment, and the inch step beside it', numInput(h, 'length', 'increment')?.value === isB.value.incrementMm && numInput(h, 'length', 'incrementInch')?.value === isB.value.incrementInch && numRow(h, 'length')?.dataset.mode === 'increment', { mm: numInput(h, 'length', 'increment')?.value, inch: numInput(h, 'length', 'incrementInch')?.value })
+    // A machine needs a name before it can be saved (the page keeps Save off without one), so "Save is on" below is about the table only.
+    setField(h, 'name', 'Lathe custom feed')
+    await h.frame()
     const was = numInput(h, 'feedPerMin', 'increment')?.value ?? ''
     const wasInch = numInput(h, 'feedPerMin', 'incrementInch')?.value ?? ''
     h.check('the feed per minute row has both steps written, and Save is on', was !== '' && wasInch !== '' && !numField(h, 'feedPerMin', 'incrementInch')?.dataset.error && !saveOff(h), { was, wasInch })
@@ -146,6 +149,7 @@ scenario('p4-machines-numbers', { timeout: 600, files: REPO_FILE }, async (h) =>
         const name = `${profile === 'okuma-osp' ? 'Okuma' : 'Lathe'} ${preset.id}`
         await startAdd(h, profile)
         setField(h, 'numberInput', shownPreset(h, preset))
+        setField(h, 'name', name)
         await h.frame()
         await h.idle()
         h.check(`${name}: with the preset chosen nothing is wrong in the table and Save is on`, !saveOff(h) && !h.q('machine-number-problems') && h.qa('machine-number-row').every((row) => !row.querySelector('[data-error]')), { rows: h.qa('machine-number-row').length })
@@ -165,6 +169,8 @@ scenario('p4-machines-numbers', { timeout: 600, files: REPO_FILE }, async (h) =>
     setField(h, 'numberInput', shownPreset(h, isB))
     await h.frame()
     await h.idle()
+    setField(h, 'name', 'Lathe typed')
+    await h.frame()
     const input = numInput(h, 'length', 'increment')
     const typed = `${isB.value.incrementMm}0`
     setInput(input, typed)
@@ -255,7 +261,7 @@ scenario('p4-machines-axes', { timeout: 600, files: REPO_FILE }, async (h) => {
     h.check('the fields show what was typed', machineFormControl(h, 'extraAxes')?.value === 'AA' && machineFormControl(h, 'builderCodes')?.value === 'G810-G829')
     await saveMachineForm(h, {})
     const record = await recordOf(h, 'Mill AA')
-    h.check('Save wrote the axis as a name and a kind, and the builder codes as typed', JSON.stringify(record?.params?.extraAxes) === JSON.stringify([{ name: 'AA', kind: 'linear' }]) && record.params.builderCodes === 'G810-G829', record?.params)
+    h.check('Save wrote the axis as a name and a kind, and the builder codes as typed', sameJson(record?.params?.extraAxes, [{ name: 'AA', kind: 'linear' }]) && record.params.builderCodes === 'G810-G829', record?.params)
     h.check('the page lists the machine', machineRows(h).some((row) => row.name === 'Mill AA'))
     await closeSettings(h, opened)
   })
