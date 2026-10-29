@@ -7,9 +7,12 @@
 // backend sends the event `gedit-open-requests` with `{ paths, refused }`, and keeps what
 // arrives before this window can listen. This file is the webview's half:
 //
-//   1. **Wait for crash recovery** (`awaitRestoreDecision`), as the session restore does: a
-//      file opened from disk while the recovery dialog is still up would take the path of a
-//      recovered document (`contrib/session.ts`).
+//   1. **Wait for the start to be over** (`startupDecisions`), in this order: every contribution
+//      has activated (the claims of crash recovery and of the session restore are made, whatever
+//      the file-name order: this file sorts before both), crash recovery has decided (a file
+//      opened from disk while the recovery dialog is up would take the path of a recovered
+//      document), and the session restore has put up its front tab (so the file the user
+//      double-clicked is the one in front, and a recovered file is not opened twice).
 //   2. **Register the listener, then ask once** (`open_requests_ready`). In that order, so a
 //      path that arrives between the two is in the answer or in an event, never in neither.
 //   3. **Open with `files.open`**: the 50 MiB and 50 files rules, the encoding questions and
@@ -22,6 +25,8 @@
 // What the payload carries is trusted only as far as its shape: anything else is ignored.
 
 import { awaitRestoreDecision } from '$lib/app/recovery';
+import { contributionsLoaded } from '$lib/app/contributionsLoaded';
+import { awaitSessionRestore } from '$lib/app/session';
 import { dialogs } from '$lib/app/dialogs';
 import { files } from '$lib/app/fileOps';
 import { status } from '$lib/app/status';
@@ -40,7 +45,7 @@ export interface OpenBatch {
 
 /** What the module needs, injected so a unit test needs no webview (AD-2). */
 export interface OpenRequestsDeps {
-  /** Settles when crash recovery has decided (or there is nothing to decide). */
+  /** Settles when the start is over: contributions loaded, recovery decided, session restored. */
   decided(): Promise<void>;
   /** Registers the listener for the event; resolves with the function that removes it. */
   listen(callback: (payload: unknown) => void): Promise<Disposable>;
@@ -52,8 +57,19 @@ export interface OpenRequestsDeps {
   show(text: string, o?: { error?: boolean }): void;
 }
 
+/**
+ * Contributions loaded, then the crash-recovery decision, then the session restore. Each step
+ * resolves at once when its owner never started (no claim, nobody to ask), so a switched-off
+ * session restore or a missing contribution cannot hold a hand-over back for ever.
+ */
+export async function startupDecisions(loaded: Promise<void>): Promise<void> {
+  await loaded;
+  await awaitRestoreDecision();
+  await awaitSessionRestore();
+}
+
 const real: OpenRequestsDeps = {
-  decided: () => awaitRestoreDecision(),
+  decided: () => startupDecisions(contributionsLoaded),
   listen: async (callback) => {
     const { listen } = await import('@tauri-apps/api/event');
     return listen<unknown>(OPEN_REQUESTS_EVENT, (event) => callback(event.payload));

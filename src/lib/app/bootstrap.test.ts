@@ -85,8 +85,8 @@ describe('startApp', () => {
       'activateLanguage',
       'loadUiState',
       'loadUserConfig',
-      'loadMachines',
       'loadUserKeys',
+      'loadMachines',
       'startChannels',
       'loadContributions',
       'installDispatcher',
@@ -221,6 +221,36 @@ describe('startApp', () => {
       'dispose startChannels',
       'setContextProvider',
     ]);
+  });
+
+  // WY-CODE-4: the user files and the key bindings go out together; the machines still wait for
+  // the user files (a machine whose base is a user profile is valid at the first open).
+  it('starts the key bindings together with the user files, and the machines after the user files', async () => {
+    const log: string[] = [];
+    let finishConfig!: () => void;
+    const slowConfig = new Promise<void>((resolve) => (finishConfig = resolve));
+    const h = harness({
+      loadUserConfig: async () => {
+        log.push('config start');
+        await slowConfig;
+        log.push('config done');
+      },
+      loadUserKeys: async () => {
+        log.push('keys start');
+        await Promise.resolve();
+        log.push('keys done');
+      },
+      loadMachines: async () => void log.push('machines start'),
+    });
+    const started = createStartApp(h.deps)();
+    await vi.waitFor(() => expect(log).toContain('keys done'));
+    // Both calls are out and the keys are in while the user files are still being listed.
+    expect(log.slice(0, 2)).toEqual(['config start', 'keys start']);
+    expect(log).not.toContain('machines start');
+    finishConfig();
+    await started;
+    expect(log.indexOf('machines start')).toBeGreaterThan(log.indexOf('config done'));
+    expect(h.log).toContain('loadContributions');
   });
 
   // A config folder that cannot be read must not cost the user their editor.

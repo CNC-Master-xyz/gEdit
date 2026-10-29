@@ -332,17 +332,24 @@ export function createUserConfig(deps: UserConfigDeps): UserConfigService & User
   async function run(): Promise<ProfileProblem[]> {
     if (!deps.available()) return get(problemList);
 
-    const listing: { kind: UserFileKind; files: Listed[] }[] = [];
-    const packaged: { kind: UserFileKind; files: Listed[] }[] = [];
+    let listing: { kind: UserFileKind; files: Listed[] }[];
+    let packaged: { kind: UserFileKind; files: Listed[] }[] = [];
+    // One wave of round trips (WY-CODE-4): the user lists, the packages' lists and the packages'
+    // own list are asked together, not one after the other. The packages' list never rejects.
+    const packages = refreshPackages();
     try {
-      for (const kind of KINDS) listing.push({ kind, files: [...(await deps.list(kind))].sort(byName) });
-      if (deps.listPackageFiles !== undefined) {
-        for (const kind of KINDS) {
-          const found = await deps.listPackageFiles(kind);
-          packaged.push({ kind, files: layerSorted(found) });
-        }
-      }
+      const [mine, theirs] = await Promise.all([
+        Promise.all(KINDS.map(async (kind) => ({ kind, files: [...(await deps.list(kind))].sort(byName) }))),
+        deps.listPackageFiles === undefined
+          ? Promise.resolve([])
+          : Promise.all(
+              KINDS.map(async (kind) => ({ kind, files: layerSorted(await deps.listPackageFiles!(kind)) })),
+            ),
+      ]);
+      listing = mine;
+      packaged = theirs;
     } catch (error) {
+      await packages;
       // The folder cannot be listed: nothing changes, and the user is told why.
       const message = `the folder could not be read: ${error instanceof Error ? error.message : String(error)}`;
       const problems = [{ origin: 'user' as const, file: null, profileId: null, path: '', message }];
@@ -351,7 +358,7 @@ export function createUserConfig(deps: UserConfigDeps): UserConfigService & User
     }
 
     // The packages' list (manifests, counts) follows every load, even one that changes nothing.
-    await refreshPackages();
+    await packages;
 
     const signature = signatureOf(listing, packaged);
     if (signature === lastSignature) return get(problemList);
