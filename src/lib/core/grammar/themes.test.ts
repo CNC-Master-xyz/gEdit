@@ -7,6 +7,10 @@ import { validateProfile } from '$lib/core/profiles/validate';
 import type { Profile, ProfileColors } from '$lib/core/profiles/types';
 import { roleColorProblem } from './contrast';
 import { EDITOR_COLORS, ROLES, ROLE_COLORS, ROLE_FONT_STYLE, type Role } from './roles';
+// @ts-expect-error Monaco's own spelling of a token's class, shipped without types
+import { sanitize } from 'monaco-editor/esm/vs/editor/standalone/common/monarch/monarchCommon.js';
+// @ts-expect-error shipped without types
+import { TokenTheme } from 'monaco-editor/esm/vs/editor/common/languages/supports/tokenization.js';
 import { generateThemes, layeredRoleColor, paletteOverrides, profileOverrides, type GeneratedTheme } from './themes';
 
 const fanuc = (() => {
@@ -102,6 +106,28 @@ describe('generateThemes: the profile layer on top of the user layer', () => {
     expect(profileOverrides(faint, 'dark')).toEqual({});
     expect(profileOverrides(faint, 'light')).toEqual({});
     expect(themes([faint]).dark.rules).toHaveLength(ROLES.length);
+  });
+});
+
+describe('generateThemes: the rule of a profile finds the tokens Monarch gives that profile', () => {
+  // Monarch writes every token as `<role>.<language id>` and replaces `_`, `&`, `<`, `>`, `'` and `"` by `-` in it
+  // (`sanitize` of monarchCommon). The live preview of the profile form is the language `_profile-preview`: a rule written
+  // with the id as it stands never matched a token, so a colour set in the form was not drawn in the preview.
+  it.each([
+    ['_profile-preview', 'dark'],
+    ['_profile-preview', 'light'],
+    ['shop-mill', 'dark'],
+  ] as const)('%s: the token Monaco gives a feed word (%s theme) gets the profile colour', (id, mode) => {
+    const own = mode === 'dark' ? DARK_OWN : LIGHT_OWN;
+    const painted = { ...withColors({ dark: { feed: DARK_OWN }, light: { feed: LIGHT_OWN } }), id } as Profile;
+    const theme = generateThemes([painted])[mode as 'dark' | 'light'] as GeneratedTheme;
+    const tokenTheme = TokenTheme.createFromRawTokenTheme(theme.rules, []);
+    const colours: Array<{ toString(): string }> = tokenTheme.getColorMap();
+    const painted_ = (token: string): string => String(colours[(tokenTheme.match(0, token) >>> 15) & 0x1ff]).toLowerCase();
+    const token = `feed${sanitize(`.${id}`)}`;
+    expect(painted_(token)).toBe(own);
+    // and another language's feed word keeps the role colour
+    expect(painted_(`feed${sanitize('.other-profile')}`)).not.toBe(own);
   });
 });
 

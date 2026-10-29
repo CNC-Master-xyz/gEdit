@@ -35,7 +35,7 @@ import type { Profile } from '$lib/core/profiles/types';
 /**
  * The Monaco language id of the live preview (§6.10 rule 8). It starts with `_`, which no
  * profile id can (`PROFILE_ID` in `core/profiles/validate.ts`), so the preview's grammar and its
- * theme rules (`<role>._profile-preview`) can never touch a real profile's documents.
+ * theme rules (`<role>.-profile-preview`: Monarch writes the `_` of a language id as `-`) can never touch a real profile's documents.
  */
 export const PREVIEW_LANGUAGE_ID = '_profile-preview';
 
