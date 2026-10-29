@@ -940,7 +940,9 @@ impl Sink for ChannelSink {
 
 /// How opening a file failed.
 enum OpenFailure {
-    /// The file is a link (or became one): never followed.
+    /// The file is a link (or became one): never followed. Only the Unix open tells it apart;
+    /// on Windows the link itself is opened and read.
+    #[cfg_attr(windows, allow(dead_code))]
     Link,
     Other,
 }

@@ -859,8 +859,13 @@ mod tests {
         let web = tauri::Url::parse("https://example.com/part.nc").unwrap();
         let custom = tauri::Url::parse("gedit://open?path=/etc/passwd").unwrap();
         let (texts, refused) = url_arguments(&[file, web, custom]);
-        #[cfg(unix)]
-        assert_eq!(texts, vec!["/tmp/part 1.nc".to_owned()]);
+        // Off Unix the file URL names no path gEdit opens, so it is refused too.
+        let expected: Vec<String> = if cfg!(unix) {
+            vec!["/tmp/part 1.nc".to_owned()]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(texts, expected);
         assert_eq!(refused, 2 + u32::from(cfg!(not(unix))));
         #[cfg(unix)]
         {
