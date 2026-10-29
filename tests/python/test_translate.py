@@ -26,7 +26,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from tests.python import helpers
-from tests.python.test_rotate import run_extra_axes
+from tests.python.test_rotate import run_extra_axes, run_text
 
 try:
     import tomllib  # noqa: F401
@@ -194,6 +194,8 @@ class GoldenTest(unittest.TestCase):
             "frame", "coordinate-shift", "intermediate-point", "call", "expression", "machine-dependent",
             "distance-assumed", "axis-unwritten", "unknown-code", "rotary-turned", "selection-inside",
             "cycle-not-reviewed", "fk-contour", "arc-unsupported", "resolution",
+            # Round Y review (WY-NC-4): golden g70-pair-finish-only.
+            "contour-split",
         }
         self.assertLessEqual(wanted, seen)
 
@@ -1268,6 +1270,106 @@ class RotaryExtraAxisTest(unittest.TestCase):
         result = run_extra_axes(SCRIPT, self.D, "QQ0")
         self.assertFalse(refused(result), result["findings"])
         self.assertEqual(result["text"].split("\n")[1:3], ["N50 G0 X5 Y0 Z50 QQ0", "N60 G1 X15 Y5 Z-2 F200"])
+
+
+def preset_selection(profile_id: str, preset: str, program: List[str], start: int, end: int, below: bool = True) -> Dict[str, Any]:
+    """Translate ``dz=-5`` of lines ``start`` to ``end`` (1-based) of ``program`` on a machine
+    ``preset``, with the lines above and (``below``) the lines below."""
+    context = helpers.effective_context(profile_id, preset=preset)
+    context["params"] = {"dx": 0, "dy": 0, "dz": -5}
+    context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": program[: start - 1]}
+    if below:
+        context["input"]["followingLines"] = program[end:]
+    out = run_script(SCRIPT, stdin="\n".join(program[start - 1 : end]), context=context)
+    if not out.ok:
+        raise AssertionError(out.stderr)
+    return out.json()
+
+
+class ContourPairTest(unittest.TestCase):
+    """Round Y review WY-NC-4 (the rule of T019/D3 and of the Z mirror's D2, for Translate): a
+    roughing or finishing cycle and the contour it names move together or not at all. Fanuc
+    `G70`-`G73` name the contour by `P`/`Q` block numbers; the Okuma LAP `G85`-`G88` by the name of
+    a `G81` ... `G80` shape. Before the fix each split selection below moved part of the pair."""
+
+    FANUC = [
+        "O1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G99 G0 X60. Z2. T0101", "G71 U2. R0.5",
+        "G71 P10 Q20 U0.4 W0.1 F0.25", "N10 G0 X20.", "G1 Z-10. F0.1", "X40. Z-20.", "N20 X60.", "G0 X100. Z50.",
+        "T0202", "G0 X60. Z2.", "G70 P10 Q20", "G0 X100. Z50.", "M30",
+    ]
+    OKUMA = [
+        "O1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G90 G0 X100. Z50.",
+        "G85 NLAP1 D2. F0.3 U0.4 W0.1", "G87 NLAP1", "G0 X100. Z50.", "NLAP1 G81", "G0 X20.", "G1 Z-10. F0.1",
+        "X40. Z-20.", "G80", "M02",
+    ]
+
+    def fanuc(self, start: int, end: int, below: bool = True) -> Dict[str, Any]:
+        return preset_selection("fanuc-lathe", "is-b", self.FANUC, start, end, below)
+
+    def okuma(self, start: int, end: int, below: bool = True) -> Dict[str, Any]:
+        return preset_selection("okuma-osp", "okuma-1mm", self.OKUMA, start, end, below)
+
+    @staticmethod
+    def errors(result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def test_fanuc_the_finishing_cycle_without_its_contour(self) -> None:
+        # Lines 10-13: G70 would rapid to N10 at the moved Z, into the roughed contour.
+        result = self.fanuc(10, 13)
+        self.assertEqual(self.errors(result), [(12, "contour-split")])
+        self.assertEqual(result["text"], "\n".join(self.FANUC[9:13]))
+        self.assertIn("only move together", result["findings"][0]["message"])
+
+    def test_fanuc_the_roughing_cycle_without_its_contour(self) -> None:
+        self.assertEqual(self.errors(self.fanuc(1, 4)), [(4, "contour-split")])
+
+    def test_fanuc_the_contour_without_its_cycles(self) -> None:
+        program = list(self.FANUC)
+        program[4] = "N10 G0 X20. Z2."  # a first move with every axis: no selection-start
+        result = preset_selection("fanuc-lathe", "is-b", program, 5, 8)
+        self.assertEqual(self.errors(result), [(5, "contour-split")])
+        # The roughing cycle and its contour, while the G70 below names the contour too.
+        self.assertEqual(self.errors(self.fanuc(2, 9)), [(4, "contour-split"), (5, "contour-split")])
+
+    def test_okuma_the_shape_without_its_calls(self) -> None:
+        # The shape's first block gets no Z added (the LAP approach depends on it).
+        result = self.okuma(6, 10)
+        self.assertEqual(self.errors(result), [(6, "contour-split"), (7, "selection-start")])
+        self.assertNotIn("word-added", [f["reason"] for f in result["findings"]])
+        self.assertEqual(result["text"], "\n".join(self.OKUMA[5:10]))
+
+    def test_okuma_the_calls_without_their_shape(self) -> None:
+        self.assertEqual(self.errors(self.okuma(2, 5)), [(3, "contour-split"), (4, "contour-split")])
+        self.assertEqual(self.errors(self.okuma(3, 4)), [(3, "selection-start"), (4, "contour-split")])
+
+    def test_a_cycle_that_starts_at_the_unmoved_point(self) -> None:
+        # The pair whole, but no move to the cycle's start point in the selection: the cycle
+        # starts where the lines above left the tool, and N10 gets no Z added.
+        result = self.fanuc(3, 14)
+        self.assertEqual(self.errors(result), [(4, "selection-start")])
+        self.assertIn("roughing or finishing cycle starts from that point", result["findings"][0]["message"])
+        self.assertEqual(self.errors(self.okuma(3, 10)), [(3, "selection-start")])
+
+    def test_without_the_lines_below_a_pair_is_refused(self) -> None:
+        result = self.fanuc(2, 14, below=False)
+        self.assertEqual(self.errors(result), [(4, "contour-split"), (5, "contour-split"), (12, "contour-split")])
+        self.assertIn("lines below the selection were not available", result["findings"][0]["message"])
+        self.assertEqual(self.errors(self.okuma(2, 10, below=False)), [(3, "contour-split"), (4, "contour-split"), (6, "contour-split")])
+
+    def test_guards_the_whole_pair_and_the_whole_program_still_move(self) -> None:
+        moved = self.fanuc(2, 14)
+        self.assertFalse(refused(moved), moved["findings"])
+        self.assertEqual(moved["text"].split("\n")[3:6], ["N10 G0 X20.", "G1 Z-15. F0.1", "X40. Z-25."])
+        self.assertFalse(refused(self.okuma(2, 10)))
+        # Lines between the pairs and lines above them touch no contour.
+        self.assertFalse(refused(self.fanuc(9, 11)))
+        self.assertFalse(refused(self.okuma(1, 2)))
+        whole = run_text(SCRIPT, "fanuc-lathe", {"dz": -5}, "\n".join(self.FANUC), preset="is-b")
+        self.assertFalse(refused(whole), whole["findings"])
+        self.assertIn("G0 X60. Z-3.", whole["text"].split("\n"))
+        whole = run_text(SCRIPT, "okuma-osp", {"dz": -5}, "\n".join(self.OKUMA), preset="okuma-1mm")
+        self.assertFalse(refused(whole), whole["findings"])
+        self.assertIn("X40. Z-25.", whole["text"].split("\n"))
 
 
 if __name__ == "__main__":
