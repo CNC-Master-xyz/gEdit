@@ -83,7 +83,9 @@ Settled defaults (the owner's answers of 2026-10-12, plan §9; the same as `_nc_
   `syntax.extraAxisNames`: `AA`) is no X, Y or Z, so its words are left as written; the run
   does not refuse for them. One information row per such axis, at its first word, names it and
   how many of its words were left (`extra-axis`), so a user whose `AA` runs along X sees that it
-  did not move. A rotary extra axis is left as silently as `C` is.
+  did not move. A rotary extra axis is read like `A`, `B` and `C` (round Y review WY-NC-2):
+  its words are left without a row, and while it stands away from 0 the moves under it are
+  refused (`rotary-turned`), since gEdit cannot know what it turns.
 
 What moves and what stays
 -------------------------
@@ -145,6 +147,14 @@ axis later (`rotary-turned`). Without those lines such a move is refused (`selec
 Wave Y (skeptic D3): a contour between two labels moves with its cycle (T019) only while no
 line above or below the selection names the same labels (another `CYCLE95`, a contour call);
 without the lines below, the cycle keeps its refusal (`cycle-position`).
+Round Y review (WY-NC-4): the same rule for a roughing or finishing cycle that names its
+contour, Fanuc `G70`-`G73` `P`..`Q` (by block numbers) and the Okuma LAP `G85`-`G88` (by the
+name of a `G81`/`G82`/`G83` ... `G80` shape): the cycles and the contour move together or not
+at all. A selection that holds a cycle without its whole contour, or part of a contour without
+every cycle that names it, is refused (`contour-split`); without the lines below, a selection
+that holds either is refused. A cycle in the selection that would start where the lines above
+left the tool is refused (`selection-start`), and no word is ever added to a contour block (a
+`Z` in the first block of a `G71` contour makes it another type of cycle).
 
 Two refusals concern the whole run rather than a block, with reasons of their own: a run
 with no code database (`no-database`: a move cannot be told from a machine position or a
@@ -216,6 +226,8 @@ REASON_TEXT = {
     "resolution": ("block with a word that cannot hold the shift", "blocks with a word that cannot hold the shift"),
     "selection-start": ("first move of the selection that would miss the moved path", "first moves of the selection that would miss the moved path"),
     "selection-below": ("move that waits on a rotary axis the lines below may turn", "moves that wait on a rotary axis the lines below may turn"),
+    # Round Y review (WY-NC-4).
+    "contour-split": ("roughing or finishing cycle split from its contour", "roughing or finishing cycles split from their contour"),
 }
 
 #: The refusals of the run itself, beside ``_nc_geom.REASONS``: id -> the plain text after
@@ -237,7 +249,30 @@ RUN_REASONS = {
         "block above the selection. Start the selection at a block that moves to a position on "
         "every shifted axis, and give its first pass every value"
     ),
+    # Round Y review (WY-NC-4): the details of `ContourPairs` say which text a block gets.
+    "contour-split": (
+        "a roughing or finishing cycle and the contour it names (G70 to G73 with P and Q, an "
+        "Okuma LAP shape) only move together, and this selection holds the cycle without the "
+        "whole contour, or part of the contour without every cycle that names it. Select the "
+        "cycles and the whole contour together, or run Translate on the whole program"
+    ),
 }
+#: Round Y review (WY-NC-4): the text of a ``contour-split`` refusal whose selection did not get
+#: the lines below it, and of a ``selection-start`` refusal of a roughing or finishing cycle.
+CONTOUR_BELOW = "below"
+CONTOUR_BELOW_TEXT = (
+    "a roughing or finishing cycle and the contour it names (G70 to G73 with P and Q, an Okuma "
+    "LAP shape) only move together, and the lines below the selection were not available, so "
+    "whether another cycle or the rest of the contour stands there is not known. Run Translate "
+    "on the whole program"
+)
+CONTOUR_START = "a roughing or finishing cycle that starts where the lines above left the tool"
+CONTOUR_START_TEXT = (
+    "the selection starts where the lines above it leave the tool, and that point is not moved "
+    "with the selection. A roughing or finishing cycle starts from that point and goes back to "
+    "it, so it would cut the moved contour from the unmoved point. Start the selection at the "
+    "block that moves the tool to the start point of the cycle"
+)
 #: The information rows of the run itself, beside ``_nc_geom.INFO``: id -> (the count's words,
 #: singular and plural; the row's text after "<the words>: "). v1.2.0, the owner's decision of
 #: 2026-10-19: a word added to the selection's first move.
@@ -382,6 +417,75 @@ def names_labels(text: str, first: str, last: str) -> bool:
     return False
 
 
+class ContourPairs:
+    """Round Y review (WY-NC-4): the roughing and finishing cycles of the lines read and the
+    contours they name, each by a key: ``("blocks", P, Q)`` for a Fanuc ``G70``-``G73`` (the
+    profile's ``numbering.references`` rule with two addresses), ``("label", NAME)`` for an
+    Okuma LAP call (a code of a contour group that neither opens nor closes a shape, on a line
+    with the label ``NNAME``) and its shape (the line with the label and a code that opens a
+    shape, to the next line with a code that closes one)."""
+
+    __slots__ = ("calls", "contours")
+
+    def __init__(self) -> None:
+        #: key -> the lines of the cycles that name it.
+        self.calls: Dict[Tuple[str, ...], List[int]] = {}
+        #: key -> each (first line, last line) the contour may stand on; the last is ``None``
+        #: when no line read ends it.
+        self.contours: Dict[Tuple[str, ...], List[Tuple[int, Optional[int]]]] = {}
+
+
+def contour_pairs(cp: Any, tracker: Any, numbered: Sequence[Tuple[int, str]]) -> ContourPairs:
+    """Round Y review (WY-NC-4): the cycles and contours of ``numbered`` ((line, text) in line
+    order). A Fanuc contour runs from a line that carries its first block number to the next
+    line that carries its last; a number on several lines gives several contours, which a
+    selection cannot hold as one (refused)."""
+    data = _nc_geom._data(tracker)
+    ranges = data.ranges
+    groups = data.contour_groups
+    interp = tracker.interp
+    pairs = ContourPairs()
+    carried: List[Tuple[int, str]] = []
+    shapes: Dict[str, List[int]] = {}
+    closes: List[int] = []
+    state: Any = None
+    for line, text in numbered:
+        tokens, state = gedit_nc.tokenize_line(text, cp, state)
+        kinds = set()
+        for token in tokens:
+            if token.kind == "blockNumber":
+                number = _nc_geom.number_of(token.value_text if token.value_text is not None else token.text)
+                if number is not None:
+                    carried.append((line, number))
+            elif groups and token.kind == "word" and token.address and token.value_text is not None and token.index is None:
+                entry = interp.entry(token.address + token.value_text)
+                if entry is not None and entry.get("group") in groups:
+                    kind = entry.get("contour")
+                    kinds.add(kind if kind in ("open", "close") else "call")
+        if ranges:
+            named = _nc_run.contour_named(gedit_nc.mask_comments(text, cp), tokens, ranges)
+            if named is not None:
+                pairs.calls.setdefault(("blocks",) + tuple(named), []).append(line)
+        if "close" in kinds:
+            closes.append(line)
+        labels = [(t.address or "").upper() for t in tokens if t.kind == "label" and t.address]
+        for label in labels:
+            if "open" in kinds:
+                shapes.setdefault(label, []).append(line)
+            elif "call" in kinds:
+                pairs.calls.setdefault(("label", label), []).append(line)
+    for key in [k for k in pairs.calls if k[0] == "blocks"]:
+        spans = pairs.contours.setdefault(key, [])
+        for start, number in carried:
+            if number == key[1]:
+                spans.append((start, next((other for other, n in carried if n == key[2] and other >= start), None)))
+    for label, starts in shapes.items():
+        spans = pairs.contours.setdefault(("label", label), [])
+        for start in starts:
+            spans.append((start, next((other for other in closes if other > start), None)))
+    return pairs
+
+
 class Run:
     """Walks the program once with the tracker and judges every line with `_nc_geom`."""
 
@@ -448,6 +552,12 @@ class Run:
         self._macro_seen = False
         #: P4h fix round (Q-5): the machine's linear extra axes (`linear_extra_axes`).
         self.extra_axes = linear_extra_axes(profile)
+        #: Round Y review (WY-NC-4): the roughing and finishing cycles of a selection's lines and
+        #: the contours they name (`contour_pairs`); the lines of every contour, to which no word
+        #: is added; and the lines of the cycles.
+        self.pairs: Optional[ContourPairs] = None
+        self.contour_lines: set = set()
+        self.pair_calls: set = set()
 
     def note_extra_axes(self, line: Line, step: _nc_path.Step) -> None:
         """P4h fix round (Q-5): the words of a linear extra axis of the machine on the line,
@@ -494,6 +604,8 @@ class Run:
                 self.note_last_words(step)
         if preceding and self.is_selection:
             self.outside = None
+        if self.is_selection:
+            self.note_pairs(preceding, lines, base_line, following)
         block = 0
         edge: Optional[_nc_geom.Refusal] = None
         if preceding and (continued or gedit_nc.continues_block(lines[0] if lines else "", cp)):
@@ -545,6 +657,7 @@ class Run:
             # CODE-3: every selection, from line 1 too (a cycle started in it can still be in
             # force below it).
             self.selection_end(last_line, selection_continued)
+            self.split_pairs(following is not None)
             # FZ-5 (plan section 7 #503): what the program does below the selection decides,
             # as it does for the whole run, whether a rotary axis the selection's moves wait on
             # is ever turned (`settle_rotary`).
@@ -816,6 +929,64 @@ class Run:
                 return False
         return True
 
+    def note_pairs(self, preceding: Sequence[str], lines: Sequence[str], base_line: int, following: Optional[Sequence[str]]) -> None:
+        """Round Y review (WY-NC-4): the roughing and finishing cycles and their contours in every
+        line a selection run has (above, in and below the selection)."""
+        first = base_line - len(preceding)
+        numbered = list(enumerate(list(preceding) + list(lines) + list(following or []), first))
+        self.pairs = contour_pairs(self.cp, self.tracker, numbered)
+        last = first + len(numbered) - 1
+        for spans in self.pairs.contours.values():
+            for start, end in spans:
+                self.contour_lines.update(range(start, (end if end is not None else last) + 1))
+        for found in self.pairs.calls.values():
+            self.pair_calls.update(found)
+
+    def split_pairs(self, below_known: bool) -> None:
+        """Round Y review (WY-NC-4), the rule of T019 and of the Z mirror's D2 for Translate: a
+        roughing or finishing cycle (Fanuc `G70`-`G73` `P`..`Q`, Okuma LAP `G85`-`G88`) and the
+        contour it names move together or not at all. The control runs the contour from where
+        the cycle is (FANUC 0i-F: the stock removal and finishing cycles; OSP-P300: LAP, whose
+        shape `G81`/`G82` ... `G80` the calls name), so a selection that holds the cycle without
+        its whole contour, or part of the contour without every cycle that names it, is refused
+        (`contour-split`) at each cycle and at the first contour line it holds. A selection whose
+        lines below were not sent cannot tell, so it refuses whenever it holds either."""
+        pairs = self.pairs
+        if pairs is None or not self.lines:
+            return
+        first, last = self.lines[0].number, self.lines[-1].number
+        by_number = {line.number: line for line in self.lines}
+        far = max([last] + [end for spans in pairs.contours.values() for _, end in spans if end is not None]) + len(self.below_lines or [])
+
+        def inside(line: int) -> bool:
+            return first <= line <= last
+
+        for key in sorted(set(pairs.calls) | set(pairs.contours)):
+            calls = pairs.calls.get(key, [])
+            spans = pairs.contours.get(key, [])
+            touched = [c for c in calls if inside(c)]
+            for start, end in spans:
+                stop = end if end is not None else far
+                if start <= last and stop >= first:
+                    touched.append(max(start, first))
+            if not touched:
+                continue
+            whole = (
+                below_known
+                and len(spans) == 1
+                and spans[0][1] is not None
+                and inside(spans[0][0])
+                and inside(spans[0][1])
+                and all(inside(c) for c in calls)
+            )
+            if whole:
+                continue
+            detail = "" if below_known else CONTOUR_BELOW
+            for number in sorted(set(touched)):
+                target = by_number[number]
+                if not any(r.reason == "contour-split" for r in target.refusals):
+                    target.refusals.append(_nc_geom.Refusal(number, "contour-split", _quote(target.text), detail))
+
     def calls_at_positions(self, start: int) -> bool:
         """v1.2.0 (T021): every call of the definition on line ``start`` is a call at a position
         that writes the tool axis."""
@@ -931,6 +1102,11 @@ class Run:
         self.outside -= set(step.unwritten or ())
         if not self.outside:
             return
+        if step.line in self.pair_calls:
+            # Round Y review (WY-NC-4): a roughing or finishing cycle starts from where the tool
+            # stands and goes back there; no word is added to it.
+            self.refuse_start(line, CONTOUR_START)
+            return
         roles = self._roles
         polar = step.polar is not None or any(r.role.startswith("polar") for r in roles)
         arc = step.arc is not None or any(isinstance(e, _nc_path.Unknown) and e.kind == "arc" for e in step.events)
@@ -974,6 +1150,11 @@ class Run:
         tracker = self.tracker
         state = tracker.interp.state
         if not linear or any(r.role == "point-inc" for r in linear) or state.get("distance") != "absolute":
+            return False
+        if line.number in self.contour_lines:
+            # Round Y review (WY-NC-4): never a word added to a contour a cycle names: a Z in the
+            # first block of a G71 contour makes it another type of cycle (FANUC alarm 0323), and
+            # an Okuma LAP approach depends on the first shape block.
             return False
         if any(self.position_events(step)):
             return False  # a tool or an offset picked in the block itself
@@ -1145,6 +1326,10 @@ class Findings:
 
 def own_text(refusal: _nc_geom.Refusal) -> Optional[str]:
     """The text of a refusal translate words itself (NC-3, NCR-3), or ``None``."""
+    if refusal.reason == "contour-split" and refusal.detail == CONTOUR_BELOW:
+        return CONTOUR_BELOW_TEXT
+    if refusal.reason == "selection-start" and refusal.detail == CONTOUR_START:
+        return CONTOUR_START_TEXT
     if refusal.reason in RUN_REASONS:
         return RUN_REASONS[refusal.reason]
     if refusal.reason != "cycle-position":
