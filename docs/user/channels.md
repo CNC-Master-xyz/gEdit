@@ -926,7 +926,8 @@ Lines that belong to no channel, between the sections, are not copied.
 
 Use it to read one turret's program from start to end, to print it, or to work on one
 channel alone. It writes no file. gEdit asks once per session to make sure you know. The new
-documents are untitled, with names such as `SHAFT — Turret A`. gEdit remembers which
+documents are untitled and carry the name **Save Channel Files** proposes, in the form `PART_1.MPF`
+(see [Save Channel Files](#save-channel-files)). gEdit remembers which
 documents it made from which program until you quit.
 
 ### Merge Channels Back
