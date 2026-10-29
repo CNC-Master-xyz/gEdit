@@ -22,7 +22,6 @@ import { normalizeCode } from './lookup';
 import { readDwell, readExpand, readExpandRole } from './expand';
 import { loadTemplates } from '$lib/core/templates/load';
 import type { CodeDb, CodeEntry, CodeParam, CodeSets } from './types';
-import type { NumberClass } from '$lib/core/machines/types';
 
 /**
  * M6 (§7.2, AD-19). What a `sets` member may say, one list per member.
@@ -72,7 +71,7 @@ const SETS_VALUES = {
 const SETS_FLAGS = ['speedLimit', 'planeFromAxisWord'] as const;
 
 /** M6 (§7.2, AD-31). How a cycle parameter's value is read, whatever its address suggests. */
-const PARAM_UNITS: readonly (NumberClass | 'increment' | 'count')[] = [
+const PARAM_UNITS: readonly NonNullable<CodeParam['unit']>[] = [
   'length',
   'angle',
   'feedPerMin',
@@ -80,6 +79,7 @@ const PARAM_UNITS: readonly (NumberClass | 'increment' | 'count')[] = [
   'dwell',
   'increment',
   'count',
+  'feed',
 ];
 
 /** P10 (R8, §7.2, §7.16 #106). What a parameter is to a program shift. */
@@ -122,7 +122,9 @@ function readConflicts(raw: unknown, path: string, report: (p: CodeDbProblem) =>
   }
   const out: string[] = [];
   raw.forEach((item, i) => {
-    const text = str(item);
+    // P4.39b (the agreement with codes.schema.json): read exactly as written, as the scripts
+    // compare it; " tcp" with a blank was read as "tcp" here and as nothing by Python.
+    const text = typeof item === 'string' && item !== '' ? item : undefined;
     const name = text?.startsWith('!') ? text.slice(1) : text;
     const ok =
       name !== undefined &&
@@ -196,8 +198,10 @@ function oneOf<T extends string>(
   report: (p: CodeDbProblem) => void,
 ): T | undefined {
   if (raw === undefined) return undefined;
-  const text = str(raw);
-  if (text !== undefined && (allowed as readonly string[]).includes(text)) return text as T;
+  // P4.39b (the agreement with codes.schema.json): the value as written. The scripts read the
+  // file's own text (`param.get("position") == "none"`), so a value with blanks around it
+  // (" none") was "none" here and nothing there; now it is reported here too.
+  if (typeof raw === 'string' && (allowed as readonly string[]).includes(raw)) return raw as T;
   report({ path, message: `has to be one of ${allowed.join(', ')}` });
   return undefined;
 }
@@ -213,6 +217,12 @@ const READING_MEMBERS = ['unit', 'position', 'axis', 'programNumber', 'lengthAlo
  * (a declaration without `block` counts for both), and two declarations of one address agree on
  * `READING_MEMBERS`, so a reader that does not know the block still reads the value right. A
  * declaration that breaks either rule is reported and dropped; the first one stays.
+ *
+ * P4h (plan §6.10 rule 11, the block-aware unit of AD-31; T118): `unit` alone may differ, and
+ * only between a `block: 1` and a `block: 2` declaration (the `G76` `P`: a packed count in the
+ * first block, the thread height in increments in the second). A reader that knows the block
+ * reads that block's unit; one that does not finds two units and gives the word no class, so no
+ * value is ever read with the other block's unit.
  */
 function checkBlockParams(params: CodeParam[], path: string, report: (p: CodeDbProblem) => void): CodeParam[] {
   const kept: CodeParam[] = [];
@@ -227,7 +237,9 @@ function checkBlockParams(params: CodeParam[], path: string, report: (p: CodeDbP
       });
       return;
     }
-    const differs = others.length > 0 ? READING_MEMBERS.find((m) => others[0][m] !== param[m]) : undefined;
+    const perBlock = others.length > 0 && others[0].block !== undefined && param.block !== undefined;
+    const differs =
+      others.length > 0 ? READING_MEMBERS.find((m) => others[0][m] !== param[m] && !(m === 'unit' && perBlock)) : undefined;
     if (differs !== undefined) {
       report({
         path: `${path}[${i}].${differs}`,
@@ -298,9 +310,14 @@ function readParams(
     const max = num(item.max);
     if (min !== undefined) param.min = min;
     if (max !== undefined) param.max = max;
+    // P4.39b (the agreement with codes.schema.json): a bound that is no number was dropped
+    // without a word, so the form took any value; now it is reported.
+    if (item.min !== undefined && min === undefined) report({ path: `${at}.min`, message: 'min has to be a number' });
+    if (item.max !== undefined && max === undefined) report({ path: `${at}.max`, message: 'max has to be a number' });
     if (item.unit !== undefined) {
-      const unit = str(item.unit);
-      if (unit !== undefined && (PARAM_UNITS as readonly string[]).includes(unit)) {
+      // P4.39b: as written, like `oneOf`.
+      const unit = item.unit;
+      if (typeof unit === 'string' && (PARAM_UNITS as readonly string[]).includes(unit)) {
         param.unit = unit as CodeParam['unit'];
       } else {
         report({ path: `${at}.unit`, message: `unit has to be one of ${PARAM_UNITS.join(', ')}` });
@@ -422,6 +439,10 @@ function readAddresses(
       continue;
     }
     const description = str(value.description);
+    // P4.39b: a description that is no text was dropped without a word.
+    if (value.description !== undefined && typeof value.description !== 'string') {
+      report({ path: `${at}.description`, message: 'description has to be a text' });
+    }
     out[letter] = description ? { label, description } : { label };
   }
   return out;
@@ -452,12 +473,12 @@ function readSets(raw: unknown, path: string, report: (p: CodeDbProblem) => void
       report({ path: at, message: `${member} is not something a code sets` });
       continue;
     }
-    const text = str(value);
-    if (text === undefined || !allowed.includes(text)) {
+    // P4.39b: as written, like `oneOf`.
+    if (typeof value !== 'string' || !allowed.includes(value)) {
       report({ path: at, message: `${member} has to be one of ${allowed.join(', ')}` });
       continue;
     }
-    out[member] = text;
+    out[member] = value;
   }
   // P9: a bound without a limit says nothing a reader could act on, and a reader that
   // trusted it would have to guess which word is limited.
@@ -502,6 +523,12 @@ function readEntry(
   const entry: CodeEntry = { code: normalizeCode(rawCode), label };
   const group = str(raw.group);
   if (group) entry.group = group;
+  // P4.39b (the agreement with codes.schema.json): a group or a description that is no text
+  // was dropped without a word; a group read as none changes the modal state.
+  if (raw.group !== undefined && typeof raw.group !== 'string') report({ path: `${path}.group`, message: 'group has to be a text' });
+  if (raw.description !== undefined && typeof raw.description !== 'string') {
+    report({ path: `${path}.description`, message: 'description has to be a text' });
+  }
   if (flag(raw.modal, `${path}.modal`, report)) entry.modal = true;
   if (flag(raw.pitchFeed, `${path}.pitchFeed`, report)) entry.pitchFeed = true;
   if (flag(raw.pitchFeedAmbiguous, `${path}.pitchFeedAmbiguous`, report)) entry.pitchFeedAmbiguous = true;
@@ -567,6 +594,10 @@ function readEntry(
   if (flag(raw.alone, `${path}.alone`, report)) entry.alone = true;
   const requires = readWords(raw.requires, `${path}.requires`, report);
   if (requires) entry.requires = requires;
+  // Wave Y (T093): the cycles that read a DEF-active cycle's values (Klartext cycle 20 for the
+  // SL cycles 21 to 24); address arithmetic reads it from the loaded database.
+  const usedBy = readWords(raw.usedBy, `${path}.usedBy`, report);
+  if (usedBy) entry.usedBy = usedBy;
   // B1 (A6): the words behind a code that are its own (Klartext `M128 F800`); the scripts read
   // them from the loaded database, so a member the loader dropped would be one they never see.
   const ownWords = readWords(raw.ownWords, `${path}.ownWords`, report);
@@ -690,6 +721,17 @@ export function loadCodeDb(raw: unknown, onProblem?: (p: CodeDbProblem) => void)
 
   const version = num(raw.version);
   if (version === undefined) report({ path: 'version', message: 'version is missing; read as 1' });
+  // P4.39b (the agreement with codes.schema.json): `remove` is consumed by `resolve.ts`, which
+  // skips what it cannot read; a user file is read here on its own first (`stores/codes.ts`), so
+  // a `remove` that removes nothing is said here.
+  if (raw.remove !== undefined) {
+    if (!Array.isArray(raw.remove)) report({ path: 'remove', message: 'remove has to be a list of codes' });
+    else {
+      raw.remove.forEach((code, i) => {
+        if (str(code) === undefined) report({ path: `remove[${i}]`, message: 'has to be a code, such as "G81"' });
+      });
+    }
+  }
 
   const addresses = readAddresses(raw.addresses, report);
   const codes: CodeEntry[] = [];

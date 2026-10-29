@@ -97,12 +97,14 @@ Each row names the owning work package and the feature.
 | `bookmarks.ts` | WP4.4, P4.13 | `bookmark.toggle` / `next` / `prev` / `clear` and the F2 removals; P4.13: named bookmarks (`bookmark.rename`), `bookmark.addAllMatches`, the Bookmarks panel (left region) and `view.toggleBookmarks` (Edit tab group Bookmarks, View tab group Panels; no new key) (Phase 4, P4c) |
 | `channels.ts` | WP12.5 | multi-channel programs: channel status item, sync-point navigation (`Alt+F7`, `Shift+Alt+F7`, `Mod+Alt+P`), `channels.checkSync`, `channels.assign`, `channels.splitToDocuments`, the `togglePreserveCase` removal |
 | `compare.ts` | WP2.5 | compare with a document, a file or the saved version (overlay) |
+| `configuration.ts` | P4.36 | `config.export` and `config.import` (palette category Configuration; no key): the whole configuration folder as one zip, and a zip taken in after a preview of what it would change (the same actions as Settings ▸ Configuration); the zip is read, checked and written by Rust (`src-tauri/src/configzip.rs`), never extracted, and code in it needs the "I trust this file" tick (Phase 4, P4g; §6.9 rules 16–36) |
 | `cursor.ts` | WP1.2 | cursor status item |
 | `cycleForms.ts` | P3.5 | Edit Cycle: the form of the cycle at the cursor, or a new cycle, `nc.editCycle` (Phase 3, P3b; the prelude pinned it; engine `core/templates/cycleForm.ts`, P3.8) |
 | `editing.ts` | WP4.4 | Edit-tab "Edit" and View-tab wrappers around Monaco actions |
 | `encoding.ts` | WP1.6 | encoding and EOL status items and pickers |
 | `externalChange.ts` | WP2.3 | the external-change banner and the poll |
 | `files.ts` | WP1.6 | file commands, close guard, drag and drop, window title |
+| `findInFolder.ts` | P4.28 | `search.findInFolder` (Edit tab, group Search, order 133; no key): the folder dialog, the form, then `folderSearch` (Rust walks the folder and sends each file's bytes); the files are read here with their own profile and the regular-expression guard; hits go to Results, a row opens its file through `folder_grant`; progress and Stop in the status bar (Phase 4, P4f; engine `core/folders/*`) |
 | `help.ts` | WP2.4 | About and the shortcut reference |
 | `layoutPersist.ts` | WP2.3 | restores `ui.layout` and then follows it |
 | `inspector.ts` | P3.2b | the code inspector (left panel): `view.toggleInspector` (Mod+Alt+A), `inspector.editValue` (Phase 3, P3a; the prelude pinned them) |
@@ -115,7 +117,9 @@ Each row names the owning work package and the feature.
 | `ncCleanup.ts` | WP4.3 | NC tab "Cleanup": spaces, empty lines, comments, case |
 | `ncNumbering.ts` | WP4.2 | NC tab "Numbering": `nc.renumber`, `nc.removeBlockNumbers` |
 | `renumberOthers.ts` | P4.20b | NC tab "Numbering": `nc.updateOtherReferences` (Update References in Other Documents…; no key; enabled while a list from the last Renumber Blocks is pending): rewrites the references into the renumbered program that other open documents of the dialect still hold, one confirmation, each document its own undo step, all or nothing (Phase 4, P4d; the prelude pinned it; service `app/renumberOthers.ts`, rules `core/transforms/otherReferences.ts`, P4.20a) |
+| `openRequests.ts` | P4.29 | the files the system asks gEdit to open (a double-click or Open With; a second start of gEdit on Windows and Linux): listens for `gedit-open-requests`, asks `open_requests_ready` once after the listener is registered, opens the paths with `files.open` behind any open dialog and only after every contribution has activated, crash recovery has decided and the session restore has put up its front tab (independent of file-name order; `contributionsLoaded` in `app/contributions.ts`, `awaitSessionRestore` in `app/session.ts`), and says in one status line what was skipped; no command, no key (Phase 4, P4f; the checks and the grant are `src-tauri/src/open_requests.rs`, plan section 6.8.2 S7) |
 | `palette.ts` | WP1.1 | `view.commandPalette` (F1) |
+| `profileForm.ts` | P4.40 | `profile.editInForm` ("Edit Profile in Form", palette and a button per profile on Settings ▸ Profiles; no key): the profile of the active program when it is one of yours, a built-in one read-only; the form comes from `schemas/profile.schema.json`, saves through the file's document, shows a live preview on a sample program (Phase 4, P4h; model `app/profileForm.ts`) |
 | `profileSelect.ts` | WP1.6 | dialect profile status item and picker |
 | `programMap.ts` | WP1.5 | program map (left panel) |
 | `quitGuard.ts` | WP6.5 | reports "any document dirty" to the macOS quit guard |
@@ -128,7 +132,7 @@ Each row names the owning work package and the feature.
 | `scripts.ts` | WP5.2 | the script UI: Tools group, `script.*` commands, Output panel, status item |
 | `search.ts` | WP11.1 | Edit tab "Search": `search.findAll` (Mod+Shift+F), `search.replace`, `search.wholeAddressInFind` |
 | `segments.ts` | WP10.1 | `nav.selectToolSegment` (Mod+F7): select from one tool change to the next |
-| `session.ts` | WP7.5 | session restore at start, and the per-file memory that follows the tabs |
+| `session.ts` | WP7.5 | session restore at start, and the per-file memory that follows the tabs; claims the restore at activation and marks it over in a `finally` (`claimSessionRestore` / `markSessionRestored`), which `openRequests.ts` waits on |
 | `settings.ts` | WP2.7 | the settings dialog, `settings.open` (Mod+,), `profile.manage` (Settings on the Profiles page, no key; M13 integration), reload on save |
 | `splitView.ts` | P4.21 | split view: `view.splitEditor`, `view.splitEditorDown`, `view.closeSplit` (View tab, group Editor; no key), `view.focusNextPane` / `view.focusPreviousPane` (`F6` / `Shift+F6`); the groups are `monaco/editorService.ts` (Phase 4, P4e; the prelude pinned them) |
 | `channelPanes.ts` | P4.22b | the channel view: `channels.sideBySide` (NC tab, group Channels; no key) opens one pane per channel (sections of one program, or the open channel documents, the other channel files offered through the file dialog) lined up at the wait codes; the bar above the panes is a `banner` panel; the panes are `monaco/channelPanes.ts` (Phase 4, P4e) |

@@ -51,6 +51,7 @@ export default {
     inactive_other: '{count} cannot be used yet: their dialect is not loaded or does not accept them (see the list).',
     skipped_one: '{count} was not valid and was left out.',
     skipped_other: '{count} were not valid and were left out.',
+    foldersNotTaken: 'Machine folders belong to one computer and were not imported.',
     full: 'A machines file holds at most {max} machines.',
     unreadable: 'That file is not a machines file',
     notJson: 'That file is not valid JSON',
@@ -100,6 +101,25 @@ export default {
     profileHelp: 'The dialect this machine runs. It cannot be changed afterwards.',
     modal: 'Power-on code, group {group}',
     modalHelp: 'What is in effect before the program sets it.',
+    /** P4h (§6.10 rule 13; T123): only on a profile that offers it (the Siemens profiles). */
+    extraAxes: 'Extra axes',
+    extraAxesHelp:
+      'Axis names of more than one letter that the machine builder set up, such as AA. A Siemens control writes them with an equals sign (AA=90); some machines also take AA90. gEdit then reads both as a move of that axis, and Translate, Rotate and Mirror leave that axis as written. On a standard Siemens control AA90 alone is the name of a program, so list a name only if your machine reads it as an axis. Separate the names with commas and write "rotary" after a name that turns in degrees, for example: AA, BB rotary. Leave it empty if the machine has none. The colour of such a word in the editor does not change.',
+    /** P4h (§6.10 rule 14; T123). `{example}` is data from the profile (`G810-G829`). */
+    builderCodes: 'Machine builder codes',
+    builderCodesHelp:
+      'Codes the machine builder added, as a list such as {example}. The hover and the block inspector name them as codes of the machine builder; the scripts treat them as codes gEdit does not know.',
+  },
+
+  /** P4h (§6.10 rules 13, 14; T123): the two fields' problems, and how hover and the inspector name such words. */
+  extra: {
+    notAxis: '"{item}" is not an extra axis: write 2 to 8 letters, and "rotary" after a name that turns in degrees, for example BB rotary',
+    twice: '"{name}" is listed twice',
+    tooMany: 'A machine names at most {max} extra axes',
+    problem: '{message}',
+    axisLinear: 'Extra axis of this machine',
+    axisRotary: 'Extra rotary axis of this machine, in degrees',
+    builderCode: "A code of the machine builder: its meaning is in the machine's documentation.",
   },
 
   // Group names we have a word for; anything else falls back to `param.modal`
@@ -120,8 +140,7 @@ export default {
     profileDefault: 'Dialect default',
     unconfirmed: 'unconfirmed',
     custom: 'Custom (edited in the file)',
-    customDetail:
-      'The file holds number rules that match no preset. They are kept until a preset is picked here.',
+    customDetail: 'These rules match no number input of the list; the table Numbers shows and edits them.',
   },
 
   // Where a value comes from (`ParamSource`)

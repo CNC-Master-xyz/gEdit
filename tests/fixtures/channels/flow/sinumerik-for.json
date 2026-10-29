@@ -1,0 +1,63 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Siemens two channels: channel 1 waits on mark 1 inside FOR R1=1 TO 3 ... ENDFOR (three passes); channel 2 writes mark 1 three times. Read by jump lines the count was not checked; followed, both channels wait three times and then on mark 2: correct, no finding.",
+  "rule": "F3",
+  "profile": "sinumerik",
+  "preset": "sinumerik-2channel",
+  "program": {
+    "1": [
+      "%_N_FLOWB1_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "FOR R1=1 TO 3",
+      "NN100: WAITM(1,1,2)",
+      "G1 X10 F0.2",
+      "ENDFOR",
+      "NN200: WAITM(2,1,2)",
+      "M30"
+    ],
+    "2": [
+      "%_N_FLOWB2_MPF",
+      "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+      "NN100: WAITM(1,1,2)",
+      "NN110: WAITM(1,1,2)",
+      "NN120: WAITM(1,1,2)",
+      "NN200: WAITM(2,1,2)",
+      "M30"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [],
+        "loops": [
+          {
+            "start": 3,
+            "end": 6,
+            "count": 3
+          }
+        ],
+        "opaque": []
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "count-not-checked",
+        "channel": "2",
+        "line": 4,
+        "mark": "1",
+        "other": "1",
+        "otherLine": 4,
+        "counts": {
+          "channel": 3,
+          "other": 1
+        }
+      }
+    ],
+    "after": []
+  }
+}

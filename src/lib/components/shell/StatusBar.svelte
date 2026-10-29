@@ -50,8 +50,11 @@
             class="message-action"
             data-testid="status-message-action"
             onclick={() => {
+              // Read the action before the message is cleared: `action` follows the message, and once the
+              // message is gone reading it throws, so the button would clear the bar and do nothing.
+              const run = action.run;
               status.clear();
-              action.run();
+              run();
             }}>{action.label}</button
           >
         {/if}

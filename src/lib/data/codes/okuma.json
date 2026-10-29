@@ -208,12 +208,16 @@
     {
       "code": "G17",
       "group": "plane",
+      "modal": true,
+      "review": "pending",
       "conflicts": ["radiusComp"],
       "label": "Compensation plane XY, for driven-tool milling on the face"
     },
     {
       "code": "G18",
       "group": "plane",
+      "modal": true,
+      "review": "pending",
       "conflicts": ["radiusComp"],
       "label": "Compensation plane ZX, the turning plane",
       "description": "In force at power-on and after a reset, and selected again by M109."
@@ -221,6 +225,8 @@
     {
       "code": "G19",
       "group": "plane",
+      "modal": true,
+      "review": "pending",
       "label": "Compensation plane YZ, for driven-tool milling on the side"
     },
     {
@@ -245,6 +251,24 @@
       "params": [
         { "address": "HP", "label": "Number of the tool-change or return position, set in the machine's parameters", "min": 1, "max": 5, "unit": "count" }
       ]
+    },
+    {
+      "code": "G24",
+      "group": "nonmodal",
+      "axisWords": "machine",
+      "sets": { "motion": "rapid" },
+      "review": "pending",
+      "label": "Move to the tool-change home position, axes one by one",
+      "description": "Moves the turret to the tool-change home position set in the machine's parameters, in machine coordinates and not in the program's, at rapid with each axis on its own (no straight line). An option; one of the home position commands with G20, G21 and G25."
+    },
+    {
+      "code": "G25",
+      "group": "nonmodal",
+      "axisWords": "machine",
+      "sets": { "motion": "rapid" },
+      "review": "pending",
+      "label": "Move to the joint position, axes one by one",
+      "description": "Moves to the joint position set in the machine's parameters, in machine coordinates and not in the program's, at rapid with each axis on its own (no straight line). An option; one of the home position commands with G20, G21 and G24."
     },
     {
       "code": "G31",
@@ -478,7 +502,7 @@
         { "address": "L", "label": "Depth after which the tool pulls fully out, as a diameter", "min": 0, "unit": "length" },
         { "address": "DA", "label": "Pull-back after each peck", "min": 0, "unit": "length" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" },
-        { "address": "F", "label": "Feed", "min": 0 },
+        { "address": "F", "label": "Feed", "min": 0, "unit": "feed" },
         { "address": "T", "label": "Offset for the end point; not a tool change" }
       ]
     },
@@ -497,7 +521,7 @@
         { "address": "L", "label": "Depth after which the tool pulls fully out", "min": 0, "unit": "length" },
         { "address": "DA", "label": "Pull-back after each peck", "min": 0, "unit": "length" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" },
-        { "address": "F", "label": "Feed", "min": 0 },
+        { "address": "F", "label": "Feed", "min": 0, "unit": "feed" },
         { "address": "T", "label": "Offset for the end point; not a tool change" }
       ]
     },
@@ -530,7 +554,7 @@
         { "address": "X", "label": "Tapping position, as a diameter" },
         { "address": "Z", "label": "Tapping depth", "required": true },
         { "address": "K", "label": "Rapid approach before the tap starts cutting" },
-        { "address": "F", "label": "Tapping feed, tied to the pitch", "required": true, "min": 0 }
+        { "address": "F", "label": "Tapping feed, tied to the pitch", "required": true, "min": 0, "unit": "feed" }
       ]
     },
     {
@@ -545,7 +569,7 @@
         { "address": "X", "label": "Tapping position, as a diameter" },
         { "address": "Z", "label": "Tapping depth", "required": true },
         { "address": "K", "label": "Rapid approach before the tap starts cutting" },
-        { "address": "F", "label": "Tapping feed, tied to the pitch", "required": true, "min": 0 }
+        { "address": "F", "label": "Tapping feed, tied to the pitch", "required": true, "min": 0, "unit": "feed" }
       ]
     },
     {
@@ -588,11 +612,11 @@
         { "address": "XA", "label": "First change point, as a diameter", "unit": "length", "axis": "X" },
         { "address": "ZA", "label": "First change point along Z, on the face", "unit": "length", "axis": "Z" },
         { "address": "DA", "label": "Depth of cut after the first point, as a diameter and incremental", "min": 0, "unit": "length" },
-        { "address": "FA", "label": "Feed after the first point", "min": 0 },
+        { "address": "FA", "label": "Feed after the first point", "min": 0, "unit": "feed" },
         { "address": "XB", "label": "Second change point, as a diameter", "unit": "length", "axis": "X" },
         { "address": "ZB", "label": "Second change point along Z, on the face", "unit": "length", "axis": "Z" },
         { "address": "DB", "label": "Depth of cut after the second point, as a diameter and incremental", "min": 0, "unit": "length" },
-        { "address": "FB", "label": "Feed after the second point", "min": 0 }
+        { "address": "FB", "label": "Feed after the second point", "min": 0, "unit": "feed" }
       ]
     },
     {
@@ -603,7 +627,7 @@
       "description": "Roughs along the shape whose sequence name follows the code, leaving U and W for finishing. No S, T or M word may stand in the block except M85, which keeps the tool from going back to the start point afterwards, and a change of cutting conditions (G84) goes on the lines after it that start with $.",
       "params": [
         { "address": "D", "label": "Depth of cut, as a diameter and incremental", "min": 0, "unit": "length" },
-        { "address": "F", "label": "Roughing feed", "min": 0 },
+        { "address": "F", "label": "Roughing feed", "min": 0, "unit": "feed" },
         { "address": "U", "label": "Finish allowance on X, as a diameter", "min": 0, "unit": "length" },
         { "address": "W", "label": "Finish allowance on Z", "min": 0, "unit": "length" }
       ]
@@ -616,7 +640,7 @@
       "description": "Roughs by copying the shape whose sequence name follows the code, which suits a cast or forged blank. No S, T or M word may stand in the block except M85, which keeps the tool from going back to the start point afterwards.",
       "params": [
         { "address": "D", "label": "Depth of cut, as a diameter and incremental", "min": 0, "unit": "length" },
-        { "address": "F", "label": "Roughing feed, until the shape sets one with E", "min": 0 },
+        { "address": "F", "label": "Roughing feed, until the shape sets one with E", "min": 0, "unit": "feed" },
         { "address": "U", "label": "Finish allowance on X, as a diameter", "min": 0, "unit": "length" },
         { "address": "W", "label": "Finish allowance on Z", "min": 0, "unit": "length" }
       ]
@@ -816,6 +840,7 @@
     {
       "code": "G119",
       "group": "plane",
+      "modal": true,
       "conflicts": ["radiusComp"],
       "review": "pending",
       "label": "Compensation plane C-X-Z, for driven-tool milling on the side",
@@ -1047,7 +1072,7 @@
         { "address": "R", "label": "Infeed from the cutting start, instead of the depth" },
         { "address": "I", "label": "Rapid approach for a hole across the turning axis" },
         { "address": "K", "label": "Rapid approach for a hole in the face" },
-        { "address": "F", "label": "Drilling feed per minute", "min": 0 },
+        { "address": "F", "label": "Drilling feed per minute", "min": 0, "unit": "feed" },
         { "address": "Q", "label": "Number of holes spaced evenly around C", "min": 1, "unit": "count" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" }
       ]
@@ -1066,7 +1091,7 @@
         { "address": "R", "label": "Infeed from the cutting start, instead of the depth" },
         { "address": "I", "label": "Rapid approach for a hole across the turning axis" },
         { "address": "K", "label": "Rapid approach for a hole in the face" },
-        { "address": "F", "label": "Boring feed per minute", "min": 0 },
+        { "address": "F", "label": "Boring feed per minute", "min": 0, "unit": "feed" },
         { "address": "Q", "label": "Number of holes spaced evenly around C", "min": 1, "unit": "count" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" }
       ]
@@ -1087,7 +1112,7 @@
         { "address": "K", "label": "Rapid approach for a hole in the face" },
         { "address": "D", "label": "Peck depth", "min": 0, "unit": "length" },
         { "address": "L", "label": "Relief between the pecks", "min": 0, "unit": "length" },
-        { "address": "F", "label": "Drilling feed per minute", "min": 0 },
+        { "address": "F", "label": "Drilling feed per minute", "min": 0, "unit": "feed" },
         { "address": "Q", "label": "Number of holes spaced evenly around C", "min": 1, "unit": "count" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" }
       ]
@@ -1108,7 +1133,7 @@
         { "address": "R", "label": "Infeed from the cutting start, instead of the depth" },
         { "address": "I", "label": "Rapid approach for a hole across the turning axis" },
         { "address": "K", "label": "Rapid approach for a hole in the face" },
-        { "address": "F", "label": "Tapping feed, tied to the pitch", "required": true, "min": 0 },
+        { "address": "F", "label": "Tapping feed, tied to the pitch", "required": true, "min": 0, "unit": "feed" },
         { "address": "Q", "label": "Number of holes spaced evenly around C", "min": 1, "unit": "count" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" }
       ]
@@ -1175,7 +1200,7 @@
         { "address": "R", "label": "Infeed from the cutting start, instead of the depth" },
         { "address": "I", "label": "Rapid approach for a hole across the turning axis" },
         { "address": "K", "label": "Rapid approach for a hole in the face" },
-        { "address": "F", "label": "Reaming feed per minute", "min": 0 },
+        { "address": "F", "label": "Reaming feed per minute", "min": 0, "unit": "feed" },
         { "address": "Q", "label": "Number of holes spaced evenly around C", "min": 1, "unit": "count" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" }
       ]
@@ -1200,6 +1225,13 @@
       "review": "pending",
       "label": "Turret C",
       "description": "On a machine with three turrets, the blocks that follow are for turret C. Not on every control: on the OSP-P200 G312 and G313 are contour codes for the side face, and the 2014 OSP-P300 list also has G314 for turret D."
+    },
+    {
+      "code": "G314",
+      "group": "turret",
+      "review": "pending",
+      "label": "Turret D",
+      "description": "On a machine with four turrets, the blocks that follow are for turret D. An option of the OSP-P300; not on every control."
     },
     {
       "code": "M0",
@@ -1648,6 +1680,8 @@
           "label": "File name for the tape header",
           "type": "text",
           "help": "Letters and digits, starting with a letter, at most 16. Writes the header line $NAME.MIN%; leave empty for none.",
+          "maxLength": 16,
+          "charset": "name",
           "prefix": "$",
           "suffix": ".MIN%",
           "uppercase": true
@@ -1657,6 +1691,8 @@
           "label": "Program name (O)",
           "type": "text",
           "help": "At most four letters or digits after O; leave empty for none.",
+          "maxLength": 4,
+          "charset": "letters-digits",
           "default": "1001",
           "prefix": "O",
           "uppercase": true
@@ -2058,6 +2094,8 @@
           "label": "Contour name",
           "type": "text",
           "help": "N followed by at most four letters or digits, for example NLAP1; the same in all three places. The form offers a name the program does not use yet.",
+          "maxLength": 5,
+          "charset": "name",
           "required": true,
           "default": "NLAP1",
           "uppercase": true

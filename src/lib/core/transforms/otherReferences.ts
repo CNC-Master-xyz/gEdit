@@ -249,7 +249,8 @@ function decide(
   if (word.program === 'called') {
     const call = index.calls.get(row);
     // No readable call, or a local one (`M98 Q30` runs a part of B's own program).
-    if (call === undefined || call.local === true || call.key === null) return null;
+    // An external call (`M198`) runs a program from a device, never A's program of that number.
+    if (call === undefined || call.local === true || call.external === true || call.key === null) return null;
     // B holds the program itself: the reference is B's own business (the in-file rules).
     if ((index.byKey.get(call.key)?.length ?? 0) > 0) return null;
     // A holds it once and no other open document holds it: only then is it A's program.

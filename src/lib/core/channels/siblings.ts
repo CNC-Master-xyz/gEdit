@@ -15,6 +15,7 @@
 // and the contradiction is a problem (`documentChannel`).
 
 import type { CompiledProfile } from '$lib/core/profiles/types';
+import { jobListChannel, type JobList } from './jobList';
 import { channelRefs, readMarker, resolveChannelToken } from './resolve';
 import type { ChannelBudget, ChannelParams, ChannelProblem, ChannelRef } from './types';
 
@@ -56,11 +57,13 @@ function list(p: ChannelParams): ChannelParams['list'] {
  * per-channel templates (the one with the longest literal part wins, so `PART_GS.MPF` is
  * the `{{stem}}_GS.MPF` channel and not the `{{stem}}.MPF` one with stem `PART_GS`). Two
  * templates of different channels that explain the name equally well answer null.
+ * Last (P4.30b, T055), the `firstFileName` pattern: a name it matches is the file of the first
+ * declared channel, with the stem it captured (`by: 'first'`).
  */
 export function fileChannel(
   baseName: string,
   p: ChannelParams,
-): { channel: ChannelRef; stem: string; by: 'pattern' | 'template'; match?: RegExpExecArray } | null {
+): { channel: ChannelRef; stem: string; by: 'pattern' | 'template' | 'first'; match?: RegExpExecArray } | null {
   if (p.layout !== 'multi-file') return null;
   if (typeof p.fileName === 'string') {
     try {
@@ -89,7 +92,25 @@ export function fileChannel(
     } else if (literal === best.literal && best.channel.index !== i) tie = true;
   });
   const found = best as { channel: ChannelRef; stem: string; literal: number } | null;
-  return found && !tie ? { channel: found.channel, stem: found.stem, by: 'template' } : null;
+  if (found === null) return firstFile(baseName, p, refs);
+  return tie ? null : { channel: found.channel, stem: found.stem, by: 'template' };
+}
+
+/**
+ * The path-1 file (T055): `firstFileName` matched on the base name, case-insensitively. Only a
+ * pattern with a `stem` group and without a `channel` group counts (the validator says so for
+ * any other); the stem must not be empty.
+ */
+function firstFile(baseName: string, p: ChannelParams, refs: ChannelRef[]): { channel: ChannelRef; stem: string; by: 'first' } | null {
+  if (typeof p.firstFileName !== 'string' || p.firstFileName === '' || refs.length === 0) return null;
+  try {
+    const m = new RegExp(p.firstFileName, 'i').exec(baseName);
+    const stem = m?.groups?.stem;
+    if (m === null || typeof stem !== 'string' || stem === '' || 'channel' in (m.groups ?? {})) return null;
+    return { channel: refs[0], stem, by: 'first' };
+  } catch {
+    return null; // a pattern that does not compile matches nothing; the validator reports it
+  }
 }
 
 /**
@@ -137,8 +158,9 @@ export function siblingNames(
 /** Which channel a `multi-file` document is, without the user's own assignment (WP12.5). */
 export interface DocumentChannel {
   channel: ChannelRef | null;
-  /** `marker` when the header named it (it wins), `fileName` when only the name did. */
-  by: 'fileName' | 'marker' | null;
+  /** `marker` when the header named it (it wins), `fileName` when only the name did,
+   *  `jobList` when only an open Siemens job list did (P4.30b, J5). */
+  by: 'fileName' | 'marker' | 'jobList' | null;
   /** From the file name; `''` when the name is no channel file. */
   stem: string;
   /** The marker's own problems, and a marker that contradicts the file name. */
@@ -154,13 +176,18 @@ export interface DocumentChannel {
  * hand (`channels.assign`) is the service's to put on top. A header that matched the
  * `marker` pattern but named no declared channel, or named two, answers no channel at all:
  * the file name does not stand in for a header that says something else.
+ *
+ * P4.30b (J5): `o.job`, an open Siemens job list of the document's folder, comes last: it
+ * answers only when neither the marker nor the file name does, a job list that disagrees with
+ * either is a problem (`channelFiles.problems.jobListDisagrees`), and one whose `SELECT` lines
+ * give this program two channels answers none (`channelFiles.problems.jobListAmbiguous`).
  */
 export function documentChannel(
   baseName: string,
   lines: readonly string[],
   cp: CompiledProfile,
   p: ChannelParams,
-  o?: ChannelBudget,
+  o?: ChannelBudget & { job?: JobList | null },
 ): DocumentChannel {
   if (p.layout !== 'multi-file') return { channel: null, by: null, stem: '', problems: [] };
   const byName = fileChannel(baseName, p);
@@ -168,7 +195,16 @@ export function documentChannel(
   const problems = [...marker.problems];
   const stem = byName?.stem ?? '';
   if (marker.abandoned === true) return { channel: null, by: null, stem, problems, abandoned: true };
+  const job = o?.job ? jobListChannel(o.job, baseName, p) : null;
+  const jobDisagrees = (ref: ChannelRef): void => {
+    if (job === null || !('channel' in job) || job.channel.id === ref.id) return;
+    problems.push({
+      path: 'jobList',
+      message: { key: 'channelFiles.problems.jobListDisagrees', params: { line: job.line, jobList: job.channel.name, channel: ref.name } },
+    });
+  };
   if (marker.channel !== null) {
+    jobDisagrees(marker.channel);
     if (byName !== null && byName.channel.id !== marker.channel.id) {
       problems.push({
         path: `line:${marker.line}`,
@@ -185,5 +221,84 @@ export function documentChannel(
   if (marker.problems.some((problem) => problem.path.startsWith('line:'))) {
     return { channel: null, by: null, stem, problems };
   }
-  return { channel: byName?.channel ?? null, by: byName ? 'fileName' : null, stem, problems };
+  if (byName !== null) {
+    jobDisagrees(byName.channel);
+    return { channel: byName.channel, by: 'fileName', stem, problems };
+  }
+  if (job !== null && 'ambiguous' in job) {
+    problems.push({ path: 'jobList', message: { key: 'channelFiles.problems.jobListAmbiguous', params: { lines: job.ambiguous.join(', ') } } });
+    return { channel: null, by: null, stem, problems };
+  }
+  if (job !== null) return { channel: job.channel, by: 'jobList', stem, problems };
+  return { channel: null, by: null, stem, problems };
+}
+
+// ---------------------------------------------------------------------------------------
+// Phase 4 (P4f prelude; plan section 6.8): the sibling lookup from a folder listing, written
+// by P4.30b. `siblingNames` above derives names and asks whether they exist; the
+// two functions below cover what it cannot derive (an alias in the file name, a path-1 file
+// without the channel marker, T055) by looking at the names `folder_siblings` lists.
+//
+//  L1. `listingPattern` is the glob `folder_siblings` is asked with: the document's stem and
+//      `*` (`PART*`), never `*` alone (the command refuses a glob with fewer than two literal
+//      characters). null when the document is no channel file, or its stem is shorter than that.
+//  L2. `siblingsFromListing` reads each listed name with `fileChannel` (and `firstFileName`) and
+//      keeps those with the same stem (case-insensitive) and another channel than the document's
+//      own. One name per channel: a channel with two names is `ambiguous` and gets none (refuse
+//      rather than guess), a declared channel with none is `missing`.
+//  L3. The result is a hint for the file dialog and the status message, as `channel_siblings`
+//      is today: nothing is opened without the user picking it (standing rule 14).
+// ---------------------------------------------------------------------------------------
+
+export interface ListedSiblings {
+  found: { channel: ChannelRef; name: string }[];
+  ambiguous: { channel: ChannelRef; names: string[] }[];
+  missing: ChannelRef[];
+}
+
+/** A glob may hold `*` and `?` only as wildcards; a stem with either is not looked for. */
+const GLOB_CHARS = /[*?]/;
+
+/** L1. */
+export function listingPattern(baseName: string, p: ChannelParams): string | null {
+  const named = fileChannel(baseName, p);
+  if (named === null) return null;
+  const stem = named.stem;
+  if (stem.length < 2 || GLOB_CHARS.test(stem) || !plainName(stem)) return null;
+  // The stem where this name has it: at the start (`PART*`, the common case), else anywhere.
+  return baseName.toLowerCase().startsWith(stem.toLowerCase()) ? `${stem}*` : `*${stem}*`;
+}
+
+/** L2. */
+export function siblingsFromListing(
+  baseName: string,
+  listing: readonly string[],
+  p: ChannelParams,
+  self?: string,
+): ListedSiblings | null {
+  const named = fileChannel(baseName, p);
+  if (named === null) return null;
+  const own = typeof self === 'string' ? (resolveChannelToken(p, self) ?? named.channel) : named.channel;
+  const stem = named.stem.toLowerCase();
+  const byChannel = new Map<string, string[]>();
+  const seen = new Set<string>([baseName.toLowerCase()]);
+  for (const name of listing) {
+    const key = name.toLowerCase();
+    if (seen.has(key) || !plainName(name)) continue;
+    seen.add(key);
+    const found = fileChannel(name, p);
+    if (found === null || found.stem.toLowerCase() !== stem || found.channel.id === own.id) continue;
+    const names = byChannel.get(found.channel.id) ?? [];
+    names.push(name);
+    byChannel.set(found.channel.id, names);
+  }
+  const out: ListedSiblings = { found: [], ambiguous: [], missing: [] };
+  for (const ref of channelRefs(p)) {
+    if (ref.id === own.id) continue;
+    const names = byChannel.get(ref.id) ?? [];
+    if (names.length === 1) out.found.push({ channel: ref, name: names[0] });
+    else if (names.length > 1) out.ambiguous.push({ channel: ref, names });
+    else out.missing.push(ref);
+  }
+  return out;
 }

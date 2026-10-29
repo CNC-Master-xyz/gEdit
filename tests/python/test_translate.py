@@ -26,6 +26,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from tests.python import helpers
+from tests.python.test_rotate import run_extra_axes, run_text
 
 try:
     import tomllib  # noqa: F401
@@ -131,13 +132,29 @@ def run_document(text: str, profile_id: str, params: Dict[str, Any]) -> helpers.
     return run_script(SCRIPT, stdin=text, context=context)
 
 
-def run_inline(text: str, profile_id: str, params: Dict[str, Any], preceding: Optional[List[str]] = None) -> Dict[str, Any]:
-    """One run of an inline program; ``preceding`` makes it a selection below those lines."""
+def golden_context(case: helpers.GeometryCase) -> Dict[str, Any]:
+    """``helpers.geometry_context`` with the lines below a selection (FZ-5): a golden's selection
+    ends the document, so they are none."""
+    context = helpers.geometry_context(case)
+    scope = context.get("input")
+    if isinstance(scope, dict) and scope.get("scope") == "selection":
+        scope.setdefault("followingLines", [])
+    return context
+
+
+def run_inline(
+    text: str, profile_id: str, params: Dict[str, Any], preceding: Optional[List[str]] = None, following: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """One run of an inline program; ``preceding`` makes it a selection below those lines, which
+    ends the document unless ``following`` gives the lines below it (FZ-5)."""
     context = helpers.effective_context(profile_id, params=params)
     lines = text.split("\n")
     if preceding is not None:
         start = len(preceding) + 1
-        context["input"] = {"scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding}
+        context["input"] = {
+            "scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding,
+            "followingLines": list(following or []),
+        }
     out = run_script(SCRIPT, stdin=text, context=context)
     if not out.ok:
         raise AssertionError(out.stderr)
@@ -150,7 +167,7 @@ class GoldenTest(unittest.TestCase):
         self.assertGreaterEqual(len(cases), 30)
         for case in cases:
             with self.subTest(case=case.name):
-                out = run_script(SCRIPT, stdin=case.input_text(), context=helpers.geometry_context(case))
+                out = run_script(SCRIPT, stdin=case.input_text(), context=golden_context(case))
                 self.assertTrue(out.ok, out.stderr)
                 result = out.json()
                 self.assertEqual(result["text"], case.expected_text())
@@ -177,6 +194,8 @@ class GoldenTest(unittest.TestCase):
             "frame", "coordinate-shift", "intermediate-point", "call", "expression", "machine-dependent",
             "distance-assumed", "axis-unwritten", "unknown-code", "rotary-turned", "selection-inside",
             "cycle-not-reviewed", "fk-contour", "arc-unsupported", "resolution",
+            # Round Y review (WY-NC-4): golden g70-pair-finish-only.
+            "contour-split",
         }
         self.assertLessEqual(wanted, seen)
 
@@ -187,7 +206,7 @@ class IdentityAndRoundTripTest(unittest.TestCase):
     def test_a_zero_shift_gives_every_golden_back_byte_for_byte(self) -> None:
         for case in helpers.geometry_cases("translate"):
             with self.subTest(case=case.name):
-                context = helpers.geometry_context(case)
+                context = golden_context(case)
                 context["params"] = dict(ZERO)
                 out = run_script(SCRIPT, stdin=case.input_text(), context=context)
                 self.assertTrue(out.ok, out.stderr)
@@ -199,7 +218,7 @@ class IdentityAndRoundTripTest(unittest.TestCase):
             if case.refused:
                 continue
             with self.subTest(case=case.name):
-                context = helpers.geometry_context(case)
+                context = golden_context(case)
                 context["params"] = negated(case.params)
                 out = run_script(SCRIPT, stdin=case.expected_text(), context=context)
                 self.assertTrue(out.ok, out.stderr)
@@ -1037,6 +1056,320 @@ class RefusedBlocksAreNotMovedTest(unittest.TestCase):
         result, calls = self.run_in_process(text, {"dx": 1, "dy": 2, "dz": 0})
         self.assertEqual(result["findings"], [])
         self.assertIn("Y2.", result["text"])
+
+
+class LaterVersionTest(unittest.TestCase):
+    """Wave Y, BL-NC-geometry: the later-version transforms under translate. Each test fails
+    without its change."""
+
+    KLARTEXT = ReviewFixTest.KLARTEXT
+
+    def errors(self, result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def test_t021_every_call_at_a_position_moves_the_calls_z_and_keeps_q203(self) -> None:
+        # TNC 640 cycle manual (2019, p.65): the tool-axis coordinate of CYCL CALL POS acts like a
+        # further datum shift, so moving it moves the cycle once; Q203 stays.
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 CYCL CALL POS X+30 Y+10 Z-2 FMAX")
+        result = run_inline(text, "heidenhain-klartext", {"dx": 1, "dz": 1})
+        self.assertEqual(self.errors(result), [])
+        lines = result["text"].split("\n")
+        self.assertIn("  Q203=+0 ;SURFACE COORDINATE", lines)
+        self.assertIn("5 CYCL CALL POS X+11 Y+10 Z+1 FMAX", lines)
+        self.assertIn("6 CYCL CALL POS X+31 Y+10 Z-1 FMAX", lines)
+        self.assertIn("4 L Z+51 R0 FMAX", lines)
+
+    def test_t021_one_other_call_keeps_the_refusal(self) -> None:
+        # The golden b3-klartext-call-pos-z holds M99 and M89 calls; here one CYCL CALL.
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 L X+30 Y+10 R0 FMAX\n66 CYCL CALL")
+        self.assertEqual(self.errors(run_inline(text, "heidenhain-klartext", {"dz": 1})), [(4, "cycle-position"), (8, "cycle-position")])
+
+    def test_t021_a_call_at_a_position_without_the_tool_axis_keeps_the_refusal(self) -> None:
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 CYCL CALL POS X+30 Y+10 FMAX")
+        found = self.errors(run_inline(text, "heidenhain-klartext", {"dz": 1}))
+        self.assertEqual(found, [(4, "cycle-position"), (8, "cycle-position"), (9, "cycle-position")])
+
+    def test_t021_a_selection_with_the_definition_and_its_calls(self) -> None:
+        text = self.KLARTEXT.replace("6 L X+30 Y+10 R0 FMAX M99", "6 CYCL CALL POS X+30 Y+10 Z-2 FMAX")
+        lines = text.split("\n")
+        result = run_inline("\n".join(lines[3:9]), "heidenhain-klartext", {"dz": 1}, lines[:3])
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("  Q203=+0 ;SURFACE COORDINATE", result["text"].split("\n"))
+
+    def test_t019_cycle95_with_its_contour_between_labels_in_the_scope(self) -> None:
+        # SINUMERIK cycles manual, CYCLE95: NPP names the contour, a subprogram or a section of
+        # the program between two labels ("START:END"). The section in the run moves with it.
+        lines = [
+            "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE", "N10 G18 G90 G95 DIAMON", "N20 T1 D1",
+            "N40 G0 X65 Z2", 'N50 CYCLE95("ANFANG:ENDE",2,0.1,0.2,0.1,0.3,0.25,0.1,9,0,0,0.5)', "N60 G0 X100 Z50", "N70 M30",
+            "ANFANG:", "N80 G1 X20 Z0", "N90 Z-20", "ENDE:",
+        ]
+        text = "\n".join(lines)
+        result = run_inline(text, "sinumerik", {"dz": -1})
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N80 G1 X20 Z-1", result["text"].split("\n"))
+        # A contour in a subprogram stays refused.
+        sub = text.replace('"ANFANG:ENDE"', '"KONTUR1"')
+        self.assertEqual(self.errors(run_inline(sub, "sinumerik", {"dz": -1})), [(5, "cycle-position")])
+        # A label that is not in the run, or one written twice.
+        self.assertEqual(self.errors(run_inline(text.replace("ENDE:", "ENDX:"), "sinumerik", {"dz": -1})), [(5, "cycle-position")])
+        self.assertEqual(self.errors(run_inline(text + "\nANFANG:", "sinumerik", {"dz": -1})), [(5, "cycle-position")])
+        # A selection that holds the cycle and not its contour.
+        found = self.errors(run_inline("\n".join(lines[3:7]), "sinumerik", {"dz": -1}, lines[:3]))
+        self.assertIn((5, "cycle-position"), found)
+
+
+class ContourNamedOutsideTest(unittest.TestCase):
+    """Wave Y skeptic of BL-NC-geometry, D3: a contour between two labels moves with the cycle
+    that names it only while no cycle outside the selection names the same labels (it would
+    stay where it is and run the moved contour), and only when the lines below the selection
+    are known. Each test fails without the fix, except those marked as guards."""
+
+    # A roughing and a finishing CYCLE95 on one contour written after M30 (the skeptic's t019a).
+    LINES = [
+        "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE", "N10 G18 G90 G95 DIAMON", "N20 T1 D1",
+        "N30 G96 S200 M3 LIMS=3000", "N40 G0 X65 Z2", 'N50 CYCLE95("ANFANG:ENDE",2,0.1,0.2,0.1,0.3,0.25,0.1,1,0,0,0.5)',
+        "N60 G0 X100 Z50", "N65 T2 D1", "N66 G0 X65 Z2", 'N67 CYCLE95("ANFANG:ENDE",2,0.1,0.2,0.1,0.3,0.25,0.1,5,0,0,0.5)',
+        "N68 G0 X100 Z50", "N70 M30", "ANFANG:", "N80 G1 X20 Z0", "N90 Z-20", "N100 X40 Z-30", "N110 X60", "ENDE:",
+    ]
+    # Lines 9-18: the finishing cycle and the contour.
+    START = 9
+
+    def errors(self, result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def finishing(self, lines: List[str], following: Optional[List[str]] = None) -> Dict[str, Any]:
+        return run_inline("\n".join(lines[self.START - 1:]), "sinumerik", {"dz": -1}, lines[: self.START - 1], following)
+
+    def without_roughing(self) -> List[str]:
+        return [line if not line.startswith("N50 ") else "N50 G0 X70" for line in self.LINES]
+
+    def test_a_cycle_above_the_selection_names_the_contour(self) -> None:
+        result = self.finishing(self.LINES)
+        self.assertEqual(self.errors(result), [(10, "cycle-position")])
+        self.assertEqual(result["text"], "\n".join(self.LINES[self.START - 1:]))
+
+    def test_guard_the_same_selection_without_the_cycle_above_moves(self) -> None:
+        result = self.finishing(self.without_roughing())
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N80 G1 X20 Z-1", result["text"].split("\n"))
+
+    def test_a_cycle_below_the_selection_names_the_contour(self) -> None:
+        below = ['N200 CYCLE95("anfang : ende",2,0.1,0.2,0.1,0.3,0.25,0.1,5,0,0,0.5)']
+        self.assertEqual(self.errors(self.finishing(self.without_roughing(), below)), [(10, "cycle-position")])
+
+    def test_a_contour_call_below_names_the_labels_one_by_one(self) -> None:
+        # A contour call of the cutting cycles names the start and the end label as two strings.
+        below = ['N200 CYCLE62(,1,"ANFANG","ENDE")']
+        self.assertEqual(self.errors(self.finishing(self.without_roughing(), below)), [(10, "cycle-position")])
+
+    def test_without_the_lines_below_the_run_refuses(self) -> None:
+        lines = self.without_roughing()
+        context = helpers.effective_context("sinumerik", params={"dz": -1})
+        context["input"] = {
+            "scope": "selection", "startLine": self.START, "endLine": len(lines), "precedingLines": lines[: self.START - 1],
+        }
+        out = run_script(SCRIPT, stdin="\n".join(lines[self.START - 1:]), context=context)
+        self.assertTrue(out.ok, out.stderr)
+        self.assertEqual(self.errors(out.json()), [(10, "cycle-position")])
+
+    def test_guard_both_cycles_and_the_contour_in_the_run(self) -> None:
+        result = run_inline("\n".join(self.LINES), "sinumerik", {"dz": -1})
+        self.assertEqual(self.errors(result), [])
+        self.assertIn("N80 G1 X20 Z-1", result["text"].split("\n"))
+        # A selection that holds both cycles and the contour moves them too.
+        result = run_inline("\n".join(self.LINES[4:]), "sinumerik", {"dz": -1}, self.LINES[:4])
+        self.assertEqual(self.errors(result), [])
+
+    def test_guard_other_labels_outside_the_selection_do_not_refuse(self) -> None:
+        below = ['N200 CYCLE95("START:STOP",2,0.1,0.2,0.1,0.3,0.25,0.1,5,0,0,0.5)', "START:", "N210 G1 X30 Z0", "STOP:"]
+        self.assertEqual(self.errors(self.finishing(self.without_roughing(), below)), [])
+
+
+class ExtraAxisRowTest(unittest.TestCase):
+    """P4h fix round, Q-5 (plan section 6.10 rule 13): Translate leaves the words of a machine's
+    linear extra axis as written, and says so in one information row per axis (no refusal), so a
+    user whose AA runs along X sees that it did not move. A rotary extra axis gets no row (and,
+    standing away from 0, refuses the run as C does: :class:`RotaryExtraAxisTest`)."""
+
+    HEAD = ["; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE", "N10 G17 G90 G71 G54", "N20 T1 D1", "N30 M6"]
+
+    def run_on(self, body: List[str], params: Dict[str, Any]) -> Dict[str, Any]:
+        case = next(c for c in helpers.geometry_cases("translate") if c.name == "extra-axis-sinumerik-mill")
+        context = golden_context(case)
+        context["params"] = dict(params)
+        lines = self.HEAD + body
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(lines)}
+        out = run_script(SCRIPT, stdin="\n".join(lines), context=context)
+        self.assertTrue(out.ok, out.stderr)
+        return out.json()
+
+    @staticmethod
+    def rows(result: Dict[str, Any]) -> List[Tuple[int, str, str]]:
+        return [(f["line"], f["severity"], f["message"]) for f in result["findings"] if f["reason"] == "extra-axis"]
+
+    def test_one_row_names_the_words_of_the_linear_extra_axis(self) -> None:
+        result = self.run_on(["N40 G0 X0 Y0 Z50 AA0 QQ0", "N50 G1 X20 AA15.5 F200", "N60 G1 Y10 QQ90", "N70 M30"], {"dx": 1})
+        self.assertEqual(result["text"].split("\n")[4:6], ["N40 G0 X1 Y0 Z50 AA0 QQ0", "N50 G1 X21 AA15.5 F200"])
+        self.assertEqual(
+            self.rows(result),
+            [(5, "info", "AA0: AA is an extra axis of the machine, and Translate moves only X, Y and Z, so it left AA0 and AA15.5 as written. If AA moves along X, Y or Z on this machine, change them by hand.")],
+        )
+        self.assertIn("Left 2 words as written: 2 words of an extra axis of the machine.", result["message"])
+        self.assertFalse(any(f["severity"] == "error" for f in result["findings"]))
+
+    def test_one_word_and_many_words(self) -> None:
+        one = self.run_on(["N40 G0 X0 Y0 Z50 AA=7", "N50 M30"], {"dz": 1})
+        self.assertEqual([m for _, _, m in self.rows(one)], [
+            "AA=7: AA is an extra axis of the machine, and Translate moves only X, Y and Z, so it left AA=7 as written. If AA moves along X, Y or Z on this machine, change it by hand."
+        ])
+        many = self.run_on(["N40 G0 X0 Y0 Z50"] + ["G1 X%d AA%d F100" % (i, i) for i in range(1, 9)] + ["M30"], {"dx": 1})
+        rows = self.rows(many)
+        self.assertEqual(len(rows), 1)
+        self.assertIn("so it left AA1, AA2, AA3, AA4, AA5 and 3 more words as written", rows[0][2])
+
+    def test_a_rotary_extra_axis_and_a_program_without_one_get_no_row(self) -> None:
+        rotary = self.run_on(["N40 G0 X0 Y0 Z50 QQ0", "N50 M30"], {"dx": 1})
+        self.assertFalse(refused(rotary), rotary["findings"])
+        self.assertEqual(self.rows(rotary), [])
+        result = self.run_on(["N40 G0 X0 Y0 Z50", "N50 M30"], {"dx": 1})
+        self.assertEqual(self.rows(result), [])
+        self.assertNotIn("extra axis", result["message"])
+
+    def test_a_refused_run_lists_only_its_refusals(self) -> None:
+        result = self.run_on(["N40 G0 X0 Y0 Z50 AA0", "N50 G1 X=R1 AA5 F100", "N60 M30"], {"dx": 1})
+        self.assertTrue(refused(result))
+        self.assertEqual(self.rows(result), [])
+
+    def test_without_the_machine_no_word_is_an_extra_axis(self) -> None:
+        lines = self.HEAD + ["N40 G0 X0 Y0 Z50 AA=7", "N50 M30"]
+        result = run_inline("\n".join(lines), "sinumerik-mill", {"dx": 1})
+        self.assertEqual(self.rows(result), [])
+
+
+class RotaryExtraAxisTest(unittest.TestCase):
+    """Round Y review WY-NC-2 (owner decision 2026-10-29): a rotary extra axis of the machine
+    (``QQ``, listed as rotary) standing away from 0 stops Translate as A, B and C do: gEdit cannot
+    know what it turns, so the X, Y and Z words under it are no longer positions in the part.
+    Before the fix the whole run moved two words under ``QQ90``."""
+
+    D = {"dx": 5, "dy": 0, "dz": 0}
+
+    def test_the_whole_run_and_a_selection_under_qq90_are_refused(self) -> None:
+        for rotary in ("QQ90", "C90"):
+            result = run_extra_axes(SCRIPT, self.D, rotary)
+            self.assertEqual(
+                [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"],
+                [(2, "rotary-turned"), (3, "rotary-turned")], rotary,
+            )
+            self.assertIn("N60 G1 X10 Y5 Z-2 F200", result["text"].split("\n"))
+            result = run_extra_axes(SCRIPT, self.D, rotary, selection=(3, 3))
+            self.assertEqual([(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"], [(3, "rotary-turned")])
+
+    def test_at_zero_the_run_still_moves(self) -> None:
+        result = run_extra_axes(SCRIPT, self.D, "QQ0")
+        self.assertFalse(refused(result), result["findings"])
+        self.assertEqual(result["text"].split("\n")[1:3], ["N50 G0 X5 Y0 Z50 QQ0", "N60 G1 X15 Y5 Z-2 F200"])
+
+
+def preset_selection(profile_id: str, preset: str, program: List[str], start: int, end: int, below: bool = True) -> Dict[str, Any]:
+    """Translate ``dz=-5`` of lines ``start`` to ``end`` (1-based) of ``program`` on a machine
+    ``preset``, with the lines above and (``below``) the lines below."""
+    context = helpers.effective_context(profile_id, preset=preset)
+    context["params"] = {"dx": 0, "dy": 0, "dz": -5}
+    context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": program[: start - 1]}
+    if below:
+        context["input"]["followingLines"] = program[end:]
+    out = run_script(SCRIPT, stdin="\n".join(program[start - 1 : end]), context=context)
+    if not out.ok:
+        raise AssertionError(out.stderr)
+    return out.json()
+
+
+class ContourPairTest(unittest.TestCase):
+    """Round Y review WY-NC-4 (the rule of T019/D3 and of the Z mirror's D2, for Translate): a
+    roughing or finishing cycle and the contour it names move together or not at all. Fanuc
+    `G70`-`G73` name the contour by `P`/`Q` block numbers; the Okuma LAP `G85`-`G88` by the name of
+    a `G81` ... `G80` shape. Before the fix each split selection below moved part of the pair."""
+
+    FANUC = [
+        "O1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G99 G0 X60. Z2. T0101", "G71 U2. R0.5",
+        "G71 P10 Q20 U0.4 W0.1 F0.25", "N10 G0 X20.", "G1 Z-10. F0.1", "X40. Z-20.", "N20 X60.", "G0 X100. Z50.",
+        "T0202", "G0 X60. Z2.", "G70 P10 Q20", "G0 X100. Z50.", "M30",
+    ]
+    OKUMA = [
+        "O1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G90 G0 X100. Z50.",
+        "G85 NLAP1 D2. F0.3 U0.4 W0.1", "G87 NLAP1", "G0 X100. Z50.", "NLAP1 G81", "G0 X20.", "G1 Z-10. F0.1",
+        "X40. Z-20.", "G80", "M02",
+    ]
+
+    def fanuc(self, start: int, end: int, below: bool = True) -> Dict[str, Any]:
+        return preset_selection("fanuc-lathe", "is-b", self.FANUC, start, end, below)
+
+    def okuma(self, start: int, end: int, below: bool = True) -> Dict[str, Any]:
+        return preset_selection("okuma-osp", "okuma-1mm", self.OKUMA, start, end, below)
+
+    @staticmethod
+    def errors(result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def test_fanuc_the_finishing_cycle_without_its_contour(self) -> None:
+        # Lines 10-13: G70 would rapid to N10 at the moved Z, into the roughed contour.
+        result = self.fanuc(10, 13)
+        self.assertEqual(self.errors(result), [(12, "contour-split")])
+        self.assertEqual(result["text"], "\n".join(self.FANUC[9:13]))
+        self.assertIn("only move together", result["findings"][0]["message"])
+
+    def test_fanuc_the_roughing_cycle_without_its_contour(self) -> None:
+        self.assertEqual(self.errors(self.fanuc(1, 4)), [(4, "contour-split")])
+
+    def test_fanuc_the_contour_without_its_cycles(self) -> None:
+        program = list(self.FANUC)
+        program[4] = "N10 G0 X20. Z2."  # a first move with every axis: no selection-start
+        result = preset_selection("fanuc-lathe", "is-b", program, 5, 8)
+        self.assertEqual(self.errors(result), [(5, "contour-split")])
+        # The roughing cycle and its contour, while the G70 below names the contour too.
+        self.assertEqual(self.errors(self.fanuc(2, 9)), [(4, "contour-split"), (5, "contour-split")])
+
+    def test_okuma_the_shape_without_its_calls(self) -> None:
+        # The shape's first block gets no Z added (the LAP approach depends on it).
+        result = self.okuma(6, 10)
+        self.assertEqual(self.errors(result), [(6, "contour-split"), (7, "selection-start")])
+        self.assertNotIn("word-added", [f["reason"] for f in result["findings"]])
+        self.assertEqual(result["text"], "\n".join(self.OKUMA[5:10]))
+
+    def test_okuma_the_calls_without_their_shape(self) -> None:
+        self.assertEqual(self.errors(self.okuma(2, 5)), [(3, "contour-split"), (4, "contour-split")])
+        self.assertEqual(self.errors(self.okuma(3, 4)), [(3, "selection-start"), (4, "contour-split")])
+
+    def test_a_cycle_that_starts_at_the_unmoved_point(self) -> None:
+        # The pair whole, but no move to the cycle's start point in the selection: the cycle
+        # starts where the lines above left the tool, and N10 gets no Z added.
+        result = self.fanuc(3, 14)
+        self.assertEqual(self.errors(result), [(4, "selection-start")])
+        self.assertIn("roughing or finishing cycle starts from that point", result["findings"][0]["message"])
+        self.assertEqual(self.errors(self.okuma(3, 10)), [(3, "selection-start")])
+
+    def test_without_the_lines_below_a_pair_is_refused(self) -> None:
+        result = self.fanuc(2, 14, below=False)
+        self.assertEqual(self.errors(result), [(4, "contour-split"), (5, "contour-split"), (12, "contour-split")])
+        self.assertIn("lines below the selection were not available", result["findings"][0]["message"])
+        self.assertEqual(self.errors(self.okuma(2, 10, below=False)), [(3, "contour-split"), (4, "contour-split"), (6, "contour-split")])
+
+    def test_guards_the_whole_pair_and_the_whole_program_still_move(self) -> None:
+        moved = self.fanuc(2, 14)
+        self.assertFalse(refused(moved), moved["findings"])
+        self.assertEqual(moved["text"].split("\n")[3:6], ["N10 G0 X20.", "G1 Z-15. F0.1", "X40. Z-25."])
+        self.assertFalse(refused(self.okuma(2, 10)))
+        # Lines between the pairs and lines above them touch no contour.
+        self.assertFalse(refused(self.fanuc(9, 11)))
+        self.assertFalse(refused(self.okuma(1, 2)))
+        whole = run_text(SCRIPT, "fanuc-lathe", {"dz": -5}, "\n".join(self.FANUC), preset="is-b")
+        self.assertFalse(refused(whole), whole["findings"])
+        self.assertIn("G0 X60. Z-3.", whole["text"].split("\n"))
+        whole = run_text(SCRIPT, "okuma-osp", {"dz": -5}, "\n".join(self.OKUMA), preset="okuma-1mm")
+        self.assertFalse(refused(whole), whole["findings"])
+        self.assertIn("X40. Z-25.", whole["text"].split("\n"))
 
 
 if __name__ == "__main__":

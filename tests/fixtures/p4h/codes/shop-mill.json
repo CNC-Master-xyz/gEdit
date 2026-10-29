@@ -1,0 +1,218 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/codes.schema.json",
+  "dialect": "shop-mill",
+  "version": 1,
+  "extends": "fanuc",
+  "remove": ["G89"],
+  "addresses": {
+    "X": { "label": "X axis", "description": "Position on the X axis." },
+    "Q": { "label": "Q word" }
+  },
+  "codes": [
+    { "code": "G76", "description": "Fine boring, as this shop writes it.", "review": "pending" },
+    { "code": "M8", "label": "Coolant on (through the spindle)", "replace": true, "group": "coolant", "modal": true },
+    {
+      "code": "G901",
+      "label": "Shop tilt",
+      "group": "frame",
+      "frame": "open",
+      "positionsRotary": true,
+      "frameZeroWords": ["A", "B"],
+      "frameEmptyCloses": "1",
+      "frameIdentity": "0",
+      "conflicts": ["tcp", "!frame:frame", "code:G43.4"],
+      "requires": ["A", "B"],
+      "ownWords": ["F"],
+      "alone": null,
+      "verify": false,
+      "params": [
+        { "address": "A", "label": "Tilt angle A", "frameZero": "zero", "keepsRotary": true, "inPlane": "angle", "position": "none" },
+        { "address": "B", "label": "Tilt angle B", "turnsRotary": true, "frameCloses": "\"0\"", "position": "none" },
+        { "address": "F", "label": "Feed of the rotary axes", "unit": "feedPerMin", "position": "none" }
+      ]
+    },
+    {
+      "code": "G902",
+      "label": "Shop data setting",
+      "group": "offset",
+      "wordsAreData": true,
+      "axisWords": "data",
+      "shift": true,
+      "shiftZeroIsNone": true,
+      "params": [
+        { "address": "L", "label": "Which table", "toolOffsetValues": ["1", "10"], "unit": "count" },
+        { "address": "P", "label": "Which program", "programNumber": "plain", "unit": "count" },
+        { "address": "I", "label": "Weight", "unit": "count", "decimals": true },
+        { "address": "J", "label": "Point on X", "axis": "X", "position": "other" }
+      ]
+    },
+    {
+      "code": "G903",
+      "label": "Shop two-block cycle",
+      "blocks": 2,
+      "group": "cycle",
+      "params": [
+        { "address": "P", "label": "Passes, chamfer and angle", "block": 1, "unit": "count", "position": "none" },
+        { "address": "P", "label": "Thread height", "block": 2, "unit": "increment", "position": "none" },
+        { "address": "Q", "label": "First depth of cut", "block": 2, "unit": "increment", "position": "none" },
+        { "address": "R", "label": "Taper", "lengthAlong": "X", "position": "none", "lengthInForce": true },
+        { "address": "L", "label": "Direction", "signOf": "next-move", "position": "none" },
+        { "address": "Z", "label": "End point", "required": true, "min": -1000, "max": 1000, "position": "tool-axis" }
+      ]
+    },
+    {
+      "code": "G904",
+      "label": "Shop peck drilling",
+      "group": "cycle",
+      "modal": true,
+      "sets": { "cycle": "start" },
+      "params": [
+        { "address": "X", "label": "Hole position X", "expandRole": "position" },
+        { "address": "Y", "label": "Hole position Y", "expandRole": "position" },
+        { "address": "Z", "label": "Hole bottom", "position": "tool-axis", "twin": "D", "expandRole": "depth" },
+        { "address": "D", "label": "Hole depth from R", "position": "none", "twin": "Z" },
+        { "address": "R", "label": "R point", "position": "tool-axis", "expandRole": "r-plane" },
+        { "address": "Q", "label": "Peck", "position": "none", "expandRole": "peck" },
+        { "address": "P", "label": "Dwell", "position": "none", "unit": "count", "expandRole": "dwell" },
+        { "address": "F", "label": "Feed", "position": "none", "expandRole": "feed" },
+        { "address": "E", "label": "Feed out", "position": "none", "expandRole": "feed-out" },
+        { "address": "K", "label": "Repeats", "position": "none", "unit": "count", "expandRole": "repeat" }
+      ],
+      "expand": {
+        "kind": "peck",
+        "returnBy": "code",
+        "leaves": { "motion": "before", "feed": "cycle" },
+        "feedOutZero": "feed",
+        "steps": [
+          { "step": "rapid", "to": "r-plane" },
+          { "step": "pecks", "mode": "chip-break", "retract": { "form": "peckRetract" }, "retractAt": "feed-out" },
+          { "step": "dwell", "at": "bottom" },
+          { "step": "feed", "to": "r-plane", "feed": "feed-out" },
+          { "step": "rapid", "to": "return" }
+        ]
+      }
+    },
+    {
+      "code": "G905",
+      "label": "Shop drilling with a choice",
+      "group": "cycle",
+      "modal": true,
+      "sets": { "cycle": "start" },
+      "params": [
+        { "address": "Z", "label": "Hole bottom", "position": "tool-axis", "expandRole": "depth" },
+        { "address": "R", "label": "R point", "position": "tool-axis", "expandRole": "r-plane" },
+        { "address": "Q", "label": "Peck", "position": "none", "expandRole": "peck" },
+        { "address": "V", "label": "Way of drilling", "position": "mode", "expandRole": "variant" },
+        { "address": "W", "label": "Axis", "position": "mode", "expandRole": "default" },
+        { "address": "S", "label": "Spindle direction", "position": "none", "expandRole": "spindle-direction" },
+        { "address": "O", "label": "Spindle angle", "position": "none", "expandRole": "orient-angle" },
+        { "address": "I", "label": "Lift-off", "position": "none", "expandRole": "lift-off-first" }
+      ],
+      "expand": {
+        "by": "V",
+        "cases": {
+          "0": {
+            "kind": "drill",
+            "returnBy": "code",
+            "leaves": { "motion": "cycle", "feed": "before" },
+            "defaults": { "W": ["0", "3"] },
+            "steps": [
+              { "step": "rapid", "to": "r-plane" },
+              { "step": "feed", "to": "depth" },
+              { "step": "spindle-stop" },
+              { "step": "orient" },
+              { "step": "lift-off" },
+              { "step": "rapid", "to": "return" },
+              { "step": "lift-off", "back": true },
+              { "step": "spindle-restore" }
+            ]
+          },
+          "1": {
+            "kind": "peck",
+            "returnBy": "code",
+            "leaves": { "motion": "cycle", "feed": "cycle" },
+            "defaults": { "W": "0" },
+            "steps": [
+              { "step": "rapid", "to": "r-plane" },
+              { "step": "pecks", "mode": "full-retract", "back": "r-plane", "reentry": { "form": "peckClearance" } },
+              { "step": "rapid", "to": "return" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "code": "G906",
+      "label": "Shop dwell",
+      "group": "nonmodal",
+      "fNotFeed": true,
+      "params": [
+        { "address": "X", "label": "Seconds", "unit": "dwell" },
+        { "address": "P", "label": "Increments", "unit": "count" }
+      ],
+      "dwell": { "seconds": "X", "increments": "P" }
+    },
+    {
+      "code": "G907",
+      "label": "Shop arc with compensation",
+      "aliases": ["G0907"],
+      "group": "motion",
+      "modal": true,
+      "sets": {
+        "motion": "feed",
+        "path": "arc",
+        "arcDirection": "cw",
+        "radiusComp": "on",
+        "compSide": "left",
+        "plane": "XY",
+        "distance": "absolute",
+        "units": "mm",
+        "feedUnit": "per-minute",
+        "cycleReturn": "initial",
+        "speedLimit": true,
+        "speedLimitBound": "lower",
+        "speedUnit": "rpm",
+        "diameter": "off",
+        "tcp": "off",
+        "planeFromAxisWord": false,
+        "spindle": "on",
+        "toolSpindle": "off",
+        "lengthComp": "on",
+        "exitSpeed": "zero",
+        "language": "iso"
+      }
+    },
+    { "code": "M300", "label": "Shop pallet call", "call": true, "blockFeed": true, "machineType": "mill", "flow": "jump" },
+    { "code": "M301", "label": "Shop pole", "pole": "set", "axisWords": "data", "contour": "open", "blank": true },
+    { "code": "M302", "label": "Shop thread", "pitchFeed": true, "pitchFeedAmbiguous": true, "tappingElsewhere": true, "tapping": true, "frameWithoutValues": "close", "frame": "close" },
+    { "code": "SPOS", "label": "Spindle position", "orient": true }
+  ],
+  "templates": [
+    {
+      "id": "shop-drill",
+      "label": "Shop drilling",
+      "group": "Drilling",
+      "description": "A drilled hole the way this shop writes it.",
+      "toolbar": true,
+      "machineType": "mill",
+      "review": "pending",
+      "body": "{{N}} (DRILL {{name}} {{sys.date}})\n{{N}} G98 G81 {{z}} R{{r}} {{f}} {{k}}\n/{{N}} M{{coolant}}\n{{N}} G80 ({{rpm}})",
+      "params": [
+        { "id": "name", "label": "Name", "type": "text", "uppercase": true, "comment": false, "maxLength": 12, "charset": "name", "default": "HOLE" },
+        { "id": "z", "label": "Depth", "type": "number", "required": true, "min": -500, "max": 0, "decimals": "min1", "default": "-10", "prefix": "Z", "plusSign": false, "unit": "mm", "help": "The bottom of the hole.", "remember": true },
+        { "id": "r", "label": "R point", "type": "number", "decimals": 3, "default": 2 },
+        { "id": "f", "label": "Feed", "type": "number", "prefix": "F", "suffix": "", "unit": "mm/min", "default": 150 },
+        { "id": "k", "label": "Repeats", "type": "integer", "min": 1, "max": 99, "digits": 2, "prefix": "K" },
+        { "id": "coolant", "label": "Coolant", "type": "choice", "choices": [{ "label": "Flood", "value": "8" }, { "label": "Mist", "value": 7 }], "default": "8" },
+        { "id": "rpm", "label": "Speed", "type": "formula", "formula": "1000 * f / (pi * 10)", "decimals": 0, "digits": 4, "hidden": true, "unit": "1/min" }
+      ]
+    },
+    {
+      "id": "shop-snippet",
+      "label": "Shop snippet",
+      "group": "Other",
+      "snippet": true,
+      "body": "G0 X${1:0.} Y${2:0.}"
+    }
+  ]
+}

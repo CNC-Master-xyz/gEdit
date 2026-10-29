@@ -141,6 +141,14 @@ const PINNED: { id: string; keys?: Keys; title: string; owner: string; pending?:
   { id: 'profile.testOnDocument', title: 'userConfig.testOnDocument', owner: 'userConfig.ts' },
   { id: 'machines.import', title: 'machines.import', owner: 'userConfig.ts' },
   { id: 'machines.export', title: 'machines.export', owner: 'userConfig.ts' },
+  // Phase 4, P4g, P4.36 (plan §6.9 rule 45; `contrib/configuration.ts`): Export and Import of the whole
+  // configuration as one zip, palette category `configuration.category` and the buttons of
+  // Settings ▸ Configuration. No key: both are rare and an import changes many files.
+  { id: 'config.export', title: 'configuration.exportTitle', owner: 'configuration.ts' },
+  { id: 'config.import', title: 'configuration.importTitle', owner: 'configuration.ts' },
+  // P4.40, plan §6.10 rule 7 (palette, category `profileForm.category`, and a button per profile on
+  // Settings ▸ Profiles; no key)
+  { id: 'profile.editInForm', title: 'profileForm.edit', owner: 'profileForm.ts' },
   // M13, WP13.4 (P13; registered by WP13.4, `contrib/typing.ts`): Home tab, group
   // `typing.group`, after the Edit group; no default key (a toggle that silently changes what
   // every keystroke does should not be one key press away).
@@ -207,6 +215,13 @@ const PINNED: { id: string; keys?: Keys; title: string; owner: string; pending?:
   { id: 'file.appendFile', title: 'insertFile.append', owner: 'insertFile.ts' },
   { id: 'file.print', keys: 'Mod+P', title: 'print.print', owner: 'print.ts' },
   { id: 'file.exportHtml', title: 'print.exportHtml', owner: 'print.ts' },
+  // Phase 4, P4f (pinned at the P4f integration; Phase 4 plan §6.11). Find in Folder
+  // (`contrib/findInFolder.ts`, P4.28): Edit tab, group `search.group`, order 133; no key
+  // (`Mod+Shift+F` is Find All, and the `Mod+Alt` letters wait for the AltGr check). Save Channel
+  // Files (`contrib/channels.ts`, P4.31): NC tab, group `channels.group`, order 96; no key; its
+  // title is `channelScope.saveFiles`.
+  { id: 'search.findInFolder', title: 'findInFolder.command', owner: 'findInFolder.ts' },
+  { id: 'channels.saveChannelFiles', title: 'channelScope.saveFiles', owner: 'channels.ts' },
 ];
 /**
  * The ribbon groups of those entries: NC tab (M10, M12 navigation), Edit tab (search, M13
@@ -254,6 +269,7 @@ const PINNED_CATEGORIES = [
   'ranges.category',
   'insertFile.category',
   'print.category',
+  'configuration.category',
 ];
 
 const asDefs = (rows: { id: string; keys?: Keys }[]): CommandDef[] =>

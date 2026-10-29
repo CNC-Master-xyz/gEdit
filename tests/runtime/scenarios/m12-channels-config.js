@@ -38,6 +38,7 @@ import {
   openMachinesPage,
   pickMachine,
   sameJson,
+  MACHINES_SCHEMA,
   waitForMachine,
 } from './m6-common.js'
 import { NC_DIR, REPO_FILE, channelItem, channelState, context, golden, mapRows, open, ready, waitChannel } from './m12-common.js'
@@ -74,7 +75,8 @@ const WANTED = {
 const record = (channels) => ({ id: 'twin-lathe', name: 'Twin lathe', profile: 'fanuc-lathe', notes: '', params: { ...LATHE_REST, channels } })
 
 /** The file, with the defaults the page may add. @param {object[]} machines @param {Record<string, string>} [defaults] */
-const file = (machines, defaults = {}) => ({ $version: 1, machines, defaults })
+// A machines file gEdit made starts with the `$schema` line (Wave Y, owner answer Q4h-2).
+const file = (machines, defaults = {}) => ({ $schema: MACHINES_SCHEMA, $version: 1, machines, defaults })
 
 /**
  * Picks the option with this index in a choice field (see 1. above).

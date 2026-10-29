@@ -230,6 +230,18 @@ describe('the stored number input', () => {
     );
   });
 
+  it('takes an inch increment only on a class that follows the units (P4.39b, the agreement with the schema)', () => {
+    for (const cls of ['length', 'feedPerMin', 'feedPerRev']) {
+      expect(numberInput({ mode: 'increment', incrementMm: '0.001', classes: { [cls]: { incrementInch: '0.0001' } } }), cls).toEqual([]);
+    }
+    for (const cls of ['angle', 'dwell']) {
+      const problems = numberInput({ mode: 'increment', incrementMm: '0.001', classes: { [cls]: { incrementInch: '0.0001' } } });
+      expect(problems, cls).toEqual([
+        `machines[0].params.numberInput.classes.${cls}.incrementInch: the ${cls} class does not change with the units, so it has no inch increment`,
+      ]);
+    }
+  });
+
   it('refuses a number input on a profile that does not read numbers by a setting', () => {
     const m = machine({ profile: 'heidenhain-klartext', params: { numberInput: { mode: 'calculator', incrementMm: '1' } } });
     // Klartext has no `machineParams` at all, so the record is refused one step earlier.
@@ -387,6 +399,23 @@ describe('M12 (WP12.3): validateChannels', () => {
     expect(rel(checkCh(per))).toEqual(['list[0].fileName']);
   });
 
+  it('P4.30b: the file name of the first channel is a pattern with a stem and without a channel, for one program per channel only', () => {
+    expect(checkCh({ ...multi(), firstFileName: '^(?<stem>[^.]+)$' })).toEqual([]);
+    expect(checkCh({ ...multi() })).toEqual([]); // no default: absent is fine
+    const noStem = checkCh({ ...multi(), firstFileName: '^[^.]+$' });
+    expect(rel(noStem)).toEqual(['firstFileName']);
+    expect(noStem[0].message).toContain('(?<stem>…)');
+    const withChannel = checkCh({ ...multi(), firstFileName: '^(?<stem>.+)_(?<channel>1)$' });
+    expect(rel(withChannel)).toEqual(['firstFileName']);
+    expect(withChannel[0].message).toContain('(?<channel>…)');
+    for (const bad of ['(?<stem>', '', 5, 'x'.repeat(1001)]) expect(rel(checkCh({ ...multi(), firstFileName: bad })), String(bad)).toEqual(['firstFileName']);
+    expect(rel(checkCh({ ...good(), firstFileName: '^(?<stem>[^.]+)$' }))).toEqual(['firstFileName']);
+    // The block is broken (not the record), and the problem has the member's JSON path.
+    const block = channelBlock(machine({ params: { channels: { ...multi(), firstFileName: '^[^.]+$' } as never } }), 'machines[0]');
+    expect(block.state).toBe('invalid');
+    expect(block.state === 'invalid' ? block.problems.map((p) => p.path) : []).toEqual(['machines[0].params.channels.firstFileName']);
+  });
+
   it('refuses a single-brace {stem} or {channel}, and a template that never names the channel (CODE-4)', () => {
     const one = checkCh({ ...multi(), fileNameFor: '{stem}.NC{channel}' });
     expect(rel(one)).toEqual(['fileNameFor']);
@@ -467,6 +496,10 @@ describe('M12 (WP12.3): validateChannels', () => {
     expect(rel(checkCh(rule({ id: 'stops-and-ends' })))).toEqual(['syncMarks[0].id']);
     expect(rel(checkCh(rule({ semantics: 'sometimes' })))).toEqual(['syncMarks[0].semantics']);
     expect(rel(checkCh(rule({ blocking: 'yes' })))).toEqual(['syncMarks[0].blocking']);
+    // P4.39b (the agreement with the schema): the channel check reads these as `=== true`.
+    expect(rel(checkCh(rule({ answers: 'yes' })))).toEqual(['syncMarks[0].answers']);
+    expect(rel(checkCh(rule({ samePartners: 1 })))).toEqual(['syncMarks[0].samePartners']);
+    expect(checkCh(rule({ answers: false, samePartners: true }))).toEqual([]);
     expect(rel(checkCh(rule({ label: undefined })))).toEqual(['syncMarks[0].label']);
     for (const semantics of ['rendezvous', 'count', 'ordered']) expect(checkCh(rule({ semantics }))).toEqual([]);
     expect(rel(checkCh({ ...good(), syncMarks: Array.from({ length: 33 }, (_, i) => ({ ...(good().syncMarks as Block[])[0], id: `r${i}` })) }))).toEqual(['syncMarks']);
@@ -562,5 +595,121 @@ describe('the user guide writes file name templates the way the product reads th
       const text = readFileSync(new URL(file, dir), 'utf8');
       expect(singleBraceNames(text), file).toEqual([]);
     }
+  });
+});
+
+// P4h prelude (plan §6.10 rules 13 and 14; T123): the shape of a machine's extra axes and
+// builder codes, and that its profile offers them. The rules that need the profile's addresses,
+// keywords and the code database are P4.43b's and come on top.
+describe('extra axes and builder codes (P4h)', () => {
+  const OFFERING: Profile = {
+    ...MILL,
+    machineParams: { ...MILL.machineParams, extraAxes: {}, builderCodes: { letters: ['G'], example: 'G810-G829' } },
+  };
+  const mill = (params: MachineConfig['params']): MachineConfig => machine({ profile: 'fanuc-gcode', params });
+
+  it('accepts names with a kind and a list of codes on a profile that offers them', () => {
+    expect(
+      check(mill({ extraAxes: [{ name: 'AA', kind: 'linear' }, { name: 'QQ', kind: 'rotary' }], builderCodes: 'G810-G819, G825' }), OFFERING),
+    ).toEqual([]);
+  });
+
+  it('refuses both on a profile that does not offer them', () => {
+    expect(check(mill({ extraAxes: [{ name: 'AA', kind: 'linear' }], builderCodes: 'G810' }), MILL)).toEqual([
+      'machines[0].params.extraAxes: the profile "fanuc-gcode" has no extra axes',
+      'machines[0].params.builderCodes: the profile "fanuc-gcode" has no machine builder codes',
+    ]);
+  });
+
+  it('names each broken axis by its path', () => {
+    const bad = check(
+      mill({
+        extraAxes: [
+          { name: 'aa', kind: 'linear' },
+          { name: 'A', kind: 'linear' },
+          { name: 'AA1', kind: 'rotary' },
+          { name: 'BB', kind: 'angle' },
+          { name: 'CC', kind: 'linear' },
+          { name: 'CC', kind: 'linear' },
+          'DD',
+        ] as unknown as MachineConfig['params']['extraAxes'],
+      }),
+      OFFERING,
+    ).map((row) => row.slice(0, row.indexOf(':')));
+    expect(bad).toEqual([
+      'machines[0].params.extraAxes[0].name',
+      'machines[0].params.extraAxes[1].name',
+      'machines[0].params.extraAxes[2].name',
+      'machines[0].params.extraAxes[3].kind',
+      'machines[0].params.extraAxes[5].name',
+      'machines[0].params.extraAxes[6]',
+    ]);
+    const many = Array.from({ length: 17 }, (_, i) => ({ name: `A${String.fromCharCode(65 + i)}`, kind: 'linear' as const }));
+    expect(check(mill({ extraAxes: many }), OFFERING)).toEqual(['machines[0].params.extraAxes: a machine names at most 16 extra axes']);
+    expect(check(mill({ extraAxes: 'AA' as unknown as [] }), OFFERING)).toEqual(['machines[0].params.extraAxes: the extra axes are a list']);
+  });
+
+  it('refuses a code list it cannot read or with another letter, in its own words', () => {
+    for (const bad of ['', 'M810', 'G820-G810', 'G8x0', 12]) {
+      const rows = check(mill({ builderCodes: bad as string }), OFFERING);
+      expect(rows, String(bad)).toHaveLength(1);
+      expect(rows[0], String(bad)).toMatch(/^machines\[0\]\.params\.builderCodes: the builder codes are /);
+      expect(rows[0], String(bad)).not.toMatch(/wait/);
+    }
+  });
+});
+
+// P4.43b (plan §6.10 rules 13 and 14; T123): the clash rules on top of the prelude's shape rules.
+describe('extra axes and builder codes: the clash rules (P4.43b)', () => {
+  const SIEMENS = profile('sinumerik');
+  const turn = (params: MachineConfig['params']): MachineConfig => machine({ profile: 'sinumerik', params });
+  const axes = (...names: string[]): MachineConfig['params'] => ({ extraAxes: names.map((name) => ({ name, kind: 'linear' as const })) });
+
+  it('accepts names the profile and its codes do not read', () => {
+    expect(check(turn({ ...axes('AA', 'QQ', 'XYZ'), builderCodes: 'G810-G829' }), SIEMENS)).toEqual([]);
+  });
+
+  it('refuses a name the profile or its codes already read, and says what it is', () => {
+    const rows = (name: string): string[] => check(turn(axes(name)), SIEMENS);
+    // An angular address of the profile, a speed limit word, a keyword, a letters-only code
+    // (`MSG`, the arc radius `CR`), a parameter of a cycle (the retraction plane `RTP`).
+    expect(rows('SF')).toEqual(['machines[0].params.extraAxes[0].name: "SF" is already a rotary axis of this profile']);
+    expect(rows('LIMS')).toEqual(['machines[0].params.extraAxes[0].name: "LIMS" is already a speed limit word of this profile']);
+    expect(rows('TRANS')).toEqual(['machines[0].params.extraAxes[0].name: "TRANS" is already a keyword of this profile']);
+    expect(rows('MSG')).toEqual(['machines[0].params.extraAxes[0].name: "MSG" is already the code MSG']);
+    expect(rows('CR')).toEqual(['machines[0].params.extraAxes[0].name: "CR" is already the code CR']);
+    expect(rows('RTP')[0]).toMatch(/^machines\[0\]\.params\.extraAxes\[0\]\.name: "RTP" is already a parameter of CYCLE/);
+  });
+
+  it('reads the incremental twins, the colon words and the keyed address maps too', () => {
+    const shaped: Profile = {
+      ...SIEMENS,
+      addresses: { ...SIEMENS.addresses, incremental: { UU: 'X' }, feedUnitWords: { FPM: 'per-minute' } },
+      syntax: { ...SIEMENS.syntax, colonWords: ['VC'] },
+    };
+    const rows = (name: string): string[] => check(turn(axes(name)), shaped);
+    expect(rows('UU')).toEqual(['machines[0].params.extraAxes[0].name: "UU" is already an incremental axis word of this profile']);
+    expect(rows('FPM')).toEqual(['machines[0].params.extraAxes[0].name: "FPM" is already a feed unit word of this profile']);
+    expect(rows('VC')).toEqual(['machines[0].params.extraAxes[0].name: "VC" is already a word written with a colon (VC:…)']);
+  });
+
+  it('counts the profile’s own extra axes towards the limit', () => {
+    const own: Profile = { ...SIEMENS, syntax: { ...SIEMENS.syntax, extraAxisNames: ['PA', 'PB', 'PC'] } };
+    const names = Array.from({ length: 14 }, (_, i) => `M${String.fromCharCode(65 + i)}A`);
+    expect(check(turn(axes(...names)), own)).toEqual([
+      'machines[0].params.extraAxes: with the profile’s own extra axes this makes more than 16'.replace('’', "'"),
+    ]);
+    // A name the profile already lists counts once.
+    expect(check(turn(axes('PA', ...names.slice(0, 13))), own)).toEqual([]);
+  });
+
+  it('refuses a builder code the code database knows, naming it', () => {
+    expect(check(turn({ builderCodes: 'G810-G829, G850' }), SIEMENS)).toEqual([]);
+    expect(check(turn({ builderCodes: 'G17' }), SIEMENS)).toEqual([
+      'machines[0].params.builderCodes: G17 is a code gEdit already knows, not a code of the machine builder',
+    ]);
+    const many = check(turn({ builderCodes: 'G0-G99' }), SIEMENS);
+    expect(many).toHaveLength(1);
+    expect(many[0]).toMatch(/^machines\[0\]\.params\.builderCodes: G0, G1, G2 and \d+ more are codes gEdit already knows/);
   });
 });

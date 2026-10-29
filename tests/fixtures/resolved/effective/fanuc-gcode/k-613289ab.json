@@ -122,8 +122,7 @@
     },
     "editing": {
       "forceUppercase": true,
-      "preventLineJoin": true,
-      "tabWidth": 4
+      "preventLineJoin": true
     },
     "files": {
       "defaultExtension": "nc",
@@ -322,6 +321,7 @@
         },
         {
           "address": "P",
+          "external": true,
           "maxDigits": 4,
           "repeatAddress": "L",
           "trigger": "(?<![A-Z])M\\s*0*198(?!\\d)"

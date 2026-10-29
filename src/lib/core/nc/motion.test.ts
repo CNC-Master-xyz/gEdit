@@ -236,7 +236,9 @@ describe('the arc flag in the code databases', () => {
     'fanuc-lathe-b': ['G2', 'G3'],
     okuma: ['G102', 'G103', 'G132', 'G133', 'G2', 'G3'],
     sinumerik: ['CIP', 'CT', 'G2', 'G3'],
-    heidenhain: ['APPR CT', 'APPR LCT', 'C', 'CP', 'CR', 'CT', 'CTP', 'DEP CT', 'DEP LCT'],
+    // BL-templates-data (T155): the milling database extends `sinumerik` and inherits its arcs.
+    'sinumerik-mill': ['CIP', 'CT', 'G2', 'G3'],
+    heidenhain: ['APPR CT', 'APPR LCT', 'APPR PCT', 'APPR PLCT', 'C', 'CP', 'CR', 'CT', 'CTP', 'DEP CT', 'DEP LCT', 'DEP PLCT'],
   };
 
   it.each(Object.entries(ARCS))('%s lists exactly its arcs', (dialect, codes) => {

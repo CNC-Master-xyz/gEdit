@@ -18,6 +18,7 @@ the machine, not for the person who builds the editor — the build and design n
 | [Your own profiles and code files](profiles.md) | Profiles for one shop, machine or folder, and your own G and M codes in the help; the Profiles page; when a profile of yours is used |
 | [Understanding a block](inspector.md) | The code inspector (what each word means on your machine and what is in force at the cursor, and changing a value from it), the hover with a cycle's parameters, and the motion colours |
 | [Writing with templates](templates.md) | The Insert tab: program starts, tool changes and cycles from a form, templates in completion, Edit Cycle, formulas, favourites, the template manager, New Template from Selection, and where your templates are kept |
+| [Folders and files from the system](folders.md) | Find in Folder, opening an NC file by double-click and the one running window |
 | [Editing comfort](editing.md) | Auto Space, the automatic block number, bookmark names and the bookmark panel, Select and Delete Block Range, Insert and Append File, Print and Export as HTML |
 | [Transformations](transformations.md) | The NC tab: renumbering, removing block numbers, the five cleanups, block skip and selecting a tool's lines |
 | [Channels](channels.md) | Twin-turret and multi-path programs: finding the channels, the wait codes, and checking that the waits fit |
@@ -41,7 +42,7 @@ Across the top is the **ribbon**, with seven tabs:
 | Tab | What it holds |
 |---|---|
 | **File** | New, Open, Save, Save As, Save All, Close, **Reload** (read the file again from disk, [below](#reload-from-disk)) · the recent-files list · **Insert File** and **Append File** (group *Insert*), **Print** and **Export as HTML** (group *Print*) — see [Editing comfort](editing.md) |
-| **Edit** | Undo, redo, find, replace, comment, duplicate, move, delete line, select all, upper and lower case (plain text commands; on a program use **Convert Case…** on the NC tab) · **Find All…**, **Replace All…**, **Find Whole Address…** ([Searching](#searching)) · **Go to Line or Block…** (group *Go To*) · **Typing**: **Upper-Case Typing** switches [upper case while you type](#typing-forced-upper-case-and-no-accidental-joins) off or on for this session, **Auto Space** and **Automatic Block Number** do the same for the [two helps of Editing comfort](editing.md#auto-space) · **Bookmarks** (Name Bookmark, Bookmark All Matches, Bookmark Panel; [Bookmarks](editing.md#bookmarks)) · **Block Range** (Select and Delete; [Block Range](editing.md#select-and-delete-block-range)) |
+| **Edit** | Undo, redo, find, replace, comment, duplicate, move, delete line, select all, upper and lower case (plain text commands; on a program use **Convert Case…** on the NC tab) · **Find All…**, **Find in Folder…**, **Replace All…**, **Find Whole Address…** ([Searching](#searching)) · **Go to Line or Block…** (group *Go To*) · **Typing**: **Upper-Case Typing** switches [upper case while you type](#typing-forced-upper-case-and-no-accidental-joins) off or on for this session, **Auto Space** and **Automatic Block Number** do the same for the [two helps of Editing comfort](editing.md#auto-space) · **Bookmarks** (Name Bookmark, Bookmark All Matches, Bookmark Panel; [Bookmarks](editing.md#bookmarks)) · **Block Range** (Select and Delete; [Block Range](editing.md#select-and-delete-block-range)) |
 | **Insert** | The **templates** of the active program — **Program start** (the first lines of a program, in the dialect's own style) and end, tool change, drilling, tapping, turning and threading cycles, for all six dialects — as buttons and lists, **Favorites** first; **Edit Cycle…** for the cycle at the cursor; **Manage Templates…** and **New Template from Selection…** for your own. See [Writing with templates](templates.md) |
 | **NC** | Renumbering, removing block numbers, the cleanups, block skip and selecting a tool segment — see [Transformations](transformations.md) · group **Channels**: the sync-point keys, **Channels Side by Side**, **Split into Channel Documents**, **Merge Channels Back** — see [Channels](channels.md) |
 | **Tools** | Compare ([Comparing two programs](#comparing-two-programs)) · the scripts that come with gEdit, in the **Built-in Scripts** group — **Program checks**, **Scale feed rates**, **Scale spindle speeds**, **Tool list**, **Extents**, **Address arithmetic**, **Translate**, **Rotate**, **Mirror** (see [Scripts](scripts.md)) · **Check Wait Codes** for [channels](channels.md#check-wait-codes) · **Test Profile on Document** for [profiles of your own](profiles.md#testing-a-profile-on-a-program) |
@@ -115,6 +116,12 @@ the channels of a program lined up at their waits, use the channel view: **Chann
 **Open** (`Cmd/Ctrl+O`) takes several files at once, up to 50; pick or drop more and only
 the first 50 open, with a message. You can also drag files onto the window from Finder or
 Explorer; folders are ignored with a message.
+
+Double-click an NC file in Explorer or Finder, or choose gEdit in *Open With*, and it opens in
+the running gEdit; on Windows and Linux a second start hands its files to the open window
+instead of opening another. **On Linux, double-click does not start gEdit in this version**:
+the package does not register the NC file types; use **Open** or drop the files on the window
+([Folders and files from the system](folders.md#opening-files-from-the-system)).
 
 A file that is already open is brought forward instead of being opened twice, and the status
 bar says *<name> is already open*. gEdit asks the file system for the file's real path, so
@@ -583,6 +590,7 @@ turn that off.
 | Find text, one hit at a time, and replace it | `Cmd/Ctrl+F`, the editor's own find and replace (see [Shortcuts](shortcuts.md)) |
 | Every hit in a list, in one program or in all open ones | **Find All…**, `Cmd/Ctrl+Shift+F` (Edit tab, *Search*) |
 | Change what a search finds, in place or into a new tab | **Replace All…** (Edit tab, *Search*) |
+| Every hit in the programs of a folder, open or not | **Find in Folder…** (Edit tab, *Search*), see [Folders](folders.md#find-in-folder) |
 | One address in the editor's own find box, so you can step through it | **Find Whole Address…** (Edit tab, *Search*) |
 
 Find All and Replace All share one form. It reads each line the way the dialect does, so it
@@ -634,7 +642,10 @@ stopped after 2 seconds and reported, and nothing is found or changed (see
 
 ### Where it looks, and what you get
 
-*Look in* is the active document or all open documents. Find All writes the hits into the
+*Look in* is the active document or all open documents. For a program with channels in one
+file, the form also has a **Channel** choice, and the hits are then the lines of that channel
+only ([Channels](channels.md#searching-and-comparing-one-channel)). **Find in Folder…** reads
+the files of a folder instead of the open documents ([Folders](folders.md#find-in-folder)). Find All writes the hits into the
 Results panel: the line, the text and, over several documents, the document; a click jumps
 to the line. The heading holds the full count ("37 hits for G1"), and the status bar
 repeats it. At most 10,000 rows are listed; if there are more, the panel says how many are
@@ -748,7 +759,8 @@ buttons for the next and previous difference. A third view, **Aligned**, shows b
 level, block by block ([below](#the-aligned-view)).
 
 The current document stays editable in the comparison, unless it is locked; the other side
-is read-only. Files above 50 MB are refused.
+is read-only. For a program with channels the command first asks **Compare which lines?**: the whole
+program, or one channel, cut on both sides ([Channels](channels.md#searching-and-comparing-one-channel)). Files above 50 MB are refused.
 
 A comparison has three views: two modes, **Raw** and **Review**, and the **Aligned** view. The **Raw | Review | Aligned** switch in the toolbar chooses.
 
@@ -1066,17 +1078,20 @@ in lower case, on every shipped dialect.
 
 ## Settings
 
-`Cmd/Ctrl+,` opens the settings dialog. Seven pages:
+`Cmd/Ctrl+,` opens the settings dialog. A search box at the top finds a setting or a page ([Finding a setting](configuration.md#finding-a-setting)). Ten pages:
 
 | Page | What you can set |
 |---|---|
-| **Appearance** | Color theme (System, Light or Dark), editor font and size |
-| **Editor** | Tab width, spaces or tabs, whitespace display, word wrap, minimap, line numbers, current-line highlight, sticky scroll, text drag and drop, copy without a selection |
+| **Appearance** | Color theme (System, Light or Dark), editor font and size, and the [code colours](#code-colours) |
+| **Editor** | Tab width (a [profile of yours](profiles.md#colours-tab-width-and-rulers-in-a-profile) can set its own), spaces or tabs, whitespace display, word wrap, minimap, line numbers, current-line highlight, sticky scroll, text drag and drop, copy without a selection |
 | **Assistance** | Hover help on or off; completion automatic, manual or off; [colouring the lines by how they move](inspector.md#motion-colours) on or off |
 | **Files** | Length of the recent list, what happens when a file changes outside gEdit, the dialect new files start in, and what [Never losing work](#never-losing-work) sets: where the backup copy goes, how many versions to keep, the most space they may take and when the earlier versions of deleted files go, and the switches for crash recovery, session restore and per-file memory |
 | **Scripts** | The Python interpreter, extra script folders, the time limit for a run, whether the bundled scripts are listed — and the path of your own scripts folder |
 | **Machines** | Your machine configurations: add, edit, duplicate, remove, import and export, and which one is the default for a dialect — see [Machines](machines.md) |
-| **Profiles** | Your own profiles and code files: new, open, import, export, remove, test on the open program — see [Your own profiles and code files](profiles.md). **Manage Profiles…** in the palette opens the dialog on this page |
+| **Profiles** | Your own profiles and code files: new, open, edit in a form with a live preview, import, export, remove, test on the open program — see [Your own profiles and code files](profiles.md). **Manage Profiles…** in the palette opens the dialog on this page |
+| **Keyboard** | Your own key for any command, reset, and the keys that clash — see [Your own keys](shortcuts.md#your-own-keys) |
+| **Packages** | Script packages: folders of scripts, profiles and code files, switched on or off — see [Script packages](scripts.md#script-packages) |
+| **Configuration** | Export everything you set up to one zip file, and import such a file with a preview and a backup — see [Export and import](configuration.md#export-and-import) |
 
 **Closing the dialog with something unsaved asks first.** If you typed a new value and leave
 without **Save** — **Cancel**, `Esc`, a click outside the dialog, or **Open settings file** —
@@ -1085,15 +1100,33 @@ saving them?* and offers **Discard changes**. The same question comes while a ma
 Machines page is half filled in (*The machine you are adding or editing is not saved yet. Leave
 without saving it?*): when you close the dialog, press **Open settings file** or **Save**, and
 also when you click another page of the dialog, because the page you leave drops the form.
-With nothing typed, nothing is asked.
+The same goes for a profile of yours that is open in [the form](profiles.md#editing-a-profile-in-a-form)
+on the Profiles page: *The changes to … are not saved. Leave without saving them?* (with the changes
+you made in Settings named too, when there are both). With nothing typed, nothing is asked.
 
-The Machines and Profiles pages are not pages of settings. Machine configurations are
+### Code colours
+
+Under the choice of theme, **Appearance** has a block **Code colours**: one row for each kind
+of word (block numbers, G codes, M codes, axis words, arc centres, feed, spindle speed, tool,
+variables, keywords and functions, comments, section headings, program start, end and name,
+other numbers, text in quotes, operators, unknown or invalid words), with the dark and the
+light theme side by side and the theme in use first. A row has a colour picker, the colour as
+`#rrggbb`, the **contrast** against the editor background (for example *7.2 to 1*), and **Reset**,
+which goes back to the colour from the level below. The **open editor shows each change at
+once**; **Save** keeps the colours, and **Cancel** puts the old ones back. A colour that is too
+faint to read, below 4.5 to 1, says why in the row and cannot be saved. The colours are laid
+over the standard ones, and [a profile](profiles.md#colours-tab-width-and-rulers-in-a-profile) can
+lay its own over yours for its documents; the print uses the same colours. The colour of an axis
+word of a machine's [extra axis](machines.md#sinumerik-extra-axes-and-machine-builder-codes) does
+not change, since the colouring belongs to the dialect and not to the machine.
+
+The Machines, Profiles, Keyboard, Packages and Configuration pages are not pages of settings: they act at once on their own file or folder, and the dialog's **Save** does not cover them. Machine configurations are
 records with names of their own, and they live in their own file (`machines.json`), not in
 `settings.json`; your profiles and code files are files of their own in two folders.
 
 Settings are stored as a small JSON file that holds only what you changed, so a default
 that improves in a later version reaches you. `Open settings file` in the dialog opens it
-as a document, for the few keys that are not in the dialog (column rulers, for example).
+as a document, for the few keys that are not in the dialog (column rulers, for example; a [profile](profiles.md#colours-tab-width-and-rulers-in-a-profile) can also set its own).
 
 Where that file is, and your own scripts folder beside it, is listed under
 [Where things are](#where-things-are).
@@ -1105,7 +1138,9 @@ Being clear about this saves disappointment on the shop floor.
 - **No backplot, no 3D display, no simulation.** gEdit reads and writes text. It does not
   know where the tool is.
 - **No machine communication.** No DNC, no serial, no FTP, no drip feed.
-- **No program management.** No library, no job list, no PDM or ERP link.
+- **No program management.** No library, no job queue, no PDM or ERP link. (A Siemens *job
+  list* file is read for one thing only: which program is which channel, see
+  [Channels](channels.md#the-siemens-job-list).)
 - **Translate, rotate and mirror move the path, not the machine.** They work in the XY plane
   of a milling program (rotate and mirror) and, on a lathe, translate and mirror in Z for the
   counter spindle. They do not rotate a lathe program, do not follow a subprogram or macro
@@ -1168,12 +1203,15 @@ Being clear about this saves disappointment on the shop floor.
 | Settings | `<config>/settings.json` |
 | Machine configurations | `<config>/machines.json` |
 | Your own scripts | `<config>/scripts/` |
+| Script packages, one folder each | `<config>/packages/` |
+| Your own keys | `<config>/keybindings.json` |
 | Your own profiles | `<config>/profiles/` |
 | Your own code files, with your own templates | `<config>/codes/` |
 | Recent files, panel sizes, remembered form values, the last script you ran, the last session, and your place in each file | `<data>/state.json` |
 | Window size and position | `<config>/.window-state.json` |
 | The copies made before a save | `<data>/backups/` |
 | Unsaved work kept for a crash | `<data>/recovery/` |
+| The copies an import of a configuration made first | `<data>/import-backups/` |
 
 `<config>` and `<data>` are the standard application folders of your operating system: on
 macOS both are `~/Library/Application Support/com.pburg.gedit`, on Windows both are

@@ -436,7 +436,7 @@ the list described above, unchanged.
 Lists what a program does that the control or the machine will not like, before the
 program goes to the machine. It changes nothing: the result is a table in the **Results**
 panel, one row per finding, in line order, with the line, the check, a severity and the
-finding. Click a row to jump to the line.
+finding. Click a row to jump to the line. Check Program reads the program from top to bottom and does not follow jumps (`GOTO`, `IF`), unlike Check Wait Codes; a problem that only happens when a jump skips a line is not found.
 
 It is **a reading of the text, not a simulation**. It does not know where the tool is, what
 the stock looks like or whether the tool fits the hole; it finds what a program says about
@@ -1708,10 +1708,75 @@ Rules worth knowing:
   or ."). On Windows a file that carries one of these characters is not offered as a script
   either.
 
+[Packages](#script-packages) add a fourth place for scripts: one folder per package.
+
 The script commands also include **New Script** (writes a commented template into your
 folder, opens it for editing and lists it) and **Edit Script** (opens the source of a
 script in your own folder or an extra folder; on a bundled script it offers **Copy and
 edit** instead — the bundled file itself is never made writable).
+
+## Script packages
+
+A package is a folder that holds scripts, profiles and code files that belong together, for
+example everything one shop uses for its lathes. It is copied in, not installed: gEdit never
+downloads a package and has no "install from a link".
+
+Packages live in the `packages` folder next to your settings ([Where things
+are](README.md#where-things-are)); **Settings ▸ Packages** shows its path. One package is one
+folder inside it:
+
+```text
+packages/
+  shop-a/
+    package.json        optional: name, version, description (a label only)
+    scripts/            .py files, one level of group folders
+    profiles/           *.json  your profiles, as in the profiles guide
+    codes/              *.json  code files, templates included
+```
+
+**The folder name is the package.** Use lower case letters, digits, `.`, `_` and `-`, starting
+with a letter or digit, at most 64 characters. A folder with another name is listed with the
+reason and not read. A name that starts with `.` is skipped. `package.json` only supplies the
+name shown on the page, the version and a description; a missing one is a note, a wrong entry
+in it is ignored with a note, and nothing in it decides what loads. At most 32 packages are
+read, and a folder that is a link is listed with an error and not followed: copy the package
+in. If the `packages` folder itself is a link, gEdit lists no packages and says so. Files inside
+a package follow the rules of your own files (plain names, at most 1 MB each, UTF-8 text, no
+links). Over all packages together gEdit reads at most 32 MB per listing; a file beyond that is
+listed as not read.
+
+**The Packages page** shows one row for each package: its name, version, description, how many
+scripts, profiles and code files it holds, a switch and any problems. **Reload** reads the folder
+again. The switch takes effect at once, without a restart: a package that is off contributes
+nothing, no script, no profile and no code file, and its script commands disappear from the
+Scripts tab and the palette. The switch is the setting `packages.disabled`, a list of folder
+names; a name in it with no folder is kept in case the folder comes back.
+
+**Which one wins.** Where two sources have the same name, the nearer to you wins:
+
+- **Scripts.** The order is the bundled scripts, the packages by name, your own folder, then your
+  extra folders. A script replaces one with the same file name from an earlier source, so your
+  own scripts beat a package's, and a package further down the alphabet beats an earlier one.
+  The replaced script stays listed, marked as hidden behind the other.
+- **Profiles and code files.** A package sits between the built-in files and your own. A profile
+  of yours with the id of a package profile replaces it, with a notice. Two packages with a
+  profile of one id: the first package by name loads, the second is reported. A package profile
+  that uses the id of a built-in profile is reported and not loaded. Code files are laid over the
+  built-in ones package by package, then yours, member by member, as for [your own code
+  files](profiles.md); every changed meaning is shown as a notice. A profile may extend a
+  profile from any layer below it.
+
+A problem says where it is, for example *package shop-a: lathe.json*.
+
+**A package script cannot be edited in place.** Its commands in the Scripts tab are listed
+under the package's name. **Edit Script** asks whether to copy it to your scripts folder and edit the copy; the copy goes
+to your own folder, shadows the original, and is yours to change. To change the package itself,
+edit the files in its folder.
+
+**Trust.** A package is as trusted as a script you wrote: its scripts run with your rights (see
+[Security](#security)). Switching a package on is your decision, and nothing runs just because a
+package is listed. A package that arrives in a [configuration
+file](configuration.md#export-and-import) needs the trust tick when it holds scripts.
 
 ---
 

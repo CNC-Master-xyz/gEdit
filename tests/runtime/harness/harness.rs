@@ -815,6 +815,48 @@ pub fn h_drop(
         .map_err(|e| e.to_string())
 }
 
+/// Hands the running app what the system hands it when the user opens files with it (P4f,
+/// plan section 6.8.2 S7): the same functions the real hand-over calls, so the argument
+/// checks, the grant of each file and the event to the page are the real ones.
+///
+/// - macOS: the system tells the app by `RunEvent::Opened` with file URLs; `args` are those
+///   URLs as text (`file:///...`, or any other scheme, which the app refuses). `cwd` is not used.
+/// - Windows and Linux: a second start of gEdit hands its arguments to the first one; `args` are
+///   the arguments after the program name and `cwd` the working folder of that start.
+///
+/// Answers which of the two hand-overs ran (`"opened"` or `"second-instance"`), so a scenario
+/// can say what it did not prove on the other systems. The call returns at once: the work goes
+/// to the blocking pool, as for the real hand-over, and the page opens the files afterwards.
+#[tauri::command]
+pub fn h_open_request(
+    app: AppHandle,
+    args: Vec<String>,
+    cwd: Option<String>,
+) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = cwd;
+        let mut urls = Vec::with_capacity(args.len());
+        for arg in &args {
+            urls.push(tauri::Url::parse(arg).map_err(|e| format!("not a URL: {arg}: {e}"))?);
+        }
+        crate::open_requests::opened(&app, &urls);
+        Ok("opened".to_owned())
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        let mut all = vec!["gedit".to_owned()];
+        all.extend(args);
+        crate::open_requests::second_instance(&app, all, cwd.unwrap_or_default());
+        Ok("second-instance".to_owned())
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+    {
+        let _ = (app, args, cwd);
+        Err("open requests are not simulated on this system".to_owned())
+    }
+}
+
 // ---------------------------------------------------------------- disk and processes
 
 #[tauri::command(async)]

@@ -48,9 +48,10 @@ describe('B1 (a7s): the Klartext entries from the TNC 640 manuals', () => {
     expect(entry('CYCL DEF 14')?.sets).toBeUndefined();
     expect(entry('CYCL DEF 14')?.group).toBe('cycle');
     expect(entry('CYCL DEF 14')?.params).toBeUndefined();
-    // Cycle 20 CONTOUR DATA is DEF-active too but holds tool-axis positions (Q5, Q7) that a
-    // shift would have to move: it stays out until a DEF-active cycle can be judged.
-    expect(entry('CYCL DEF 20')).toBeNull();
+    // Cycle 20 CONTOUR DATA is DEF-active too and holds tool-axis positions (Q5, Q7): since
+    // Wave Y (T093) address arithmetic and the transforms judge it (`blNcData.test.ts`).
+    expect(entry('CYCL DEF 20')?.sets).toBeUndefined();
+    expect(entry('CYCL DEF 20')?.group).toBe('cycle');
   });
 
   it('lists the Q parameters of each cycle in the order the control writes them', () => {
@@ -78,11 +79,12 @@ describe('B1 (a7s): the Klartext entries from the TNC 640 manuals', () => {
       'Q223', 'Q222', 'Q368', 'Q207', 'Q351', 'Q201', 'Q202', 'Q206', 'Q200', 'Q203', 'Q204', 'Q370', 'Q376', 'Q215', 'Q369',
       'Q338', 'Q385',
     ]);
-    expect(order('CYCL DEF 21')).toEqual(['Q10', 'Q11', 'Q13']);
-    expect(order('CYCL DEF 22')).toEqual(['Q10', 'Q11', 'Q12', 'Q18', 'Q19', 'Q208', 'Q401', 'Q404']);
+    // Wave Y (T096): the tool names QS13 and QS18, written instead of Q13 and Q18.
+    expect(order('CYCL DEF 21')).toEqual(['Q10', 'Q11', 'Q13', 'QS13']);
+    expect(order('CYCL DEF 22')).toEqual(['Q10', 'Q11', 'Q12', 'Q18', 'QS18', 'Q19', 'Q208', 'Q401', 'Q404']);
     expect(order('CYCL DEF 23')).toEqual(['Q11', 'Q12', 'Q208']);
     expect(order('CYCL DEF 24')).toEqual(['Q9', 'Q10', 'Q11', 'Q12', 'Q14']);
-    expect(order('CYCL DEF 25')).toEqual(['Q1', 'Q3', 'Q5', 'Q7', 'Q10', 'Q11', 'Q12', 'Q15', 'Q18', 'Q446', 'Q447', 'Q448']);
+    expect(order('CYCL DEF 25')).toEqual(['Q1', 'Q3', 'Q5', 'Q7', 'Q10', 'Q11', 'Q12', 'Q15', 'Q18', 'QS18', 'Q446', 'Q447', 'Q448']);
   });
 
   it('labels as feeds exactly the parameters that are feeds', () => {

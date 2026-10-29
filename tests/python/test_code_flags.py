@@ -108,7 +108,7 @@ class FlaggedEntriesGoldenTest(unittest.TestCase):
         databases = self.golden["databases"]
         self.assertEqual(
             sorted(databases),
-            ["fanuc", "fanuc-lathe", "fanuc-lathe-b", "heidenhain", "okuma", "sinumerik"],
+            ["fanuc", "fanuc-lathe", "fanuc-lathe-b", "heidenhain", "okuma", "sinumerik", "sinumerik-mill"],
         )
         self.assertGreaterEqual(len(databases["fanuc"]), 24)
         self.assertGreaterEqual(len(databases["heidenhain"]), 18)

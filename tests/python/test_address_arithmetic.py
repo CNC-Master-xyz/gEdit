@@ -123,6 +123,11 @@ def context_of(case):
         context["machine"]["id"] = name.lower().replace(" ", "-")
         context["machine"]["name"] = name
     context.pop("machineName", None)
+    scope = context.get("input")
+    if isinstance(scope, dict) and scope.get("scope") == "selection" and "followingLines" not in scope:
+        # v1.2.0 Wave Y (D5): a selection case runs to the end of its document (README), and
+        # the app sends the lines below a selection, here none (FZ-5).
+        context["input"] = dict(scope, followingLines=[])
     return context
 
 
@@ -184,7 +189,10 @@ class TestPointlessFeedsT084(unittest.TestCase):
 
 
 class TestFkContour(unittest.TestCase):
-    """B1 fix NC (NC-03): the absolute points of a Klartext FK contour are left and listed."""
+    """B1 fix NC (NC-03): the absolute points of a Klartext FK contour were left and listed.
+    v1.2.0 Wave Y (T121): with every FK word classified (TNC 640 Klartext manual 2019, free
+    contour programming, p.175-189), a shift moves them with their axis; a scale, or a block with
+    a word nobody classified, still leaves them and lists them."""
 
     PROGRAM = "\n".join([
         "0 BEGIN PGM FK MM",
@@ -195,23 +203,141 @@ class TestFkContour(unittest.TestCase):
         "5 END PGM FK MM",
     ])
 
-    def test_an_x_shift_leaves_the_x_points_and_says_so(self):
+    def test_an_x_shift_moves_the_x_points(self):
         payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="add", operand=5, addresses=["X"])
         text = lines_of(payload)
         self.assertEqual(text[2], "2 FL X+85 Y+20 AN+0")
-        self.assertEqual(text[3], "3 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60")
+        self.assertEqual(text[3], "3 FC DR+ R30 CCX+55 CCY+50 P1X+75 P1Y+60")
+        self.assertEqual(text[4], "4 FCT DR- R15 P1X+35 P1Y+40 P2X+45 P2Y+50")
+        self.assertEqual([f for f in payload["findings"] if f["reason"] == "fk-point"], [])
+
+    def test_a_y_shift_moves_the_y_points_only(self):
+        payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="add", operand=5, addresses=["Y"])
+        self.assertEqual(lines_of(payload)[3], "3 FC DR+ R30 CCX+50 CCY+55 P1X+70 P1Y+65")
+
+    def test_the_relative_polar_and_beside_the_contour_words(self):
+        program = "\n".join([
+            "0 BEGIN PGM FK MM", "1 FPOL X+10 Y+10", "2 FL PR+20 PA+20", "3 FL AN+45",
+            "4 FCT IX+20 DR- R20 CCA+90 RX 3", "5 FLT AN-70 PDX+50 PDY+53 D10", "6 FL PAR 5 DP 12.5", "7 FSELECT 2",
+            "8 FC DR- R10 CCA+0 ICCX+20 ICCY-15 RCCX12 RCCY14", "9 END PGM FK MM",
+        ])
+        payload = run(program, profile="heidenhain-klartext", operation="add", operand=5, addresses=["X", "Y"])
+        text = lines_of(payload)
+        self.assertEqual((text[1], text[5]), ("1 FPOL X+15 Y+15", "5 FLT AN-70 PDX+55 PDY+58 D10"))
+        self.assertEqual(text[2:5] + text[6:9], program.split("\n")[2:5] + program.split("\n")[6:9])
+        self.assertEqual([f for f in payload["findings"] if f["reason"] == "fk-point"], [])
+
+    def test_a_scale_or_a_word_nobody_classified_leaves_them_and_says_so(self):
+        payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="multiply", operand=2, addresses=["X"])
         fk = [(f["line"], f["message"].split(":")[0], f["severity"]) for f in payload["findings"] if f["reason"] == "fk-point"]
         self.assertEqual(fk, [(4, "CCX+50", "warning"), (4, "P1X+70", "warning"), (5, "P1X+30", "warning"), (5, "P2X+40", "warning")])
-        self.assertIn("4 FK contour points", payload["message"])
-
-    def test_a_y_shift_lists_the_y_points_only(self):
-        payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="add", operand=5, addresses=["Y"])
-        words = [f["message"].split(":")[0] for f in payload["findings"] if f["reason"] == "fk-point"]
-        self.assertEqual(words, ["CCY+50", "P1Y+60", "P1Y+40", "P2Y+50"])
+        unclassified = self.PROGRAM.replace("P1Y+60", "P1Y+60 XYZ5")
+        payload = run(unclassified, profile="heidenhain-klartext", operation="add", operand=5, addresses=["X"])
+        self.assertIn("3 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60 XYZ5", lines_of(payload))
+        self.assertIn((4, "CCX+50"), [(f["line"], f["message"].split(":")[0]) for f in payload["findings"] if f["reason"] == "fk-point"])
 
     def test_a_z_shift_touches_no_fk_point(self):
         payload = run(self.PROGRAM, profile="heidenhain-klartext", operation="add", operand=5, addresses=["Z"])
         self.assertEqual([f for f in payload["findings"] if f["reason"] == "fk-point"], [])
+
+
+class TestFkContourInASelectionD4(unittest.TestCase):
+    """v1.2.0 Wave Y, D4 (the skeptic of T121): a selection moves the FK points of a contour only
+    when the whole contour lies in it: the FPOL in force at its first FK block, its first to its
+    last FK block, and every block a relative reference names. Otherwise its points are left with
+    the `fk-point` warning, as before T121: `FL PR+30 PA+0` and `CCPR+20 CCPA+90` stay about the
+    unmoved FPOL, and moving `CCX`/`P1X` alone would bend the contour (probe t121a)."""
+
+    PROGRAM = "\n".join([
+        "0 BEGIN PGM FK MM",
+        "1 ; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "2 TOOL CALL 1 Z S2000",
+        "3 L Z+100 R0 FMAX",
+        "4 L X+10 Y+10 R0 FMAX",
+        "5 L Z-5 R0 F500",
+        "6 APPR CT X+20 Y+20 CCA90 R+5 RL F300",
+        "7 FPOL X+50 Y+50",
+        "8 FL PR+30 PA+0",
+        "9 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60",
+        "10 FCT DR- R15 CCPR+20 CCPA+90",
+        "11 FLT P1X+20 P1Y+80",
+        "12 L X+20 Y+20",
+        "13 DEP CT CCA90 R+5 F1000",
+        "14 L Z+100 R0 FMAX",
+        "15 END PGM FK MM",
+    ])
+
+    def run_on(self, start, end, program=None, below=True):
+        lines = (program or self.PROGRAM).split("\n")
+        context = helpers.effective_context("heidenhain-klartext")
+        context["params"] = {"operation": "add", "operand": 5, "addresses": ["X"]}
+        context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+        if below:
+            context["input"]["followingLines"] = lines[end:]
+        result = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
+        if not result.ok:
+            raise AssertionError(result.stderr)
+        return result.json()
+
+    def fk_points(self, payload):
+        return [(f["line"], f["message"].split(":")[0], f["severity"]) for f in payload["findings"] if f["reason"] == "fk-point"]
+
+    def test_the_fpol_above_the_selection_leaves_every_fk_point(self):
+        payload = self.run_on(9, 12)
+        self.assertEqual(payload["text"], "\n".join(self.PROGRAM.split("\n")[8:12]))
+        self.assertEqual(self.fk_points(payload), [(10, "CCX+50", "warning"), (10, "P1X+70", "warning"), (12, "P1X+20", "warning")])
+
+    def test_a_selection_with_the_whole_contour_moves_it(self):
+        for end in (12, 13):
+            payload = self.run_on(8, end)
+            text = lines_of(payload)
+            self.assertEqual((text[0], text[2], text[4]), ("7 FPOL X+55 Y+50", "9 FC DR+ R30 CCX+55 CCY+50 P1X+75 P1Y+60", "11 FLT P1X+25 P1Y+80"))
+            self.assertEqual(self.fk_points(payload), [])
+
+    def test_a_contour_that_runs_on_below_the_selection_is_left(self):
+        payload = self.run_on(8, 11)
+        self.assertEqual(lines_of(payload)[2], "9 FC DR+ R30 CCX+50 CCY+50 P1X+70 P1Y+60")
+        # The FPOL on line 8 stays with its contour (D4 follow-up).
+        self.assertEqual([p[0] for p in self.fk_points(payload)], [8, 10, 10])
+        # Without the lines below, a contour still open at the selection's end may run on.
+        payload = self.run_on(8, 12, below=False)
+        self.assertEqual([p[0] for p in self.fk_points(payload)], [8, 10, 10, 12])
+
+    def test_a_reference_to_a_block_above_the_selection_leaves_the_contour(self):
+        program = "\n".join([
+            "0 BEGIN PGM FK MM", "1 L X+10 Y+10 R0 FMAX", "2 L X+30 Y+10", "3 FPOL X+50 Y+50", "4 FL PR+20 PA+20",
+            "5 FC DR+ R10 CCX+60 CCY+50 RX 2", "6 FLT P1X+40 P1Y+70", "7 L X+0 Y+0", "8 END PGM FK MM",
+        ])
+        payload = self.run_on(4, 8, program)
+        self.assertEqual([p[:2] for p in self.fk_points(payload)], [(4, "X+50"), (6, "CCX+60"), (7, "P1X+40")])
+        # The same contour with the block it names in the selection moves.
+        payload = self.run_on(3, 8, program)
+        self.assertEqual(lines_of(payload)[3], "5 FC DR+ R10 CCX+65 CCY+50 RX 2")
+        self.assertEqual(self.fk_points(payload), [])
+
+    def test_the_fpol_stays_with_a_contour_that_is_left(self):
+        # D4 follow-up: moving the pole alone would move the polar values about it.
+        payload = self.run_on(8, 11)
+        self.assertEqual(lines_of(payload)[0], "7 FPOL X+50 Y+50")
+        self.assertEqual(self.fk_points(payload)[0], (8, "X+50", "warning"))
+        # A pole whose contour lies below the selection, or may (no lines below).
+        for below in (True, False):
+            payload = self.run_on(8, 8, below=below)
+            self.assertEqual((payload["text"], self.fk_points(payload)), ("7 FPOL X+50 Y+50", [(8, "X+50", "warning")]))
+        # The whole contour: the pole moves with it.
+        self.assertEqual(lines_of(self.run_on(8, 12))[0], "7 FPOL X+55 Y+50")
+
+    def test_a_word_nobody_classified_leaves_the_whole_contour(self):
+        # D4 follow-up: the points of a contour move together or not at all, in a whole run too.
+        program = self.PROGRAM.replace("11 FLT P1X+20 P1Y+80", "11 FLT P1X+20 P1Y+80 XYZ5")
+        payload = run(program, profile="heidenhain-klartext", operation="add", operand=5, addresses=["X"])
+        text = lines_of(payload)
+        self.assertEqual(text[7:12], program.split("\n")[7:12])
+        self.assertEqual(
+            [p[:2] for p in self.fk_points(payload)],
+            [(8, "X+50"), (10, "CCX+50"), (10, "P1X+70"), (12, "P1X+20")],
+        )
+        self.assertEqual(text[12], "12 L X+25 Y+20")
 
 
 def lines_of(payload):
@@ -1015,12 +1141,13 @@ class TestP4aReviewLatheCycleValues(unittest.TestCase):
         self.assertEqual(finding_at(payload, 4)["reason"], "not-scaled")
 
     def test_an_end_point_without_the_lengths_is_not_scaled_either(self):
-        # The control takes Q and R from the first block or its own settings, unscaled.
+        # The control takes Q and R from the first block or its own settings, unscaled; since
+        # the P4.43a data line the thread height P of the second block is a length too (T118).
         payload = self.lathe("G76 X40. Z-20. F1.5", operation="multiply", operand=2, addresses=["X"])
         self.assertEqual(lines_of(payload)[2], "G76 X40. Z-20. F1.5")
         self.assertEqual(
             finding_at(payload, 3)["message"],
-            "G76 X40. Z-20. F1.5: G76 has depths or distances of its own (Q and R) that a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+            "G76 X40. Z-20. F1.5: G76 has depths or distances of its own (Q, R and P) that a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
         )
 
     def test_an_incremental_end_point_is_refused_like_an_absolute_one(self):
@@ -1287,6 +1414,11 @@ LENGTHS_ALONG = {
         "CYCL DEF 254": {"Q219": "plane", "Q375": "plane"},
         "CYCL DEF 256": {"Q218": "plane", "Q424": "plane", "Q219": "plane", "Q425": "plane", "Q220": "plane"},
         "CYCL DEF 257": {"Q223": "plane", "Q222": "plane"},
+        # Wave Y (T093-T095): the pattern sizes, face milling and the rounding of cycle 20.
+        "CYCL DEF 220": {"Q244": "plane"},
+        "CYCL DEF 221": {"Q237": "plane", "Q238": "plane"},
+        "CYCL DEF 233": {"Q218": "plane", "Q219": "plane", "Q220": "plane"},
+        "CYCL DEF 20": {"Q8": "plane"},
     },
     "sinumerik": {
         "CYCLE61": {"_LENG": "plane", "_WID": "plane"},
@@ -1524,16 +1656,58 @@ class TestNcfcFanucArcRadius(unittest.TestCase):
                 self.assertEqual(payload["findings"], [])
 
 
-def run_selection(text, start, end, profile="fanuc-gcode", **params):
-    """A selection of an inline program (lines ``start`` to ``end``), primed with the lines above."""
+def run_selection(text, start, end, profile="fanuc-gcode", below=True, **params):
+    """A selection of an inline program (lines ``start`` to ``end``), primed with the lines above
+    and, unless ``below`` is false, given the lines below."""
     lines = text.split("\n")
     context = helpers.effective_context(profile)
     context["params"] = dict({"operation": "add", "operand": 0.5}, **params)
     context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+    if below:
+        # The app sends the lines below a selection too (FZ-5; v1.2.0 Wave Y, D5).
+        context["input"]["followingLines"] = lines[end:]
     result = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
     if not result.ok:
         raise AssertionError(result.stderr)
     return result.json()
+
+
+class TestRotaryBelowTheSelectionD5(unittest.TestCase):
+    """v1.2.0 Wave Y, D5 (the skeptic of FZ-5): a move made before the program first writes a
+    rotary axis that turns it is refused when the program turns that axis later (NC-4). A
+    selection reads the lines below it for that (``input.followingLines``), so it refuses exactly
+    what the whole run refuses; without them such a move is left with a warning (probe fz5a)."""
+
+    PROGRAM = "\n".join([
+        "%", "O1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G21 G17 G90",
+        "G0 X0. Y0. Z50.", "G1 X10. Y10. F100.", "G1 X20. Y10.", "G0 Z50.", "G0 B90.", "G1 X5. Y5.", "M30", "%",
+    ])
+
+    def test_a_selection_refuses_what_the_whole_run_refuses(self):
+        whole = run(self.PROGRAM, operand=1, addresses=["X"])
+        self.assertEqual([(f["line"], f["reason"]) for f in whole["findings"]], [(n, "rotary-without-tcp") for n in (4, 5, 6, 9)])
+        payload = run_selection(self.PROGRAM, 5, 6, operand=1, addresses=["X"])
+        self.assertEqual(lines_of(payload), ["G1 X10. Y10. F100.", "G1 X20. Y10."])
+        self.assertEqual(
+            [(f["line"], f["reason"], f["message"]) for f in payload["findings"]],
+            [(n, "rotary-without-tcp", m["message"]) for n, m in ((5, finding_at(whole, 5)), (6, finding_at(whole, 6)))],
+        )
+
+    def test_without_the_lines_below_such_a_move_is_left_with_a_warning(self):
+        payload = run_selection(self.PROGRAM, 5, 6, below=False, operand=1, addresses=["X"])
+        self.assertEqual(lines_of(payload), ["G1 X10. Y10. F100.", "G1 X20. Y10."])
+        self.assertEqual(finding_at(payload, 5)["severity"], "warning")
+        self.assertEqual(finding_at(payload, 5)["reason"], "rotary-without-tcp")
+        self.assertIn("the lines below the selection were not available", finding_at(payload, 5)["message"])
+
+    def test_a_program_that_never_turns_the_axis_below_is_shifted(self):
+        program = self.PROGRAM.replace("G0 B90.", "G0 B0.")
+        payload = run_selection(program, 5, 6, operand=1, addresses=["X"])
+        self.assertEqual(lines_of(payload), ["G1 X11. Y10. F100.", "G1 X21. Y10."])
+        self.assertEqual(payload["findings"], [])
+        # A selection that ends at the end of the document has nothing below it.
+        payload = run_selection("G21 G17 G90\nG1 X10. Y10. F100.", 2, 2, operand=1, addresses=["X"])
+        self.assertEqual((lines_of(payload), payload["findings"]), (["G1 X11. Y10. F100."], []))
 
 
 class TestNcr1DrillingCycleAfterAnArc(unittest.TestCase):
@@ -1783,6 +1957,8 @@ class TestEveryReasonHasItsWords(unittest.TestCase):
         self.assertEqual(set(module.WORD_REASONS), WORD_REASONS)
         self.assertEqual([r for r in list(module.BLOCK_REASONS) + list(module.WORD_REASONS) if not module.REASON_TEXT.get(r, (None,))[0]], [])
         self.assertEqual([r for r in module.BLOCK_REASONS if not module.SHORT.get(r)], [])
+        # WY-NC-1: a block that is no cycle and goes on below the selection is counted too.
+        self.assertTrue(module.REASON_TEXT.get("selection", (None,))[0])
 
 
 class TestD4CycleStartLevel(unittest.TestCase):
@@ -1960,6 +2136,64 @@ class TestFb2ToolDirection(unittest.TestCase):
         self.assertIn("a parameter of G41.6", found[0]["message"])
 
 
+class TestP4hG76ThreadHeightByBlock(unittest.TestCase):
+    """P4h fix round, D1 / NC-2 (plan §6.10 rule 11; T118): the `G76` `P` is a packed count in
+    the first block and the thread height in increments in the second. Every Python caller of
+    `number_class_of` passes the block (`gedit_nc.block_cycle_of`), and the cycle's parameter is
+    read by its block's declaration; without it both `P` words had no class and the cycle was
+    refused as "does not know what kind of number". Now the second-block `P` is a value of the
+    cycle, left and listed like its `Q` and `R` (NC-16). The first-block `P` is a packed count
+    (passes, chamfer and insert angle, two digits each): a number added to it would change the
+    angle (`P010060` to `P10061`, 61 degrees), so it is left and listed too (`PACKED_COUNTS`)."""
+
+    PROGRAM = "G21 G18 G99\nG0 X50. Z5.\nG76 P010060 Q100 R0.05\nG76 X20. Z-30. P1500 Q300 F2.\nM30\n"
+
+    def run_on(self, context, **params):
+        context["params"] = dict({"operation": "add", "operand": 0.5, "addresses": ["P"]}, **params)
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(self.PROGRAM.split("\n"))}
+        result = helpers.run_script(SCRIPT, stdin=self.PROGRAM, context=context)
+        if not result.ok:
+            raise AssertionError(result.stderr)
+        return result.json()
+
+    def check(self, payload):
+        # Both blocks are left as written, each P listed as a value of the cycle.
+        self.assertEqual(lines_of(payload)[2:4], ["G76 P010060 Q100 R0.05", "G76 X20. Z-30. P1500 Q300 F2."])
+        self.assertEqual([(f["line"], f["reason"]) for f in payload["findings"]], [(3, "data"), (4, "data")])
+        self.assertEqual(finding_at(payload, 3)["message"], "P010060: a value of G76, not a position of this program.")
+        self.assertEqual(finding_at(payload, 4)["message"], "P1500: a value of G76, not a position of this program.")
+        self.assertNotIn("kind of number", json.dumps(payload))
+
+    def test_is_b(self):
+        self.check(self.run_on(helpers.effective_context("fanuc-lathe", preset="is-b")))
+
+    def test_without_a_machine(self):
+        self.check(self.run_on(helpers.effective_context("fanuc-lathe")))
+
+    def test_a_multiply_of_p_leaves_the_packed_count(self):
+        payload = self.run_on(helpers.effective_context("fanuc-lathe", preset="is-b"), operation="multiply", operand=2)
+        self.assertEqual(lines_of(payload)[2], "G76 P010060 Q100 R0.05")
+        self.assertEqual(finding_at(payload, 3)["reason"], "data")
+
+    def test_a_first_block_that_writes_only_p_is_left(self):
+        context = helpers.effective_context("fanuc-lathe", preset="is-b")
+        context["params"] = {"operation": "add", "operand": 0.5, "addresses": ["P"]}
+        text = "G21 G18 G99\nG0 X50. Z5.\nG76 P020060\nM30\n"
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(text.split("\n"))}
+        payload = helpers.run_script(SCRIPT, stdin=text, context=context).json()
+        self.assertEqual(lines_of(payload)[2], "G76 P020060")
+        self.assertEqual(finding_at(payload, 3)["message"], "P020060: a value of G76, not a position of this program.")
+
+    def test_a_multiply_names_the_thread_height_among_the_lengths_it_does_not_scale(self):
+        context = helpers.effective_context("fanuc-lathe", preset="is-b")
+        payload = self.run_on(context, operation="multiply", operand=2, addresses=["X"])
+        self.assertEqual(lines_of(payload)[3], "G76 X20. Z-30. P1500 Q300 F2.")
+        self.assertEqual(
+            finding_at(payload, 4)["message"],
+            "G76 X20. Z-30. P1500 Q300 F2.: G76 writes P1500, which may be a depth or a distance a multiply or divide does not scale, so the cycle cannot be scaled in one piece.",
+        )
+
+
 class TestManualCheckD43OnlyPositionsNeedTheDistanceMode(unittest.TestCase):
     """Manual-check fix round, D4-3: G90/G91 govern where the axes go, not the feed. Only a
     position word (an axis, its incremental twin, an arc centre, `R` and the other position
@@ -2133,3 +2367,148 @@ class TestReviewRoundCodeValueOnAnAxisAddress(unittest.TestCase):
         payload = self.okuma("G33 X40. Z-20. F1.5 C90.", addresses=["Z"], operand=-1)
         self.assertEqual(lines_of(payload)[2], "G33 X40. Z-21. F1.5 C90.")
         self.assertEqual(payload["findings"], [])
+
+
+class TestWyNc1SelectionEndsInsideABlock(unittest.TestCase):
+    """v1.2.0 Wave Y review, WY-NC-1: the other edge of the start rule. A selection that ends
+    inside a block that goes on below it (a Klartext `~` at the end of its last line, an Okuma
+    `$` line below it) holds only part of that block. Judged from its selected lines it was
+    shifted in part: cycle 233 moved its `Q227` start level but not its `Q386` end level, and
+    the two together give the depth (TNC 620 cycles manual, 2015, p.171-172: both absolute,
+    equal means depth 0). Such a block is left as written with a warning, and a cycle it
+    belongs to is left whole; a whole run still moves every word of it."""
+
+    FACE = "\n".join([
+        "0 BEGIN PGM FACE MM",
+        "1 ; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "2 TOOL CALL 1 Z S2000",
+        "3 L X+0 Y+0 Z+100 R0 FMAX",
+        "4 CYCL DEF 233 PLANFRAESEN ~",
+        "  Q215=+0 ;BEARBEITUNGS-UMFANG ~",
+        "  Q389=+0 ;FRAESSTRATEGIE ~",
+        "  Q350=+1 ;FRAESRICHTUNG ~",
+        "  Q218=+100 ;1. SEITEN-LAENGE ~",
+        "  Q219=+50 ;2. SEITEN-LAENGE ~",
+        "  Q227=+2 ;STARTPUNKT 3. ACHSE ~",
+        "  Q386=+0 ;ENDPUNKT 3. ACHSE ~",
+        "  Q369=+0 ;AUFMASS TIEFE ~",
+        "  Q202=+1 ;MAX. ZUSTELL-TIEFE ~",
+        "  Q370=+1 ;BAHN-UEBERLAPPUNG ~",
+        "  Q207=+500 ;VORSCHUB FRAESEN ~",
+        "  Q385=+500 ;VORSCHUB SCHLICHTEN ~",
+        "  Q253=+750 ;VORSCHUB VORPOS. ~",
+        "  Q357=+2 ;SI.-ABSTAND SEITE ~",
+        "  Q200=+2 ;SICHERHEITS-ABST. ~",
+        "  Q204=+50 ;2. SICHERHEITS-ABST. ~",
+        "  Q347=+0 ;1. BEGRENZUNG ~",
+        "  Q348=+0 ;2. BEGRENZUNG ~",
+        "  Q349=+0 ;3. BEGRENZUNG ~",
+        "  Q220=+2 ;ECKENRADIUS ~",
+        "  Q368=+0 ;AUFMASS SEITE ~",
+        "  Q338=+0 ;ZUST. SCHLICHTEN ~",
+        "  Q367=+0 ;LAGE FLAECHE",
+        "5 CYCL CALL M3",
+        "6 END PGM FACE MM",
+    ])
+
+    CONTOUR = "\n".join([
+        "0 BEGIN PGM SL MM",
+        "1 ; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "2 TOOL CALL 1 Z S3000",
+        "3 L Z+100 R0 FMAX",
+        "4 CYCL DEF 20 CONTOUR DATA ~",
+        "  Q1=-20 ;MILLING DEPTH ~",
+        "  Q2=1 ;TOOL PATH OVERLAP ~",
+        "  Q3=+0.2 ;ALLOWANCE FOR SIDE ~",
+        "  Q4=+0.1 ;ALLOWANCE FOR FLOOR ~",
+        "  Q5=+30 ;SURFACE COORDINATE ~",
+        "  Q6=2 ;SET-UP CLEARANCE ~",
+        "  Q7=+80 ;CLEARANCE HEIGHT ~",
+        "  Q8=0.5 ;ROUNDING RADIUS ~",
+        "  Q9=+1 ;ROTATIONAL DIRECTION",
+        "5 L X+50 Y+50 R0 FMAX",
+        "6 CYCL CALL M3",
+        "7 END PGM SL MM",
+    ])
+
+    #: An Okuma LAP call whose change point runs over two `$` lines (OSP-P200 alarm list
+    #: LG37-005-R4, 2008, p.281: a line that starts with `$` belongs to the block above it).
+    LAP = "\n".join([
+        "O1000",
+        "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM)",
+        "G90 G00 X100. Z5.",
+        "G85 NAT01 D4. F0.3 U0.4 W0.2",
+        "$ G84 XA=60. DA=2.",
+        "$ ZA=-20. FA=0.2",
+        "NAT01 G81",
+        "G01 X40. Z0.",
+        "Z-30.",
+        "X80.",
+        "G80",
+        "G00 X200. Z100.",
+        "M02",
+    ])
+
+    def select(self, text, start, end, profile, preset=None, below=True, **params):
+        lines = text.split("\n")
+        context = helpers.effective_context(profile, preset=preset) if preset else helpers.effective_context(profile)
+        context["params"] = dict({"operation": "add", "operand": -1, "addresses": ["Z"]}, **params)
+        context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+        if below:
+            context["input"]["followingLines"] = lines[end:]
+        result = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
+        self.assertTrue(result.ok, result.stderr)
+        return result.json()
+
+    def test_cycle_233_ending_after_q227_is_left_with_a_warning(self):
+        lines = self.FACE.split("\n")
+        for below in (True, False):
+            with self.subTest(below=below):
+                payload = self.select(self.FACE, 1, 11, "heidenhain-klartext", below=below)
+                self.assertEqual(lines_of(payload)[4:11], lines[4:11])
+                finding = finding_at(payload, 5)
+                self.assertEqual((finding["severity"], finding["reason"]), ("warning", "cycle-outside"))
+                self.assertEqual(
+                    finding["message"],
+                    '4 CYCL DEF 233 PLANFRAESEN ~: the block goes on below the selection (line 12), so it is left as written.',
+                )
+                self.assertIn("1 cycle partly outside the selection", payload["message"])
+                self.assertNotIn("as written: .", payload["message"])
+
+    def test_a_whole_run_still_moves_q227_and_q386_together(self):
+        payload = run(self.FACE, profile="heidenhain-klartext", operand=-1, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[10:12], ["  Q227=+1 ;STARTPUNKT 3. ACHSE ~", "  Q386=-1 ;ENDPUNKT 3. ACHSE ~"])
+        payload = self.select(self.FACE, 1, 30, "heidenhain-klartext")
+        self.assertEqual(lines_of(payload)[10:12], ["  Q227=+1 ;STARTPUNKT 3. ACHSE ~", "  Q386=-1 ;ENDPUNKT 3. ACHSE ~"])
+        self.assertNotIn("cycle-outside", reasons(payload))
+
+    def test_cycle_20_ending_at_q5_is_left(self):
+        lines = self.CONTOUR.split("\n")
+        payload = self.select(self.CONTOUR, 1, 10, "heidenhain-klartext")
+        self.assertEqual(lines_of(payload)[4:10], lines[4:10])
+        self.assertEqual(finding_at(payload, 5)["reason"], "cycle-outside")
+        self.assertIn("goes on below the selection (line 11)", finding_at(payload, 5)["message"])
+        # The whole cycle in the selection moves Q5 and Q7 together.
+        payload = self.select(self.CONTOUR, 1, 17, "heidenhain-klartext")
+        self.assertEqual(lines_of(payload)[9:12:2], ["  Q5=+29 ;SURFACE COORDINATE ~", "  Q7=+79 ;CLEARANCE HEIGHT ~"])
+
+    def test_an_okuma_block_whose_dollar_line_lies_below_is_left(self):
+        payload = self.select(self.LAP, 1, 5, "okuma-osp", preset="okuma-1mm", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[2:5], ["G90 G00 X102. Z7.", "G85 NAT01 D4. F0.3 U0.4 W0.2", "$ G84 XA=60. DA=2."])
+        finding = finding_at(payload, 4)
+        # This run reads a LAP call as a block of its own (no cycle group): the reason is the
+        # selection's, as at the start edge.
+        self.assertEqual((finding["severity"], finding["reason"]), ("warning", "selection"))
+        self.assertIn("the block goes on below the selection (line 6), so it is left as written", finding["message"])
+        # The whole block in the selection moves both coordinates of the change point.
+        payload = self.select(self.LAP, 1, 6, "okuma-osp", preset="okuma-1mm", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[4:6], ["$ G84 XA=62. DA=2.", "$ ZA=-18. FA=0.2"])
+
+    def test_a_plain_block_going_on_below_names_its_reason_in_the_summary(self):
+        text = "O1000\n(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM)\nG90 G00 X100.\n$ Z5.\nM02"
+        payload = self.select(text, 1, 3, "okuma-osp", preset="okuma-1mm", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[2], "G90 G00 X100.")
+        self.assertEqual(finding_at(payload, 3)["reason"], "selection")
+        self.assertIn("Left 1 block as written: 1 block partly outside the selection.", payload["message"])
+        payload = self.select(text, 1, 4, "okuma-osp", preset="okuma-1mm", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[2:4], ["G90 G00 X102.", "$ Z7."])

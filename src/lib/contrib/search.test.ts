@@ -23,12 +23,17 @@ const fake = vi.hoisted(() => ({
   selected: '',
   models: new Set<string>(),
   runner: null as import('$lib/core/regexGuard/runner').GuardRunner | null,
+  /** P4.31: the channel set `channels.fresh` answers per document, and the machine's channel block. */
+  sets: {} as Record<string, unknown>,
+  channelParams: null as unknown,
+  fields: [] as unknown[][],
 }));
 
 vi.mock('$lib/app/modals', () => ({
   modals: {
-    form: (o: { values?: Record<string, unknown>; live?: (values: Record<string, unknown>) => unknown }): Promise<Record<string, unknown> | undefined> => {
+    form: (o: { fields?: unknown[]; values?: Record<string, unknown>; live?: (values: Record<string, unknown>) => unknown }): Promise<Record<string, unknown> | undefined> => {
       fake.forms.push({ ...o.values });
+      fake.fields.push(o.fields ?? []);
       fake.lives.push(o.live);
       return Promise.resolve(fake.answers.shift());
     },
@@ -61,6 +66,12 @@ vi.mock('$lib/stores/documents', () => ({
     get: (id: string) => (id in fake.documents ? { id, title: fake.titles[id] } : undefined),
   },
 }));
+vi.mock('$lib/stores/channels', () => ({
+  channels: {
+    fresh: (id: string) => fake.sets[id] ?? { layout: 'none', self: null, members: [], missing: [], outside: [], marks: [], problems: [], truncated: false },
+    params: () => fake.channelParams,
+  },
+}));
 vi.mock('$lib/stores/machines', () => ({ machines: { effective: () => ({ cp, codes: undefined }) } }));
 vi.mock('$lib/stores/results', () => ({ results: { show: (r: unknown) => fake.reports.push(r) } }));
 vi.mock('$lib/core/regexGuard/app', () => ({ appGuardRunner: () => Promise.resolve(fake.runner) }));
@@ -68,6 +79,7 @@ vi.mock('$lib/stores/uiState', () => ({ uiState: { getLastParams: () => undefine
 
 const search = (await import('./search')).default;
 const { hasKey } = await import('$lib/i18n');
+const { toySet } = await import('$lib/core/channels/paneFixtures');
 
 const byId = new Map<string, CommandDef>((search.commands ?? []).map((def) => [def.id, def]));
 const run = (id: string, docId = 'a'): unknown => byId.get(id)?.run({ activeDocId: docId } as never);
@@ -88,6 +100,9 @@ beforeEach(() => {
     selected: '',
     models: new Set(['a', 'b']),
     runner: null,
+    sets: {},
+    channelParams: null,
+    fields: [],
   });
 });
 
@@ -326,5 +341,92 @@ describe('a regular expression that runs away (T227)', () => {
     fake.answers.push(FORM);
     await run('search.findAll');
     expect(s.jobs).toHaveLength(1); // the word query did not go to the worker
+  });
+});
+
+describe('Find All limited to a channel (P4.31)', () => {
+  // Channel 1 at 3-4 and 7, channel 2 at 5-6; G1 in every channel.
+  const PROGRAM = ['%', 'O1000', '$1', 'G1 X1', '$2', 'G1 X2', '$1', 'G1 X3'];
+  const PARAMS = { layout: 'single-file', list: [{ id: '1', name: 'Path 1' }, { id: '2', name: 'Path 2' }, { id: '3', name: 'Path 3' }] };
+  const idsOf = (fields: unknown[]) => (fields as { id: string }[]).map((f) => f.id);
+
+  beforeEach(() => {
+    fake.documents = { a: PROGRAM, b: ['G1', 'X5'] };
+    fake.sets = { a: toySet(PROGRAM) };
+    fake.channelParams = PARAMS;
+  });
+
+  it('offers the Channel choice: all, then each channel the program has in the machine s order', async () => {
+    fake.answers.push(undefined);
+    await run('search.findAll');
+    const field = (fake.fields[0] as { id: string; choices: { label: string; value: string }[]; default: string }[]).find((f) => f.id === 'channel');
+    expect(field?.default).toBe('*');
+    expect(field?.choices).toEqual([
+      { label: 'All channels', value: '*' },
+      { label: 'Path 1', value: '1' },
+      { label: 'Path 2', value: '2' },
+    ]);
+  });
+
+  it('offers nothing for a program without channel sections', async () => {
+    fake.sets = {};
+    fake.answers.push(undefined);
+    await run('search.findAll');
+    expect(idsOf(fake.fields[0])).not.toContain('channel');
+  });
+
+  it('reads only the lines of the channel, and the rows keep the document s line numbers', async () => {
+    fake.answers.push({ ...FORM, channel: '1' });
+    await run('search.findAll');
+    const report = fake.reports[0] as ReportData;
+    expect(report.rows.map((r) => r.line)).toEqual([4, 8]);
+    expect(report.title).toBe('2 hits for G1');
+    expect(report.message).toBe('Only the lines of Path 1.');
+  });
+
+  it('All channels is the whole program, without a note', async () => {
+    fake.answers.push({ ...FORM, channel: '*' });
+    await run('search.findAll');
+    const report = fake.reports[0] as ReportData;
+    expect(report.rows.map((r) => r.line)).toEqual([4, 6, 8]);
+    expect(report.message).toBeUndefined();
+  });
+
+  it('a remembered channel this program does not have is all channels', async () => {
+    fake.answers.push({ ...FORM, channel: '3' });
+    await run('search.findAll');
+    expect((fake.reports[0] as ReportData).rows).toHaveLength(3);
+  });
+
+  it('in all open documents, a document without that channel is skipped and the Results say so', async () => {
+    fake.answers.push({ ...FORM, scope: 'open', channel: '2' });
+    await run('search.findAll');
+    const report = fake.reports[0] as ReportData;
+    expect(report.rows.map((r) => [r.docId, r.line])).toEqual([['a', 6]]);
+    expect(report.message).toBe('Only the lines of Path 2. 1 document was skipped because it has no lines of this channel.');
+  });
+
+  it('a channel file is searched whole when it is that channel s file', async () => {
+    fake.sets.b = { layout: 'multi-file', self: { id: '1', name: 'Path 1', index: 0 }, members: [], missing: [], outside: [], marks: [], problems: [], truncated: false };
+    fake.answers.push({ ...FORM, scope: 'open', channel: '1' });
+    await run('search.findAll');
+    expect((fake.reports[0] as ReportData).rows.map((r) => [r.docId, r.line])).toEqual([['a', 4], ['a', 8], ['b', 1]]);
+  });
+
+  it('keeps the regex guard: a pattern that runs away inside the channel is stopped', async () => {
+    fake.runner = {
+      run: (_job, budgetMs) => Promise.resolve({ status: 'timeout' as const, budgetMs, probe: 'query' }),
+      dispose: () => undefined,
+    };
+    fake.answers.push({ ...FORM, query: '(a+)+$', wholeAddress: false, regex: true, channel: '1' });
+    await run('search.findAll');
+    expect(fake.reports).toEqual([]);
+    expect(fake.said.at(-1)?.error).toBe(true);
+  });
+
+  it('Replace All has no Channel choice', async () => {
+    fake.answers.push(undefined);
+    await run('search.replace');
+    expect(idsOf(fake.fields[0])).not.toContain('channel');
   });
 });

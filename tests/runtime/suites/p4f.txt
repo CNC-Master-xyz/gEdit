@@ -1,0 +1,38 @@
+# P4f: "Folders, files from the system and channel files" - Find in Folder, files the system hands to the running app, machine folders, Save Channel
+# Files with the Channel choice of Find All and Compare, the check that follows jumps, the Siemens job list and the path-1 file name (plan
+# docs/planning/phase-4-implementation.md §6.8, P4.27 to P4.32, H4f), and the exit criteria that the running app proves for them.
+# Run with: tests/runtime/suites/m0.txt tests/runtime/suites/m1.txt tests/runtime/suites/m2.txt tests/runtime/suites/m3.txt tests/runtime/suites/m4.txt tests/runtime/suites/m5.txt tests/runtime/suites/m6.txt tests/runtime/suites/m7.txt tests/runtime/suites/m8.txt tests/runtime/suites/m9.txt tests/runtime/suites/m10.txt tests/runtime/suites/m11.txt tests/runtime/suites/m12.txt tests/runtime/suites/rp.txt tests/runtime/suites/m13.txt tests/runtime/suites/p3a.txt tests/runtime/suites/p3b.txt tests/runtime/suites/b1.txt tests/runtime/suites/p4a.txt tests/runtime/suites/p4e.txt tests/runtime/suites/p4f.txt
+# (on a hosted runner: the glob in .github/workflows/harness.yml names every suite file; p4f has to be in it)
+#
+# Every expected row, line and count is worked out from the programs written in the scenarios or listed in tests/fixtures/p4f/harness/README.md, every sentence
+# comes from ctx.t(...). Nothing is read from what the app shows except through the test ids and the editors' own models. The folder trees, the links, the
+# binary and the 17 MB file are built in the run folder; the folder dialog is the harness's queued answer; the hand-over of files from the system is the
+# harness command h_open_request, which calls the same functions the system's call reaches (what it cannot prove is in p4f-system.js).
+#
+# Intentional changes to earlier scenarios: none. The re-check of p4-channels.js after the P4f review fixes (the built-in three-path preset gained
+# `firstFileName`, `^(?<stem>[^.]+)$`, for a path-1 file written without an extension): its set `threepath.NC1` to `.NC3` names path 1 by the extension, so the
+# file-name rule decides first and the new pattern never applies to it; the folder listing that now also looks for the first channel's file finds
+# `threepath.NC1` by the same rule. Its expectations (the channel item, the dialog asked, the panes) did not change; p4f-siblings holds the case in the app.
+
+# Find in Folder: the tree and its counted skips, rows that open, the older-search rule, Stop, the regular-expression guard, one search at a time.
+p4f-folder
+p4f-folder-stop
+p4f-folder-regex
+p4f-folder-busy
+
+# Files the system opens in the running window, and what is refused.
+p4f-system
+
+# Machine folders: the longest folder wins, two machines on one folder choose none, a duplicate has no folders.
+p4f-machine-folders
+
+# Channel files and channel scope: Save Channel Files (PART_1 style names, the copies sentence), Merge Channels Back, Find All and Compare by channel.
+p4f-channel-files
+p4f-channel-scope
+
+# The check follows jumps: a jump inside IF ... ENDIF, over an IF block, a counted REPEAT, a forward GOTO, a jump into a subprogram.
+p4f-flow
+
+# The Siemens job list and the path-1 file name.
+p4f-joblist
+p4f-siblings

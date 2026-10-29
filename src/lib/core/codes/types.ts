@@ -41,8 +41,19 @@ export interface CodeParam {
    *
    * The complete list per code is the table in §8.2 of the plan, which WP6.2 writes from
    * and the G10 review reads first.
+   *
+   * `'feed'` (T210, owner rule of 2026-10-27: "a value is treated as a feed only when the data
+   * marks it"): the parameter is a **feed rate** whose unit is not fixed by the code — the
+   * feed unit in force, or the control's own unit for a cycle feed (`F` of Fanuc `G81`,
+   * Klartext `Q206`, Sinumerik `_FFP1`). It is a marker only: every number reader reads such a
+   * parameter as if it declared no unit (`numberClassOf`, `gedit_nc.number_class_of`), so the
+   * value is read exactly as before. What reads it is the feed question of the scripts (Scale
+   * feed rates lists a marked cycle feed it leaves alone). A parameter whose unit is fixed says
+   * so with `'feedPerMin'` (Okuma `G101`) and is a feed too; `'feedPerRev'` is the thread
+   * **lead** and no feed. A parameter that only speaks of a feed (a feed factor, a percentage
+   * of a feed, the point where a feed starts) is not marked.
    */
-  unit?: NumberClass | 'increment' | 'count';
+  unit?: NumberClass | 'increment' | 'count' | 'feed';
   /**
    * B1 (NC-06). Only with `unit: 'count'`: the value is read as written like a count, never
    * converted, but it is a **real number**, not a whole one (the Euler angles `I`/`J`/`K` of
@@ -102,7 +113,9 @@ export interface CodeParam {
    * finishing allowance in the second); the members that change how a value is read or moved
    * (`unit`, `position`, `axis`, `programNumber`) have to agree between the two, so every reader
    * that asks only "what is `U` of `G71`" stays right in both blocks (`core/codes/load.ts`
-   * refuses a second declaration that disagrees).
+   * refuses a second declaration that disagrees). P4h (plan §6.10 rule 11; T118): `unit` alone
+   * may differ between a `block: 1` and a `block: 2` declaration; a reader that knows the block
+   * (`numberClassOf`'s `cycleBlock`) reads that block's unit, one that does not reads no class.
    *
    * Which block a written block is (`cycleBlockOf`, `core/codes/blocks.ts`; Python
    * `gedit_nc.cycle_block_of`): the second when it writes an address declared for the second
@@ -702,6 +715,13 @@ export interface CodeEntry {
   alone?: boolean;
   /** M10 (WP10.2). The block of this code has to write at least one of these addresses or keywords (Klartext `PLANE …` one of `MOVE`, `TURN`, `STAY`). */
   requires?: string[];
+  /**
+   * Wave Y (T093). On a DEF-active cycle with parameters (a `cycle` entry with no `sets.cycle`,
+   * Klartext cycle 20 CONTOUR DATA): the codes of the cycles that read its values when they are
+   * called (`CYCL DEF 21` to `CYCL DEF 24`). Address arithmetic moves such a cycle and the
+   * definitions and calls of those cycles together or not at all (`address_arithmetic.used_by`).
+   */
+  usedBy?: string[];
   /**
    * B1 (A6, owner decision of 2026-10-10). Addresses this code takes as words of its own when they
    * stand **behind** it in its block: the words written there belong to the code, not to the

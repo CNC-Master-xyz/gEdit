@@ -73,9 +73,16 @@
       { "code": "BLK FORM", "declared": {"axisWords": "data", "blank": true}, "reads": {"axisWords": "data", "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "CC", "declared": {"axisWords": "data", "pole": "set"}, "reads": {"axisWords": "data", "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "C", "declared": {"pole": "use"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
+      { "code": "RND", "declared": {"blockFeed": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
+      { "code": "CHF", "declared": {"blockFeed": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "LP", "declared": {"pole": "use"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "CP", "declared": {"pole": "use"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "CTP", "declared": {"pole": "use"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
+      { "code": "APPR PLT", "declared": {"pole": "use"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
+      { "code": "APPR PLN", "declared": {"pole": "use"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
+      { "code": "APPR PCT", "declared": {"pole": "use"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
+      { "code": "APPR PLCT", "declared": {"pole": "use"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
+      { "code": "DEP PLCT", "declared": {"pole": "use"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "LBL", "declared": {"flow": "label"}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "CALL LBL", "declared": {"call": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "CALL PGM", "declared": {"call": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
@@ -113,6 +120,8 @@
     "okuma": [
       { "code": "G20", "declared": {"axisWords": "machine"}, "reads": {"axisWords": "machine", "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "G21", "declared": {"axisWords": "machine"}, "reads": {"axisWords": "machine", "frame": null, "speedLimitBound": null, "tcp": null} },
+      { "code": "G24", "declared": {"axisWords": "machine"}, "reads": {"axisWords": "machine", "frame": null, "speedLimitBound": null, "tcp": null} },
+      { "code": "G25", "declared": {"axisWords": "machine"}, "reads": {"axisWords": "machine", "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "G50", "declared": {"axisWords": "data", "shift": true, "sets": {"speedLimit": true}}, "reads": {"axisWords": "data", "frame": null, "speedLimitBound": "upper", "tcp": null} },
       { "code": "G136", "declared": {"frame": "close"}, "reads": {"axisWords": null, "frame": "close", "speedLimitBound": null, "tcp": null} },
       { "code": "G137", "declared": {"frame": "open"}, "reads": {"axisWords": null, "frame": "open", "speedLimitBound": null, "tcp": null} },
@@ -187,7 +196,8 @@
       { "code": "CALL", "declared": {"call": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "PCALL", "declared": {"call": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} },
       { "code": "EXTCALL", "declared": {"call": true}, "reads": {"axisWords": null, "frame": null, "speedLimitBound": null, "tcp": null} }
-    ]
+    ],
+    "sinumerik-mill": []
   },
   "droppedByOverride": {
     "fanuc-lathe": [

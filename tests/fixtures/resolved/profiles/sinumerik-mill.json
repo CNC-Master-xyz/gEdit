@@ -35,7 +35,7 @@
     "spindle": "S",
     "tool": "T"
   },
-  "codes": "sinumerik",
+  "codes": "sinumerik-mill",
   "compare": {
     "ignoreBlockNumbers": true,
     "ignoreCase": true,
@@ -158,6 +158,14 @@
   "grammar": "sinumerik",
   "id": "sinumerik-mill",
   "machineParams": {
+    "builderCodes": {
+      "example": "G810-G829",
+      "letters": [
+        "G"
+      ],
+      "source": "syntax-sinumerik.md §4 (G810 to G819 and G820 to G829, the machine builder's G groups 31 and 32)",
+      "verify": true
+    },
     "channels": {
       "presets": [
         {
@@ -439,6 +447,10 @@
       ]
     },
     "diameter": "off",
+    "extraAxes": {
+      "source": "syntax-sinumerik.md §3.2 (axis names of more than one letter; 840D sl NC programming manual, value assignments)",
+      "verify": true
+    },
     "modalGroups": [
       "feedmode",
       "plane",

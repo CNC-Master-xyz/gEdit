@@ -290,9 +290,12 @@ describe('a Fanuc lathe (G-code system A)', () => {
     expect(checkValue(t, '2.5', view)).toEqual({ key: 'inspector.why.wholeNumber' });
     expect(checkValue(t, '202', view)).toBeNull();
     expect(checkValue(t, '2.0', view)).toBeNull();
+    // P4h (T118): the packed P of the first block of G76 is the count; the thread height P of the
+    // second block is a number of least increments, which needs a machine to be read (and so to be edited).
+    const first = inspectBlock(doc(text, 7), view, null, state({ ...base, block: { cycle: 'G76', pitchFeed: true } }));
+    expect(checkValue(row(first, 'P020060'), '20060.5', view)).toEqual({ key: 'inspector.why.wholeNumber' });
     const second = inspectBlock(doc(text, 8), view, null, state({ ...base, block: { cycle: 'G76', pitchFeed: true } }));
-    const p = row(second, 'P1200');
-    expect(checkValue(p, '1200.5', view)).toEqual({ key: 'inspector.why.wholeNumber' });
+    expect(checkValue(row(second, 'P1200'), '1200', view)).toEqual({ key: 'inspector.why.needsMachine' });
     const f = row(second, 'F1.5');
     expect(checkValue(f, '-1', view)).toEqual({ key: 'inspector.why.min', params: { min: '0' } });
     expect(checkValue(f, 'x', view)).toEqual({ key: 'inspector.why.notANumber' });
@@ -834,5 +837,29 @@ describe('register numbers are never negative', () => {
       expect(checkValue(row(r, written), '-3', mill), written).toMatchObject({ key: 'inspector.why.min' });
       expect(checkValue(row(r, written), '3', mill), written).toBeNull();
     }
+  });
+});
+
+// P4h (plan §6.10 rules 13, 14; T123): a machine's extra axes are axis words with their value;
+// its builder codes stay unknown codes with a note that says where their meaning is.
+describe('a machine with extra axes and builder codes (P4.43b)', () => {
+  const machine = { extraAxes: [{ name: 'AA', kind: 'linear' as const }, { name: 'QQ', kind: 'rotary' as const }], builderCodes: 'G810-G829' };
+  const text = 'N5 G90 G71\nN10 G1 X10 AA90 QQ45.5 G810';
+  const after = state({ groups: { distance: mv('G90', 1), units: mv('G71', 1) }, distance: 'absolute', units: { value: 'mm', line: 1, assumed: false } });
+
+  it('reads an extra axis as a length or an angle, and names a builder code', () => {
+    const r = inspectBlock(doc(text, 2), viewOf('sinumerik', { name: 'Turn 5', params: machine }), after, after);
+    expectKnownKeys(r);
+    expect([row(r, 'AA90').kind, row(r, 'AA90').address, row(r, 'AA90').value?.cls, row(r, 'AA90').value?.effective]).toEqual(['address', 'AA', 'length', '90']);
+    expect([row(r, 'QQ45.5').kind, row(r, 'QQ45.5').value?.cls, row(r, 'QQ45.5').value?.unit]).toEqual(['address', 'angle', 'deg']);
+    expect(row(r, 'G810').kind).toBe('unknown');
+    expect(row(r, 'G810').notes).toEqual([{ key: 'machines.extra.builderCode' }]);
+    expect(row(r, 'G810').edit.ok).toBe(false);
+  });
+
+  it('leaves both as words it does not know without the machine', () => {
+    const r = inspectBlock(doc(text, 2), viewOf('sinumerik'), after, after);
+    expect(row(r, 'AA90').kind).toBe('unknown');
+    expect(keys(row(r, 'G810').notes)).toEqual(['note.notDescribed']);
   });
 });

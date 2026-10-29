@@ -48,7 +48,7 @@ scenario('m13-user-profile', { timeout: 420 }, async (h) => {
   // ============================================================ A. the empty page
   h.check('both folders exist from the first start, and hold nothing', !!(await h.disk.stat(profilesDir))?.isDir && !!(await h.disk.stat(codesDir))?.isDir)
   let page = await openProfilesPage(h)
-  h.check('Settings has a Profiles tab, after Machines', h.qa('settings-category').map((e) => e.dataset.category).slice(-2).join() === 'machines,profiles' && h.q('settings-page')?.dataset.category === 'profiles', h.qa('settings-category').map((e) => e.dataset.category))
+  h.check('Settings has a Profiles tab, after Machines (and before the P4g Keyboard, Packages and Configuration tabs)', h.qa('settings-category').map((e) => e.dataset.category).slice(-5, -3).join() === 'machines,profiles' && h.q('settings-page')?.dataset.category === 'profiles', h.qa('settings-category').map((e) => e.dataset.category))
   let rows = profileRows(h)
   h.check('the page lists the six built-in profiles and nothing of yours', rows.length === 6 && rows.every((r) => r.origin === 'builtin' && r.kind === 'profile' && r.file === ''), rows.map((r) => `${r.id}:${r.origin}`))
   h.check('each built-in row offers "New profile from this…" and "Test on document", and no Open, Export or Remove', rows.every((r) => !!profileAction(h, 'new', { row: r.element }) && !!profileAction(h, 'test', { row: r.element }) && !profileAction(h, 'open', { row: r.element }) && !profileAction(h, 'remove', { row: r.element })))

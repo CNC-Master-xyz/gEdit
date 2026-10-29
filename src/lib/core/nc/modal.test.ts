@@ -189,6 +189,31 @@ describe('codes and words (rules 1-7, 9)', () => {
     expect(states[1].block.toolChange).toBe(true);
   });
 
+  it('rule 7 (T113): a Klartext TOOL CALL that names the loaded tool and no axis only changes the speed', () => {
+    const lines = ['TOOL CALL 4 Z S3000', 'TOOL CALL 4 S4000', 'TOOL CALL 04 S4500', 'TOOL CALL 4 Z S5000', 'TOOL CALL "D8" Z S100', 'TOOL CALL "D8" S200', 'TOOL CALL 12.1 Z', 'TOOL CALL 12 S1'];
+    const states = walk(ctx('heidenhain-klartext'), lines);
+    expect(states.map((s) => s.block.toolChange)).toEqual([true, false, false, true, true, false, true, true]);
+    expect(states.map((s) => s.tool?.station ?? null)).toEqual(['4', '4', '4', '4', '"D8"', '"D8"', '12.1', '12']);
+    // The tool keeps the line it was loaded on, so a tool-change time is counted once.
+    expect(states.map((s) => s.tool?.line ?? null)).toEqual([1, 1, 1, 4, 5, 5, 7, 8]);
+    expect(states.map((s) => s.speed?.valueText ?? null)).toEqual(['3000', '4000', '4500', '5000', '100', '200', '200', '1']);
+  });
+
+  it('rule 7 (T113): on an axis-aware profile a tool line that names no tool is no tool change', () => {
+    const base = PROFILES.get('heidenhain-klartext');
+    if (!base) throw new Error('no profile heidenhain-klartext');
+    const variant = {
+      ...base,
+      toolCall: { trigger: '\\bTOOL\\s+CALL\\b', tool: 'TOOL\\s+CALL\\s+(?<tool>\\d+)?\\s*(?:(?<axis>[XYZ])(?![A-Z0-9_]))?', toolFrom: 'same-line' as const },
+    };
+    const checked = validateProfile(variant);
+    if (!checked.ok) throw new Error(checked.errors.join('; '));
+    const c = { cp: compileProfile(checked.profile), db: ctx('heidenhain-klartext').db };
+    const states = walk(c, ['1 TOOL CALL 5 Z S1000', '2 TOOL CALL Z S2000', '3 TOOL CALL S2500']);
+    expect(states.map((s) => s.block.toolChange)).toEqual([true, false, false]);
+    expect(states.map((s) => s.tool?.line ?? null)).toEqual([1, 1, 1]);
+  });
+
   it('rule 9: an unknown code changes nothing', () => {
     expect(last('fanuc-gcode', ['G1 X1. F100.', 'G999'])).toEqual({ ...last('fanuc-gcode', ['G1 X1. F100.', '']) });
   });

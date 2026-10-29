@@ -27,6 +27,7 @@ import {
   openMachinesPage,
   ready,
   sameJson,
+  MACHINES_SCHEMA,
 } from './m6-common.js'
 
 const CONFIG = 'home/Library/Application Support/com.pburg.gedit'
@@ -97,7 +98,8 @@ scenario('m6-machines-broken', { timeout: 300, files: { [`${CONFIG}/machines.jso
   await h.alert.click('Replace with an empty file')
   await h.waitFor(async () => (await h.disk.stat(`${paths.machinesFile}.bak`)) !== null, { timeout: 10000 })
   h.check('the unusable file is kept as machines.json.bak, byte for byte', (await h.disk.read(`${paths.machinesFile}.bak`)) === BROKEN, JSON.stringify(await h.disk.read(`${paths.machinesFile}.bak`)))
-  const empty = { $version: 1, machines: [], defaults: {} }
+  // The empty file is a new file of gEdit's, so it starts with the `$schema` line (Wave Y, owner answer Q4h-2).
+  const empty = { $schema: MACHINES_SCHEMA, $version: 1, machines: [], defaults: {} }
   h.check('and an empty, usable file takes its place', sameJson(await machinesFile(h), empty), { got: await machinesFile(h), want: empty })
 
   // ------------------------------------------------------------ the page is usable again

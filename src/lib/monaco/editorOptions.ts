@@ -19,9 +19,11 @@
 import type * as MonacoApi from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { editor as editorService } from '$lib/monaco/editorService';
 import { docs as appDocs } from '$lib/stores/documents';
+import { profiles as appProfiles } from '$lib/stores/profiles';
 import { settings as appSettings } from '$lib/stores/settings';
 import type { Settings } from '$lib/core/settings/schema';
-import type { Disposable, DocumentStore, EditorService } from '$lib/app/types';
+import type { ProfileEditing } from '$lib/core/profiles/types';
+import type { Disposable, DocId, DocumentStore, EditorService } from '$lib/app/types';
 import type { Readable } from 'svelte/store';
 
 /**
@@ -47,8 +49,20 @@ function completionOptions(mode: Settings['assist.completion']): EditorOptions {
   };
 }
 
+/**
+ * The part of a profile these options read (plan §6.10 rule 9, Q4h-4): its own `tabWidth` and
+ * `rulers` win over the general settings for the documents of that profile. Absent, the
+ * settings apply; an empty `rulers` list is present and means "no ruler".
+ */
+export type ProfileEditingSource = { editing?: Pick<ProfileEditing, 'tabWidth' | 'rulers'> } | undefined;
+
+/** The rulers a document of `profile` gets: the profile's list when it has one, else the setting's. */
+function rulersFor(s: Settings, profile?: ProfileEditingSource): number[] {
+  return [...(profile?.editing?.rulers ?? s['editor.rulers'])];
+}
+
 /** Everything `updateOptions()` understands, typed so that a wrong name does not compile. */
-function typedEditorOptions(s: Settings): EditorOptions {
+function typedEditorOptions(s: Settings, profile?: ProfileEditingSource): EditorOptions {
   return {
     fontFamily: s['appearance.editorFontFamily'],
     fontSize: s['appearance.editorFontSize'],
@@ -62,7 +76,7 @@ function typedEditorOptions(s: Settings): EditorOptions {
     stickyScroll: { enabled: s['editor.stickyScroll'], defaultModel: 'outlineModel' },
     dragAndDrop: s['editor.dragAndDrop'],
     emptySelectionClipboard: s['editor.emptySelectionClipboard'],
-    rulers: [...s['editor.rulers']],
+    rulers: rulersFor(s, profile),
     hover: { enabled: s['assist.hover'] },
     ...completionOptions(s['assist.completion']),
     // T214: an NC block ends with Enter, so a suggestion is taken with Tab unless asked.
@@ -70,30 +84,49 @@ function typedEditorOptions(s: Settings): EditorOptions {
   };
 }
 
-/** The `IEditorOptions` that `s` implies, including `stickyScroll` and `quickSuggestions`. */
-export function editorOptionsFor(s: Settings): Record<string, unknown> {
-  return typedEditorOptions(s) as Record<string, unknown>;
+/**
+ * The `IEditorOptions` that `s` implies, including `stickyScroll` and `quickSuggestions`.
+ * With `profile` (the effective profile of the document the editor shows) its `rulers` win.
+ */
+export function editorOptionsFor(s: Settings, profile?: ProfileEditingSource): Record<string, unknown> {
+  return typedEditorOptions(s, profile) as Record<string, unknown>;
 }
 
-/** The per-model options that `s` implies (`tabSize`, `insertSpaces`). */
-export function modelOptionsFor(s: Settings): Record<string, unknown> {
+/**
+ * The per-model options that `s` implies (`tabSize`, `insertSpaces`). With `profile` (the
+ * document's effective profile) its `tabWidth` wins over `editor.tabWidth`.
+ */
+export function modelOptionsFor(s: Settings, profile?: ProfileEditingSource): Record<string, unknown> {
   const options: MonacoApi.editor.ITextModelUpdateOptions = {
-    tabSize: s['editor.tabWidth'],
+    tabSize: profile?.editing?.tabWidth ?? s['editor.tabWidth'],
     insertSpaces: s['editor.insertSpaces'],
   };
   return options as Record<string, unknown>;
+}
+
+/** What the options need to know about profiles; `revision` changes whenever the profiles are reloaded. */
+export interface EditorProfilesView {
+  revision: Readable<number>;
+  /** The profile with that id, or undefined (a file that was opened under a profile that is gone). */
+  profile(id: string): ProfileEditingSource;
 }
 
 export interface EditorSettingsDeps {
   values: Readable<Settings>;
   editor: EditorService;
   docs: DocumentStore;
+  /** Without it no profile has its own tab width or rulers (the unit tests that predate P4.42). */
+  profiles?: EditorProfilesView;
 }
 
 const LIVE: EditorSettingsDeps = {
   values: appSettings.values,
   editor: editorService,
   docs: appDocs,
+  profiles: {
+    revision: appProfiles.revision,
+    profile: (id) => (appProfiles.get(id) ? appProfiles.profile(id) : undefined),
+  },
 };
 
 /**
@@ -113,15 +146,59 @@ const LIVE: EditorSettingsDeps = {
  */
 export function installEditorSettings(deps: EditorSettingsDeps = LIVE): Disposable {
   let current: Settings | undefined;
+  // What was last written, so that a profile or document change touches only what moved.
+  const modelKeys = new Map<DocId, string>();
+  const groupKeys = new WeakMap<object, string>();
 
-  function applyModels(s: Settings): void {
-    const options = modelOptionsFor(s);
-    for (const doc of deps.docs.all()) deps.editor.model(doc.id)?.updateOptions(options);
+  function profileOf(id: DocId): ProfileEditingSource {
+    const doc = deps.docs.get(id);
+    return doc ? deps.profiles?.profile(doc.profileId) : undefined;
+  }
+
+  /** One model; `force` writes it even when its options did not change (a settings change always did). */
+  function applyModel(id: DocId, s: Settings, force: boolean): void {
+    const options = modelOptionsFor(s, profileOf(id));
+    const key = JSON.stringify(options);
+    if (!force && modelKeys.get(id) === key) return;
+    modelKeys.set(id, key);
+    deps.editor.model(id)?.updateOptions(options);
+  }
+
+  function applyModels(s: Settings, force: boolean): void {
+    const live = new Set<DocId>();
+    for (const doc of deps.docs.all()) {
+      live.add(doc.id);
+      applyModel(doc.id, s, force);
+    }
+    for (const id of modelKeys.keys()) if (!live.has(id)) modelKeys.delete(id);
+  }
+
+  /**
+   * `rulers` is an editor option, so it follows the group and not the document: each group's
+   * editor gets the rulers of the profile of the document it shows now, and the settings'
+   * rulers again when that profile has none. Written on the instance, after the shared update.
+   */
+  function applyGroupRulers(s: Settings, force: boolean): void {
+    for (const view of deps.editor.groupViews()) {
+      const rulers = editorOptionsFor(s, profileOf(view.docId)).rulers;
+      const key = JSON.stringify(rulers);
+      if (!force && groupKeys.get(view.editor) === key) continue;
+      groupKeys.set(view.editor, key);
+      view.editor.updateOptions({ rulers: rulers as number[] });
+    }
   }
 
   function applyAll(s: Settings): void {
     deps.editor.updateOptions(editorOptionsFor(s));
-    applyModels(s);
+    applyModels(s, true);
+    applyGroupRulers(s, true);
+  }
+
+  /** A profile reloaded or switched, a document opened or moved to another group: only what differs. */
+  function refresh(): void {
+    if (!current) return;
+    applyModels(current, false);
+    applyGroupRulers(current, false);
   }
 
   const stopValues = deps.values.subscribe((s) => {
@@ -130,8 +207,14 @@ export function installEditorSettings(deps: EditorSettingsDeps = LIVE): Disposab
   });
 
   const stopCreate = deps.editor.onDidCreateModel((id) => {
-    if (current) deps.editor.model(id)?.updateOptions(modelOptionsFor(current));
+    if (current) applyModel(id, current, true);
   });
+
+  const stops: Disposable[] = [];
+  if (deps.profiles) stops.push(deps.profiles.revision.subscribe(refresh));
+  // A profile switch changes `profileId` in the document list; a group showing another document
+  // changes the group state; a new editor instance (a re-attach) starts from the shared rulers.
+  stops.push(deps.docs.list.subscribe(refresh), deps.editor.groups.subscribe(refresh), deps.editor.onDidAttach(refresh));
 
   // `editor.ready` resolves on the first attach and never rejects; the catch is there so
   // that a future change cannot turn it into an unhandled rejection (the harness counts
@@ -149,5 +232,6 @@ export function installEditorSettings(deps: EditorSettingsDeps = LIVE): Disposab
     disposed = true;
     stopValues();
     stopCreate();
+    for (const stop of stops) stop();
   };
 }

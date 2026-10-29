@@ -20,6 +20,7 @@ unless an extra folder holds one too (Phase 1 plan §3, AD-13).
 | `_nc_geom.py` | Phase 4 (P4a): the transform rules — the role of each word, how translate, rotate and mirror move it, and why a block is refused |
 | `_nc_run.py` | Phase 4 (P4b prelude): the run the transforms share — the form and context checks, the scope and the lines above a selection, the machine sentence, writing edits into a line, and the plane run of rotate and mirror |
 | `_nc_cycles.py` | Phase 4 (P4b): the drilling cycles as plain moves, read from the expansion schemas of the code database, and the machine's motion data and limits; read by the cycle expansion, the time estimate, the extents (the depths of the holes) and the program checks |
+| `_nc_block.py` | Wave Y (T209, T090): what Scale feed rates, Scale spindle speeds and the Tool list share — the power-on state, the codes a block writes, the parameter and number helpers, and a block read to its end across its continuation lines (Klartext `~`, Okuma `$`), so a code on any of its lines counts for all of them |
 | `tool_list.py` | tools in order of first use, with descriptions and call counts — `output = "report"` |
 | `scale_feed.py` | multiply `F` values by a percentage — `output = "replace"` |
 | `scale_speed.py` | multiply `S` values by a percentage — `output = "replace"` |
@@ -36,10 +37,10 @@ unless an extra folder holds one too (Phase 1 plan §3, AD-13).
 a script**: discovery skips them, because they are library code, not commands. The `_nc_*`
 modules are the internals of `gedit_nc`, which re-exports everything that is public — a
 script imports `gedit_nc` and nothing else, so the split can move without breaking anyone.
-Four helpers sit **above** `gedit_nc` instead of inside it: `_nc_path`, `_nc_geom`, `_nc_run`
-and `_nc_cycles` import `gedit_nc` and are not re-exported by it. The bundled geometry
-scripts, `extents.py`, `expand_cycles.py`, `time_estimate.py` and `program_checks.py` import
-them by name (`import _nc_path`); they are internal, and a
+Five helpers sit **above** `gedit_nc` instead of inside it: `_nc_path`, `_nc_geom`, `_nc_run`,
+`_nc_cycles` and `_nc_block` import `gedit_nc` and are not re-exported by it. The bundled geometry
+scripts, `extents.py`, `expand_cycles.py`, `time_estimate.py`, `program_checks.py`, the two
+scale scripts and the tool list import them by name (`import _nc_path`); they are internal, and a
 script of your own that imports them may break when they change.
 
 ---
@@ -154,7 +155,8 @@ should survive with defaults, or a clear message, rather than a traceback.
   "input": {
     "scope": "selection",                // selection | document | none
     "startLine": 41, "endLine": 48,      // 1-based, inclusive, whole lines
-    "precedingLines": ["%", "O1234", "…"] // optional; see §6
+    "precedingLines": ["%", "O1234", "…"], // optional; see §6
+    "followingLines": ["N90 M30", "%"]     // optional, a selection only; see §6
   },
   "cursor": { "line": 44, "column": 3 },
   "params": { "percent": 90 },
@@ -326,6 +328,13 @@ state = gedit_nc.prime_tracker(tracker, above, cp)    # also the LineState line 
 `prime_tracker` returns the `LineState` to pass to your first `tokenize_line`, so a Klartext
 `~` continuation that begins above the selection is still a continuation inside it.
 
+`input.followingLines` (v1.2.0, FZ-5) carries the document lines **below** `endLine` of a
+selection, under the same caps and the same rule: left out rather than cut, and `[]` for a
+selection that ends at the end of the document. A script whose answer for the selection depends
+on what the program does later reads it (`_nc_run.following_lines`): Translate checks whether a
+rotary axis the selection's moves wait on is turned below, and refuses such a move when the
+field is absent.
+
 Three rules to keep:
 
 1. **The field is optional, and absent is a correct context.** Keep whatever your script did
@@ -372,7 +381,8 @@ docstrings in the file are the detail.
 | `axis_words_of(entry)`, `frame_of(entry)`, `speed_limit_bound_of(entry)`, `tcp_of(entry)` | how one code entry's flags read (§7.2): the block's axis words are `'data'` or a `'machine'` position; the code opens or closes a coordinate `frame`; the side a speed limit bounds; tool centre point control `'on'`/`'off'` (M10) |
 | `position_of(param)` | M10 (roadmap R8): what a cycle parameter is to a program shift — `'tool-axis'` (an absolute coordinate on the tool axis), `'none'`, `'other'` (an absolute position a shift cannot judge), `'mode'`, or `None` when nobody reviewed it |
 | `arc_direction_of(entry)`, `comp_side_of(entry)`, `arc_direction_words_of(profile)` | Phase 4 (P4a): what a mirror swaps — the direction of an arc code as the control defines it (`'cw'` for `G2`, `'ccw'` for `G3`; only on an arc), the side of a compensation code that is on (`'left'` for `G41`, `RL`; `'right'` for `G42`, `RR`), and the profile's direction words (Klartext `{"DR+": "ccw", "DR-": "cw"}`) |
-| `cycle_block_of(entry, addresses)`, `params_of_block(entry, block)`, `declares_blocks(entry)` | B1: the two blocks of a lathe roughing or threading cycle (`G71 U2. R.5` then `G71 P10 Q20 U.4 W.1 F.25`), from the entry's `CodeParam.block`: `2` when the block writes an address of the second block only (`P`/`Q` of `G71`, an axis word of `G74`, `X`/`Z` of `G76`), else `1` when it writes one of the first, else `None`; and the parameters of that block, whose labels say what each address means there. How a value is read never depends on it: an address declared in both blocks has the same `unit` and `position` in both |
+| `cycle_block_of(entry, addresses)`, `params_of_block(entry, block)`, `declares_blocks(entry)` | B1: the two blocks of a lathe roughing or threading cycle (`G71 U2. R.5` then `G71 P10 Q20 U.4 W.1 F.25`), from the entry's `CodeParam.block`: `2` when the block writes an address of the second block only (`P`/`Q` of `G71`, an axis word of `G74`, `X`/`Z` of `G76`), else `1` when it writes one of the first, else `None`; and the parameters of that block, whose labels say what each address means there. How a value is read can depend on it (P4h, plan §6.10 rule 11): the `G76` `P` is a packed count in the first block and the thread height in increments in the second |
+| `block_cycle_of(entries, tokens)` | P4h (plan §6.10 rule 11): which block of a two-block cycle a whole block is — `cycle_block_of` of the entries of its codes that declare their blocks, read from the addresses of its words that have a value; `None` when no entry declares blocks, when the words do not tell, or when two such entries answer differently. Every caller of `number_class_of` passes it as `cycle_block` (the twin of `blockCycleOf` in `wordValue.ts`) |
 | `is_assignment(token)`, `same_spindle(written, main)` | M10 review: a word written with `=` (`S1=900`, an indexed `S[2]=500`), which is a value and never a code; whether `1`, `01` and `1` name one spindle (a letter without case) |
 | `program_start_of(line, cp)`, `ModalInterpreter.program_start(line)` | M13 review (NC-4): the program start a line writes (`O2`, `%_N_SUB_SPF`: the profile's `program.start` at the head of the line, outside comments), or `None`; and the hook a script calls there, before `update`, which forgets the tool (and the last tool written) at every start after the first and answers whether it did. The tool list and the extents call it; a subprogram behind `M30` is then charged to no tool of the main program |
 | `tool_label(tool, drop_leading_zeros=False, collapse_offset_digits=False)` | M13 review (NC-9): a tool as the tool list names it (`T0101` → `T1` on a lathe, `"MILL_D10"` → `MILL_D10`); the extents name their tool scopes with it too |

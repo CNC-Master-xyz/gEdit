@@ -22,7 +22,7 @@ Both live in one **code database** file per dialect ([format below](#code-databa
 ### Hover explanations for codes
 `P1 · M · Core` (codes and addresses) · `P2 · S · Core` (cycle parameters, modal context)
 
-**Status:** shipped: codes and addresses in Phase 1; cycle parameters and modal context in P3a (P3.3). Hover can be switched off in `Settings ▸ Assistance`; a delay or a modifier key was not built.
+**Status:** shipped: codes and addresses in Phase 1; cycle parameters and modal context in P3a (P3.3). Hover can be switched off in `Settings ▸ Assistance`; a delay or a modifier key was not built. P4h: a G code the machine builder added (the machine's *Machine builder codes*, e.g. `G810-G829` on a Sinumerik machine) is named "a code of the machine builder" by hover and the inspector instead of unknown; an extra axis word of the machine is named as such; the second-block `P` of `G76` is read in least increments (see [Machines](../user/machines.md#the-numbers-table)).
 
 Hovering over a word shows a short explanation from the dictionary. It uses a Monaco `HoverProvider` per dialect.
 
@@ -141,11 +141,11 @@ Template illustrations (an image per template or parameter) are in the backlog.
 
 ## Code database format
 
-One JSON file per dialect. Built-ins are in `src/lib/data/codes/`, and user additions are in `<config>/codes/`. It replaced the Phase 0 `src/lib/data/blocks/*.json`, which are deleted. The examples below show the shape; the shipped files also use `extends` (a file builds on another, for example `fanuc-lathe` on `fanuc`) and `remove`, and have members this note does not list (see [Your own profiles and code files](../user/profiles.md#code-files-your-own-g-and-m-codes) for the ones a user may write). No JSON Schema file ships yet (the `$schema` line is a plan; JSON Schemas for profiles and machines are in the Phase 4 table of the roadmap).
+One JSON file per dialect. Built-ins are in `src/lib/data/codes/`, and user additions are in `<config>/codes/`. It replaced the Phase 0 `src/lib/data/blocks/*.json`, which are deleted. The examples below show the shape; the shipped files also use `extends` (a file builds on another, for example `fanuc-lathe` on `fanuc`) and `remove`, and have members this note does not list (see [Your own profiles and code files](../user/profiles.md#code-files-your-own-g-and-m-codes) for the ones a user may write). A JSON Schema ships since P4h: `schemas/codes.schema.json`, a third beside the profile and machines schemas, and a code file that gEdit creates starts with a `$schema` line that points at it in the public repository (`https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/codes.schema.json`). The loader's checks stay the gate; the schema is for an editor that reads it.
 
 ```json
 {
-  "$schema": "../schema/codes.schema.json",
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/codes.schema.json",
   "dialect": "fanuc",
   "version": 1,
   "addresses": {

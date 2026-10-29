@@ -32,6 +32,14 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-window-state = "2"
 toml = "0.9"
+# The configuration zip (P4g, P4.36; docs/planning/phase-4-implementation.md §6.9): exact
+# version, no default features. The default set pulls in AES, bzip2, deflate64, LZMA, PPMd,
+# xz, zstd and the `time` crate; a configuration zip is written by gEdit with plain deflate,
+# and an entry in any other method is refused on import (§6.9 rule 23), so none of them is
+# built. `deflate-flate2-zlib-rs` uses the `flate2` + `zlib-rs` pair the build already has
+# through Tauri (no new compression crate). The crate's `extract` is never called: gEdit reads
+# each entry itself under its own limits (§6.9 rules 22–24). Licence: MIT (checked 2026-10-27).
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
@@ -54,3 +62,12 @@ windows-sys = { version = "0.61", features = [
 # nothing else in the backend talks to Objective-C, and G8 checks that.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+
+# One running gEdit on Windows and Linux (AD-54, P4f): a second start hands its file paths to
+# the first and ends. Not on macOS, where the system keeps one instance of a bundled app and
+# sends the files as `RunEvent::Opened`; the plugin's macOS door is a socket in /tmp that any
+# local user can write to (plan section 6.8). `~2.4.5`, not `2`: 2.5.x needs tauri 2.12 and
+# this build is on 2.11 (a tauri update is its own change); 2.4.x is the newest line that
+# resolves against the locked tauri. Licence: Apache-2.0 OR MIT, checked 2026-10-27.
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "~2.4.5"

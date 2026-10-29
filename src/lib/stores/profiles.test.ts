@@ -300,13 +300,14 @@ describe('the effective profile', () => {
     expect(withFilters.effective('fanuc-lathe', increments).profile.syntax.decimalPointSignificant).toBe(true);
   });
 
-  // An overlay is data: its patterns are checked when the profile loads, but whether the
-  // merged profile still holds together only shows when the variant is chosen. `tool`
-  // without its named group is exactly that case — it compiles, and the program map could
-  // not read a tool number out of it.
+  // An overlay is data: since P4.39a it is checked with the same shapes when the profile loads, but
+  // whether the merged profile still holds together only shows when the variant is chosen. Here the
+  // overlay replaces `addresses.axes` by a list without X, and the profile's own `incremental` map
+  // (U moves X) then points at an axis that is gone: each half is fine, the merge is not.
   it('falls back to the profile when a variant overlay does not validate, and says so once', () => {
     const broken = structuredClone(fanucJson) as unknown as Record<string, unknown>;
     broken.id = 'broken-overlay';
+    (broken.addresses as Record<string, unknown>).incremental = { U: 'X' };
     broken.machineParams = {
       variants: [
         {
@@ -315,7 +316,7 @@ describe('the effective profile', () => {
           default: 'A',
           choices: [
             { value: 'A', label: 'A' },
-            { value: 'B', label: 'B', overlay: { toolCall: { tool: 'T(\\d+)' } } },
+            { value: 'B', label: 'B', overlay: { addresses: { axes: ['Y', 'Z'] } } },
           ],
         },
       ],
@@ -335,7 +336,7 @@ describe('the effective profile', () => {
     expect(first.codes.dialect).toBe('fanuc');
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('the machine settings could not be applied');
-    expect(problems[0]).toContain('toolCall.tool');
+    expect(problems[0]).toContain('addresses.incremental.U');
     // Reported once: the answer is cached like any other.
     expect(registry.effective('broken-overlay', chosen)).toBe(first);
     expect(problems).toHaveLength(1);

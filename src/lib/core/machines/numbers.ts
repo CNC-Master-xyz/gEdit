@@ -235,6 +235,9 @@ function feedClassOf(unit: FeedUnit | string | undefined): NumberClass | Undecla
 /** Two codes of one block (or two codes in force) declare one address with different units. */
 const CONFLICT = Symbol('conflict');
 
+/** A `CodeParam.unit` that decides how a word is read: every one but the feed marker. */
+type DeclaredUnit = Exclude<NonNullable<CodeParam['unit']>, 'feed'>;
+
 /**
  * The `unit` the codes of `codes` declare for `word` among their parameters: undefined when
  * none does, `CONFLICT` when two of them say different things.
@@ -243,14 +246,29 @@ const CONFLICT = Symbol('conflict');
  * winning, a block that writes two codes declaring one address with different units read
  * the word by whichever code the caller happened to list first, and M13's user databases can
  * write such a pair. A disagreement is "cannot tell", which gets no class and so no value.
- * The two declarations of one two-block cycle (`G71`, `G76`) have the same unit — the loader
- * refuses a database where they differ — so they never conflict.
+ *
+ * The block-aware unit (P4h, plan §6.10 rule 11; T118). A two-block cycle (`blocks: 2`) may
+ * declare an address once per block with a different `unit` — the `G76` `P` is a packed count
+ * in the first block and the thread height in increments in the second. With `cycleBlock`
+ * known, only that block's declarations and those without a `block` are read; with it null
+ * both are, and two different units are the same "cannot tell" as above: no class, never the
+ * other block's unit. Every other entry is read whole.
+ *
+ * T210: the feed marker `unit: 'feed'` declares nothing here. It says the parameter is a feed
+ * rate in the unit in force, which is how the word is read without it (Python twin:
+ * `_nc_machine._declared_unit`).
  */
-function declaredUnit(codes: readonly CodeEntry[], word: string): CodeParam['unit'] | typeof CONFLICT | undefined {
-  let found: CodeParam['unit'] | undefined;
+function declaredUnit(
+  codes: readonly CodeEntry[],
+  word: string,
+  cycleBlock: 1 | 2 | null,
+): DeclaredUnit | typeof CONFLICT | undefined {
+  let found: DeclaredUnit | undefined;
   for (const entry of codes) {
+    const perBlock = cycleBlock !== null && entry?.blocks === 2;
     for (const param of paramsOf(entry)) {
-      if (upper(param?.address ?? '') !== word || param?.unit === undefined) continue;
+      if (perBlock && param?.block !== undefined && param.block !== cycleBlock) continue;
+      if (upper(param?.address ?? '') !== word || param?.unit === undefined || param.unit === 'feed') continue;
       if (found !== undefined && found !== param.unit) return CONFLICT;
       found = param.unit;
     }
@@ -270,7 +288,9 @@ function paramsOf(entry: CodeEntry | undefined): readonly CodeParam[] {
  *
  *  1. `CodeParam.unit` of a code in this block — a cycle parameter is often the one place
  *     a control breaks its own convention (§8.2 is where these are written down); codes of
- *     the block that declare the word with different units give it no class (T212); then
+ *     the block that declare the word with different units give it no class (T212), and so
+ *     do the two blocks of a two-block cycle that declare it with different units while the
+ *     block (`cycleBlock`) is not known (P4h, T118: the `G76` `P`); then
  *     (M9) the same of a code **in force** (`inForce`: the modal cycle, the motion code or
  *     a mode the caller's tracker has active), whose parameters keep their reading in the
  *     blocks that repeat it. A thread **lead** is declared this way (`F` with `unit:
@@ -321,6 +341,14 @@ export function numberClassOf(
      * could not name (rule 3).
      */
     inForce?: readonly CodeEntry[];
+    /**
+     * P4h (plan §6.10 rule 11; T118). Which block of a two-block cycle of `blockCodes` this
+     * block is (`cycleBlockOf`; `blockCycleOf` in `wordValue.ts` for a whole block), or null
+     * when that cannot be told. A parameter declared with another unit per block is read with
+     * this block's unit, and with no class when the block is not known. The codes in force are
+     * always read as if the block were not known (the two-block cycles are not modal).
+     */
+    cycleBlock?: 1 | 2 | null;
   },
 ): ResolvedClass {
   const word = upper(address);
@@ -331,7 +359,8 @@ export function numberClassOf(
   // 1. what the code database says about this parameter of this code, then of the code in
   //    force: a lead is declared here (`F` with `unit: 'feedPerRev'`), never inferred. Codes
   //    that disagree tell nothing (T212): no class, whatever order they come in.
-  const declared = declaredUnit(codes, word) ?? declaredUnit(inForce, word);
+  const cycleBlock = o.cycleBlock === 1 || o.cycleBlock === 2 ? o.cycleBlock : null;
+  const declared = declaredUnit(codes, word, cycleBlock) ?? declaredUnit(inForce, word, null);
   if (declared === CONFLICT) return null;
   if (declared !== undefined) return declared;
 
@@ -458,6 +487,32 @@ function readingFor(cls: ValueClass, input: NumberInput | null, units: 'mm' | 'i
   if (cls === 'increment') return { mode: reading, unit };
   if (mode !== 'increment' && mode !== 'calculator' && mode !== 'scale') return null;
   return { mode, unit };
+}
+
+/**
+ * P4h (plan §6.10 rule 12; P4.43a). How a machine with `input` reads a number of class `cls`
+ * in a program in `units`: the reading and its unit (the increment, or the value of "1"), or
+ * null when it has none. The machine dialog's per-class table (`numberForm.ts`) shows exactly
+ * this, so the table and every reader of a value can never disagree about a row.
+ */
+export function classReadingOf(
+  cls: NumberClass,
+  input: NumberInput,
+  units: 'mm' | 'inch',
+): { mode: NumberReading; unit: string } | null {
+  if (input === null || typeof input !== 'object') return null;
+  const reading = readingFor(cls, input, units);
+  return reading === null ? null : { mode: reading.mode, unit: reading.unit };
+}
+
+/**
+ * Decimal text in its one canonical spelling (`'0.0010'` → `'0.001'`, `'1.'` → `'1'`), or null
+ * when `text` is not a decimal number. Exported for the per-class table, which compares
+ * increments by value and never as typed.
+ */
+export function canonicalDecimal(text: string): string | null {
+  const value = toDec(text);
+  return value === null ? null : decText(value);
 }
 
 /** The unit as an exact decimal, or null when the declaration cannot be used. */

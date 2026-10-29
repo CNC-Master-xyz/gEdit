@@ -255,6 +255,12 @@ class _LexSpec:
     declare_after: frozenset = frozenset()
     #: M12.5 ``syntax.plainTextRun``; 0 when the profile does not set it.
     plain_text_run: int = 0
+    #: P4h ``syntax.extraAxisNames`` (plan section 6.10 rule 13): the key is the name as the
+    #: line is compared (upper case unless the profile is case sensitive), the value the name
+    #: as listed. ``extra_axis_leads`` are their first characters, both cases unless case
+    #: sensitive. Twin of ``LexSpec.extraAxes`` / ``extraAxisLeads`` (``tokenizer.ts``).
+    extra_axes: Dict[str, str] = field(default_factory=dict)
+    extra_axis_leads: frozenset = frozenset()
     #: B2: the profile's whole-line fast path (:class:`_FastLine`), or ``None`` when the
     #: profile has a rule the fast path cannot prove it leaves alone.
     fast: Optional[Any] = None
@@ -737,6 +743,21 @@ def _build_spec(cp: CompiledProfile) -> _LexSpec:
             else 0
         ),
     )
+    extra_axes: Dict[str, str] = {}
+    leads = set()
+    names = syntax.get("extraAxisNames")
+    for name in names if isinstance(names, list) else []:
+        if not isinstance(name, str) or re.fullmatch(r"[A-Za-z]+", name) is None:
+            continue
+        key = name if case_sensitive else name.upper()
+        if key in extra_axes:
+            continue
+        extra_axes[key] = name
+        leads.add(ord(key[0]))
+        if not case_sensitive:
+            leads.add(ord(key[0].lower()))
+    spec.extra_axes = extra_axes
+    spec.extra_axis_leads = frozenset(leads)
     spec.fast = _build_fast_line(spec, cp)
     return spec
 
@@ -909,6 +930,34 @@ def _letters_end_at(line: str, p: int, limit: int) -> int:
     while i < limit and _is_letter(ord(line[i])):
         i += 1
     return i
+
+
+def _extra_axis_at(line: str, p: int, limit: int, spec: _LexSpec) -> Optional[Tuple[str, int]]:
+    """P4h (plan section 6.10 rule 13): the name of an extra axis of the machine at ``p``
+    (``syntax.extraAxisNames``) as listed and where its letters end, when a run of letters
+    starts at ``p``, is exactly that name and has a value start behind it: a digit, a point,
+    or a sign followed by a digit or a point. ``None`` otherwise (``extraAxisAt``)."""
+    if p > 0:
+        before = ord(line[p - 1])
+        if _is_letter(before) or before == _UNDERSCORE:
+            return None
+    end = _letters_end_at(line, p, limit)
+    run = line[p:end]
+    name = spec.extra_axes.get(run if spec.case_sensitive else run.upper())
+    if name is None or end >= limit:
+        return None
+
+    def is_point(code: int) -> bool:
+        return code == spec.decimal_point or (spec.decimal_point_alt != _NO_CHAR and code == spec.decimal_point_alt)
+
+    first = ord(line[end])
+    if _is_digit(first) or is_point(first):
+        return name, end
+    if (first == _PLUS or first == _MINUS) and end + 1 < limit:
+        nxt = ord(line[end + 1])
+        if _is_digit(nxt) or is_point(nxt):
+            return name, end
+    return None
 
 
 @dataclass
@@ -1798,6 +1847,11 @@ def _build_fast_line(spec: _LexSpec, cp: "CompiledProfile") -> Optional[_FastLin
     ]
     if spec.exponent != "":
         guards.append(re.compile(re.escape(spec.exponent), cp.flags).search)
+    if spec.extra_axes:
+        # P4h: a line that may hold an extra axis word (`AA90`) takes the character loop,
+        # which reads the rule; the guard finds every listed name, whatever stands around it.
+        names = "|".join(re.escape(name) for name in sorted(spec.extra_axes, key=len, reverse=True))
+        guards.append(re.compile("(?:%s)" % names, 0 if spec.case_sensitive else re.IGNORECASE).search)
 
     number = _number_body(point)
     # The comment as one piece of the shape (it is never empty: it has its marker).
@@ -2362,6 +2416,21 @@ def tokenize_line(
                         token.value = parse_number(token.value_text)
                     p = token.end
                     continue
+
+        # P4h (plan section 6.10 rule 13; T123): an extra axis of the machine with its value
+        # (`AA90`), after the assignment (`AA=10`) and the bracket call (`AA(1)`), before the
+        # names (`AA90` would be one unknown token, a lone `QQ0` a call). The value is read
+        # like any address's.
+        if code in spec.extra_axis_leads:
+            axis = _extra_axis_at(line, p, limit, spec)
+            value = _read_value(line, axis[1], limit, spec, False) if axis is not None else None
+            if axis is not None and value is not None:
+                token = _push(tokens, "word", line, p, value.end)
+                token.address = axis[0]
+                token.value_text = value.text
+                token.value = value.value
+                p = value.end
+                continue
 
         if code == _BRACKET_OPEN:
             end = _expression_end_at(line, p, limit)

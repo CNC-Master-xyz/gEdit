@@ -17,9 +17,11 @@
 
 import type { Component } from 'svelte';
 import type { Readable } from 'svelte/store';
+import type { UserKeyService } from '$lib/app/keys/userKeys';
 import type { PrintService } from '$lib/app/print';
 import type { ChannelMember, ChannelRef, ChannelSet, SyncFinding } from '$lib/core/channels/types';
 import type { CodeDb, CodeEntry, CodeLookup } from '$lib/core/codes/types';
+import type { UserBindings } from '$lib/core/keys/userKeys';
 import type { CompareOptions } from '$lib/core/compare/types';
 import type { FieldSpec } from '$lib/core/forms/types';
 import type { ModalSnapshot } from '$lib/core/nc/modal';
@@ -40,6 +42,7 @@ import type { MachineType } from '$lib/core/profiles/types';
 import type {
   ConfigLoad,
   ConfigPaths,
+  PackageList,
   PythonStatus,
   RecentEntry,
   ScriptEntry,
@@ -173,6 +176,14 @@ export interface CommandRegistry {
   context(): CommandContext;
   /** Bumps on (un)register and on context changes. */
   readonly changed: Readable<number>;
+  /**
+   * The user's key bindings (P4g, §6.9 rule 5). From now on `get` and `list` answer each command
+   * with its keys in force, and so does a command registered later; `changed` bumps. `{}` puts
+   * the declared keys back.
+   */
+  setKeyOverrides(bindings: UserBindings): void;
+  /** The keys the command was registered with, whatever the user bound; undefined for an unknown id. */
+  defaultKeys(id: string): CommandDef['keys'];
 }
 
 export interface RibbonRegistry {
@@ -857,6 +868,11 @@ export interface UserFileText {
   /** The file name inside its folder (`lathe-shop.json`). */
   name: string;
   text: string;
+  /**
+   * P4g (§6.9 rule 11): the folder name of the script package the file comes from; unset for the
+   * user's own file. The packages' files are handed over first, the user's own after them.
+   */
+  package?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1096,6 +1112,14 @@ export interface ReportData {
    * transforms never set it — their findings are bounded by the document.
    */
   dropped?: number;
+  /**
+   * Phase 4 (P4f prelude, Find in Folder; plan section 6.8): what a click on a row does when the
+   * rows are not lines of open documents. When set, the panel calls it for a row that carries a
+   * `path` (and a `line`, if the hit has one) instead of revealing a line of an open document.
+   * It lives in memory with the report; an exported report (CSV, text) never holds it. The
+   * folder search's opener grants the one file (`folder_grant`), opens it and reveals the line.
+   */
+  openRow?: (row: Record<string, unknown>) => void | Promise<void>;
 }
 
 /** stores/results.ts → `export const results: ResultsService` (owner: WP4.1) */
@@ -1649,6 +1673,10 @@ export interface AppContext {
   channelPanes: ChannelPaneService;
   // Phase 4, P4c (P4.15; the prelude wires the stub, plan §6.5 rule 10)
   print: PrintService;
+  // Phase 4, P4g (§6.9 rule 46: the harness reaches both through `h.app.ctx`)
+  userKeys: UserKeyService;
+  /** The script packages of the last load with their manifests; null until the first load has asked (`userConfig.packages`). */
+  packages: Readable<PackageList | null>;
 }
 
 /**

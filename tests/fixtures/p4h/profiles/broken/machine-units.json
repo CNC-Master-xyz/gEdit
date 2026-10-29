@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/profile.schema.json",
+  "id": "machine-units",
+  "name": "Units written into the profile",
+  "shortName": "UNITS",
+  "version": 1,
+  "extends": "fanuc-gcode",
+  "modal": {
+    "units": "inch"
+  }
+}

@@ -35,6 +35,11 @@ import { lookupCode, normalizeCode } from '$lib/core/codes/lookup';
 import { resolveCodeDbFiles } from '$lib/core/codes/resolve';
 import type { CodeDb, CodeEntry, CodeParam } from '$lib/core/codes/types';
 import type { FeedUnit, Profile } from '$lib/core/profiles/types';
+import { ModalInterpreter } from '$lib/core/nc/modal';
+import { maskComments } from '$lib/core/nc/mask';
+import { tokenizeLine } from '$lib/core/nc/tokenizer';
+import type { LineState } from '$lib/core/nc/types';
+import { ctx } from '../../../../tests/unit/helpers/modalIndex';
 
 const DIALECT = 'okuma';
 
@@ -416,6 +421,8 @@ describe('the words a script must not scale', () => {
 type Unit = NonNullable<CodeParam['unit']>;
 
 const DRIVEN_TOOL: Record<string, Unit> = { Q: 'count', E: 'dwell' };
+/** T210: the feed marker on a driven-tool cycle's feed (its F is a feed rate in the unit in force). */
+const DRIVEN_TOOL_FEED: Record<string, Unit> = { ...DRIVEN_TOOL, F: 'feed' };
 
 const PARAM_UNITS: Record<string, Record<string, Unit>> = {
   G2: { L: 'length' },
@@ -434,13 +441,16 @@ const PARAM_UNITS: Record<string, Record<string, Unit>> = {
   G35: { F: 'feedPerRev', E: 'feedPerRev', J: 'count' },
   G71: { A: 'angle', B: 'angle', D: 'length', U: 'length', H: 'length', L: 'length', E: 'feedPerRev', F: 'feedPerRev', J: 'count', Q: 'count' },
   G72: { A: 'angle', B: 'angle', D: 'length', W: 'length', H: 'length', L: 'length', E: 'feedPerRev', F: 'feedPerRev', J: 'count', Q: 'count' },
-  G73: { D: 'length', L: 'length', DA: 'length', E: 'dwell' },
-  G74: { D: 'length', L: 'length', DA: 'length', E: 'dwell' },
+  // T210: the feed marker on every feed rate whose unit is the one in force (a tap's F too).
+  G73: { D: 'length', L: 'length', DA: 'length', E: 'dwell', F: 'feed' },
+  G74: { D: 'length', L: 'length', DA: 'length', E: 'dwell', F: 'feed' },
   G75: { L: 'length' },
   G76: { L: 'length' },
-  G84: { XA: 'length', ZA: 'length', DA: 'length', XB: 'length', ZB: 'length', DB: 'length' },
-  G85: { D: 'length', U: 'length', W: 'length' },
-  G86: { D: 'length', U: 'length', W: 'length' },
+  G77: { F: 'feed' },
+  G78: { F: 'feed' },
+  G84: { XA: 'length', ZA: 'length', DA: 'length', XB: 'length', ZB: 'length', DB: 'length', FA: 'feed', FB: 'feed' },
+  G85: { D: 'length', U: 'length', W: 'length', F: 'feed' },
+  G86: { D: 'length', U: 'length', W: 'length', F: 'feed' },
   G87: { U: 'length', W: 'length' },
   G88: { D: 'length', H: 'length', B: 'angle', U: 'length', W: 'length' },
   // M9 (WP9.5a): the contour moves of a driven tool cut at a feed per minute whatever the
@@ -453,15 +463,15 @@ const PARAM_UNITS: Record<string, Record<string, Unit>> = {
   // B1: the side contour arcs, whose format gives F in mm/min (LG33-019 chapter 9).
   G132: { L: 'length', F: 'feedPerMin' },
   G133: { L: 'length', F: 'feedPerMin' },
-  G181: DRIVEN_TOOL,
-  G182: DRIVEN_TOOL,
-  G183: { ...DRIVEN_TOOL, D: 'length', L: 'length' },
-  G184: DRIVEN_TOOL,
+  G181: DRIVEN_TOOL_FEED,
+  G182: DRIVEN_TOOL_FEED,
+  G183: { ...DRIVEN_TOOL_FEED, D: 'length', L: 'length' },
+  G184: DRIVEN_TOOL_FEED,
   G185: { F: 'feedPerRev' },
   G186: { F: 'feedPerRev' },
   G187: { F: 'feedPerRev' },
   G188: { F: 'feedPerRev' },
-  G189: DRIVEN_TOOL,
+  G189: DRIVEN_TOOL_FEED,
   CALL: { Q: 'count' },
   MODIN: { Q: 'count' },
 };
@@ -599,7 +609,8 @@ describe('B1: the lathe codes added from the manuals', () => {
 
   it('reads G119 as the side compensation plane, beside G17 to G19', () => {
     expect(codesWith((e) => e.group === 'plane')).toEqual(['G17', 'G18', 'G19', 'G119']);
-    expect(entry('G119').modal).toBeUndefined();
+    // Wave Y data batch: G119 stays in force until another plane code, like G17 to G19.
+    expect(entry('G119').modal).toBe(true);
     expect(entry('G119').sets).toBeUndefined();
   });
 
@@ -615,7 +626,8 @@ describe('B1: the lathe codes added from the manuals', () => {
   });
 
   it('reads G313 as the third turret, beside G13 and G14', () => {
-    expect(codesWith((e) => e.group === 'turret')).toEqual(['G13', 'G14', 'G313']);
+    // Wave Y (T102): G314, turret D (OSP-P300 G-code list, 2014).
+    expect(codesWith((e) => e.group === 'turret')).toEqual(['G13', 'G14', 'G313', 'G314']);
     expect(entry('G313').label).toBe('Turret C');
   });
 
@@ -632,7 +644,9 @@ describe('B1: the lathe codes added from the manuals', () => {
       // v1.2 NC fix round (NCF-A follow-up): the thread passes and the L-radius arcs (lengthAlong).
       // Manual-check fix D5-1: the change points of G84 as coordinates.
       // NC-5: the turret wait M100 refused under nose radius compensation.
-      'G2', 'G3', 'G20', 'G21', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'GOTO', 'IF', 'M85', 'M100',
+      // Wave Y (T101, T102): G24, G25 and G314.
+      // Wave Y data batch: G17, G18 and G19 held in force (modal), G18 at power-on.
+      'G2', 'G3', 'G17', 'G18', 'G19', 'G20', 'G21', 'G24', 'G25', 'G31', 'G32', 'G33', 'G41', 'G42', 'G75', 'G76', 'G84', 'G85', 'G86', 'G93', 'G102', 'G103', 'G119', 'G132', 'G133', 'G313', 'G314', 'GOTO', 'IF', 'M85', 'M100',
     ]);
     for (const e of ENTRIES.filter((row) => reviewOf(row) !== undefined)) expect(reviewOf(e), e.code).toBe('pending');
   });
@@ -719,5 +733,40 @@ describe('manual-check fixes (2026-10-25): LAP, the fixed thread cycles and the 
     expect((entry('G313') as { review?: unknown }).review).toBe('pending');
     expect(entry('G313').description).toMatch(/G312 and G313 are contour codes for the side face/);
     expect(entry('G313').description).toMatch(/G314 for turret D/);
+  });
+});
+
+describe('Wave Y: the plane code in force', () => {
+  /** The plane group of the modal state after each line (index 0: the power-on state). */
+  function planes(lines: readonly string[]): (string | undefined)[] {
+    const c = ctx('okuma-osp');
+    const interp = new ModalInterpreter(c.cp, c.db);
+    let state: LineState | undefined;
+    const out = [interp.state().groups.plane?.code];
+    lines.forEach((line, i) => {
+      const r = tokenizeLine(line, c.cp, state);
+      state = r.state;
+      interp.update(r.tokens, i + 1, maskComments(line, c.cp));
+      out.push(interp.state().groups.plane?.code);
+    });
+    return out;
+  }
+
+  it('holds G17, G18, G19 and G119 until another plane code, from G18 at power-on', () => {
+    // The control selects G18 at power-on and after a reset; G17 and G19 work in the Y-axis
+    // mode (M110), G119 is a plane of its own, and each stays until another plane code.
+    for (const code of ['G17', 'G18', 'G19', 'G119']) {
+      expect(entry(code).modal, code).toBe(true);
+      expect(entry(code).group, code).toBe('plane');
+      expect(entry(code).sets, code).toBeUndefined();
+    }
+    expect(OKUMA_PROFILE.modal?.initial?.plane).toBe('G18');
+    expect(planes(['G0 X100. Z5.', 'M110', 'G17', 'G1 X40. Y0 F100', 'G19', 'G1 Z-2.', 'G119', 'G1 X0', 'G18', 'G0 X200.'])).toEqual([
+      'G18', 'G18', 'G18', 'G17', 'G17', 'G19', 'G19', 'G119', 'G119', 'G18', 'G18',
+    ]);
+    // They choose the compensation plane only: no working plane is set, the turning plane
+    // ZX stays the one the geometry reads.
+    const c = ctx('okuma-osp');
+    expect(new ModalInterpreter(c.cp, c.db).state().plane).toBe('unknown');
   });
 });

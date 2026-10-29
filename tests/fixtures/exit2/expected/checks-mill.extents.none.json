@@ -227,6 +227,12 @@
       },
       {
         "line": 38,
+        "severity": "warning",
+        "message": "1 subprogram call, first G0 G65 P9010 A1. (line 38): the called program is not in this document, or gEdit does not follow this call (a repeat, a jump into the program, a macro with arguments, a call inside the called program), so where it leaves the tool is not known; the positions after it are not resolved until a block writes them.",
+        "reason": "call"
+      },
+      {
+        "line": 38,
         "severity": "info",
         "message": "G65, 1 block: its axis words are values, not positions; left out of the ranges.",
         "reason": "data"

@@ -5,17 +5,18 @@
 // The fake below records the three calls `registerAll` makes per profile plus the two
 // `defineTheme` calls, which is the whole contract this module has with the editor.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { profiles as registry } from '$lib/stores/profiles';
-import { defineThemes, languageConfiguration, registerAll, registerLanguages } from './languages';
+import { defineThemes, languageConfiguration, previewRoleColors, registerAll, registerLanguages } from './languages';
 import { THEME_IDS } from '$lib/core/grammar';
 import { validateProfile } from '$lib/core/profiles/validate';
 import { loadCodeDb } from '$lib/core/codes/load';
 import { BUILTIN_CODE_DB_JSON } from '$lib/data/codes';
 import { BUILTIN_PROFILE_JSON } from '$lib/data/profiles';
+import { ROLE_COLORS } from '$lib/core/grammar/roles';
 import type { Monaco } from './setup';
 import type { CodeDb } from '$lib/core/codes/types';
-import type { Profile } from '$lib/core/profiles/types';
+import type { Profile, ProfileColors } from '$lib/core/profiles/types';
 
 interface Recorded {
   registered: { id: string; extensions?: string[]; aliases?: string[] }[];
@@ -298,5 +299,99 @@ describe('a profile that cannot be registered', () => {
     }
     expect(log.registered.filter((entry) => entry.id === fanuc.id)).toHaveLength(1);
     expect(log.grammars.filter(([id]) => id === fanuc.id)).toHaveLength(1);
+  });
+});
+
+// P4h (P4.41, plan §6.10 rule 6): the user's role colours reach the themes.
+describe('the user role colours', () => {
+  type Theme = { rules: { token: string; foreground?: string }[] };
+  const feedOf = (log: Recorded, id: string, last = true): string | undefined => {
+    const all = log.themes.filter(([themeId]) => themeId === id);
+    const theme = (last ? all[all.length - 1] : all[0])?.[1] as Theme | undefined;
+    return theme?.rules.find((rule) => rule.token === 'feed')?.foreground;
+  };
+  const sourcesWith = (palette: () => ProfileColors) => ({ list: () => profiles, codeDb: dbOf, roleColors: palette });
+
+  it('defineThemes puts them in the place of the built-in colours', () => {
+    const { monaco, log } = fakeMonaco();
+    defineThemes(monaco, profiles, { dark: { feed: '#ffcc00' } });
+    expect(feedOf(log, THEME_IDS.dark)).toBe('#ffcc00');
+    expect(feedOf(log, THEME_IDS.light)).toBe(ROLE_COLORS.light.feed);
+  });
+
+  it('registerLanguages defines the themes with the colours of the source', () => {
+    const { monaco, log } = fakeMonaco();
+    registerLanguages(monaco, sourcesWith(() => ({ dark: { feed: '#ffcc00' } })));
+    expect(feedOf(log, THEME_IDS.dark)).toBe('#ffcc00');
+  });
+
+  it('defines the themes again when the colours change, and only then', () => {
+    const { monaco, log } = fakeMonaco();
+    let palette: ProfileColors = {};
+    const sources = sourcesWith(() => palette);
+    registerLanguages(monaco, sources);
+    expect(log.themes).toHaveLength(2);
+    registerLanguages(monaco, sources);
+    expect(log.themes).toHaveLength(2);
+    palette = { dark: { feed: '#ffcc00' } };
+    registerLanguages(monaco, sources);
+    expect(log.themes).toHaveLength(4);
+    expect(feedOf(log, THEME_IDS.dark)).toBe('#ffcc00');
+    // languages were not registered or tokenized again for a colour change
+    expect(log.registered).toHaveLength(profiles.length);
+    expect(log.grammars).toHaveLength(profiles.length);
+  });
+
+  it('previewRoleColors shows a draft in the open editor and puts the saved colours back', () => {
+    vi.useFakeTimers();
+    try {
+      const { monaco, log } = fakeMonaco();
+      registerLanguages(monaco, sourcesWith(() => ({ dark: { feed: '#00ccff' } })));
+      previewRoleColors({ dark: { feed: '#ffcc00' } });
+      vi.advanceTimersByTime(20);
+      expect(feedOf(log, THEME_IDS.dark)).toBe('#ffcc00');
+      previewRoleColors(null);
+      expect(feedOf(log, THEME_IDS.dark)).toBe('#00ccff');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // CODE-4: a colour picker fires `input` tens of times a second; every definition repaints every editor.
+  it('previewRoleColors defines the themes once per frame, with the newest draft (20 pushes, one pair)', () => {
+    vi.useFakeTimers();
+    try {
+      const { monaco, log } = fakeMonaco();
+      registerLanguages(monaco, sourcesWith(() => ({})));
+      const before = log.themes.length;
+      for (let i = 0; i < 20; i++) previewRoleColors({ dark: { feed: `#ffcc${(i + 10).toString(16).padStart(2, '0')}` } });
+      expect(log.themes).toHaveLength(before);
+      vi.advanceTimersByTime(20);
+      expect(log.themes).toHaveLength(before + 2);
+      expect(feedOf(log, THEME_IDS.dark)).toBe('#ffcc1d');
+      vi.advanceTimersByTime(100);
+      expect(log.themes).toHaveLength(before + 2);
+      previewRoleColors(null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('previewRoleColors(null) puts the saved colours back at once and drops a draft that was waiting', () => {
+    vi.useFakeTimers();
+    try {
+      const { monaco, log } = fakeMonaco();
+      registerLanguages(monaco, sourcesWith(() => ({ dark: { feed: '#00ccff' } })));
+      const before = log.themes.length;
+      previewRoleColors({ dark: { feed: '#ffcc00' } });
+      expect(log.themes).toHaveLength(before);
+      previewRoleColors(null);
+      expect(feedOf(log, THEME_IDS.dark)).toBe('#00ccff');
+      const after = log.themes.length;
+      vi.advanceTimersByTime(100);
+      expect(log.themes).toHaveLength(after);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

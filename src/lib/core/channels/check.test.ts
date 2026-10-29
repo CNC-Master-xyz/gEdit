@@ -11,7 +11,7 @@ import { t } from '$lib/i18n';
 import { asksSamePartners, checkSyncMarks, checkSyncMarksReport, markKey } from './check';
 import { findMarks } from './marks';
 import { findSections } from './resolve';
-import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE, type ChannelParams, type SyncFinding, type SyncHit, type SyncRule } from './types';
+import { CHANNEL_CAPS, STOPS_AND_ENDS_RULE, type ChannelFlow, type ChannelParams, type SyncFinding, type SyncHit, type SyncRule } from './types';
 
 // --- helpers ----------------------------------------------------------------------------
 
@@ -859,6 +859,83 @@ describe('checkSyncMarks: a P-word rule asks for the same partners by default (T
     expect(asksSamePartners(rule('wait', { samePartners: true }))).toBe(true);
     expect(asksSamePartners(presetOf('sinumerik', 'sinumerik-2channel').syncMarks[0])).toBe(false);
     expect(asksSamePartners(undefined)).toBe(false);
+  });
+});
+
+// --- P4.32: the check follows jumps (plan section 6.8.7) ------------------------------------------
+// The NC cases per rule are the goldens of `tests/fixtures/channels/flow` (flow.test.ts); these
+// pin how the check reads a flow it is handed.
+
+describe('checkSyncMarks follows the flow (P4.32)', () => {
+  const NONE: ChannelFlow = { jumps: [], loops: [], opaque: [] };
+  const both = ['1', '2'];
+
+  it('a channel with a flow entry is read by its opaque lines, not by its jump lines', () => {
+    const perChannel = {
+      '1': seq('1', both, [
+        ['M901', 3],
+        ['M902', 5],
+      ]),
+      '2': seq('2', both, [
+        ['M902', 3],
+        ['M901', 5],
+      ]),
+    };
+    const kinds = (o: Parameters<typeof checkSyncMarks>[2]) => checkSyncMarks(perChannel, two, o).map((f) => f.kind);
+    expect(kinds({ jumpLines: { '1': [4] } })).toEqual(['order-not-checked']);
+    expect(kinds({ jumpLines: { '1': [4] }, flow: { '1': NONE } })).toEqual(['out-of-order']);
+    expect(kinds({ jumpLines: { '1': [4] }, flow: { '1': { ...NONE, opaque: [4] } } })).toEqual(['order-not-checked']);
+    // A flow for a channel the caller did not pass, or for the lines outside every section, is not read.
+    expect(kinds({ jumpLines: { '1': [4] }, flow: { '3': NONE, '': NONE } })).toEqual(['order-not-checked']);
+  });
+
+  it('F2: a mark a followed jump skips does not run; the partner that waits for it is reported', () => {
+    const perChannel = {
+      '1': seq('1', both, [
+        ['M901', 3],
+        ['M902', 5],
+        ['M903', 7],
+      ]),
+      '2': seq('2', both, [
+        ['M901', 3],
+        ['M902', 4],
+        ['M903', 5],
+      ]),
+    };
+    expect(checkSyncMarks(perChannel, two)).toEqual([]);
+    const f = checkSyncMarks(perChannel, two, { flow: { '1': { ...NONE, jumps: [{ line: 4, target: 6 }] } } });
+    expect(brief(f)).toEqual([['missing', '2', 4, 'M902', '1']]);
+  });
+
+  it('F3: a mark in a counted loop runs once per pass, and a finding of a kind is given once', () => {
+    const loop: ChannelFlow = { ...NONE, loops: [{ start: 2, end: 4, count: 3 }] };
+    const thrice = { '1': seq('1', both, [['M901', 3]]), '2': seq('2', both, [['M901', 3], ['M901', 4], ['M901', 5]]) };
+    expect(brief(checkSyncMarks(thrice, two))).toEqual([['count-mismatch', '2', 4, 'M901', '1']]);
+    expect(checkSyncMarks(thrice, two, { flow: { '1': loop } })).toEqual([]);
+    const twice = { '1': thrice['1'], '2': thrice['2'].slice(0, 2) };
+    const f = checkSyncMarks(twice, two, { flow: { '1': loop } });
+    expect(brief(f)).toEqual([['count-mismatch', '1', 3, 'M901', '2']]);
+    expect(f[0].counts).toEqual({ channel: 3, other: 2 });
+    // Missing in the other channel: one finding, not one per pass.
+    const none = { '1': thrice['1'], '2': [] };
+    expect(brief(checkSyncMarks(none, two, { flow: { '1': loop } }))).toEqual([['missing', '1', 3, 'M901', '2']]);
+  });
+
+  it('F3: an ordered rule leaves the step into the next pass not judged, and judges a decrease inside a pass', () => {
+    const p = machine(['a', 'b'], [rule('p', { semantics: 'ordered' })]);
+    const loop: ChannelFlow = { ...NONE, loops: [{ start: 2, end: 6, count: 2 }] };
+    const rising = { a: [hit('P10', 3, 'a', [], 'p'), hit('P20', 5, 'a', [], 'p')], b: [] };
+    // P10 of pass 2 after P20 of pass 1: the loop's end is a backward jump between them, as before.
+    expect(brief(checkSyncMarks(rising, p, { flow: { a: loop } }))).toEqual([['order-not-checked', 'a', 3, 'P10', null]]);
+    const falling = { a: [hit('P20', 3, 'a', [], 'p'), hit('P10', 5, 'a', [], 'p')], b: [] };
+    expect(brief(checkSyncMarks(falling, p, { flow: { a: loop } }))).toEqual([['not-increasing', 'a', 5, 'P10', null]]);
+  });
+
+  it('F2: an answering mark a followed jump skips answers nothing', () => {
+    const p = machine(both, [rule('wait'), rule('setm', { answers: true })]);
+    const perChannel = { '1': [hit('5', 5, '1', both, 'setm', false)], '2': [hit('5', 3, '2', both)] };
+    expect(checkSyncMarks(perChannel, p, { flow: { '1': NONE } })).toEqual([]);
+    expect(brief(checkSyncMarks(perChannel, p, { flow: { '1': { ...NONE, jumps: [{ line: 4, target: 6 }] } } }))).toEqual([['missing', '2', 3, '5', '1']]);
   });
 });
 

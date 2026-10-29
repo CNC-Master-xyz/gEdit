@@ -5,6 +5,7 @@
 //! | Root | Folder | Editable | Note |
 //! |---|---|---|---|
 //! | `bundled` | `resource_dir()/scripts` | no | hidden when `scripts.showBundled` is false |
+//! | `pkg-<name>` | `<config>/packages/<name>/scripts` | no | one per enabled package, by name; see below |
 //! | `user` | `<config>/scripts` | yes | created at startup by `paths::ensure_dirs` |
 //! | `extra<N>` | `scripts.folders[N]` | yes | `N` is the index in the settings list |
 //!
@@ -30,6 +31,14 @@
 //!   scripts. A dev build without the bundled resource, and an extra folder on a network
 //!   share that is not mounted today, both have to give a working Scripts menu.
 //!
+//! **Packages** (Phase 4 plan §6.9 rules 8, 10, 12): the roots of the enabled packages sit
+//! between `bundled` and `user`, by package name, so the user's scripts beat a package's and a
+//! later package beats an earlier one. A package root is not editable (`script_source_path`
+//! refuses it, "Copy to user folder" works), a disabled package has no root, and nothing inside
+//! a package is a link that is followed: a linked package or `scripts` folder gets no root, a
+//! linked group folder or script is neither listed nor resolved. The headers read under a
+//! package root count against the 32 MiB of all packages (`packages::MAX_TOTAL_BYTES`).
+//!
 //! The three path commands are the only ones that widen the fs scope, and only for a
 //! file the user may edit. `script_source_path` on a `bundled:` id is an error, not a
 //! silent copy (plan §3).
@@ -47,7 +56,9 @@ use tauri::{AppHandle, Manager};
 
 use super::meta::{parse_header, Header, ScriptMeta};
 use super::settings::ScriptSettings;
+use crate::packages;
 use crate::paths;
+use crate::userfiles;
 
 /// The name of the bundled scripts folder inside `resource_dir()`, and of the user's
 /// own folder inside the config directory.
@@ -158,8 +169,10 @@ pub fn roots(app: &AppHandle) -> Result<Vec<RootDir>, String> {
 /// `settings.json` once.
 pub fn roots_with(app: &AppHandle, settings: &ScriptSettings) -> Result<Vec<RootDir>, String> {
     let dirs = paths::app_dirs(app)?;
-    Ok(roots_in(
+    let package_dirs = packages::script_roots(&dirs.packages_dir(), &settings.packages_disabled);
+    Ok(roots_with_packages(
         bundled_dir(app),
+        &package_dirs,
         dirs.user_scripts_dir(),
         &settings.folders,
         settings.show_bundled,
@@ -183,7 +196,19 @@ pub fn roots_in(
     extra: &[PathBuf],
     show_bundled: bool,
 ) -> Vec<RootDir> {
-    let mut roots = Vec::with_capacity(extra.len() + 2);
+    roots_with_packages(bundled, &[], user, extra, show_bundled)
+}
+
+/// [`roots_in`] with the script folders of the enabled packages (`packages::script_roots`:
+/// package name and `scripts` folder, by name), which sit between `bundled` and `user`.
+pub fn roots_with_packages(
+    bundled: Option<PathBuf>,
+    package_dirs: &[(String, PathBuf)],
+    user: PathBuf,
+    extra: &[PathBuf],
+    show_bundled: bool,
+) -> Vec<RootDir> {
+    let mut roots = Vec::with_capacity(extra.len() + package_dirs.len() + 2);
     if let Some(dir) = bundled {
         roots.push(RootDir {
             name: "bundled".to_string(),
@@ -192,6 +217,12 @@ pub fn roots_in(
             listed: show_bundled,
         });
     }
+    roots.extend(package_dirs.iter().map(|(name, dir)| RootDir {
+        name: packages::root_name(name),
+        dir: dir.clone(),
+        editable: false,
+        listed: true,
+    }));
     roots.push(RootDir {
         name: "user".to_string(),
         dir: user,
@@ -215,8 +246,15 @@ pub fn roots_in(
 
 /// Every script in every root, with its header already parsed.
 pub fn discover(roots: &[RootDir]) -> ScriptList {
+    discover_with_budget(roots, packages::MAX_TOTAL_BYTES)
+}
+
+/// [`discover`] with the packages' header budget passed in, so the cap can be tested.
+fn discover_with_budget(roots: &[RootDir], package_budget: u64) -> ScriptList {
     let mut scripts = Vec::new();
     let mut folders = Vec::with_capacity(roots.len());
+    // What the packages' headers may still read in all (`packages::MAX_TOTAL_BYTES`).
+    let mut package_budget = package_budget;
     for root in roots {
         folders.push(FolderInfo {
             root: root.name.clone(),
@@ -224,25 +262,48 @@ pub fn discover(roots: &[RootDir]) -> ScriptList {
             exists: root.dir.is_dir(),
         });
         if root.listed {
-            scripts.extend(scan_root(root));
+            let budget = is_package_root(root).then_some(&mut package_budget);
+            scripts.extend(scan_root(root, budget));
         }
     }
     mark_shadowed(&mut scripts);
     ScriptList { scripts, folders }
 }
 
-/// The `.py` files of one root: the folder itself, then one level of subfolders.
-fn scan_root(root: &RootDir) -> Vec<ScriptEntry> {
-    let mut scripts: Vec<ScriptEntry> = script_files(&root.dir)
+/// How many scripts a package's `scripts` folder holds, by the rules of the walk and without
+/// reading a header: for the Packages page (§6.9 rule 8). A link is not counted.
+pub fn count_package_scripts(dir: &Path) -> usize {
+    script_files(dir, false).len()
+        + sub_folders(dir, false)
+            .iter()
+            .map(|(_, folder)| script_files(folder, false).len())
+            .sum::<usize>()
+}
+
+/// Whether `root` is a package's script folder (`pkg-<name>`).
+fn is_package_root(root: &RootDir) -> bool {
+    packages::package_of_root(&root.name).is_some()
+}
+
+/// The `.py` files of one root: the folder itself, then one level of subfolders. Under a
+/// package root nothing that is a link is listed (`links` false), and `budget` is what the
+/// headers of all packages may still read.
+fn scan_root(root: &RootDir, mut budget: Option<&mut u64>) -> Vec<ScriptEntry> {
+    let links = !is_package_root(root);
+    let mut scripts: Vec<ScriptEntry> = script_files(&root.dir, links)
         .into_iter()
-        .map(|(name, path)| entry(root, None, name, &path))
+        .map(|(name, path)| entry(root, None, name, &path, budget.as_deref_mut()))
         .collect();
-    for (group, dir) in sub_folders(&root.dir) {
-        scripts.extend(
-            script_files(&dir)
-                .into_iter()
-                .map(|(name, path)| entry(root, Some(group.clone()), name, &path)),
-        );
+    for (group, dir) in sub_folders(&root.dir, links) {
+        scripts.extend(script_files(&dir, links).into_iter().map(|(name, path)| {
+            entry(
+                root,
+                Some(group.clone()),
+                name,
+                &path,
+                budget.as_deref_mut(),
+            )
+        }));
     }
     // Ungrouped scripts first (`None` sorts before `Some`), then group by group, and by
     // file name inside each. Case-insensitive, because that is the order the user reads.
@@ -255,23 +316,39 @@ fn scan_root(root: &RootDir) -> Vec<ScriptEntry> {
     scripts
 }
 
-/// The runnable `.py` files directly inside `dir`, as (file name, path).
-fn script_files(dir: &Path) -> Vec<(String, PathBuf)> {
-    read_names(dir)
+/// The runnable `.py` files directly inside `dir`, as (file name, path), by name. With `links`
+/// false (a package) a link is not a file here, whatever it points at.
+fn script_files(dir: &Path, links: bool) -> Vec<(String, PathBuf)> {
+    let mut files: Vec<(String, PathBuf)> = read_names(dir)
         .into_iter()
         .filter(|(name, path)| {
             name != LIBRARY_FILE_NAME
                 && Path::new(name).extension().is_some_and(|ext| ext == "py")
-                && path.is_file()
+                && if links {
+                    path.is_file()
+                } else {
+                    fs::symlink_metadata(path)
+                        .is_ok_and(|meta| !userfiles::is_link(&meta) && meta.is_file())
+                }
         })
-        .collect()
+        .collect();
+    files.sort();
+    files
 }
 
-/// The group folders directly inside `dir`, as (group name, path).
-fn sub_folders(dir: &Path) -> Vec<(String, PathBuf)> {
+/// The group folders directly inside `dir`, as (group name, path). With `links` false (a
+/// package) a link is not a folder here.
+fn sub_folders(dir: &Path, links: bool) -> Vec<(String, PathBuf)> {
     let mut folders: Vec<(String, PathBuf)> = read_names(dir)
         .into_iter()
-        .filter(|(_, path)| path.is_dir())
+        .filter(|(_, path)| {
+            if links {
+                path.is_dir()
+            } else {
+                fs::symlink_metadata(path)
+                    .is_ok_and(|meta| !userfiles::is_link(&meta) && meta.is_dir())
+            }
+        })
         .collect();
     folders.sort_by_cached_key(|(name, _)| name.to_lowercase());
     folders
@@ -298,8 +375,30 @@ fn read_names(dir: &Path) -> Vec<(String, PathBuf)> {
         .collect()
 }
 
-fn entry(root: &RootDir, group: Option<String>, file_name: String, path: &Path) -> ScriptEntry {
-    let header = header_of(path);
+fn entry(
+    root: &RootDir,
+    group: Option<String>,
+    file_name: String,
+    path: &Path,
+    budget: Option<&mut u64>,
+) -> ScriptEntry {
+    let header = match budget {
+        None => header_of(path),
+        // A package's header counts against the packages' 32 MiB; past it the script is listed
+        // with the reason and its header is not read (§6.9 rule 9).
+        Some(left) => {
+            let cost = fs::metadata(path).map_or(0, |meta| meta.len().min(MAX_HEADER_BYTES));
+            if cost > *left {
+                Header {
+                    meta: None,
+                    error: Some(packages::PACKAGES_CAP_ERROR.to_string()),
+                }
+            } else {
+                *left -= cost;
+                header_of(path)
+            }
+        }
+    };
     ScriptEntry {
         id: match &group {
             Some(group) => format!("{}:{group}/{file_name}", root.name),
@@ -450,6 +549,23 @@ pub fn resolve_id(roots: &[RootDir], id: &str) -> Result<Resolved, String> {
     }
     candidate.push(file_name);
 
+    // Nothing inside a package is followed (§6.9 rule 8): the scripts folder, the group folder
+    // and the file are each looked at as they are, and a link is "not found".
+    if is_package_root(root) {
+        let mut at = root.dir.clone();
+        let mut parts = vec![None];
+        parts.extend(group.map(Some));
+        parts.push(Some(file_name));
+        for part in parts {
+            if let Some(part) = part {
+                at.push(part);
+            }
+            if fs::symlink_metadata(&at).map_or(true, |meta| userfiles::is_link(&meta)) {
+                return Err(format!("Script not found: {id}"));
+            }
+        }
+    }
+
     // Both sides are canonicalized, so a symlink inside the root that points out of it
     // is refused, and so is a root reached through a link of its own.
     let root_dir = fs::canonicalize(&root.dir)
@@ -549,8 +665,13 @@ pub fn copy_into(dir: &Path, source: &Resolved, script_id: &str) -> Result<PathB
 /// The body of [`script_source_path`]: the file, or why it must not be handed out.
 pub fn editable_source<'a>(script: &'a Resolved, script_id: &str) -> Result<&'a Path, String> {
     if !script.editable {
+        let kind = if packages::package_of_root(&script.root).is_some() {
+            "a package script"
+        } else {
+            "a bundled script"
+        };
         return Err(format!(
-            "{script_id} is a bundled script and cannot be edited; copy it to the user folder first"
+            "{script_id} is {kind} and cannot be edited; copy it to the user folder first"
         ));
     }
     Ok(&script.path)
@@ -1251,5 +1372,300 @@ mod tests {
         assert_eq!(meta.name, "Deburr \"O\\D\"");
         assert_eq!(meta.warnings, Vec::<String>::new());
         assert!(!source.contains(TEMPLATE_NAME));
+    }
+
+    // ---- packages (P4.35, §6.9 rules 8, 10, 12) ---------------------------------------------
+
+    fn package_roots(base: &Path, names: &[&str]) -> Vec<(String, PathBuf)> {
+        names
+            .iter()
+            .map(|name| (name.to_string(), base.join(name).join("scripts")))
+            .collect()
+    }
+
+    #[test]
+    fn package_roots_sit_between_bundled_and_user_by_name_and_are_not_editable() {
+        let roots = roots_with_packages(
+            Some(PathBuf::from("/res/scripts")),
+            &[
+                (
+                    "shop-a".to_string(),
+                    PathBuf::from("/cfg/packages/shop-a/scripts"),
+                ),
+                (
+                    "shop-b".to_string(),
+                    PathBuf::from("/cfg/packages/shop-b/scripts"),
+                ),
+            ],
+            PathBuf::from("/cfg/scripts"),
+            &[PathBuf::from("/extra")],
+            true,
+        );
+        let names: Vec<(&str, bool)> = roots
+            .iter()
+            .map(|r| (r.name.as_str(), r.editable))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("bundled", false),
+                ("pkg-shop-a", false),
+                ("pkg-shop-b", false),
+                ("user", true),
+                ("extra0", true)
+            ]
+        );
+        // No packages: the roots are the ones there always were.
+        assert_eq!(
+            roots_with_packages(None, &[], PathBuf::from("/u"), &[], true),
+            roots_in(None, PathBuf::from("/u"), &[], true)
+        );
+    }
+
+    #[test]
+    fn user_scripts_beat_a_package_and_a_later_package_beats_an_earlier_one() {
+        let base = scratch(
+            "pkg-shadow",
+            &[
+                ("shop-a/scripts/facing.py", &header("A facing")),
+                ("shop-a/scripts/only_a.py", &header("Only A")),
+                ("shop-b/scripts/facing.py", &header("B facing")),
+                ("user/facing.py", &header("Mine")),
+                ("user/only_a.py", &header("Mine too")),
+            ],
+        );
+        let mut roots = roots_with_packages(
+            None,
+            &package_roots(&base, &["shop-a", "shop-b"]),
+            base.join("user"),
+            &[],
+            true,
+        );
+        let list = discover(&roots);
+        let state: Vec<(&str, bool, bool)> = list
+            .scripts
+            .iter()
+            .map(|s| (s.id.as_str(), s.shadowed, s.editable))
+            .collect();
+        assert_eq!(
+            state,
+            [
+                ("pkg-shop-a:facing.py", true, false),
+                ("pkg-shop-a:only_a.py", true, false),
+                ("pkg-shop-b:facing.py", true, false),
+                ("user:facing.py", false, true),
+                ("user:only_a.py", false, true),
+            ]
+        );
+        // Without the user's copy of `facing.py`, the later package wins.
+        roots.retain(|r| r.name != "user");
+        let list = discover(&roots);
+        let facing: Vec<(&str, bool)> = list
+            .scripts
+            .iter()
+            .filter(|s| s.file_name == "facing.py")
+            .map(|s| (s.id.as_str(), s.shadowed))
+            .collect();
+        assert_eq!(
+            facing,
+            [
+                ("pkg-shop-a:facing.py", true),
+                ("pkg-shop-b:facing.py", false)
+            ]
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_package_script_resolves_but_is_not_editable_and_the_copy_shadows_it() {
+        let base = scratch(
+            "pkg-copy",
+            &[
+                ("shop-a/scripts/finish/chamfer.py", &header("Chamfer")),
+                ("user/", ""),
+            ],
+        );
+        let roots = roots_with_packages(
+            None,
+            &package_roots(&base, &["shop-a"]),
+            base.join("user"),
+            &[],
+            true,
+        );
+        let script = resolve_id(&roots, "pkg-shop-a:finish/chamfer.py").unwrap();
+        assert!(!script.editable);
+        let refusal = editable_source(&script, "pkg-shop-a:finish/chamfer.py").unwrap_err();
+        assert!(
+            refusal.contains("a package script") && refusal.contains("copy it to the user folder")
+        );
+        // "Copy to user folder" works; the copy sits in the user folder and wins.
+        let copy = copy_into(&base.join("user"), &script, "pkg-shop-a:finish/chamfer.py").unwrap();
+        assert_eq!(copy, base.join("user/chamfer.py"));
+        assert!(is_writable(&copy));
+        let list = discover(&roots);
+        let shadowed: Vec<(&str, bool)> = list
+            .scripts
+            .iter()
+            .map(|s| (s.id.as_str(), s.shadowed))
+            .collect();
+        assert_eq!(
+            shadowed,
+            [
+                ("pkg-shop-a:finish/chamfer.py", true),
+                ("user:chamfer.py", false)
+            ]
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A disabled package has no root: its id is "Unknown script folder" and nothing is listed.
+    #[test]
+    fn a_disabled_package_has_no_root() {
+        let base = scratch(
+            "pkg-off",
+            &[
+                ("on/scripts/a.py", &header("A")),
+                ("off/scripts/b.py", &header("B")),
+                ("user/", ""),
+            ],
+        );
+        let enabled = crate::packages::script_roots(&base, &["off".to_string()]);
+        let roots = roots_with_packages(None, &enabled, base.join("user"), &[], true);
+        assert_eq!(ids(&discover(&roots)), ["pkg-on:a.py"]);
+        assert_eq!(
+            resolve_id(&roots, "pkg-off:b.py").unwrap_err(),
+            "Unknown script folder: pkg-off"
+        );
+        // Switched on again: back.
+        let roots = roots_with_packages(
+            None,
+            &crate::packages::script_roots(&base, &[]),
+            base.join("user"),
+            &[],
+            true,
+        );
+        assert_eq!(ids(&discover(&roots)), ["pkg-off:b.py", "pkg-on:a.py"]);
+        assert!(resolve_id(&roots, "pkg-off:b.py").is_ok());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// §6.9 rule 8: nothing inside a package is followed. A linked script and a linked group
+    /// folder are neither listed nor resolved; the same links in a user folder keep working.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_inside_a_package_is_neither_listed_nor_resolved() {
+        let base = scratch(
+            "pkg-links",
+            &[
+                ("shop/scripts/real.py", &header("Real")),
+                ("outside/leak.py", &header("Leak")),
+                ("outside/grp/deep.py", &header("Deep")),
+            ],
+        );
+        let scripts = base.join("shop/scripts");
+        std::os::unix::fs::symlink(base.join("outside/leak.py"), scripts.join("linked.py"))
+            .unwrap();
+        std::os::unix::fs::symlink(base.join("outside/grp"), scripts.join("linkedgrp")).unwrap();
+        // A link that stays inside the package is not followed either.
+        std::os::unix::fs::symlink(scripts.join("real.py"), scripts.join("alias.py")).unwrap();
+        let roots = roots_with_packages(
+            None,
+            &package_roots(&base, &["shop"]),
+            base.join("user"),
+            &[],
+            true,
+        );
+        assert_eq!(ids(&discover(&roots)), ["pkg-shop:real.py"]);
+        for id in [
+            "pkg-shop:linked.py",
+            "pkg-shop:alias.py",
+            "pkg-shop:linkedgrp/deep.py",
+        ] {
+            assert_eq!(
+                resolve_id(&roots, id).unwrap_err(),
+                format!("Script not found: {id}"),
+                "{id}"
+            );
+        }
+        assert!(resolve_id(&roots, "pkg-shop:real.py").is_ok());
+        // The user's own folder keeps following links, as before.
+        let user = scratch("pkg-links-user", &[]);
+        std::os::unix::fs::symlink(base.join("outside/leak.py"), user.join("linked.py")).unwrap();
+        assert_eq!(
+            ids(&discover(&[root("user", &user, true)])),
+            ["user:linked.py"]
+        );
+        for d in [base, user] {
+            let _ = fs::remove_dir_all(&d);
+        }
+    }
+
+    /// A `scripts` folder that is itself a link gets no root, and one swapped in after the roots
+    /// were built is refused at the id.
+    #[cfg(unix)]
+    #[test]
+    fn a_package_scripts_folder_that_is_a_link_gets_no_root_and_does_not_resolve() {
+        let base = scratch(
+            "pkg-rootlink",
+            &[("outside/a.py", &header("A")), ("shop/", "")],
+        );
+        std::os::unix::fs::symlink(base.join("outside"), base.join("shop/scripts")).unwrap();
+        assert!(crate::packages::script_roots(&base, &[]).is_empty());
+        let roots = roots_with_packages(
+            None,
+            &package_roots(&base, &["shop"]),
+            base.join("user"),
+            &[],
+            true,
+        );
+        assert_eq!(
+            resolve_id(&roots, "pkg-shop:a.py").unwrap_err(),
+            "Script not found: pkg-shop:a.py"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_headers_of_all_packages_together_are_read_under_the_cap() {
+        let big = format!("{}# padding\n", header("Big"));
+        let base = scratch(
+            "pkg-cap",
+            &[
+                ("a/scripts/one.py", &big),
+                ("a/scripts/two.py", &big),
+                ("b/scripts/three.py", &big),
+                ("user/mine.py", &big),
+            ],
+        );
+        let roots = roots_with_packages(
+            None,
+            &package_roots(&base, &["a", "b"]),
+            base.join("user"),
+            &[],
+            true,
+        );
+        let one = big.len() as u64;
+        // Room for two headers: the third script of the packages is listed, unread, with the reason.
+        let list = discover_with_budget(&roots, one * 2);
+        let state: Vec<(&str, bool, Option<&str>)> = list
+            .scripts
+            .iter()
+            .map(|s| (s.id.as_str(), s.meta.is_some(), s.header_error.as_deref()))
+            .collect();
+        assert_eq!(
+            state,
+            [
+                ("pkg-a:one.py", true, None),
+                ("pkg-a:two.py", true, None),
+                (
+                    "pkg-b:three.py",
+                    false,
+                    Some(crate::packages::PACKAGES_CAP_ERROR)
+                ),
+                // The user's own folder is not part of the packages' budget.
+                ("user:mine.py", true, None),
+            ]
+        );
+        let _ = fs::remove_dir_all(&base);
     }
 }

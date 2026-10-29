@@ -220,8 +220,14 @@ incremental twin such as `W`, the Klartext `I` prefix — and every word while t
 mode is not known), variables and expressions, words with no resolved value (every
 machine-dependent word while no machine is chosen), the values of a cycle (NC-16), and
 count parameters reached only through the arc-centre option (`G83 … K3`). An absolute point of a Klartext FK contour
-(`P1X` … `P3Y`, the centre `CCX`/`CCY`) on a chosen axis is left and listed as a warning
-(B1 fix NC, NC-03): gEdit does not move it, so the FK contour has to be checked.
+(`P1X` … `P3Y`, the centre `CCX`/`CCY`, a point beside the contour `PDX`/`PDY`) on a chosen axis
+moves with a shift of that axis when every word of its block is classified (v1.2.0 Wave Y, T121:
+`FK_KEPT`); under a scale, or in a block with a word nobody classified, it is left and listed as
+a warning (B1 fix NC, NC-03), so the FK contour has to be checked. On a selection they move only
+when the whole FK contour lies in it (Wave Y, D4): the FPOL in force at its first FK block, its
+first to its last FK block, and every block a relative reference names; else they are left so too.
+The points of a contour move together or not at all (a word nobody classified in one of its
+blocks leaves them all), and the `FPOL` the contour reads stays with them.
 
 Selections
 ----------
@@ -230,6 +236,10 @@ distance mode, the plane, a frame and a cycle in force there are known. A cycle 
 started above the selection and is moved there cannot be moved here, so the blocks in the
 selection that run it are refused. Without the lines above, the run says so at its first
 line and reads the selection from the top-of-program state, which leaves most words alone.
+The lines below the selection (`input.followingLines`, FZ-5) are read for the rotary axes only
+(Wave Y, D5): a move made before the program first writes a rotary axis that turns it is
+refused when the program turns that axis later, below the selection too, as the whole run
+refuses it; without those lines such a move is left with a warning.
 
 Everything outside the values it changes — line endings, spacing, block numbers, comments —
 is handed back byte for byte: the only edits are the value spans of tokens.
@@ -237,6 +247,7 @@ is handed back byte for byte: the only edits are the value spans of tokens.
 
 from __future__ import annotations
 
+import re
 import sys
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -309,10 +320,43 @@ WORD_REASONS = ("unreadable", "data", "incremental", "expression", "machine-depe
 #: or scale of their axis leaves them as written and says so instead of moving the contour
 #: only in part without a word.
 FK_POINT_AXES = {
-    "P1X": "X", "P2X": "X", "P3X": "X", "CCX": "X",
-    "P1Y": "Y", "P2Y": "Y", "P3Y": "Y", "CCY": "Y",
+    "P1X": "X", "P2X": "X", "P3X": "X", "CCX": "X", "PDX": "X",
+    "P1Y": "Y", "P2Y": "Y", "P3Y": "Y", "CCY": "Y", "PDY": "Y",
     "P1Z": "Z", "P2Z": "Z", "P3Z": "Z",
 }
+
+#: v1.2.0 Wave Y (T121): every other word an FK block writes, classified from the TNC 640
+#: Klartext manual (2019, free contour programming, p.175-189), none of which a shift changes:
+#: the elements (``FL``, ``FLT``, ``FC``, ``FCT``, ``FPOL`` whose ``X``/``Y`` are axis words,
+#: ``FSELECT`` and its solution number, ``CLSD``), the direction ``DR``, the sizes (``R``,
+#: ``LEN``, ``D`` the distance of a point beside the contour, ``DP`` the distance of a parallel
+#: line, ``CCA``), the angles (``AN``, ``IAN``, read as ``AN`` with its prefix), the polar values
+#: about ``FPOL`` (``PR``, ``PA``, ``IPR``, ``IPA``, ``CCPR``, ``CCPA``, ``ICCPR``, ``ICCPA``), the
+#: incremental centre (``ICCX``, ``ICCY``) and the relative references to an earlier block, written
+#: incremental and naming that block (``RX``, ``RY``, ``RPR``, ``RPA``, ``RAN``, ``PAR``, ``RCCX``,
+#: ``RCCY``, ``RCCPR``, ``RCCPA``). A shift of a chosen axis moves the absolute points of
+#: :data:`FK_POINT_AXES` with it only in a block whose every word is in one of the two tables
+#: (or is an axis word, the feed, an M word or a compensation code): the whole FK contour then
+#: moves with the path. A scale still leaves them as written: the sizes would have to scale too.
+FK_KEPT = frozenset((
+    "FL", "FLT", "FC", "FCT", "FPOL", "FSELECT", "CLSD", "DR",
+    "R", "LEN", "D", "DP", "CCA", "AN",
+    "PR", "PA", "IPR", "IPA", "CCPR", "CCPA", "ICCPR", "ICCPA", "ICCX", "ICCY",
+    "RX", "RY", "RPR", "RPA", "RAN", "PAR", "RCCX", "RCCY", "RCCPR", "RCCPA",
+))
+#: The words besides them an FK block may write.
+FK_OTHER = frozenset(("F", "M", "RL", "RR", "R0"))
+#: v1.2.0 Wave Y (D4, the skeptic of T121): the words that make a block an element of an FK
+#: contour (with ``FSELECT``, which picks one of its solutions), the pole of its polar values,
+#: and the relative references, each followed by the number of the block it names (TNC 640
+#: Klartext manual 2019, p.175-189). A selection moves the FK points of a contour only when the
+#: whole contour lies in it: its FPOL, its first to its last FK block, and every block a
+#: reference names (`Run.fk_contours`).
+FK_ELEMENTS = frozenset(("FL", "FLT", "FC", "FCT", "FSELECT"))
+FK_POLE = "FPOL"
+FK_REFERENCES = frozenset(("RX", "RY", "RPR", "RPA", "RAN", "PAR", "RCCX", "RCCY", "RCCPR", "RCCPA"))
+#: A quick look whether lines may hold an FK block or an FPOL at all (``Run.fk_contours``).
+FK_TEXT = re.compile(r"\bF(?:L|LT|C|CT|SELECT|POL)\b", re.IGNORECASE)
 
 #: What the summary calls a count of each reason (singular, plural).
 REASON_TEXT = {
@@ -320,7 +364,7 @@ REASON_TEXT = {
     "machine-position": ("machine position", "machine positions"),
     "frame": ("inside a frame", None),
     "rotary-without-tcp": ("rotary move without tool centre point control", "rotary moves without tool centre point control"),
-    "cycle-outside": ("cycle started above the selection", "cycles started above the selection"),
+    "cycle-outside": ("cycle partly outside the selection", "cycles partly outside the selection"),
     "cycle-not-reviewed": ("cycle not reviewed", "cycles not reviewed"),
     "cycle-position": ("cycle call with positions of its own", "cycle calls with positions of their own"),
     "cycle-mode": ("cycle in another mode", "cycles in another mode"),
@@ -332,6 +376,8 @@ REASON_TEXT = {
     "pole": ("block around a pole that cannot be moved", "blocks around a pole that cannot be moved"),
     "arc-geometry": ("arc whose centre or intermediate point cannot be moved", "arcs whose centre or intermediate point cannot be moved"),
     "not-scaled": ("block a multiply or divide does not scale", "blocks a multiply or divide does not scale"),
+    # v1.2.0 Wave Y (WY-NC-1): a block that is no cycle and goes on below the selection.
+    "selection": ("block partly outside the selection", "blocks partly outside the selection"),
     "unreadable": ("word that cannot be read", "words that cannot be read"),
     "data": ("data word", "data words"),
     "incremental": ("incremental word", "incremental words"),
@@ -693,7 +739,8 @@ def params_of(entry: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def param_named(entry: Optional[Dict[str, Any]], address: str) -> Optional[Dict[str, Any]]:
     # B1: the first declaration answers for both blocks of a two-block cycle; its `position`
-    # and `unit` are the same in both (`gedit_nc.params_of_block` has the block's labels).
+    # is the same in both (`gedit_nc.params_of_block` has the block's labels). Its `unit` may
+    # differ (P4h, T118: the `G76` `P`), so a cycle's block reads its own (`Run.param_of`).
     for param in params_of(entry):
         written = param.get("address")
         if isinstance(written, str) and written.upper() == address.upper():
@@ -751,9 +798,40 @@ def is_zero(literal: Optional[gedit_nc.NumericLiteral]) -> bool:
     return number is not None and number == 0
 
 
+#: P4h fix round: counts of a two-block cycle that pack several values into one number, as
+#: (code, address, block). The `G76` `P` of the first block writes the finishing passes, the
+#: chamfer and the insert angle in two digits each (`P010060`); a number added to it changes
+#: the angle to one the control does not take. The code data has no mark for a packed count,
+#: so the list is written here.
+PACKED_COUNTS = frozenset({("G76", "P", 1)})
+
+
+def is_packed_count(entry: Optional[Dict[str, Any]], param: Optional[Dict[str, Any]]) -> bool:
+    """A parameter :data:`PACKED_COUNTS` names: a value of the cycle, left and listed."""
+    if not isinstance(param, dict) or param.get("unit") != "count" or not gedit_nc.declares_blocks(entry):
+        return False
+    address = str(param.get("address") or "").upper()
+    return (code_of(entry).upper(), address, param.get("block")) in PACKED_COUNTS
+
+
 def code_of(entry: Optional[Dict[str, Any]], fallback: str = "the cycle") -> str:
     code = entry.get("code") if isinstance(entry, dict) else None
     return code if isinstance(code, str) and code != "" else fallback
+
+
+def is_def_active(entry: Optional[Dict[str, Any]]) -> bool:
+    """T093 (Wave Y): a DEF-active cycle whose parameters the run judges. A cycle entry (`group:
+    'cycle'`) with parameters and no `sets.cycle`: it acts where it is defined and is never
+    called (Klartext cycle 20 CONTOUR DATA). Cycle 14, which has no parameters, stays out."""
+    return isinstance(entry, dict) and entry.get("group") == "cycle" and not sets_of(entry).get("cycle") and bool(params_of(entry))
+
+
+def used_by(entry: Optional[Dict[str, Any]]) -> List[str]:
+    """T093: the cycles that read a DEF-active cycle's values when they are called
+    (`CodeEntry.usedBy`, upper case): the values of cycle 20 are the depth, surface and
+    clearances of the SL cycles 21 to 24."""
+    found = entry.get("usedBy") if isinstance(entry, dict) else None
+    return [str(code).upper() for code in found if isinstance(code, str) and code] if isinstance(found, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -879,6 +957,11 @@ class Block:
     def codes(self) -> List[Dict[str, Any]]:
         return [entry for entry, _, _ in self.entries]
 
+    def cycle_block(self) -> Optional[int]:
+        """Which block of a two-block cycle this block is (P4h, plan §6.10 rule 11; T118):
+        `gedit_nc.block_cycle_of` of its codes and the tokens of all of its lines."""
+        return gedit_nc.block_cycle_of(self.codes(), [token for line in self.lines for token in line.tokens])
+
     def clear(self) -> None:
         """Forgets every change: the block is left as written."""
         self.edits = []
@@ -896,8 +979,13 @@ class Group:
     ``kind`` says how the cycle runs: ``'modal'`` (a word that stays in force until it is
     cancelled, Fanuc `G81`), ``'single'`` (a one-shot word, a lathe `G71`), ``'call'`` (a call,
     `CYCLE81(…)`, repeated after every position behind `MCALL`), ``'define'`` (a definition
-    and its calls, Klartext), ``'undefined'`` (a call with no reviewed definition) and
-    ``'macro'`` (a modal macro call, `G66`).
+    and its calls, Klartext), ``'undefined'`` (a call with no reviewed definition),
+    ``'macro'`` (a modal macro call, `G66`) and ``'active'`` (T093: a DEF-active cycle whose
+    values other cycles read, Klartext cycle 20).
+
+    ``linked`` (T093): the groups moved together with this one or not at all, both ways: a
+    DEF-active cycle and the definitions that read its values (cycle 20 and the SL cycles 21
+    to 24, with their calls).
     """
 
     def __init__(self, kind: str, entry: Optional[Dict[str, Any]], line: int) -> None:
@@ -905,6 +993,12 @@ class Group:
         self.entry = entry
         self.line = line
         self.members: List[Block] = []
+        self.linked: List["Group"] = []
+
+    def link(self, other: "Group") -> None:
+        if other is not self and other not in self.linked:
+            self.linked.append(other)
+            other.linked.append(self)
 
 
 def joined_code(entry_of: Any, name: str, number: Optional[str]) -> Optional[str]:
@@ -1013,6 +1107,69 @@ def read_block(block: Block, entry_of: Any, letters: frozenset) -> None:
             i += 1
 
 
+def blocks_of(
+    lines: Sequence[str], first_number: int, state: Optional[gedit_nc.LineState], cp: gedit_nc.CompiledProfile, entry_of: Any, letters: frozenset
+) -> List[Block]:
+    """D4: the blocks of ``lines`` as `read_block` reads them, without the modal state (the FK
+    contours of a selection, read before its blocks are judged)."""
+    out: List[Block] = []
+    pending: List[Line] = []
+    for index, text in enumerate(lines):
+        head = gedit_nc.continues_block(text, cp)
+        continued = (state.continuation if state is not None else False) or head
+        if pending and not continued:
+            out.append(Block(pending))
+            pending = []
+        tokens, state = gedit_nc.tokenize_line(text, cp, state)
+        pending.append(Line(index, first_number + index, text, tokens, True))
+    if pending:
+        out.append(Block(pending))
+    for block in out:
+        read_block(block, entry_of, letters)
+    return out
+
+
+def number_of(text: Optional[str]) -> Optional[int]:
+    """A block number as written (`12`, `+12`), or ``None``."""
+    try:
+        return int((text or "").strip())
+    except ValueError:
+        return None
+
+
+def block_addresses(block: Block) -> set:
+    """The addresses of a block's value words, upper case."""
+    return {(token.address or "").upper() for token, _ in block.words}
+
+
+def klartext_number(block: Block) -> Optional[int]:
+    """D4: the number a block is written with (Klartext `12 FL …`), or ``None``."""
+    for token in block.first.tokens:
+        if token.kind == "blockNumber":
+            return number_of(token.value_text)
+    return None
+
+
+def fk_references(block: Block) -> List[Optional[int]]:
+    """D4: the block numbers the relative references of an FK block name (`RX 3`, `RCCX12`);
+    ``None`` for a reference whose number cannot be read."""
+    out: List[Optional[int]] = []
+    for line in block.lines:
+        tokens = [t for t in line.tokens if t.kind != "whitespace"]
+        for i, token in enumerate(tokens):
+            if token.kind != "word" or (token.address or "").upper() not in FK_REFERENCES:
+                continue
+            if (token.value_text or "") != "":
+                out.append(number_of(token.value_text))
+                continue
+            nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+            if nxt is not None and nxt.kind == "word" and nxt.address is None and (nxt.value_text or "") != "":
+                out.append(number_of(nxt.value_text))
+            else:
+                out.append(None)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------
@@ -1055,6 +1212,8 @@ class Run:
         # The cycles in force.
         self.iso_group: Optional[Group] = None
         self.defined: Optional[Group] = None
+        #: T093: the DEF-active cycle in force for each cycle that reads it (`usedBy`), by code.
+        self.served: Dict[str, Group] = {}
         self.modal_call = False
         self.mcall: Optional[Group] = None
         self.macro: Optional[Group] = None
@@ -1087,6 +1246,24 @@ class Run:
         #: tool-axis word the run changed): until then a cycle starts at the unmoved level.
         self.level_above = False
         self.level_inside = False
+        #: v1.2.0 Wave Y (D4): what a selection needs to tell whether an FK contour lies wholly
+        #: in it. Whether the run is on a selection, and the lines below it
+        #: (``input.followingLines``; ``None`` when they were not sent).
+        self.is_selection = False
+        self.following: Optional[List[str]] = None
+        #: Above the selection: whether an FK contour is still open where it starts, whether
+        #: an FPOL was written, and the block numbers written there.
+        self.fk_open_above = False
+        self.fpol_above = False
+        self.numbers_above: set = set()
+        #: The selection's lines, their first line number and the tokenizer state they start in.
+        #: The tokenizer state the walk ends in (``walk_below`` reads on from it).
+        self.end_state: Optional[gedit_nc.LineState] = None
+        self.selection_lines: List[str] = []
+        self.selection_first = 1
+        self.selection_state: Optional[gedit_nc.LineState] = None
+        #: The FK contours of the run's lines (``fk_contours``), once read.
+        self._fk: Optional[Tuple[Dict[int, Optional[str]], Dict[int, bool]]] = None
 
     def entry(self, code: str) -> Optional[Dict[str, Any]]:
         """The database entry of a written code, remembered per spelling."""
@@ -1103,7 +1280,11 @@ class Run:
         cp = self.cp
         state: Optional[gedit_nc.LineState] = None
         pending: List[Line] = []
+        self.selection_lines = list(lines[inside_from:])
+        self.selection_first = first_number + inside_from
         for index, text in enumerate(lines):
+            if index == inside_from:
+                self.selection_state = state
             head = gedit_nc.continues_block(text, cp)
             continued = (state.continuation if state is not None else False) or head
             if pending and not continued:
@@ -1114,6 +1295,69 @@ class Run:
             pending.append(Line(index, first_number + index, text, tokens, index >= inside_from))
         if pending:
             self.finish(pending)
+        self.end_state = state
+
+    def refuse_end(self, last_number: int) -> None:
+        """v1.2.0 Wave Y (WY-NC-1): the other edge of the start rule (`collect_findings`). A
+        selection that ends inside a block that goes on below it (a Klartext `~` at the end of
+        its last line, an Okuma `$` line below it) holds only part of that block: the words
+        below are not seen, so judging the block from its selected lines would shift it in
+        part (cycle 233 moving its `Q227` start level but not its `Q386` end level). The block
+        holding the selection's last line is left as written and said so, before `settle`, so
+        a cycle it belongs to is left whole. Without the lines below (``input.followingLines``)
+        only a trailing marker can tell."""
+        goes_on = bool(self.end_state is not None and self.end_state.continuation)
+        if not goes_on and self.following:
+            goes_on = gedit_nc.continues_block(self.following[0], self.cp)
+        if not goes_on:
+            return
+        for block in reversed(self.blocks):
+            if block.lines[-1].number != last_number:
+                continue
+            if block.inside and block.refusal is None:
+                block.refusal = (
+                    "cycle-outside" if block.group is not None else "selection",
+                    "the block goes on below the selection (line %d), so it is left as written" % (last_number + 1),
+                )
+                block.clear()
+            return
+
+    def walk_below(self, following: Optional[Sequence[str]], first_number: int) -> None:
+        """v1.2.0 Wave Y (D5, FZ-5): the lines below a selection, read for the rotary axes only:
+        whether the program turns, later, an axis a changed block of the selection waits on
+        (`settle_rotary`), as the whole run would. Without them (``None``) such a block is left
+        (`settle_rotary`)."""
+        if not self.rotary.rotary or following is None:
+            return
+        waiting = set()
+        for block in self.blocks:
+            if block.inside and block.refusal is None and block.edits and block.tilt_pending:
+                waiting |= block.tilt_pending
+        waiting -= set(self.rotary.first_written)
+        if not waiting:
+            return
+        cp = self.cp
+        state = self.end_state
+        pending: List[Line] = []
+        for index, text in enumerate(following):
+            head = gedit_nc.continues_block(text, cp)
+            continued = (state.continuation if state is not None else False) or head
+            if pending and not continued:
+                self.note_below(pending)
+                pending = []
+                if waiting <= set(self.rotary.first_written):
+                    return
+            tokens, state = gedit_nc.tokenize_line(text, cp, state)
+            self.interp.update(tokens, first_number + index, "", continued=head)
+            pending.append(Line(index, first_number + index, text, tokens, False))
+        if pending:
+            self.note_below(pending)
+
+    def note_below(self, lines: List[Line]) -> None:
+        """D5: one block below the selection: its rotary words only."""
+        block = Block(lines)
+        read_block(block, self.entry, self.setup.letters)
+        self.note_rotary(block)
 
     def finish(self, lines: List[Line]) -> None:
         """One whole block has been read: judge it in the state it leaves behind."""
@@ -1129,6 +1373,7 @@ class Run:
         block.opens_frame = frame is not None and any(line.number == frame["line"] for line in lines)
         if not block.inside:
             self.note_level_above(block)
+            self.note_fk_above(block)
         if not self.relevant(block, group):
             if block.unknown is not None and block.inside:
                 seen = self.unknown_seen.setdefault(block.unknown, [block.number, 0])
@@ -1202,6 +1447,39 @@ class Run:
             return
         setup = self.setup
         codes = block.codes()
+        before, writes = self.note_rotary(block)
+        if self.interp.tcp is not None:
+            return
+        after = rotary.state
+        if TOOL_AXIS in setup.linear:
+            block.tilt_tool = rotary.blocking(TOOL_AXIS, before, after)
+        turned = set()
+        pending = set()
+        moved: List[str] = []
+        for token, _ in block.words:
+            address = (token.address or "").upper()
+            if (token.value_text or "") == "" or address not in setup.words:
+                continue
+            linear = self.linear_of(address, codes)
+            if linear is None:
+                continue
+            hit, unwritten = rotary.blocking(linear, before, after)
+            if hit or unwritten:
+                if address not in moved:
+                    moved.append(address)
+                turned |= hit
+                pending |= unwritten
+                if hit & writes:
+                    block.tilt_moves = True
+        block.tilt_words = moved
+        block.tilt_turned = frozenset(turned)
+        block.tilt_pending = frozenset(pending)
+
+    def note_rotary(self, block: Block) -> Tuple[Dict[str, str], set]:
+        """NC-4: the rotary words of a block, into :attr:`rotary`: where the axes stood before it,
+        and the axes it writes."""
+        rotary = self.rotary
+        codes = block.codes()
         distance = self.interp.state.get("distance")
         words: List[Tuple[str, Any, Optional[bool]]] = []
         writes = set()
@@ -1230,32 +1508,7 @@ class Run:
         # machine position does, to a place the program's frame does not state.
         if words and "data" not in flags:
             rotary.update(words, block.number, "machine" in flags)
-        if self.interp.tcp is not None:
-            return
-        after = rotary.state
-        if TOOL_AXIS in setup.linear:
-            block.tilt_tool = rotary.blocking(TOOL_AXIS, before, after)
-        turned = set()
-        pending = set()
-        moved: List[str] = []
-        for token, _ in block.words:
-            address = (token.address or "").upper()
-            if (token.value_text or "") == "" or address not in setup.words:
-                continue
-            linear = self.linear_of(address, codes)
-            if linear is None:
-                continue
-            hit, unwritten = rotary.blocking(linear, before, after)
-            if hit or unwritten:
-                if address not in moved:
-                    moved.append(address)
-                turned |= hit
-                pending |= unwritten
-                if hit & writes:
-                    block.tilt_moves = True
-        block.tilt_words = moved
-        block.tilt_turned = frozenset(turned)
-        block.tilt_pending = frozenset(pending)
+        return before, writes
 
     def pass_lengths(self, entry: Optional[Dict[str, Any]]) -> Dict[str, str]:
         """T009: the length parameters of a code and the axis each lies along (`lengthAlong`)."""
@@ -1365,6 +1618,20 @@ class Run:
         if self.macro is not None and positions:
             return self.macro
 
+        # T093: a DEF-active cycle whose values other cycles read (Klartext cycle 20). Its
+        # tool-axis positions move with the run; the definitions that read it, and their calls,
+        # are moved with it or not at all.
+        active_defs = [e for e, _, _ in entries if is_def_active(e)]
+        if active_defs:
+            entry = active_defs[-1]
+            group = self.new_group("active", entry, block.number)
+            for code in used_by(entry):
+                self.served[code] = group
+            defined = self.defined
+            if defined is not None and code_of(defined.entry, "").upper() in used_by(entry):
+                group.link(defined)
+            return group
+
         cycles = [(e, k) for e, k, _ in entries if sets_of(e).get("cycle") in ("start", "define", "call", "call-modal")]
 
         # A definition, known or not, replaces the one before it and ends a modal call.
@@ -1372,6 +1639,9 @@ class Run:
         if defines or block.generic_cycle is not None:
             self.defined = self.new_group("define", defines[-1] if defines else None, block.number)
             self.modal_call = False
+            served = self.served.get(code_of(self.defined.entry, "").upper())
+            if served is not None:
+                self.defined.link(served)
             return self.defined
         calls = [e for e, _ in cycles if sets_of(e).get("cycle") in ("call", "call-modal")]
         if calls:
@@ -1622,6 +1892,7 @@ class Run:
         # T120 / FB-2: under a mode that makes I, J and K its own words (Fanuc `G43.5`,
         # `G41.6`, `G42.6`) they are the tool direction, a count, and no arc centre to scale.
         in_force += gedit_nc.arc_centre_modes(state.get("groups"), interp.entry, setup.profile, codes)
+        cycle_block = block.cycle_block()
         outcomes: List[Outcome] = []
         geometry: List[Outcome] = []
         #: The codes (no arc) whose own positions on a chosen axis this block writes.
@@ -1663,11 +1934,32 @@ class Run:
                     return
                 if owner is not None:
                     points.add(owner)
-                outcome = self.word_outcome(token, line, address, state, codes, in_force, None, False, geo)
+                outcome = self.word_outcome(token, line, address, state, codes, in_force, None, False, geo, cycle_block=cycle_block)
                 outcomes.append(outcome)
                 geometry.append(outcome)
                 continue
             fk_axis = FK_POINT_AXES.get(address)
+            fk_why = self.fk_points_kept(block) if fk_axis is not None and fk_axis in setup.chosen and self.params.additive else "scale"
+            if fk_axis is not None and fk_axis in setup.chosen and fk_why is None:
+                # T121: the absolute points of an FK contour move with the shift of their axis.
+                outcomes.append(
+                    self.word_outcome(token, line, address, state, codes, in_force, None, False, ("absolute", fk_axis), cycle_block=cycle_block)
+                )
+                continue
+            if fk_axis is not None and fk_axis in setup.chosen and fk_why == "outside":
+                # D4: a contour that runs past the selection would be moved only in part.
+                written = quote(token.text)
+                outcomes.append(
+                    (
+                        "skip",
+                        line,
+                        "fk-point",
+                        "%s: a point of an FK contour that does not lie wholly in the selection (its FPOL, a block it refers to, or more of its blocks are outside it); gEdit does not move it. Select the whole FK contour, or check it"
+                        % written,
+                        written,
+                    )
+                )
+                continue
             if fk_axis is not None and fk_axis in setup.chosen:
                 written = quote(token.text)
                 outcomes.append(
@@ -1682,8 +1974,22 @@ class Run:
                 continue
             if address not in setup.words and not is_cycle:
                 continue
+            if self.params.additive and address in setup.chosen and FK_POLE in block_addresses(block) and not self.fk_pole_moves(block):
+                # D4 follow-up: the pole of an FK contour stays with the contour's points.
+                written = quote(token.text)
+                outcomes.append(
+                    (
+                        "skip",
+                        line,
+                        "fk-point",
+                        "%s: the pole (FPOL) of an FK contour whose points are not moved (the contour does not lie wholly in the selection, or a block of it has a word gEdit does not classify); gEdit does not move it either. Check the FK contour"
+                        % written,
+                        written,
+                    )
+                )
+                continue
             word_data = None if id(token) in pole_words else cycle_data.get(id(token), data)
-            outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, word_data, is_cycle))
+            outcomes.append(self.word_outcome(token, line, address, state, codes, in_force, word_data, is_cycle, cycle_block=cycle_block))
         for arg, cls in cycle_args:
             outcomes.append(self.arg_outcome(arg, cls, state))
 
@@ -2258,8 +2564,9 @@ class Run:
             return ("cycle-not-reviewed", "nobody reviewed the positions of %s (roadmap R8)" % name)
 
         args = self.cycle_values(block, group)
+        cycle_block = block.cycle_block()
         for arg in args:
-            param = self.param_of(entry, arg)
+            param = self.param_of(entry, arg, cycle_block)
             if arg.kind == "word" and arg.name in setup.axes and gedit_nc.position_of(param) is None:
                 continue  # an axis word: it moves as one
             if param is None:
@@ -2272,12 +2579,14 @@ class Run:
                 return ("cycle-not-reviewed", "%s writes %s, which the code database does not describe" % (name, quote(arg.text)))
             if gedit_nc.position_of(param) is None:
                 return ("cycle-not-reviewed", "nobody reviewed %s of %s (roadmap R8)" % (self.shown(entry, arg), name))
-            if arg.kind == "word" and is_cycle_value(param):
+            if arg.kind == "word" and (is_cycle_value(param) or is_packed_count(entry, param)):
                 # NC-16: a reviewed parameter that is no position (`position: 'none'`) and
                 # may be a length is a value of the cycle, not a coordinate of the program:
                 # the relief `R` of `G74`, the allowance and the taper `R` of `G76`. It is
                 # left and listed like the words of `G71`. A count stays the user's choice
-                # (`K` of `G83`, README "The form").
+                # (`K` of `G83`, README "The form"), except a packed one (`PACKED_COUNTS`:
+                # the first-block `P` of `G76`), which is left and listed too. A block that
+                # does not tell its block reads the first declaration, so a `P` there is left.
                 cycle_data[id(arg.token)] = name
         for own in [entry] + list(block.call_entries):
             others = [str(p.get("address")) for p in params_of(own) if gedit_nc.position_of(p) == "other"]
@@ -2287,7 +2596,7 @@ class Run:
                     "%s has positions of its own (%s) that a shift cannot judge" % (code_of(own), and_list(others)),
                 )
         for arg in args:
-            if gedit_nc.position_of(self.param_of(entry, arg)) != "mode" or arg.text.strip() == "":
+            if gedit_nc.position_of(self.param_of(entry, arg, cycle_block)) != "mode" or arg.text.strip() == "":
                 continue
             value = gedit_nc.decimal_of(arg.literal) if arg.literal is not None else None
             if value is None or value != 0:
@@ -2306,7 +2615,7 @@ class Run:
             )
         # What moves with a shift of the tool axis.
         for arg in args:
-            if gedit_nc.position_of(self.param_of(entry, arg)) != "tool-axis" or arg.text.strip() == "":
+            if gedit_nc.position_of(self.param_of(entry, arg, cycle_block)) != "tool-axis" or arg.text.strip() == "":
                 continue
             if arg.kind == "word":
                 # An address word follows the distance mode like any word (`word_outcome`).
@@ -2335,7 +2644,7 @@ class Run:
         # of the plane, and gEdit does not decide that for the user.
         if setup.scaled_axes:
             for arg in args:
-                along = length_along(self.param_of(entry, arg))
+                along = length_along(self.param_of(entry, arg, cycle_block))
                 if along is None or arg.text.strip() == "":
                     continue
                 hit = sorted(self.along_axes(along, state) & setup.scaled_axes)
@@ -2361,7 +2670,7 @@ class Run:
             codes = block.codes()
             data_axes = own_axes and gedit_nc.axis_words_of(entry) == "data"
             for arg in args:
-                param = self.param_of(entry, arg)
+                param = self.param_of(entry, arg, cycle_block)
                 if arg.text.strip() == "":
                     continue
                 if gedit_nc.position_of(param) != "none":
@@ -2374,7 +2683,7 @@ class Run:
                 if arg.literal is not None and gedit_nc.decimal_of(arg.literal) == 0:
                     continue
                 if arg.kind == "word" and gedit_nc.position_of(param) == "none":
-                    cls = self.number_class(arg.name, codes, [entry])
+                    cls = self.number_class(arg.name, codes, [entry], cycle_block)
                     if cls is not None and cls not in ("length", "increment"):
                         continue
                 return (
@@ -2392,9 +2701,9 @@ class Run:
                     if arg.kind == "word"
                     and arg.name in setup.words
                     and arg.name in setup.axes
-                    and gedit_nc.position_of(self.param_of(entry, arg)) is None
+                    and gedit_nc.position_of(self.param_of(entry, arg, cycle_block)) is None
                 ]
-                lengths = self.length_params(entry, codes)
+                lengths = self.length_params(entry, codes, cycle_block)
                 if scaled and lengths:
                     return (
                         "not-scaled",
@@ -2445,23 +2754,30 @@ class Run:
             str(p.get("address") or "").upper() in axes and gedit_nc.position_of(p) is None for p in params_of(entry)
         )
 
-    def length_params(self, entry: Optional[Dict[str, Any]], codes: List[Dict[str, Any]]) -> List[str]:
+    def length_params(self, entry: Optional[Dict[str, Any]], codes: List[Dict[str, Any]], cycle_block: Optional[int]) -> List[str]:
         """The addresses of the cycle's reviewed parameters that may be lengths (NC-16)."""
         found: List[str] = []
         for param in params_of(entry):
             address = str(param.get("address") or "")
             if address == "" or address in found or not is_cycle_value(param):
                 continue
-            cls = self.number_class(address.upper(), codes, [entry] if isinstance(entry, dict) else [])
+            cls = self.number_class(address.upper(), codes, [entry] if isinstance(entry, dict) else [], cycle_block)
             if cls is not None and cls not in ("length", "increment"):
                 continue
             found.append(address)
         return found
 
-    def param_of(self, entry: Optional[Dict[str, Any]], arg: Arg) -> Optional[Dict[str, Any]]:
+    def param_of(self, entry: Optional[Dict[str, Any]], arg: Arg, cycle_block: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """The parameter ``arg`` writes. ``cycle_block`` (P4h, plan §6.10 rule 11) is the block of
+        a two-block cycle the block is (`Block.cycle_block`): a word is then read by that block's
+        declaration, which can have a unit of its own (the `G76` `P`)."""
         if arg.kind == "call":
             params = params_of(entry)
             return params[arg.position - 1] if 0 < arg.position <= len(params) else None
+        if cycle_block in (1, 2) and gedit_nc.declares_blocks(entry):
+            for param in gedit_nc.params_of_block(entry, cycle_block):
+                if str(param.get("address") or "").upper() == arg.name.upper():
+                    return param
         return param_named(entry, arg.name)
 
     def shown(self, entry: Optional[Dict[str, Any]], arg: Arg) -> str:
@@ -2491,7 +2807,7 @@ class Run:
                     literal = gedit_nc.parse_number(arg_text)
                     args.append(Arg("argument %d" % position, arg_text, literal, line, span, None, "call", position))
             return args
-        if group.kind == "define":
+        if group.kind in ("define", "active"):
             # The definition writes its values; a call of it writes positions, not arguments.
             if any(e is entry for e, _, _ in block.entries):
                 return list(block.q_args)
@@ -2510,6 +2826,162 @@ class Run:
         value = as_dict(state.get("units")).get("value")
         return value if value in ("mm", "inch") else self.setup.power_on_units
 
+    def fk_classified(self, block: Block) -> bool:
+        """T121: every word of an FK block is one :data:`FK_POINT_AXES` or :data:`FK_KEPT` names,
+        an axis word or one of :data:`FK_OTHER`."""
+        axes = self.setup.axes
+        for token, _ in block.words:
+            address = (token.address or "").upper()
+            if not address:
+                continue  # a bare number: the solution of FSELECT, the block a reference names
+            if address in FK_POINT_AXES or address in FK_KEPT or address in FK_OTHER or address in axes:
+                continue
+            return False
+        return True
+
+    def fk_kind(self, block: Block) -> Optional[str]:
+        """D4: what a block is to an FK contour: ``'element'`` (an FK block, `FSELECT` among
+        them), ``'pole'`` (`FPOL`), ``'end'`` (a move of another kind to a written position,
+        which ends the contour: `L X+20 Y+20`) or ``None`` (anything else, which neither starts
+        nor ends one: a comment, `RND`, `CC`, a polar or approach block without an axis word; read
+        so, a contour runs on further, which only makes a selection refuse more)."""
+        addresses = {(token.address or "").upper() for token, _ in block.words}
+        if addresses & FK_ELEMENTS:
+            return "element"
+        if FK_POLE in addresses:
+            return "pole"
+        if any(sets_of(entry).get("motion") for entry in block.codes()) and self.positions(block):
+            return "end"
+        return None
+
+    def note_fk_above(self, block: Block) -> None:
+        """D4: a block above the selection: whether an FK contour is open where the selection
+        starts, whether an FPOL was written, and the block numbers written there."""
+        number = klartext_number(block)
+        if number is not None:
+            self.numbers_above.add(number)
+        kind = self.fk_kind(block)
+        if kind == "element":
+            self.fk_open_above = True
+        elif kind == "pole":
+            self.fpol_above = True
+        elif kind == "end":
+            self.fk_open_above = False
+
+    def fk_points_kept(self, block: Block) -> Optional[str]:
+        """D4 (the skeptic of T121) and its follow-up: why the FK points of this block are left
+        under a shift, or ``None`` when they move. They move with their FK contour or not at all:
+        ``'outside'`` when the contour does not lie wholly in a selection (the FPOL in force at its
+        first FK block, every block from the first FK block to the last one, every block a
+        relative reference such as `RX 3` or `PAR 5` names; the lines below show where a contour
+        open at the selection's end goes on, and without them it is taken to go on);
+        ``'unclassified'`` when a block of the contour, or its FPOL, writes a word nobody
+        classified (:meth:`fk_classified`)."""
+        points, _ = self.fk_contours()
+        return points.get(block.number, "unclassified")
+
+    def fk_pole_moves(self, block: Block) -> bool:
+        """D4 follow-up: whether the axis words of an `FPOL` block move under a shift. The pole
+        stays with the FK contours that read it: it moves only when every one of them moves
+        (:meth:`fk_points_kept`), and, on a selection, when no contour below it reads it (the
+        lines below show that; without them it is taken to)."""
+        _, poles = self.fk_contours()
+        return poles.get(block.number, True)
+
+    def fk_contours(self) -> Tuple[Dict[int, Optional[str]], Dict[int, bool]]:
+        """D4: the FK contours of the run's lines (the selection, or the whole program), read
+        before their blocks are judged: for every FK block, by line number, why its points are
+        left (``None``: they move); for every `FPOL` block, whether its axis words move."""
+        if self._fk is not None:
+            return self._fk
+        points: Dict[int, Optional[str]] = {}
+        poles: Dict[int, bool] = {}
+        self._fk = (points, poles)
+        if not any(FK_TEXT.search(text) for text in self.selection_lines):
+            return self._fk
+        blocks = blocks_of(self.selection_lines, self.selection_first, self.selection_state, self.cp, self.entry, self.setup.letters)
+        inside_numbers: set = set()
+        for block in blocks:
+            number = klartext_number(block)
+            if number is not None:
+                inside_numbers.add(number)
+        # A contour: its FK blocks, whether it runs outside the scope, the block numbers its
+        # references name, and whether every word of its blocks is classified.
+        sections: List[Dict[str, Any]] = []
+        # A pole: its line, whether its words are classified, the contours that read it, and
+        # whether one outside the scope reads it.
+        pole_list: List[Dict[str, Any]] = []
+        current: Optional[Dict[str, Any]] = None
+        if self.fk_open_above:
+            current = {"members": [], "outside": True, "refs": [], "classified": True}
+            sections.append(current)
+        last_pole: Optional[Dict[str, Any]] = None
+        pole_above = self.fpol_above
+        for block in blocks:
+            kind = self.fk_kind(block)
+            if kind == "pole":
+                last_pole = {"number": block.number, "classified": self.fk_classified(block), "sections": [], "outside": False}
+                pole_list.append(last_pole)
+                pole_above = False
+                if current is not None:
+                    last_pole["sections"].append(current)
+            elif kind == "element":
+                if current is None:
+                    current = {"members": [], "outside": pole_above, "refs": [], "classified": True}
+                    sections.append(current)
+                    if last_pole is not None:
+                        last_pole["sections"].append(current)
+                current["members"].append(block.number)
+                current["refs"].extend(fk_references(block))
+                if not self.fk_classified(block):
+                    current["classified"] = False
+            elif kind == "end":
+                current = None
+        if self.is_selection and (current is not None or last_pole is not None):
+            if self.following is None:
+                if current is not None:
+                    current["outside"] = True
+                if last_pole is not None:
+                    last_pole["outside"] = True
+            else:
+                still_open = current is not None
+                pole_below = False
+                for block in blocks_of(self.following, 0, None, self.cp, self.entry, self.setup.letters):
+                    kind = self.fk_kind(block)
+                    if kind == "element":
+                        if still_open:
+                            current["outside"] = True
+                        if last_pole is not None and not pole_below:
+                            last_pole["outside"] = True
+                        break
+                    if kind == "pole":
+                        pole_below = True
+                        if not still_open:
+                            break
+                    elif kind == "end":
+                        still_open = False
+                        if pole_below or last_pole is None:
+                            break
+        for section in sections:
+            section["moves"] = None
+            # A whole run holds every block a reference can name.
+            if section["outside"] or (
+                self.is_selection and any(ref is None or ref not in inside_numbers or ref in self.numbers_above for ref in section["refs"])
+            ):
+                section["moves"] = "outside"
+            elif not section["classified"]:
+                section["moves"] = "unclassified"
+        for pole in pole_list:
+            for section in pole["sections"]:
+                if not pole["classified"] and section["moves"] is None:
+                    section["moves"] = "unclassified"
+        for section in sections:
+            for number in section["members"]:
+                points[number] = section["moves"]
+        for pole in pole_list:
+            poles[pole["number"]] = pole["classified"] and not pole["outside"] and all(section["moves"] is None for section in pole["sections"])
+        return self._fk
+
     def word_outcome(
         self,
         token: gedit_nc.Token,
@@ -2521,9 +2993,12 @@ class Run:
         data: Optional[str],
         is_cycle: bool,
         geometry: Optional[Tuple[str, str]] = None,
+        *,
+        cycle_block: Optional[int],
     ) -> Outcome:
         """One word of a chosen address (or a cycle position written as a word, or a
-        coordinate of an arc, ``geometry = (mode, axis)``)."""
+        coordinate of an arc, ``geometry = (mode, axis)``). ``cycle_block`` is
+        `Block.cycle_block` of the block the word is in."""
         setup = self.setup
         params = self.params
         additive = params.additive
@@ -2546,9 +3021,9 @@ class Run:
             return ("skip", line, "incremental", "%s: written as an incremental distance, so a shift does not apply to it" % written, written)
         absolute = function == "absolute" or mode == "absolute"
         distance = state.get("distance")
-        cls = self.number_class(address, codes, in_force)
+        cls = self.number_class(address, codes, in_force, cycle_block)
         if cls is None and geometry is not None:
-            cls = self.number_class(geometry[1], codes, in_force)
+            cls = self.number_class(geometry[1], codes, in_force, cycle_block)
         # D4-3 (manual check): G90/G91 decide where the axes go, not what a feed, a dwell, a
         # speed or a count is. Only a position word waits for an absolute distance mode.
         if additive and not twin and not absolute and self.is_position(address, cls, geometry):
@@ -2606,13 +3081,16 @@ class Run:
             or address == "R"  # a length on every profile (`_nc_machine` rule 6)
         )
 
-    def number_class(self, address: str, codes: List[Dict[str, Any]], in_force: List[Dict[str, Any]]) -> Optional[str]:
-        """`gedit_nc.number_class_of`, remembered: a program asks the same few questions."""
+    def number_class(
+        self, address: str, codes: List[Dict[str, Any]], in_force: List[Dict[str, Any]], cycle_block: Optional[int]
+    ) -> Optional[str]:
+        """`gedit_nc.number_class_of`, remembered: a program asks the same few questions.
+        ``cycle_block`` is `Block.cycle_block` of the block asked about (plan §6.10 rule 11)."""
         interp = self.interp
-        key = (address, tuple(id(e) for e in codes), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed)
+        key = (address, tuple(id(e) for e in codes), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed, cycle_block)
         if key not in self._classes:
             self._classes[key] = gedit_nc.number_class_of(
-                address, self.setup.profile, interp.feed_unit, codes, interp.pitch_feed, in_force
+                address, self.setup.profile, interp.feed_unit, codes, interp.pitch_feed, in_force, cycle_block=cycle_block
             )
         return self._classes[key]
 
@@ -2779,6 +3257,22 @@ class Run:
             if block.refusal is not None or not block.edits or not block.tilt_pending:
                 continue
             later = self.rotary.known_later(block.tilt_pending)
+            unseen = sorted(a for a in block.tilt_pending if a not in first)
+            if not later and unseen and self.is_selection and self.following is None:
+                # D5: the lines below were not sent, so whether the program turns the axis
+                # there (which the whole run refuses) is not known: left, as the whole run may.
+                block.refusal = (
+                    "rotary-without-tcp",
+                    "writes %s before the program has written %s, and the lines below the selection were not available: whether the program turns %s later, which would make %s angle here unknown while tool centre point control is off, cannot be told. Run Address arithmetic on the whole program"
+                    % (
+                        and_list(block.tilt_words),
+                        and_list(unseen),
+                        "it" if len(unseen) == 1 else "them",
+                        "its" if len(unseen) == 1 else "their",
+                    ),
+                )
+                block.clear()
+                continue
             if not later:
                 continue
             block.refusal = (
@@ -2793,10 +3287,31 @@ class Run:
             )
             block.clear()
 
+    def linked_groups(self) -> List[List[Group]]:
+        """T093: the groups in pieces that move together, each in program order: a group alone,
+        or a DEF-active cycle with the definitions that read it (`Group.linked`)."""
+        seen: set = set()
+        pieces: List[List[Group]] = []
+        for group in self.groups:
+            if id(group) in seen:
+                continue
+            seen.add(id(group))
+            piece = [group]
+            stack = [group]
+            while stack:
+                for other in stack.pop().linked:
+                    if id(other) not in seen:
+                        seen.add(id(other))
+                        piece.append(other)
+                        stack.append(other)
+            pieces.append(piece)
+        return pieces
+
     def settle_groups(self) -> bool:
         changed = False
-        for group in self.groups:
-            members = group.members
+        for piece in self.linked_groups():
+            group = piece[0]
+            members = group.members if len(piece) == 1 else sorted((m for g in piece for m in g.members), key=lambda m: m.number)
             if not members:
                 continue
             first = next((m for m in members if m.refusal is not None), None)
@@ -2806,6 +3321,8 @@ class Run:
             if first is None and outside is None:
                 continue
             what = {"pole": "the same contour around the pole", "pass": "the same series of passes"}.get(group.kind, "the same cycle")
+            if len(piece) > 1:
+                what = "the same cycle and the contour data it uses"
             for member in members:
                 if member.refusal is None:
                     changed = changed or bool(member.edits)
@@ -2831,7 +3348,7 @@ SHORT = {
     "machine-position": "a machine position",
     "frame": "inside a frame",
     "rotary-without-tcp": "a rotary move without tool centre point control",
-    "cycle-outside": "above the selection",
+    "cycle-outside": "partly outside the selection",
     "cycle-not-reviewed": "not reviewed",
     "cycle-position": "positions of its own",
     "cycle-mode": "another mode",
@@ -2964,7 +3481,7 @@ def summary(run: Run, findings: Findings) -> str:
         if left_words:
             what.append(count_text(left_words, "word"))
         parts = []
-        for reason in BLOCK_REASONS:
+        for reason in BLOCK_REASONS + ("selection",):
             if block_counts.get(reason):
                 singular, plural = REASON_TEXT[reason]
                 parts.append("%s %s" % ("{:,}".format(block_counts[reason]), singular if block_counts[reason] == 1 or plural is None else plural))
@@ -3050,6 +3567,21 @@ def apply_edits(lines: Sequence[str], run: Run) -> List[str]:
     return out
 
 
+def following_lines(context: Dict[str, Any]) -> Optional[List[str]]:
+    """v1.2.0 Wave Y (D4, D5): the document lines below a selection (``input.followingLines``,
+    FZ-5), or ``None`` when the run did not get them (a whole-document run, a field that is no
+    list of strings, a selection whose lines below were too many to send). The same reading as
+    ``_nc_run.following_lines``, which this script does not import (it would load the geometry
+    modules)."""
+    scope = as_dict(context.get("input"))
+    if scope.get("scope") != "selection":
+        return None
+    lines = scope.get("followingLines")
+    if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
+        return None
+    return list(lines)
+
+
 def main() -> int:
     context = gedit_nc.load_context()
     lines = gedit_nc.read_input()
@@ -3104,7 +3636,14 @@ def main() -> int:
         )
 
     run = Run(setup, cp)
+    run.is_selection = scope.get("scope") == "selection"
+    run.following = following_lines(context)
     run.walk(list(preceding) + lines, base_line - len(preceding), len(preceding))
+    if run.is_selection:
+        run.refuse_end(base_line + len(lines) - 1)
+        end = scope.get("endLine")
+        below = end + 1 if isinstance(end, int) and not isinstance(end, bool) and end >= base_line else base_line + len(lines)
+        run.walk_below(run.following, below)
     run.settle()
     out = apply_edits(list(preceding) + lines, run)[len(preceding):]
     collect_findings(run, findings)

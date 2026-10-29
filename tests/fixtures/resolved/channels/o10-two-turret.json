@@ -166,7 +166,8 @@
       "diameter": "profile",
       "modalInitial": {
         "distance": "profile",
-        "feedmode": "profile"
+        "feedmode": "profile",
+        "plane": "profile"
       },
       "numberInput": "profile",
       "units": "profile",
@@ -551,12 +552,14 @@
       "diameter": "on",
       "initial": {
         "distance": "G90",
-        "feedmode": "G95"
+        "feedmode": "G95",
+        "plane": "G18"
       },
       "sources": {
         "diameter": "profile",
         "distance": "profile",
         "feedmode": "profile",
+        "plane": "profile",
         "units": "profile"
       },
       "units": "mm"

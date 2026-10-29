@@ -8,6 +8,7 @@
 
 import { derived, writable } from 'svelte/store';
 import { findConflicts, isValidKeySpec, resolveKeys } from '$lib/core/keys/keySpec';
+import { mergeKeys, type UserBindings } from '$lib/core/keys/userKeys';
 import { status } from '$lib/app/status';
 import { t } from '$lib/i18n';
 import { isMacPlatform } from '$lib/utils/platform';
@@ -25,6 +26,10 @@ const NO_CONTEXT: CommandContext = {
 };
 
 const defs = new Map<string, CommandDef>();
+/** The user's key bindings (P4g, §6.9 rule 5); `{}` is "the declared keys". */
+let overrides: UserBindings = {};
+/** The commands whose keys in force differ from the declared ones, as copies; `defs` keeps the originals. */
+const effective = new Map<string, CommandDef>();
 const revision = writable(0);
 
 let contextProvider: () => CommandContext = () => NO_CONTEXT;
@@ -73,6 +78,25 @@ function currentContext(): CommandContext {
   return next;
 }
 
+/**
+ * Works out the keys in force for every command and keeps a copy for each one that differs from
+ * its declared keys. `defs` is never touched, so a dispose still finds the object it registered.
+ */
+function applyOverrides(): void {
+  effective.clear();
+  if (Object.keys(overrides).length === 0) return;
+  const all = [...defs.values()];
+  const mac = mergeKeys(all, overrides, 'mac').keys;
+  const other = mergeKeys(all, overrides, 'other').keys;
+  for (const def of all) {
+    const m = mac.get(def.id);
+    const o = other.get(def.id);
+    if (m === resolveKeys(def.keys, true) && o === resolveKeys(def.keys, false)) continue;
+    const keys: CommandDef['keys'] = m === o ? m : { ...(m === undefined ? {} : { mac: m }), ...(o === undefined ? {} : { other: o }) };
+    effective.set(def.id, { ...def, keys });
+  }
+}
+
 /** Reports the key conflicts `added` introduces against everything registered before them. */
 function reportConflicts(added: CommandDef[]): void {
   const isMac = isMacPlatform();
@@ -105,6 +129,7 @@ export const commands: CommandRegistry = {
     }
     for (const def of added) defs.set(def.id, def);
     reportConflicts(added);
+    applyOverrides();
     bump();
 
     let disposed = false;
@@ -115,6 +140,7 @@ export const commands: CommandRegistry = {
         // Only remove what is still ours: a later registration of the same id wins.
         if (defs.get(def.id) === def) defs.delete(def.id);
       }
+      applyOverrides();
       bump();
     };
   },
@@ -124,11 +150,21 @@ export const commands: CommandRegistry = {
   },
 
   get(id: string): CommandDef | undefined {
-    return defs.get(id);
+    return effective.get(id) ?? defs.get(id);
   },
 
   list(): CommandDef[] {
-    return [...defs.values()];
+    return [...defs.values()].map((def) => effective.get(def.id) ?? def);
+  },
+
+  setKeyOverrides(bindings: UserBindings): void {
+    overrides = { ...bindings };
+    applyOverrides();
+    bump();
+  },
+
+  defaultKeys(id: string): CommandDef['keys'] {
+    return defs.get(id)?.keys;
   },
 
   isEnabled(id: string): boolean {
@@ -206,6 +242,8 @@ export function notifyContextChanged(): void {
 /** Test seam: drops every registration and the context provider. */
 export function resetCommandsForTest(): void {
   defs.clear();
+  overrides = {};
+  effective.clear();
   contextProvider = () => NO_CONTEXT;
   lastContext = NO_CONTEXT;
   bump();

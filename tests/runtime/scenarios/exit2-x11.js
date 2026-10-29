@@ -22,7 +22,7 @@
 
 import { scenario } from '../lib/index.js'
 import { OPERATIONS, SCRIPTS, fillForm, pick, runFromTools, runReplace } from './m10-common.js'
-import { clickMachineAction, closeSettings, machineAction, machineField, machineRows, openMachinesPage, sameJson, tooltipLine } from './m6-common.js'
+import { MACHINES_SCHEMA, clickMachineAction, closeSettings, machineAction, machineField, machineRows, openMachinesPage, sameJson, tooltipLine } from './m6-common.js'
 import { quitCleanly, otherRun, requireFirstRun } from './m7-common.js'
 import { startAdd, saveMachineForm } from './m8-common.js'
 import { setField } from './m4-common.js'
@@ -67,6 +67,13 @@ function optionStarting(h, field, start) {
   if (!option) throw new Error(`${field} has no option starting ${JSON.stringify(start)}: ${[...(select?.options ?? [])].map((o) => o.textContent?.trim()).join(' | ')}`)
   return (option.textContent ?? '').trim()
 }
+
+/**
+ * The golden of `machines.x11.json` as the app writes the file: a file gEdit made starts with the `$schema` line (Wave Y, P4h, owner
+ * answer Q4h-2), which the golden, a record of the machines, does not spell.
+ * @param {any} golden
+ */
+const asWritten = (golden) => ({ $schema: MACHINES_SCHEMA, ...golden })
 
 /** `machines.json` with the ids masked, from the golden or from the app. */
 const masked = (/** @type {any} */ file) => ({ ...file, machines: (file?.machines ?? []).map((/** @type {any} */ m) => ({ ...m, id: '*' })) })
@@ -168,7 +175,7 @@ scenario('exit2-x11-1', { timeout: 900, vars: { HOME: HOME_1 } }, async (h) => {
   await clickMachineAction(h, 'edit', machineRows(h).find((r) => r.name === specCalc.name)?.id)
   await saveMachineForm(h, { numberInput: optionStarting(h, 'numberInput', 'As written') })
   const written = await machinesNow(h)
-  h.check('adding "Lathe IS-B" and duplicating it as "Lathe calc" writes the golden machines.json (ids masked, keys sorted, $version 1)', sameJson(masked(written), x11), { got: masked(written), want: x11 })
+  h.check('adding "Lathe IS-B" and duplicating it as "Lathe calc" writes the golden machines.json (ids masked, keys sorted, $version 1)', sameJson(masked(written), asWritten(x11)), { got: masked(written), want: asWritten(x11) })
   const ids = Object.fromEntries(machineRows(h).map((r) => [r.name, r.id]))
   h.check('and the page lists both', machineRows(h).length === 2 && !!ids['Lathe IS-B'] && !!ids['Lathe calc'] && machineRows(h).every((r) => r.problems === 0), machineRows(h).map((r) => `${r.id}|${r.name}`))
   await clickMachineAction(h, 'default', ids['Lathe IS-B'])
@@ -177,7 +184,7 @@ scenario('exit2-x11-1', { timeout: 900, vars: { HOME: HOME_1 } }, async (h) => {
   // X11 (a), README: the default is cleared before (b) reads "Machine: none".
   await /** @type {any} */ (ctx.machines).setDefault('fanuc-lathe', null)
   await h.waitFor(() => machineRows(h).every((r) => r.isDefault === false), { timeout: 8000 })
-  h.check('the default is cleared again, so `defaults` reads {} as the golden does', sameJson((await machinesNow(h)).defaults, {}) && sameJson(masked(await machinesNow(h)), x11), (await machinesNow(h)).defaults)
+  h.check('the default is cleared again, so `defaults` reads {} as the golden does', sameJson((await machinesNow(h)).defaults, {}) && sameJson(masked(await machinesNow(h)), asWritten(x11)), (await machinesNow(h)).defaults)
   h.check('Edit and Remove are offered on each row', machineRows(h).every((r) => !!machineAction(h, 'edit', r.id) && !!machineAction(h, 'remove', r.id) && !!machineAction(h, 'default', r.id)), null)
   await closeSettings(h, page)
 
@@ -287,7 +294,7 @@ scenario('exit2-x11-2', { timeout: 300, vars: { HOME: HOME_2 } }, async (h) => {
   await h.idle()
 
   const file = await machinesNow(h)
-  h.check('machines.json is still the golden (Lathe IS-B, Lathe calc, no default) after the restart, plus the machine of (e)', sameJson(masked({ ...file, machines: file.machines.filter((/** @type {any} */ m) => m.name !== 'X11 Lathe A') }), x11), file)
+  h.check('machines.json is still the golden (Lathe IS-B, Lathe calc, no default) after the restart, plus the machine of (e)', sameJson(masked({ ...file, machines: file.machines.filter((/** @type {any} */ m) => m.name !== 'X11 Lathe A') }), asWritten(x11)), file)
   const page = await openMachinesPage(h)
   const rows = machineRows(h)
   h.check('both machines are listed after the restart', ['Lathe IS-B', 'Lathe calc'].every((n) => rows.some((r) => r.name === n && r.problems === 0)), rows.map((r) => `${r.id}|${r.name}`))

@@ -623,6 +623,11 @@ class Block:
     def entries(self) -> List[Dict[str, Any]]:
         return [w.entry for w in self.written if w.entry is not None]
 
+    def cycle_block(self) -> Optional[int]:
+        """Which block of a two-block cycle this block is (P4h, plan §6.10 rule 11; T118):
+        ``gedit_nc.block_cycle_of`` of its codes and the tokens of all of its lines."""
+        return gedit_nc.block_cycle_of(self.entries, [t for _, t in self.tokens])
+
     def text(self) -> str:
         return " ".join(line[1].strip() for line in self.lines)
 
@@ -2023,7 +2028,7 @@ def check_travel(run: Run, block: Block, words: Sequence[Tuple[int, gedit_nc.Tok
             cycle = interp.active_cycle
             entry = interp.entry(cycle) if cycle else None
             in_force = [entry] if entry is not None else []
-        value = axis_value(run, t, literal, entries, in_force or [])
+        value = axis_value(run, t, literal, entries, in_force or [], block.cycle_block())
         if value is None:
             continue
         if address in run.diameter_words and run.lathe:
@@ -2070,17 +2075,27 @@ def span_text(run: Run, axis: str, value: Decimal) -> str:
     return "%s %s" % (number_text(value), run.travel_units or "")
 
 
-def axis_value(run: Run, token: gedit_nc.Token, literal: Any, entries: List[Dict[str, Any]], in_force: List[Dict[str, Any]]) -> Optional[Decimal]:
+def axis_value(
+    run: Run,
+    token: gedit_nc.Token,
+    literal: Any,
+    entries: List[Dict[str, Any]],
+    in_force: List[Dict[str, Any]],
+    cycle_block: Optional[int],
+) -> Optional[Decimal]:
     """The value of an axis word in the travel's units (degrees for a rotary axis), or
-    ``None`` where the machine decides and none is chosen (`machineReading` says so)."""
+    ``None`` where the machine decides and none is chosen (`machineReading` says so).
+    ``cycle_block`` is `Block.cycle_block` of the word's block (plan §6.10 rule 11)."""
     interp = run.interp
     address = (token.address or "").upper()
-    block_key = (tuple(id(e) for e in entries), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed)
+    block_key = (tuple(id(e) for e in entries), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed, cycle_block)
     class_key = (token.address, block_key)
     if class_key in run._classes:
         cls = run._classes[class_key]
     else:
-        cls = gedit_nc.number_class_of(token.address, run.profile, interp.feed_unit, entries, interp.pitch_feed, in_force)
+        cls = gedit_nc.number_class_of(
+            token.address, run.profile, interp.feed_unit, entries, interp.pitch_feed, in_force, cycle_block=cycle_block
+        )
         run._classes[class_key] = cls
     if cls not in DIMENSION_CLASSES:
         return None
@@ -2528,6 +2543,7 @@ def read_numbers(run: Run, block: Block, words: Sequence[Tuple[int, gedit_nc.Tok
     entries: Optional[List[Dict[str, Any]]] = None
     in_force: Optional[List[Dict[str, Any]]] = None
     block_key: Optional[Tuple[Any, ...]] = None
+    cycle_block: Optional[int] = None
     chosen = as_dict(run.machine.get("source")).get("numberInput") == "machine"
     reading = run.on("machineReading") and (run.every_number is None or not run.unit_system)
     digits = run.on("wordDigits") and run.max_digits is not None
@@ -2549,12 +2565,13 @@ def read_numbers(run: Run, block: Block, words: Sequence[Tuple[int, gedit_nc.Tok
             # T120 / FB-2: under Fanuc `G43.5` (`G41.6`, `G42.6`) I, J and K are the tool
             # direction, a count, read alike on every machine.
             in_force += gedit_nc.arc_centre_modes(interp.state.get("groups"), interp.entry, profile, entries)
-            block_key = (tuple(id(e) for e in entries), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed)
+            cycle_block = block.cycle_block()
+            block_key = (tuple(id(e) for e in entries), tuple(id(e) for e in in_force), interp.feed_unit, interp.pitch_feed, cycle_block)
         class_key = (t.address, block_key)
         if class_key in run._classes:
             cls = run._classes[class_key]
         else:
-            cls = gedit_nc.number_class_of(t.address, profile, interp.feed_unit, entries, interp.pitch_feed, in_force)
+            cls = gedit_nc.number_class_of(t.address, profile, interp.feed_unit, entries, interp.pitch_feed, in_force, cycle_block=cycle_block)
             run._classes[class_key] = cls
         if want_digits:
             check_digits(run, line, t, cls, units, chosen)

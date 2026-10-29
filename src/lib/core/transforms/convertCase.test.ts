@@ -88,7 +88,7 @@ describe('convertCase options', () => {
     // and `m30`, which the control refuses on load. `fanuc-gcode` says as much in
     // `editing.forceUppercase` — which P1 reads only here; nothing upper-cases what the
     // user types (I5).
-    expect(fanuc.profile.editing).toEqual({ forceUppercase: true, preventLineJoin: true, tabWidth: 4 });
+    expect(fanuc.profile.editing).toEqual({ forceUppercase: true, preventLineJoin: true });
     expect(convertCase.preflight?.([], context(fanuc, { case: 'lower' }))).toEqual({
       key: 'ncCleanup.convertCase.lowerOnUppercaseControl',
       params: { profile: fanuc.profile.name },

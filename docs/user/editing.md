@@ -308,9 +308,11 @@ the pages would show cut. A line wider than the page continues on the next row w
 number. A tab is blanks up to the next multiple of 4. Each page has a header with the
 program's name, the date of printing and *Page 2 of 5*.
 
-**Colours** are the editor's colours for the dialect, always the **light** ones, since paper
-is white, whatever theme is on. A colour too pale to read on paper prints black. *Black only*
-writes no colour at all.
+**Colours** are the code colours you see in the editor for the dialect, always the **light**
+ones, since paper is white, whatever theme is on: the built-in colours first, then the colours
+you set yourself under *Settings, Appearance*, and then the colours a profile sets for itself,
+which win over both (see [Your own profiles](profiles.md)). A colour too pale to read on paper
+prints black. *Black only* writes no colour at all.
 
 **Limits.** Print is limited to **20,000 lines**: *This program has 41,022 lines; printing is
 limited to 20,000. Print a selection.* Export as HTML is limited to **100,000 lines**. The

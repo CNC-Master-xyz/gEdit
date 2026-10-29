@@ -19,6 +19,7 @@ from __future__ import annotations
 import unittest
 
 from tests.python import helpers
+from tests.python.test_rotate import run_extra_axes
 
 gedit_nc = helpers.import_gedit_nc()
 
@@ -102,8 +103,12 @@ class PowerOnTest(unittest.TestCase):
         self.assertEqual(helpers.effective_context(MILLING)["machine"]["params"]["diameter"], "off")
         # Everything else is the turning profile's (AD-16) — but for the rotary axes, which
         # the milling profile names as axes and as angles since M10 (P10).
-        for key in ("syntax", "outline", "numbering", "program", "codes", "grammar"):
+        for key in ("syntax", "outline", "numbering", "program", "grammar"):
             self.assertEqual(mill[key], turn[key], key)
+        # Wave Y (T156): the milling profile reads its own code set, the turning set with the
+        # milling Program start; its codes are the turning set's, entry for entry.
+        self.assertEqual((mill["codes"], turn["codes"]), (MILLING, TURNING))
+        self.assertEqual(helpers.resolved_codes(MILLING), helpers.resolved_codes(TURNING))
         rest = lambda addresses: {k: v for k, v in addresses.items() if k not in ("axes", "angular")}
         self.assertEqual(rest(mill["addresses"]), rest(turn["addresses"]))
         self.assertEqual(mill["addresses"]["axes"], ["X", "Y", "Z", "A", "B", "C"])
@@ -124,6 +129,27 @@ class FlagTest(unittest.TestCase):
         for value, want in TCP.items():
             got = sorted(entry["code"] for entry in codes if gedit_nc.tcp_of(entry) == value)
             self.assertEqual(got, want, value)
+
+
+class RotaryExtraAxisTest(unittest.TestCase):
+    """Round Y review WY-NC-2 (owner decision 2026-10-29): on a machine that lists ``QQ`` as a
+    rotary extra axis, Address Arithmetic leaves the X words under ``QQ90`` as written, as it
+    does under ``C90``; before the fix it added to both. At ``QQ0`` it still adds."""
+
+    ADD_X = {"operation": "add", "operand": 5, "addresses": ["X"]}
+
+    def test_qq90_leaves_the_words_under_it(self) -> None:
+        for rotary in ("QQ90", "C90"):
+            result = run_extra_axes("address_arithmetic.py", self.ADD_X, rotary)
+            self.assertEqual(
+                [(f["line"], f["reason"]) for f in result["findings"]], [(2, "rotary-without-tcp"), (3, "rotary-without-tcp")], rotary,
+            )
+            self.assertIn("N60 G1 X10 Y5 Z-2 F200", result["text"].split("\n"))
+
+    def test_qq0_still_adds(self) -> None:
+        result = run_extra_axes("address_arithmetic.py", self.ADD_X, "QQ0")
+        self.assertEqual(result["text"].split("\n")[1:3], ["N50 G0 X5 Y0 Z50 QQ0", "N60 G1 X15 Y5 Z-2 F200"])
+        self.assertNotIn("rotary-without-tcp", [f["reason"] for f in result["findings"]])
 
 
 if __name__ == "__main__":

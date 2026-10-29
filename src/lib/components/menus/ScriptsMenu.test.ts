@@ -28,13 +28,15 @@ vi.mock('$lib/core/scripting/filter', () => ({
           entry.meta.profiles.includes(profileId)),
     ),
   groupScripts: (entries: ScriptEntry[]) => {
-    const groups = new Map<string | null, ScriptEntry[]>();
+    const groups = new Map<string, { group: string | null; package?: string; scripts: ScriptEntry[] }>();
     for (const entry of entries) {
-      const list = groups.get(entry.group) ?? [];
-      list.push(entry);
-      groups.set(entry.group, list);
+      const pkg = entry.root.startsWith('pkg-') ? entry.root.slice(4) : undefined;
+      const key = `${pkg ?? ''}/${entry.group ?? ''}`;
+      const section = groups.get(key) ?? { group: entry.group, ...(pkg === undefined ? {} : { package: pkg }), scripts: [] };
+      section.scripts.push(entry);
+      groups.set(key, section);
     }
-    return [...groups].map(([group, scripts]) => ({ group, scripts }));
+    return [...groups.values()];
   },
 }));
 
@@ -64,11 +66,20 @@ vi.mock('$lib/stores/documents', () => {
   return { docs: { active, setActive: (v: DocMeta | null) => active.set(v) } };
 });
 
+// The package list the menu takes its captions from (`userConfig.packages`, refreshed on every load).
+vi.mock('$lib/app/userConfig', async () => {
+  const { writable } = await import('svelte/store');
+  return { userConfig: { packages: writable(null) } };
+});
+
 const ScriptsMenu = (await import('./ScriptsMenu.svelte')).default;
 const { commands, resetCommandsForTest } = await import('$lib/app/registry/commands');
 const { pythonStatus, resetScriptsForTest, scriptList, scriptListError } = await import(
   '$lib/stores/scripts'
 );
+const { userConfig } = (await import('$lib/app/userConfig')) as unknown as {
+  userConfig: { packages: { set(v: unknown): void } };
+};
 const { docs } = (await import('$lib/stores/documents')) as unknown as {
   docs: { setActive(v: DocMeta | null): void };
 };
@@ -116,6 +127,7 @@ function registerRun(id: string, enabled: boolean): void {
 const menu = (): string => render(ScriptsMenu).body;
 
 beforeEach(() => {
+  userConfig.packages.set(null);
   resetScriptsForTest();
   resetCommandsForTest();
   docs.setActive({ id: 'd1', profileId: 'fanuc-gcode' } as DocMeta);
@@ -242,5 +254,70 @@ describe('the two lists (B1 A9)', () => {
     scriptList.set([entry('bundled:scale_feed.py')]);
     expect(render(await Own()).body).toContain('No scripts of your own yet');
     expect(render(await Bundled()).body).not.toContain('No scripts');
+  });
+});
+
+// P4g (§6.9 rule 10): the scripts of a package are sections of their own, under the package's
+// name, on the Scripts tab (they are not built in, and they are not the user's own folder).
+describe('the scripts of a package', () => {
+  const Bundled = async () => (await import('./BundledScriptsMenu.svelte')).default;
+  const Own = async () => (await import('./OwnScriptsMenu.svelte')).default;
+
+  beforeEach(() => {
+    scriptList.set([
+      entry('bundled:scale_feed.py', { meta: meta({ name: 'Scale feed rates' }), editable: false }),
+      entry('pkg-shop-a:facing.py', { meta: meta({ name: 'Facing' }), editable: false }),
+      entry('pkg-shop-a:finish/chamfer.py', { group: 'finish', meta: meta({ name: 'Chamfer' }), editable: false }),
+      entry('user:mine.py', { meta: meta({ name: 'My script' }) }),
+    ]);
+  });
+
+  it('lists them on the Scripts tab, one section for the package and one for its subfolder, and not on the Tools tab', async () => {
+    const own = render(await Own()).body;
+    expect(own).toContain('data-script-id="pkg-shop-a:facing.py"');
+    expect(own).toContain('data-script-id="pkg-shop-a:finish/chamfer.py"');
+    expect(own).toContain('data-script-id="user:mine.py"');
+    expect(own).toContain('data-package="shop-a"');
+    // The caption is the package (its folder name until package.json is read) and the subfolder.
+    expect(own).toContain('shop-a / finish');
+    const bundled = render(await Bundled()).body;
+    expect(bundled).not.toContain('pkg-shop-a');
+  });
+
+  it('keeps a package section apart from a user section of the same subfolder name', async () => {
+    scriptList.set([
+      entry('pkg-shop-a:finish/chamfer.py', { group: 'finish', editable: false }),
+      entry('user:finish/mine.py', { group: 'finish' }),
+    ]);
+    const html = render(await Own()).body;
+    expect(html.match(/data-testid="scripts-group"/g)).toHaveLength(2);
+  });
+});
+
+// CODE-7 (P4g review): the captions came from a one-off `packages_list` call, so a renamed package
+// kept its old caption after Packages > Reload.
+describe('the caption of a package section', () => {
+  const Own = async () => (await import('./OwnScriptsMenu.svelte')).default;
+  const info = (name: string, title: string) => ({ name, title });
+
+  beforeEach(() => {
+    scriptList.set([entry('pkg-shop-a:facing.py', { meta: meta({ name: 'Facing' }), editable: false })]);
+  });
+
+  it('is the display name of the package list the configuration holds, and follows a new list', async () => {
+    userConfig.packages.set({ folder: '/c/packages', packages: [info('shop-a', 'Shop A tools')], problems: [] });
+    const html = render(await Own()).body;
+    expect(html).toContain('Shop A tools');
+    expect(html).not.toContain('>shop-a<');
+    userConfig.packages.set({ folder: '/c/packages', packages: [info('shop-a', 'Shop A, new name')], problems: [] });
+    const again = render(await Own()).body;
+    expect(again).toContain('Shop A, new name');
+    expect(again).not.toContain('Shop A tools');
+  });
+
+  it('is the folder name while no list is known, or when the package has no title', async () => {
+    expect(render(await Own()).body).toContain('>shop-a<');
+    userConfig.packages.set({ folder: '/c/packages', packages: [info('shop-a', '  ')], problems: [] });
+    expect(render(await Own()).body).toContain('>shop-a<');
   });
 });

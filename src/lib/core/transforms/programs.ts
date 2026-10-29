@@ -86,6 +86,13 @@ export interface CallTarget {
   local?: true;
   /** P4d review NC-2: a rule that fired is an interrupt (`CallRule.interrupt`, `M96 P2000`). */
   interrupt?: true;
+  /**
+   * Wave Y geometry fix G5 (§7 row): a rule that fired runs its program from an external device
+   * (`CallRule.external`, Fanuc `M198 P2000`). The program of the document with that number is not
+   * what a block reference on the line names (`targetProgramOf`, `possibleProgramsOf`, the other
+   * documents). It still counts as a caller for the returns of that program (owner 2026-10-20).
+   */
+  external?: true;
 }
 
 /**
@@ -205,7 +212,10 @@ function callOfRule(rule: CallRuleCompiled, tokens: readonly NcToken[], masked: 
   const after = match === null ? 0 : match.index + match[0].length;
   const address = rule.address.toUpperCase();
   const repeat = rule.repeatAddress?.toUpperCase() ?? null;
-  const interrupt: { interrupt?: true } = rule.interrupt === true ? { interrupt: true } : {};
+  const interrupt: { interrupt?: true; external?: true } = {
+    ...(rule.interrupt === true ? { interrupt: true as const } : {}),
+    ...(rule.external === true ? { external: true as const } : {}),
+  };
   const candidates: NcToken[] = [];
   let repeated = false;
   for (const token of tokens) {
@@ -266,11 +276,15 @@ export function callOn(tokens: readonly NcToken[], line: string, cp: CompiledPro
   if (fired.length === 0) return null;
   const first = fired[0];
   const interrupt = fired.some((call) => call.interrupt === true);
+  const external = fired.every((call) => call.external === true);
   const merged: CallTarget = fired.every((call) => sameCall(first, call))
     ? { ...first }
     : { key: null, text: fired.map((call) => call.text).filter((text) => text !== '').join(' ') };
   delete merged.interrupt;
+  delete merged.external;
   if (interrupt) merged.interrupt = true;
+  // Only when every rule that fired is external; one that is not still names a program of the file.
+  if (external) merged.external = true;
   return merged;
 }
 
@@ -477,6 +491,8 @@ export function targetProgramOf(scan: ProgramScan, index: ProgramIndex, row: num
     // A local call runs a part of the line's own program.
     if (call.local === true) return { segment: own };
     if (call.key === null) return { refused: 'noCall', key: null };
+    // An external call runs a program from a device, not the program of the file with that number.
+    if (call.external === true) return { refused: 'notInFile', key: call.key };
     const carriers = index.byKey.get(call.key) ?? [];
     if (carriers.length === 0) return { refused: 'notInFile', key: call.key };
     if (carriers.length > 1) return { refused: 'programTwice', key: call.key };
@@ -518,6 +534,7 @@ export function possibleProgramsOf(scan: ProgramScan, index: ProgramIndex, row: 
     const call = index.calls.get(row);
     if (call === undefined || call.local === true) return [own];
     if (call.key === null) return null;
+    if (call.external === true) return [];
     return index.byKey.get(call.key) ?? [];
   }
   const key = index.programs[own]?.key ?? null;

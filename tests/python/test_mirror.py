@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import unittest
 from decimal import Decimal
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
 
 from tests.python import helpers
 from tests.python.test_rotate import (
@@ -34,6 +34,8 @@ from tests.python.test_rotate import (
     run_case,
     run_long,
     run_owner_public,
+    run_selection,
+    run_extra_axes,
     run_text,
 )
 
@@ -551,6 +553,175 @@ class WalkCountTest(unittest.TestCase):
             result = in_process(mirror, "fanuc-gcode", self.PARAMS, text)
         self.assertEqual([made for made in trackers.made][1:], [{"reach": False, "flow": False}])
         self.assertIn("G2 ", result["text"])
+
+
+class LaterVersionTest(unittest.TestCase):
+    """Wave Y, BL-NC-geometry: the later-version transforms under the mirror. Each test fails
+    without its change."""
+
+    Z = {"about": "z"}
+    HEAD = ["%", "O0071 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G18 G21 G40 G99", "T0101", "G0 X60. Z2."]
+    G71 = ["G71 U2. R0.5", "G71 P10 Q20 U0.4 W0.1 F0.25", "N10 G0 X20.", "G1 Z-15. F0.15", "X30. W-10.", "N20 G1 X60.", "G70 P10 Q20"]
+    TAIL = ["G0 X100. Z50.", "M30", "%"]
+
+    def errors(self, result: Dict[str, Any]) -> List[Tuple[int, str]]:
+        return [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"]
+
+    def test_t015_a_roughing_cycle_with_its_contour_is_mirrored(self) -> None:
+        # The P4a prelude's case list (FANUC 0i-F lathe manual, the stock removal cycles): the
+        # contour is points, W of the second block of G71 and G72 and both W of G73 change sign,
+        # the depth of cut and the retract stay.
+        result = run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(self.HEAD + self.G71 + self.TAIL))
+        self.assertEqual(self.errors(result), [])
+        lines = result["text"].split("\n")
+        self.assertEqual(lines[5:12], ["G71 U2. R0.5", "G71 P10 Q20 U0.4 W-0.1 F0.25", "N10 G0 X20.", "G1 Z15. F0.15", "X30. W10.", "N20 G1 X60.", "G70 P10 Q20"])
+        g72 = ["G72 W1.5 R0.5", "G72 P10 Q20 U0.2 W0.1 F0.2", "N10 G0 Z-25.", "G1 X20.", "N20 Z0."]
+        lines = run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(self.HEAD + g72 + self.TAIL))["text"].split("\n")
+        self.assertEqual(lines[5:7], ["G72 W1.5 R0.5", "G72 P10 Q20 U0.2 W-0.1 F0.2"])
+        g73 = ["G73 U3. W-2. R3", "G73 P10 Q20 U0.4 W0.2 F0.25", "N10 G0 X20. Z0.", "G1 Z-20.", "N20 X60."]
+        lines = run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(self.HEAD + g73 + self.TAIL))["text"].split("\n")
+        self.assertEqual(lines[5:7], ["G73 U3. W2. R3", "G73 P10 Q20 U0.4 W-0.2 F0.25"])
+
+    def test_t015_a_contour_outside_the_scope_is_still_refused(self) -> None:
+        program = self.HEAD + self.G71 + self.TAIL
+        # The selection holds the cycle and G70 but not the whole contour.
+        found = self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(program[5:9]), preceding=program[:5]))
+        self.assertIn((6, "roughing-cycle"), found)
+        self.assertIn((7, "roughing-cycle"), found)
+        # The first block alone, its second below the selection.
+        found = self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(program[5:6]), preceding=program[:5]))
+        self.assertEqual(found, [(6, "roughing-cycle")])
+        # G70 whose contour lies above the selection.
+        found = self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(program[11:13]), preceding=program[:11]))
+        self.assertIn((12, "lathe-cycle"), found)
+        # A block number that stands twice: which contour the control takes is not certain.
+        twice = self.HEAD + self.G71 + ["N10 G0 X100. Z50."] + self.TAIL
+        self.assertIn((7, "roughing-cycle"), self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, "\n".join(twice))))
+
+    def test_t015_d5_10_the_taper_passes_stay_refused(self) -> None:
+        # Manual check D5-10: a pass with a taper stays refused under the Z mirror in v1.2.0.
+        text = "\n".join(self.HEAD + ["G90 X50. Z-20. R-2. F0.2", "G94 X20. Z-2. R-1. F0.2"] + self.TAIL)
+        found = self.errors(run_text("mirror.py", "fanuc-lathe", self.Z, text))
+        self.assertIn((6, "single-pass-taper"), found)
+        self.assertIn((7, "single-pass-taper"), found)
+
+
+class SkepticGeometryTest(unittest.TestCase):
+    """Wave Y skeptic of BL-NC-geometry. D1: a tangential arc (CT) or a Klartext departure (DEP)
+    continues the direction of the move before it, and an approach (APPR) meets the contour
+    element after it; outside the selection that move is not mirrored. D2: a roughing or
+    finishing cycle outside the selection that names the contour of the selection. Each test
+    fails without the fix, except the guards."""
+
+    MIRROR_Y10 = {"about": "x-axis", "py": 10}
+    Z = {"about": "z", "z0": 0}
+    #: A Sinumerik CT after a line (the skeptic's t016c).
+    TANGENT = [
+        "; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "N10 G17 G90 G71", "N20 G0 X10 Y0 Z5", "N30 G1 Z-2 F200", "N40 G1 X20 Y10",
+        "N50 CT X30 Y20", "N60 G1 X40 Y20", "N70 G0 Z50", "N80 M30",
+    ]
+    #: A Klartext approach and departure along straight lines (the skeptic's t018x).
+    APPROACH = [
+        "0 BEGIN PGM T MM", "1 TOOL CALL 1 Z S3000", "2 L X+0 Y+0 R0 FMAX", "3 L Z-2 R0 F200",
+        "4 APPR LT X+10 Y+0 LEN5 RL F200", "5 L X+20 Y+10", "6 DEP LT LEN10 F800", "7 L Z+50 R0 FMAX",
+        "8 END PGM T MM",
+    ]
+    #: G71 with its contour, and G70 on the same contour further down (the skeptic's t015a).
+    FINISH = [
+        "%", "O0071 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G18 G21 G40 G99", "T0101",
+        "G0 X60. Z2.", "G71 U2. R0.5", "G71 P10 Q20 U0.4 W0.1 F0.25", "N10 G0 X20.", "G1 Z-15. F0.15",
+        "X30. W-10.", "G2 X40. Z-30. R5.", "N20 G1 X60.", "G0 X100. Z50.", "T0202", "G0 X60. Z2.",
+        "G70 P10 Q20", "G0 X100. Z50.", "M30", "%",
+    ]
+
+    def test_d1_a_tangential_arc_from_the_mirror_line_as_the_first_move(self) -> None:
+        # The tool stands at X20 Y10, on the mirror line: the arc would start along the
+        # unmirrored direction of N40 and end on another arc.
+        result = run_selection(SCRIPT, "sinumerik-mill", self.MIRROR_Y10, self.TANGENT, 6, 9)
+        self.assertEqual(errors_of(result), [(6, "selection-start")])
+        self.assertEqual(result["text"], "\n".join(self.TANGENT[5:9]))
+
+    def test_d1_a_tangential_arc_after_the_join(self) -> None:
+        result = run_selection(SCRIPT, "sinumerik-mill", self.MIRROR_Y10, self.TANGENT, 5, 9)
+        self.assertEqual(errors_of(result), [(5, "selection-start")])
+
+    def test_d1_a_departure_as_the_first_move_or_after_the_join(self) -> None:
+        self.assertEqual(errors_of(run_selection(SCRIPT, "heidenhain-klartext", self.MIRROR_Y10, self.APPROACH, 7, 9)), [(7, "selection-start")])
+        self.assertEqual(errors_of(run_selection(SCRIPT, "heidenhain-klartext", self.MIRROR_Y10, self.APPROACH, 6, 9)), [(6, "selection-start")])
+
+    def test_d1_an_approach_as_the_last_move_of_the_selection(self) -> None:
+        # Its contour element (line 6) stays below the selection, unmirrored.
+        result = run_selection(SCRIPT, "heidenhain-klartext", {"about": "x-axis", "py": 0}, self.APPROACH, 3, 5)
+        self.assertEqual(errors_of(result), [(5, "selection-inside")])
+
+    def test_d1_guards_the_whole_program_and_a_selection_with_the_contour(self) -> None:
+        for program, profile in ((self.TANGENT, "sinumerik-mill"), (self.APPROACH, "heidenhain-klartext")):
+            result = run_text(SCRIPT, profile, self.MIRROR_Y10, "\n".join(program))
+            self.assertFalse(refused(result), result["findings"])
+        # The approach with the element it meets, the departure with the element it leaves.
+        result = run_selection(SCRIPT, "heidenhain-klartext", {"about": "x-axis", "py": 0}, self.APPROACH, 3, 7)
+        self.assertFalse(refused(result), result["findings"])
+        self.assertIn("4 APPR LT X+10 Y+0 LEN5 RR F200", result["text"].split("\n"))
+
+    def test_d2_a_finishing_cycle_below_names_the_contour(self) -> None:
+        # G70 below the selection would finish the mirrored contour from Z2.
+        result = run_selection(SCRIPT, "fanuc-lathe", self.Z, self.FINISH, 5, 13)
+        self.assertEqual({line for line, reason in errors_of(result) if reason == "roughing-cycle"}, {6, 7, 8})
+        # The lines below not sent: no contour is known to be in the selection.
+        result = run_selection(SCRIPT, "fanuc-lathe", self.Z, self.FINISH, 5, 13, below=False)
+        self.assertEqual(errors_of(result), [(6, "roughing-cycle"), (7, "roughing-cycle")])
+
+    def test_d2_a_contour_alone_whose_cycles_are_outside(self) -> None:
+        program = list(self.FINISH)
+        program[7] = "N10 G0 X20. Z2."  # a first move with every axis: no selection-start
+        self.assertEqual(errors_of(run_selection(SCRIPT, "fanuc-lathe", self.Z, program, 8, 12)), [(8, "roughing-cycle")])
+        # The lines below not sent: the G71 above names it.
+        self.assertEqual(errors_of(run_selection(SCRIPT, "fanuc-lathe", self.Z, program, 8, 12, below=False)), [(8, "roughing-cycle")])
+
+    def test_d2_guards_the_cycles_and_their_contour_in_the_scope(self) -> None:
+        result = run_text(SCRIPT, "fanuc-lathe", self.Z, "\n".join(self.FINISH))
+        self.assertEqual(errors_of(result), [])
+        result = run_selection(SCRIPT, "fanuc-lathe", self.Z, self.FINISH, 5, 17)
+        self.assertEqual(errors_of(result), [])
+        self.assertIn("G71 P10 Q20 U0.4 W-0.1 F0.25", result["text"].split("\n"))
+
+
+class RoundYReviewTest(unittest.TestCase):
+    """Round Y review. WY-NC-2 (owner decision 2026-10-29): a rotary extra axis of the machine
+    (``QQ``) standing away from 0 stops Mirror on the lines below it as ``C`` does. WY-NC-3: an
+    Okuma plane code (``G17``/``G18``, group ``plane`` without ``sets.plane``) that a jump skips
+    is seen by the meeting check, so the arc the jump reaches under ``G17`` is not mirrored as
+    if it ran under ``G18``."""
+
+    Z = {"about": "z", "z0": 0}
+
+    @staticmethod
+    def okuma(jump: str) -> str:
+        return "\n".join([
+            "O1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G17 G90", "G0 X50. Z2.",
+            jump, "G18 G90", "NLAB1 G2 X40. Z-5. L5. F0.2", "G1 Z-20.", "M02",
+        ])
+
+    def test_nc2_a_selection_below_a_turned_rotary_extra_axis_is_refused(self) -> None:
+        for rotary in ("QQ90", "C90"):
+            result = run_extra_axes(SCRIPT, {"about": "x-axis"}, rotary, selection=(3, 3))
+            self.assertEqual(errors_of(result), [(3, "rotary-word")], rotary)
+
+    def test_nc2_at_zero_the_selection_is_still_mirrored(self) -> None:
+        result = run_extra_axes(SCRIPT, {"about": "x-axis"}, "QQ0", selection=(3, 3))
+        self.assertFalse(refused(result), result["findings"])
+        self.assertEqual(result["text"], "N60 G1 X10 Y-5 Z-2 F200")
+
+    def test_nc3_a_jump_over_an_okuma_plane_change_is_refused(self) -> None:
+        for jump in ("IF [V1 EQ 1] NLAB1", "GOTO NLAB1", "IF [V1 EQ 1] GOTO NLAB1"):
+            result = run_text(SCRIPT, "okuma-osp", self.Z, self.okuma(jump), preset="okuma-1mm")
+            self.assertEqual(errors_of(result), [(6, "jump")], jump)
+
+    def test_nc3_without_the_jump_the_arc_is_mirrored(self) -> None:
+        result = run_text(SCRIPT, "okuma-osp", self.Z, self.okuma("(NO JUMP)"), preset="okuma-1mm")
+        self.assertFalse(refused(result), result["findings"])
+        self.assertIn("NLAB1 G3 X40. Z5. L5. F0.2", result["text"].split("\n"))
 
 
 if __name__ == "__main__":

@@ -39,6 +39,7 @@
     "@tailwindcss/vite": "^4.2.2",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.20.4",
+    "ajv": "^8.20.0",
     "autoprefixer": "^10.5.0",
     "postcss": "^8.5.10",
     "svelte": "^5.0.0",

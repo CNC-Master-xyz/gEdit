@@ -35,13 +35,14 @@ import {
   pageHeightEm,
 } from '$lib/components/print/printStyle';
 import { ROLE_COLORS, ROLES, type Role } from '$lib/core/grammar/roles';
-import { profileOverrides } from '$lib/core/grammar/themes';
+import { paletteOverrides, profileOverrides } from '$lib/core/grammar/themes';
 import { addressNames, letterAddresses, numberPattern, wordCodes } from '$lib/core/grammar/shared';
 import { tokenizeLine } from '$lib/core/nc/tokenizer';
 import { SELECTION_CROSSES, transformScope } from '$lib/core/transforms/scope';
 import { t as translate } from '$lib/i18n';
 import { editor as appEditor } from '$lib/monaco/editorService';
 import { docs as appDocs } from '$lib/stores/documents';
+import { settings as appSettings } from '$lib/stores/settings';
 import { machines as appMachines } from '$lib/stores/machines';
 import type {
   DialogFilter,
@@ -56,7 +57,7 @@ import type {
 import type { CodeDb } from '$lib/core/codes/types';
 import type { FieldSpec } from '$lib/core/forms/types';
 import type { LineState, NcToken } from '$lib/core/nc/types';
-import type { CompiledProfile } from '$lib/core/profiles/types';
+import type { CompiledProfile, ProfileColors } from '$lib/core/profiles/types';
 
 /** Print options as the print form gives them; remembered between runs in `uiState.lastParams['print']`. */
 export interface PrintOptions {
@@ -190,14 +191,16 @@ export function contrastOnWhite(hex: string): number {
 }
 
 /**
- * The colour each role prints in: the light palette with the profile's `colors.light` overrides. A role whose
- * colour is under 3:1 against white is left out, and a role that is left out prints black.
+ * The colour each role prints in, as on screen (P4h, §6.10 rule 6): the light palette, then the user's light role
+ * colours (`appearance.roleColors`), then the profile's `colors.light` overrides, the later layer winning. A role
+ * whose colour is under 3:1 against white is left out, and a role that is left out prints black.
  */
-export function printPalette(cp: CompiledProfile): Partial<Record<Role, string>> {
+export function printPalette(cp: CompiledProfile, user?: ProfileColors): Partial<Record<Role, string>> {
   const overrides = profileOverrides(cp.profile, 'light');
+  const mine = paletteOverrides(user, 'light');
   const palette: Partial<Record<Role, string>> = {};
   for (const role of ROLES) {
-    const color = overrides[role] ?? ROLE_COLORS.light[role];
+    const color = overrides[role] ?? mine[role] ?? ROLE_COLORS.light[role];
     if (HEX.test(color) && contrastOnWhite(color) >= PRINT_MIN_CONTRAST) palette[role] = color.toLowerCase();
   }
   return palette;
@@ -626,14 +629,14 @@ export function exceedsRowBudget(lines: readonly string[], textCols: number, lim
 }
 
 /** The pages of `source` for `cp`: tokens coloured with the light theme's role colours, or black. */
-export function buildPrintDocument(source: PrintSource, options: PrintOptions, cp: CompiledProfile, codes?: CodeDb): PrintDocument {
+export function buildPrintDocument(source: PrintSource, options: PrintOptions, cp: CompiledProfile, codes?: CodeDb, user?: ProfileColors): PrintDocument {
   const fontPt = clampFontPt(options.fontPt);
   const opts: PrintOptions = { ...options, fontPt };
   const { rows: pageRows, cols } = pageGeometry(fontPt);
   const gutter = opts.lineNumbers ? gutterOf(source) : 0;
   const textCols = Math.max(cols - (gutter > 0 ? gutter + 1 : 0), 1);
 
-  const palette = opts.colors === 'color' ? printPalette(cp) : {};
+  const palette = opts.colors === 'color' ? printPalette(cp, user) : {};
   const colorOf = (role: Role | null): string | undefined => (role === null ? undefined : palette[role]);
   const ctx = roleContext(cp, codes);
 
@@ -826,6 +829,8 @@ export interface PrintDeps {
   docs: Pick<DocumentStore, 'getActiveId' | 'get' | 'list'>;
   editor: Pick<EditorService, 'getLineCount' | 'getLines' | 'selectionLines'>;
   machines: Pick<MachineService, 'effective'>;
+  /** The user's role colours (`appearance.roleColors`); the print uses their light ones, as the screen does. */
+  roleColors?(): ProfileColors;
   status: Pick<StatusService, 'show'>;
   dialogs: Pick<NativeDialogs, 'saveFile'>;
   writeFile(path: string, bytes: Uint8Array): Promise<void>;
@@ -856,6 +861,14 @@ export function exportFileName(title: string): string {
 
 export function createPrintService(deps: PrintDeps): PrintService {
   const { t } = deps;
+  const roleColorsOf = (): ProfileColors => {
+    try {
+      return deps.roleColors?.() ?? {};
+    } catch (err) {
+      console.error('print: the role colours could not be read', err);
+      return {};
+    }
+  };
   // `window.print()` answers a promise where Tauri routes it to the native print operation (macOS), nothing elsewhere.
   let printFunction: () => unknown = () => deps.printWindow();
 
@@ -876,7 +889,7 @@ export function createPrintService(deps: PrintDeps): PrintService {
   };
 
   /** The document to print: its source and profile, or the outcome that says why not. */
-  function prepare(options: PrintOptions, forExport: boolean): { source: PrintSource; cp: CompiledProfile; codes: CodeDb } | PrintOutcome {
+  function prepare(options: PrintOptions, forExport: boolean): { source: PrintSource; cp: CompiledProfile; codes: CodeDb; user: ProfileColors } | PrintOutcome {
     const docId = deps.docs.getActiveId();
     const doc = docId === null ? undefined : deps.docs.get(docId);
     if (docId === null || !doc) return refuse('noDocument', t('print.noDocument'));
@@ -917,7 +930,7 @@ export function createPrintService(deps: PrintDeps): PrintService {
       const params = { pages: Math.ceil(limit / pageRows).toLocaleString('en-US') };
       return refuse('tooLong', forExport ? t('print.tooManyPagesExport', params) : t('print.tooManyPages', params), count);
     }
-    return { source, cp, codes };
+    return { source, cp, codes, user: roleColorsOf() };
   }
 
   const isOutcome = (value: unknown): value is PrintOutcome => typeof (value as PrintOutcome).ok === 'boolean';
@@ -925,7 +938,7 @@ export function createPrintService(deps: PrintDeps): PrintService {
   return {
     build(options) {
       const prepared = prepare(options, false);
-      return isOutcome(prepared) ? null : buildPrintDocument(prepared.source, options, prepared.cp, prepared.codes);
+      return isOutcome(prepared) ? null : buildPrintDocument(prepared.source, options, prepared.cp, prepared.codes, prepared.user);
     },
 
     async print(options) {
@@ -933,7 +946,7 @@ export function createPrintService(deps: PrintDeps): PrintService {
       const prepared = prepare(options, false);
       if (isOutcome(prepared)) return prepared;
       const docId = deps.docs.getActiveId() as DocId;
-      const doc = buildPrintDocument(prepared.source, options, prepared.cp, prepared.codes);
+      const doc = buildPrintDocument(prepared.source, options, prepared.cp, prepared.codes, prepared.user);
 
       let handle: PrintViewHandle;
       try {
@@ -972,7 +985,7 @@ export function createPrintService(deps: PrintDeps): PrintService {
     async exportHtml(options) {
       const prepared = prepare(options, true);
       if (isOutcome(prepared)) return prepared;
-      const doc = buildPrintDocument(prepared.source, options, prepared.cp, prepared.codes);
+      const doc = buildPrintDocument(prepared.source, options, prepared.cp, prepared.codes, prepared.user);
       const filters: DialogFilter[] = [{ name: t('print.htmlFilter'), extensions: ['html', 'htm'] }];
       const path = await deps.dialogs.saveFile({ defaultPath: exportFileName(doc.title), filters });
       if (path === null) return { ok: false, reason: 'cancelled' };
@@ -1012,6 +1025,7 @@ export const print: PrintService = createPrintService({
   docs: appDocs,
   editor: appEditor,
   machines: appMachines,
+  roleColors: () => appSettings.get('appearance.roleColors'),
   status: appStatus,
   dialogs: appDialogs,
   async writeFile(path, bytes) {

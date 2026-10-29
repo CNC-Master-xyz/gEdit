@@ -21,6 +21,8 @@
 // text (§7.5), because script and profile labels are data.
 
 import type { FieldSpec } from '$lib/core/forms/types';
+import { offersLanguageChoice } from '$lib/i18n/locale';
+import type { ProfileColors } from '$lib/core/profiles/types';
 
 /** The `$version` this build writes. A file with a higher version is read, never written. */
 export const SETTINGS_VERSION = 1;
@@ -35,6 +37,13 @@ export interface Settings {
   'appearance.editorFontFamily': string;
   /** 8-32. */
   'appearance.editorFontSize': number;
+  /**
+   * P4h (§6.10 rule 6): the user's own colour per role and theme, over the built-in palette
+   * and under a profile's own colours. Every colour is `#rrggbb` with a contrast of at least
+   * 4.5:1 against the editor background of its theme; one that is not is reported and not
+   * used. Edited in Settings, Appearance ("Code colours"), not by the form renderer.
+   */
+  'appearance.roleColors': ProfileColors;
   /** 1-16. */
   'editor.tabWidth': number;
   'editor.insertSpaces': boolean;
@@ -106,6 +115,19 @@ export interface Settings {
   /** 1-3600. */
   'scripts.timeoutSeconds': number;
   'scripts.showBundled': boolean;
+  /**
+   * P4g (plan §6.9 rules 37–42, Q4-18): the interface language, a tag such as `en` or `de-CH`
+   * (`isLocaleTag`). A tag with no message set that ships, and any other value, shows English.
+   * Takes effect at the next start. The dialog offers it only when a second language ships
+   * (`offersLanguageChoice`), so its row is `dialog: false` until then (P4.37).
+   */
+  'ui.language': string;
+  /**
+   * P4g (AD-56, plan §6.9 rule 12): the script packages that are switched off, by folder name.
+   * Rust reads this key straight from the file, like `scripts.*`. Edited on the Packages page,
+   * never in the dialog's forms.
+   */
+  'packages.disabled': string[];
 }
 
 /** `Object.freeze` without widening the value's type, so `DEFAULTS` stays a `Settings`. */
@@ -123,6 +145,7 @@ export const DEFAULTS: Settings = freeze({
   'appearance.theme': 'system',
   'appearance.editorFontFamily': "Menlo, Consolas, 'DejaVu Sans Mono', monospace",
   'appearance.editorFontSize': 14,
+  'appearance.roleColors': freeze<ProfileColors>({}),
   'editor.tabWidth': 4,
   'editor.insertSpaces': true,
   'editor.renderWhitespace': 'none',
@@ -154,6 +177,8 @@ export const DEFAULTS: Settings = freeze({
   'scripts.folders': freeze<string[]>([]),
   'scripts.timeoutSeconds': 60,
   'scripts.showBundled': true,
+  'ui.language': 'en',
+  'packages.disabled': freeze<string[]>([]),
 } satisfies Settings);
 
 /** The pages of the settings dialog, in the order they are shown (WP2.7). */
@@ -217,6 +242,9 @@ export const SETTING_FIELDS: SettingFieldMeta[] = [
   // edit and the dialog cannot disagree (G8 M2).
   meta('appearance.editorFontFamily', 'appearance', { type: 'text', required: true }),
   meta('appearance.editorFontSize', 'appearance', { type: 'integer', min: 8, max: 32 }),
+  // A palette is not a form field either: the role colour editor (`RoleColorRows.svelte`)
+  // draws it under the theme choice, so the form renderer never sees it (P4.41).
+  meta('appearance.roleColors', 'appearance', { type: 'text' }, { dialog: false }),
 
   // Editor
   meta('editor.tabWidth', 'editor', { type: 'integer', min: 1, max: 16 }),
@@ -267,4 +295,10 @@ export const SETTING_FIELDS: SettingFieldMeta[] = [
   meta('scripts.folders', 'scripts', { type: 'folder' }),
   meta('scripts.timeoutSeconds', 'scripts', { type: 'integer', min: 1, max: 3600 }),
   meta('scripts.showBundled', 'scripts', { type: 'bool' }),
+
+  // P4g: the language row is on the Appearance page only when a second language ships
+  // (`offersLanguageChoice`, rule 41); its choices are the languages that ship, filled in by the
+  // dialog. The package list has a page of its own and is never a form row.
+  meta('ui.language', 'appearance', { type: 'choice', choices: [] }, { dialog: offersLanguageChoice() }),
+  meta('packages.disabled', 'scripts', { type: 'text' }, { dialog: false }),
 ];

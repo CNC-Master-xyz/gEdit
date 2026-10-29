@@ -1,0 +1,17 @@
+{
+  "message": "Nothing was changed: 2 blocks cannot be mirrored: 2 blocks with a rotary axis away from 0. Machine 'Mill extra axes': it does not say how it reads numbers, so a word whose reading depends on that would refuse the run.",
+  "findings": [
+    {
+      "line": 10,
+      "severity": "error",
+      "message": "N80 G1 Y10 QQ90: a rotary axis moves to an angle other than 0 here, or stands at one; turning or mirroring the path would need its angle changed too, which gEdit does not do.",
+      "reason": "rotary-word"
+    },
+    {
+      "line": 11,
+      "severity": "error",
+      "message": "N90 G1 X30 AA=25: a rotary axis moves to an angle other than 0 here, or stands at one; turning or mirroring the path would need its angle changed too, which gEdit does not do.",
+      "reason": "rotary-word"
+    }
+  ]
+}

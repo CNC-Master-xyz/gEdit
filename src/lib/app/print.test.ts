@@ -44,7 +44,7 @@ import { DIALECTS, corpus } from '$lib/core/grammar/testCorpus';
 import { createDocumentStore } from '$lib/stores/documents';
 import { t } from '$lib/i18n';
 import type { DocId, NewDocMeta } from '$lib/app/types';
-import type { CompiledProfile } from '$lib/core/profiles/types';
+import type { CompiledProfile, ProfileColors } from '$lib/core/profiles/types';
 
 const FANUC = DIALECTS.find((d) => d.id === 'fanuc-gcode')!;
 const CP: CompiledProfile = FANUC.cp;
@@ -269,15 +269,15 @@ describe('colours', () => {
     }
   });
 
-  it('prints black for a role whose colour is under 3:1 against white (here: a profile override)', () => {
+  it('never prints a pale profile colour: the profile palette ignores it (P4h, §6.10 rule 6), so the role keeps its built-in colour', () => {
     const pale = { ...FANUC.profile, colors: { light: { gcode: '#ffee88', axis: '#0a5f8f' } } };
     const cp = { ...CP, profile: pale } as CompiledProfile;
     expect(contrastOnWhite('#ffee88')).toBeLessThan(3);
-    expect(printPalette(cp).gcode).toBeUndefined();
+    expect(printPalette(cp).gcode).toBe(ROLE_COLORS.light.gcode.toLowerCase());
     expect(printPalette(cp).axis).toBe('#0a5f8f');
     const doc = buildPrintDocument(source(['G1 X10.']), OPTIONS, cp);
     const row = doc.pages[0].rows[0].spans;
-    expect(row.find((s) => s.text === 'G1')?.color).toBeUndefined();
+    expect(row.find((s) => s.text === 'G1')?.color).toBe(ROLE_COLORS.light.gcode.toLowerCase());
     expect(row.find((s) => s.text === 'X10.')?.color).toBe('#0a5f8f');
   });
 
@@ -285,6 +285,32 @@ describe('colours', () => {
     const own = { ...FANUC.profile, colors: { light: { gcode: '#112233' }, dark: { gcode: '#aabbcc' } } };
     const palette = printPalette({ ...CP, profile: own } as CompiledProfile);
     expect(palette.gcode).toBe('#112233');
+  });
+
+  // CODE-9: the print follows the theme's colours, which hold the user's (built-in < user < profile).
+  it('prints the user’s light role colours, and a colour of the profile still wins over them', () => {
+    const user: ProfileColors = { light: { gcode: '#1a237e', axis: '#0a5f8f' }, dark: { feed: '#ffcc00' } };
+    expect(contrastOnWhite('#1a237e') >= 3).toBe(true);
+    const palette = printPalette(CP, user);
+    expect(palette.gcode).toBe('#1a237e');
+    expect(palette.axis).toBe('#0a5f8f');
+    expect(palette.feed).toBe(ROLE_COLORS.light.feed.toLowerCase());
+    const own = { ...FANUC.profile, colors: { light: { gcode: '#112233' } } };
+    const layered = printPalette({ ...CP, profile: own } as CompiledProfile, user);
+    expect(layered.gcode).toBe('#112233');
+    expect(layered.axis).toBe('#0a5f8f');
+    // A user colour the theme would refuse (too pale) is ignored here as well.
+    expect(printPalette(CP, { light: { gcode: '#ffee88' } }).gcode).toBe(ROLE_COLORS.light.gcode.toLowerCase());
+  });
+
+  it('the page model and the service hand the user’s colours to the page', () => {
+    const user: ProfileColors = { light: { gcode: '#1a237e' } };
+    const doc = buildPrintDocument(source(['G1 X10.']), OPTIONS, CP, undefined, user);
+    expect(doc.pages[0].rows[0].spans.find((s) => s.text === 'G1')?.color).toBe('#1a237e');
+    const r = rig();
+    r.roleColors = user;
+    const built = r.service.build(OPTIONS)!;
+    expect(built.pages[0].rows.flatMap((row) => row.spans).some((s) => s.color === '#1a237e')).toBe(true);
   });
 
   it('measures contrast the WCAG way and reads anything that is not a colour as no contrast', () => {
@@ -543,6 +569,8 @@ interface Rig {
   machineError: Error | null;
   /** Holds the layout wait of the print open until it resolves. */
   gate: Promise<void> | null;
+  /** The user's role colours the print is handed. */
+  roleColors: ProfileColors;
 }
 
 function newDoc(over: Partial<NewDocMeta> = {}): NewDocMeta {
@@ -583,6 +611,7 @@ function rig(over: { lines?: string[]; docs?: Partial<NewDocMeta> } = {}): Rig {
     writeFails: false,
     machineError: null,
     gate: null,
+    roleColors: {},
     service: undefined as never,
   };
   const deps: PrintDeps = {
@@ -598,6 +627,7 @@ function rig(over: { lines?: string[]; docs?: Partial<NewDocMeta> } = {}): Rig {
         return { cp: CP } as never;
       },
     },
+    roleColors: () => r.roleColors,
     status: { show: (text, o) => void r.shown.push({ text, error: o?.error === true }) },
     dialogs: {
       saveFile: async (o) => {

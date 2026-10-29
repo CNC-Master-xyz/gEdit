@@ -485,11 +485,13 @@ REASONS = {
     # -- arcs --------------------------------------------------------------------------
     "arc-tangential": (
         TURNING,
-        "a tangential arc or an arc through a point; gEdit cannot check it after the transform",
+        "a tangential arc or an arc through a point; gEdit cannot check it after a turn or a "
+        "mirror that rounds. Turn by 90, 180 or 270 degrees, or mirror in X or Y",
     ),
     "arc-unsupported": (
         ALL_OPS,
-        "an arc gEdit cannot compute (an arc by an L radius, a contour arc with the C axis)",
+        "an arc gEdit cannot compute, or cannot check after a turn or a mirror that rounds (an "
+        "arc by an L radius, a contour arc with the C axis)",
     ),
     "swap-unknown": (
         TURNING,
@@ -540,7 +542,8 @@ REASONS = {
     "roughing-cycle": (
         ("lathe-z-mirror",),
         "a roughing cycle that works from a contour (its finishing allowance along Z has a "
-        "direction); gEdit does not mirror it yet",
+        "direction): gEdit mirrors G70 to G73 only together with both their blocks and their "
+        "whole contour, and does not mirror the Okuma LAP",
     ),
     "lathe-cycle": (
         ("lathe-z-mirror",),
@@ -1070,6 +1073,16 @@ class _Data:
         for kind, regex in (_dict(patterns).get("outline") or []):
             if kind == "subprogram-call" and regex is not None:
                 self.calls.append(regex)
+        #: Wave Y (T015): the profile's rules that name block numbers (``numbering.references``),
+        #: of which one that names two addresses gives a range of blocks (the contour ``P`` to ``Q``
+        #: of the lathe roughing and finishing cycles).
+        refs = _dict(getattr(cp, "patterns", None)).get("references") if cp is not None else None
+        self.ranges = [(regex, [a.upper() for a in addrs]) for regex, addrs in (refs or []) if regex is not None and len(addrs) == 2]
+        #: Wave Y (T015): the block numbers the run can see (:func:`set_block_numbers`): number ->
+        #: the lines of the scope that carry it, and the numbers the lines above carry. ``None``
+        #: until a run sets them: then no contour is known to be in the scope.
+        self.scope_numbers: Optional[Dict[str, List[int]]] = None
+        self.numbers_above: FrozenSet[str] = frozenset()
         self.rotary_state = gedit_nc.RotaryState(profile)
         #: P4a fix B1 (NC-6, plan §7 #314): the control's own variables, which a program that
         #: assigns them may use to move the coordinate system (Sinumerik `$P_UIFR`, Okuma
@@ -1214,12 +1227,24 @@ class _Data:
         self._alike[key] = alike
         return alike
 
-    def number_class(self, address: str, profile_feed: Any, entries: Sequence[Dict[str, Any]], pitch: bool, in_force: Sequence[Dict[str, Any]]) -> Optional[str]:
-        key = (address.upper(), profile_feed, pitch, tuple(id(e) for e in entries), tuple(id(e) for e in in_force))
+    def number_class(
+        self,
+        address: str,
+        profile_feed: Any,
+        entries: Sequence[Dict[str, Any]],
+        pitch: bool,
+        in_force: Sequence[Dict[str, Any]],
+        cycle_block: Optional[int],
+    ) -> Optional[str]:
+        """``gedit_nc.number_class_of``, remembered. ``cycle_block`` is the block of a two-block
+        cycle the block is (``gedit_nc.block_cycle_of``; plan §6.10 rule 11), part of the key."""
+        key = (address.upper(), profile_feed, pitch, tuple(id(e) for e in entries), tuple(id(e) for e in in_force), cycle_block)
         if key not in self._classes:
             if len(self._classes) > 4096:
                 self._classes = {}
-            self._classes[key] = gedit_nc.number_class_of(address, self.profile, profile_feed, list(entries), pitch, list(in_force))
+            self._classes[key] = gedit_nc.number_class_of(
+                address, self.profile, profile_feed, list(entries), pitch, list(in_force), cycle_block=cycle_block
+            )
         return self._classes[key]
 
     def axis_of(self, address: str) -> Optional[str]:
@@ -1349,6 +1374,8 @@ class _Block:
         self.unknown_family: List[str] = []
         self._read_codes()
         self.entries = [entry for entry, _ in self.codes.values()]
+        #: P4h (plan §6.10 rule 11; T118): which block of a two-block cycle this block is.
+        self.cycle_block = gedit_nc.block_cycle_of(self.entries, tokens)
         groups = _dict(state.get("groups"))
         motion_code = _dict(groups.get("motion")).get("code")
         written_motion = [e for e in self.entries if e.get("group") == "motion" and (_sets(e).get("motion") or _sets(e).get("path"))]
@@ -1385,6 +1412,14 @@ class _Block:
         self.plane = plane if plane in _nc_path.PLANE_AXES else None
         if self.plane is None and data.lathe and not data.plane_codes:
             self.plane = "ZX"
+        #: Wave Y (D8): the plane code in force on a turning database whose plane codes only
+        #: choose the compensation plane, when it is not the turning plane's (Okuma `G17`, `G19`,
+        #: `G119`: the Y-axis mode moves G00-G03 in XY or YZ, LG32-163-R10 p.222-223); `None`
+        #: under G18 or with no plane code. An arc there is not resolved, and a turn or a mirror
+        #: refuses it (`arc-unsupported`).
+        self.off_turning_plane: Optional[str] = None
+        if data.lathe and not data.plane_codes and not _nc_path.turning_plane_in_force(state):
+            self.off_turning_plane = str(_dict(_dict(state.get("groups")).get("plane")).get("code"))
         self.tool_axis = _nc_path.PLANE_NORMAL.get(self.plane or "XY", "Z")
         self.distance = state.get("distance")
         self._reads: Optional[Dict[int, Any]] = None
@@ -1466,7 +1501,9 @@ class _Block:
 
     def number_class(self, address: str, entries: Optional[Sequence[Dict[str, Any]]] = None) -> Optional[str]:
         interp = self.interp
-        return self.data.number_class(address, interp.feed_unit, entries if entries is not None else self.entries, interp.pitch_feed, self.in_force)
+        return self.data.number_class(
+            address, interp.feed_unit, entries if entries is not None else self.entries, interp.pitch_feed, self.in_force, self.cycle_block
+        )
 
     def incremental(self, token: Any, address: str) -> Optional[bool]:
         """How an axis word is read: the tracker's reading where it has one, else the word's
@@ -1538,8 +1575,9 @@ def _kept_role(number_class: Optional[str]) -> str:
 
 
 def _class_of_param(param: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The number class a parameter declares; the feed marker ``'feed'`` (T210) is none."""
     unit = _dict(param).get("unit")
-    return unit if isinstance(unit, str) else None
+    return unit if isinstance(unit, str) and unit != "feed" else None
 
 
 def _classify(block: _Block, token: Any) -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
@@ -1616,8 +1654,10 @@ def _classify(block: _Block, token: Any) -> Tuple[str, Optional[str], Optional[D
             return ("centre" if absolute else "centre-inc"), _nc_path.CENTRE_AXIS[address], arc
         if address in _nc_path.RADIUS_WORDS:
             return "radius", None, arc
-        if found is not None and axis is None and block.number_class(address) == "length":
-            return "radius", None, arc  # a radius the arc code declares (Okuma `L`)
+        if found is not None and axis is None and address == _nc_path.declared_radius(arc) and block.number_class(address) == "length":
+            # A radius the arc code declares (Okuma `L`). FZ-8 (Wave Y): only that one; another
+            # length of the arc code (the Fanuc corner words `,C` and `,R`) keeps its value.
+            return "radius", None, arc
 
     if axis is not None:
         incremental = block.incremental(token, address)
@@ -1734,6 +1774,18 @@ def _continuation_mark(data: _Data, tokens: Sequence[Any], i: int) -> bool:
     return found is not None and found.end() >= len(text.rstrip())
 
 
+def _marker_code(block: _Block, token: Any) -> bool:
+    """Wave Y (T017): a token the tokenizer leaves unread whose text is a one-shot code of the
+    database that takes no value and sets nothing (the Okuma ``CALRG``, the larger arc of an
+    ``L`` radius): a code of the block, kept as written by every transform, no word nobody
+    describes. Only such a marker: a code that sets a mode would need the interpreter, which
+    did not read it."""
+    entry = block.interp.entry(token.text.strip())
+    if not isinstance(entry, dict) or entry.get("group") != "nonmodal":
+        return False
+    return not _params(entry) and not _sets(entry) and gedit_nc.axis_words_of(entry) is None
+
+
 def roles_of(step: "_nc_path.Step", tracker: "_nc_path.PathTracker") -> List[WordRole]:
     """Every word and every code of ``step``, in written order, with its role (contract item 1,
     2). Codes that set an arc direction or a compensation side are ``code-arc`` / ``code-comp``;
@@ -1769,7 +1821,7 @@ def roles_of(step: "_nc_path.Step", tracker: "_nc_path.PathTracker") -> List[Wor
                 out.append(role)
             continue
         if kind == "unknown" and token.text.strip() != "":
-            if not _continuation_mark(block.data, tokens, i):
+            if not _continuation_mark(block.data, tokens, i) and not _marker_code(block, token):
                 out.append(WordRole(token, "unknown", None, None, None))
         elif kind == "word" and id(token) not in block.consumed:
             if not token.address:
@@ -2165,6 +2217,99 @@ def _machine_change(block: _Block, roles: Sequence[WordRole], tracker: Any, op: 
     return "X" in absolute or "Y" in absolute
 
 
+#: Wave Y (T015): the detail of the ``roughing-cycle`` refusal of the first block of a two-block
+#: roughing cycle, which its second block, judged next, settles (the script's walk).
+SECOND_BLOCK = "waits for its second block"
+
+
+def number_of(text: Any) -> Optional[str]:
+    """A block number as a key: its digits without the leading zeros (``N0010`` and ``10`` are
+    ``'10'``), or ``None`` for anything that is not a whole number."""
+    digits = str(text or "").strip()
+    if digits[:1] in ("N", "n"):
+        digits = digits[1:]
+    if not digits.isdigit():
+        return None
+    return digits.lstrip("0") or "0"
+
+
+def set_block_numbers(tracker: Any, scope: Dict[str, List[int]], above: Sequence[str]) -> None:
+    """Wave Y (T015): the block numbers of the scope (number -> its lines) and of the lines
+    above it, which a script that walks the whole scope hands the rules before its walk: a lathe
+    roughing or finishing cycle under the Z mirror is judged only when its contour is in them."""
+    data = _data(tracker)
+    data.scope_numbers = {k: list(v) for k, v in scope.items()}
+    data.numbers_above = frozenset(above)
+
+
+def _contour_range(block: _Block) -> Optional[Tuple[str, str]]:
+    """Wave Y (T015): the first and the last block number of the contour a cycle block names
+    (``G70``-``G73`` ``P``/``Q``: a rule of the profile's ``numbering.references`` with two
+    addresses matches the block), or ``None``."""
+    data = block.data
+    if not data.ranges:
+        return None
+    text = getattr(block.step, "masked", None) or "".join(t.text for t in block.tokens)
+    words = getattr(block.step, "words", None) or {}
+    for regex, (first, last) in data.ranges:
+        if regex.search(text) is None:
+            continue
+        a = number_of(getattr(words.get(first), "value_text", None))
+        b = number_of(getattr(words.get(last), "value_text", None))
+        if a is not None and b is not None:
+            return a, b
+    return None
+
+
+def _contour_in_scope(block: _Block, found: Tuple[str, str]) -> bool:
+    """Wave Y (T015): the contour from block number ``found[0]`` to ``found[1]`` lies in the scope:
+    each number stands on one line of it and on no line above it, the first not after the last.
+    The numbers below a selection are not known; the control finds the contour by its numbers."""
+    data = block.data
+    numbers = data.scope_numbers
+    if numbers is None:
+        return False
+    first, last = (numbers.get(n, []) for n in found)
+    if len(first) != 1 or len(last) != 1 or found[0] in data.numbers_above or found[1] in data.numbers_above:
+        return False
+    return first[0] <= last[0]
+
+
+def contour_flips(block: _Block, roles: Sequence[WordRole], op: Op) -> Optional[List[WordRole]]:
+    """Wave Y (T015, the P4a prelude's case list): the words of a lathe roughing cycle block (a
+    ``'start'`` cycle whose words are data: ``G71``-``G73``) that the Z mirror changes the sign of,
+    or ``None`` when one cannot be judged. A word of the cycle on an axis the mirror turns (``W``,
+    the twin of Z; ``V`` of Y where Y turns) is an allowance or a relief whose sign gives its side
+    of the contour, which the mirror reverses (FANUC 0i-F lathe manual, the stock removal cycles:
+    the four patterns of the signs of U and W), unless the code declares it without a sign
+    (``min`` 0: the depth of cut ``W`` of the first block of ``G72``), which stays. One the code does
+    not declare for the block is not judged."""
+    entries = [e for e in block.entries if _sets(e).get("cycle") == "start" and gedit_nc.axis_words_of(e) == "data"]
+    if not entries:
+        return []
+    entry = entries[-1]
+    written = [(r.token.address or "").upper() for r in roles if r.token.kind == "word" and r.token.address]
+    number = gedit_nc.cycle_block_of(entry, written)
+    params = gedit_nc.params_of_block(entry, number)
+    turned = lathe_mirror_axes(op) if isinstance(op, LatheZMirror) else ()
+    out: List[WordRole] = []
+    for role in roles:
+        address = (role.token.address or "").upper()
+        if role.role != "data" or not address:
+            continue
+        axis = block.data.axis_of(address)
+        if axis is None or axis not in turned:
+            continue
+        param = next((p for p in params if str(p.get("address") or "").upper() == address), None)
+        if param is None:
+            return None
+        low = param.get("min")
+        if isinstance(low, (int, float)) and not isinstance(low, bool) and low >= 0:
+            continue
+        out.append(role)
+    return out
+
+
 def _lathe_reasons(block: _Block, moving: bool, tracker: Any = None) -> List[Tuple[str, str]]:
     """The case list of the prelude for the lathe Z mirror (contract item 7), from data. v1.2.0
     (NCR-2): a pass block also refuses while the taper the passes share, written above it, lies
@@ -2179,16 +2324,37 @@ def _lathe_reasons(block: _Block, moving: bool, tracker: Any = None) -> List[Tup
         if entry.get("pitchFeed") is True or entry.get("tapping") is True:
             out.append(("thread", str(entry.get("code"))))
             break
+    # Wave Y (T015): a roughing cycle (`G71`-`G73`) or a finishing pass along a contour (`G70`)
+    # whose contour, named by its block numbers, lies whole in the scope is mirrored: its contour
+    # blocks are points, and the words of the cycle along Z change sign or stay
+    # (:func:`contour_flips`, the script's rewrite). The first block of a two-block cycle names no
+    # contour: its second block, next, settles it (`SECOND_BLOCK`). The Okuma LAP stays refused:
+    # how its cutting direction along Z follows the mirrored shape is not in the manuals at hand.
+    contour = _contour_range(block) if written else None
+    along = contour is not None and _contour_in_scope(block, contour)
+    first_block = False
+    if not along and written and not running:
+        starts = [e for e in written if _sets(e).get("cycle") == "start" and gedit_nc.axis_words_of(e) == "data"]
+        if starts:
+            names = [(t.address or "").upper() for t in block.tokens if t.kind == "word" and t.address and (t.value_text or "")]
+            first_block = gedit_nc.cycle_block_of(starts[-1], names) == 1
+    contour_groups = block.data.contour_groups
     for entry in written + running:
         cycle = _sets(entry).get("cycle")
-        if (cycle == "start" and gedit_nc.axis_words_of(entry) == "data") or entry.get("group") in block.data.contour_groups:
+        if (cycle == "start" and gedit_nc.axis_words_of(entry) == "data") or entry.get("group") in contour_groups:
+            if entry.get("group") not in contour_groups and (along or first_block) and entry in written:
+                break
             out.append(("roughing-cycle", str(entry.get("code"))))
             break
     for entry in written + running:
         cycle = _sets(entry).get("cycle")
         if cycle is not None and cycle not in ("cancel", "call-modal-next"):
+            if cycle == "start" and entry in written and entry.get("group") not in contour_groups and (along or first_block):
+                break
             out.append(("lathe-cycle", str(entry.get("code"))))
             break
+    if first_block and not any(reason in ("roughing-cycle", "lathe-cycle") for reason, _ in out):
+        out.append(("roughing-cycle", SECOND_BLOCK))
     motion = block.motion
     threaded = any(reason == "thread" for reason, _ in out)
     if _sets(motion).get("path") == "cycle" and (moving or block.motion_written) and not threaded:
@@ -2211,17 +2377,47 @@ def _lathe_reasons(block: _Block, moving: bool, tracker: Any = None) -> List[Tup
     return out
 
 
-def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any) -> None:
-    """Contract item 6: a cycle the database describes, whose every value has a reviewed role."""
+#: Wave Y (T019): the detail of a ``cycle-position`` refusal whose only positions are a contour
+#: written in the program between two labels (``CYCLE95("START:END", …)``), followed by the
+#: labels; a script whose walk sees both labels in its scope takes the refusal back.
+CONTOUR_LABELS = "contour between the labels "
+
+_LABEL_RANGE = re.compile(r'^"\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*"$')
+
+
+def contour_labels(text: str) -> Optional[Tuple[str, str]]:
+    """Wave Y (T019): the two labels of a contour written as a section of the program
+    (``"START:END"``, SINUMERIK cycles manual, CYCLE95 NPP), upper case, or ``None`` for any
+    other form (a subprogram name, a path with block numbers)."""
+    found = _LABEL_RANGE.match(text.strip())
+    return (found.group(1).upper(), found.group(2).upper()) if found is not None else None
+
+
+def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any, op: Optional[Op] = None) -> List[Tuple[str, str]]:
+    """Contract item 6: a cycle the database describes, whose every value has a reviewed role.
+    Returns the contours written as a section of the program between two labels that are the
+    only positions of its own a cycle has here (T019, under a translate only)."""
     data = block.data
+    sections: List[Tuple[str, str]] = []
     for name in block.unknown_family:
         add("cycle-not-reviewed", name)
     for entry in block.judged:
         if not any(gedit_nc.position_of(p) is not None for p in _params(entry)):
             add("cycle-not-reviewed", str(entry.get("code")))
     written = {(t.address or "").upper() for t in block.tokens if t.kind == "word" and t.address and (t.value_text or "")}
+    # T019: the arguments written as a contour between two labels of this program, by their
+    # entry and address (under a translate only): the role loop below judges them.
+    in_program = {
+        (id(r.entry), (r.token.address or "").upper())
+        for r in roles
+        if r.role == "cycle-position" and r.axis is None and isinstance(op, Translate) and contour_labels(r.token.text) is not None
+    }
     for entry in block.judged + block.call_entries:
-        others = [p["address"] for p in _params(entry) if gedit_nc.position_of(p) == "other" and data.axis_of(p["address"]) is None]
+        others = [
+            p["address"]
+            for p in _params(entry)
+            if gedit_nc.position_of(p) == "other" and data.axis_of(p["address"]) is None and (id(entry), p["address"].upper()) not in in_program
+        ]
         # Positions named after an axis are the call's position in this block (`CYCL CALL
         # POS X… Y… Z…`); a call that writes none of them runs at positions kept elsewhere
         # (`CYCL CALL PAT`: a pattern or a point table), which the transform does not move.
@@ -2231,6 +2427,16 @@ def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any) -> None:
         if others:
             add("cycle-position", "%s (%s)" % (entry.get("code"), ", ".join(others)))
     for entry in block.entries:
+        # T093 (Wave Y, BL-NC-data): a DEF-active cycle with positions (Klartext cycle 20
+        # CONTOUR DATA: Q5 and Q7 on the tool axis). Its parameters stand on the lines below
+        # its head, which this walk reads without the cycle (no definition owns them), so it is
+        # refused, as it was while the database lacked it. Moving Q5 and Q7 with the path is
+        # left to the transforms' own batch.
+        if entry.get("group") == "cycle" and not _sets(entry).get("cycle"):
+            held = [str(p.get("address")) for p in _params(entry) if gedit_nc.position_of(p) in ("tool-axis", "other")]
+            if held:
+                add("cycle-position", "%s (%s)" % (entry.get("code"), ", ".join(held)))
+    for entry in block.entries:
         # A code that is nothing but positions of its own (Klartext `PATTERN DEF`, plan §7 #301).
         params = _params(entry)
         if params and entry not in block.judged and entry not in block.call_entries and all(gedit_nc.position_of(p) == "other" for p in params):
@@ -2238,7 +2444,13 @@ def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any) -> None:
     for role in roles:
         entry = role.entry
         if role.role == "cycle-position" and role.axis is None:
-            add("cycle-position", role.token.text.strip())
+            labels = contour_labels(role.token.text) if isinstance(op, Translate) else None
+            if labels is not None:
+                # T019: a contour in this program, moved by the run with its blocks when they
+                # are in its scope (the script's walk decides).
+                sections.append(labels)
+            else:
+                add("cycle-position", role.token.text.strip())
         if entry is None or (entry not in block.judged and entry is not block.defined):
             continue
         address = (role.token.address or "").upper()
@@ -2256,6 +2468,7 @@ def _judge_cycles(block: _Block, roles: Sequence[WordRole], add: Any) -> None:
                 add("cycle-not-reviewed", role.token.text.strip())
     if any(r.role == "tool-axis" for r in roles) and block.plane != "XY":
         add("cycle-plane", block.plane or "")
+    return sections
 
 
 # ---------------------------------------------------------------------------
@@ -2700,6 +2913,10 @@ def refusals_of(
     if lathe_z:
         for reason, detail in _lathe_reasons(block, moving, tracker):
             add(reason, detail)
+        if "roughing-cycle" not in found and contour_flips(block, roles, op) is None:
+            # T015: a word of a roughing cycle along the turned axis that the code does not
+            # declare for this block: its sign cannot be judged.
+            add("roughing-cycle", "")
         # P4a fix B1 (NC-8, plan §7 #316): a value whose sign is the direction of the next
         # move (Okuma `G75 L-2.`) would have to change in some blocks and not in others.
         written_words = {(t.address or "").upper() for t in block.tokens if t.kind == "word" and (t.value_text or "")}
@@ -2708,7 +2925,10 @@ def refusals_of(
             if signed:
                 add("chamfer-sign", "%s %s" % (entry.get("code"), signed[0]))
     else:
-        _judge_cycles(block, roles, add)
+        sections = _judge_cycles(block, roles, add, op)
+        if sections and "cycle-position" not in found:
+            # Only when no other position of its own refuses the block (that refusal stays).
+            add("cycle-position", CONTOUR_LABELS + ";".join("%s:%s" % pair for pair in sections))
         # P4a fix B1 (NC-2, plan §7 #311): a pocket, slot or stud turned or placed by an angle or
         # a corner of its own; refused where it is defined and where it is called.
         cycles = list(block.judged)
@@ -2725,14 +2945,39 @@ def refusals_of(
     arc = block.arc
     if arc is not None and moving:
         code = str(arc.get("code"))
+        if block.off_turning_plane is not None and name in TURNING:
+            # Wave Y (D8): an arc in the XY or YZ plane of a lathe's Y-axis mode (Okuma `G17`,
+            # `G19`, `G119`): the tracker reads the turning plane ZX only, so neither the arc
+            # nor the effect of the turn or mirror on its direction is known. A translate moves
+            # its end points and keeps the arc, as on any plane.
+            add("arc-unsupported", "%s (%s in force)" % (code, block.off_turning_plane))
         if code in _nc_path.UNRESOLVED_ARCS:
-            add("arc-tangential", code)
+            # Wave Y (T016): a tangential arc (Klartext `CT`, `CTP`, Sinumerik `CT`) and an arc
+            # through an intermediate point (`CIP`) follow from the path around them: the
+            # tangent of the element before, or the point they pass. Under an exact operation
+            # (a quarter turn, a mirror in an axis, the lathe Z mirror) those turn or reflect
+            # exactly with the path, so the arc is the transformed arc; only a rounding one,
+            # which the arc check cannot follow through such an arc, refuses it.
+            if not is_exact(op):
+                add("arc-tangential", code)
         elif gedit_nc.arc_direction_of(arc) is None and not data.direction_words:
             add("arc-unsupported", code)
         elif gedit_nc.arc_direction_of(arc) is not None and any(
             r.role == "radius" and (r.token.address or "").upper() not in _nc_path.RADIUS_WORDS for r in roles
         ):
-            add("arc-unsupported", code)
+            # Wave Y (T017): an arc by the radius its code declares (the Okuma `L`, with or
+            # without `CALRG`) keeps its radius and its choice of the arc under every exact
+            # operation, as `R` does (the prelude's case list): the end points move, a mirror
+            # swaps the direction. A rounding one would need the arc checked against a radius
+            # the tracker reads only without `CALRG`: refused there.
+            declared = _nc_path.declared_radius(arc)
+            plain = all(
+                (r.token.address or "").upper() == declared
+                for r in roles
+                if r.role == "radius" and (r.token.address or "").upper() not in _nc_path.RADIUS_WORDS
+            )
+            if not (plain and declared is not None and is_exact(op)):
+                add("arc-unsupported", code)
     if name in ("mirror", "lathe-z-mirror"):
         for role in roles:
             if role.role == "code-arc" and swap_partner(role.entry or {}, data.codes, "arcDirection") is None:
@@ -2899,6 +3144,7 @@ __all__ = [
     "FK_WORDS",
     "INCREMENTAL_ROLES",
     "INFO",
+    "CONTOUR_LABELS",
     "COUNTER_SPINDLE_VARIANT",
     "COUNTER_SPINDLE_Y_STAYS",
     "LATHE_MIRROR_AXES",
@@ -2922,6 +3168,8 @@ __all__ = [
     "affects",
     "check_arcs",
     "check_chord",
+    "contour_flips",
+    "contour_labels",
     "counter_spindle_y_turns",
     "finding_of",
     "is_exact",
@@ -2933,6 +3181,7 @@ __all__ = [
     "read_word",
     "refusals_of",
     "roles_of",
+    "set_block_numbers",
     "swap_partner",
     "swap_word",
     "transform",

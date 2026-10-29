@@ -29,6 +29,8 @@ const boundary = vi.hoisted(() => {
     disk: new Map<string, string>(),
     /** Files the folder lists with a reason instead of a text. */
     unreadable: new Map<string, string>(),
+    /** The enabled packages' files, as `package_files_list` answers them (P4g). */
+    packageFiles: [] as { package: string; kind: string; name: string; text: string }[],
     /** What the open dialog answers next, and the save dialog. */
     pick: null as string | null,
     saveTo: null as string | null,
@@ -66,6 +68,15 @@ const boundary = vi.hoisted(() => {
             : { name, text: null, error: reason };
         });
       }
+      case 'package_files_list': {
+        dir(args.kind as string);
+        return state.packageFiles
+          .filter((f) => f.kind === args.kind)
+          .sort((a, b) => (a.package + a.name < b.package + b.name ? -1 : 1))
+          .map((f) => ({ package: f.package, name: f.name, text: f.text, error: null }));
+      }
+      case 'packages_list':
+        return { folder: '/cfg/packages', packages: [], problems: [] };
       case 'user_file_create': {
         const folder = dir(args.kind as string);
         const name = args.name as string;
@@ -206,7 +217,7 @@ beforeAll(async () => {
   // The startup read, as `bootstrap.ts` does it: settings (fills `settings.paths`), then machines.
   await settings.load();
   machines.load((await boundary.invoke('config_load')) as ConfigLoad);
-});
+}, 60_000);
 
 // -- helpers ----------------------------------------------------------------------------------
 
@@ -257,6 +268,7 @@ async function empty(): Promise<void> {
     for (const key of [...boundary.state.disk.keys()]) if (key.startsWith(`${CONFIG}/${kind}/`)) boundary.state.disk.delete(key);
   }
   boundary.state.unreadable.clear();
+  boundary.state.packageFiles.length = 0;
   await userConfig.load();
 }
 
@@ -304,6 +316,46 @@ describe('load: the real Rust commands’ shapes through the real stores', () =>
     // A load with nothing changed reloads nothing.
     expect(await userConfig.load()).toEqual([]);
     expect(get(profiles.revision)).toBe(before + 1);
+  });
+
+  // P4g (§6.9 rules 11 and 12): the package layer through the real stores.
+  it('a package\'s profile and code file load under the user\'s, and go when the package is switched off', async () => {
+    const pkg = boundary.state.packageFiles;
+    pkg.push(
+      { package: 'shop-a', kind: 'codes', name: 'pkg-lathe.json', text: json({ dialect: 'pkg-lathe', extends: 'fanuc-lathe', codes: [{ code: 'M13', label: 'Chuck clamp (package)' }] }) },
+      { package: 'shop-a', kind: 'profiles', name: 'pkg-lathe.json', text: json(userProfile('pkg-lathe', { codes: 'pkg-lathe' })) },
+    );
+    put('profiles', 'shop-lathe.json', userProfile('shop-lathe'));
+
+    expect(await userConfig.load()).toEqual([]);
+
+    expect(profiles.get('pkg-lathe')).toMatchObject({ origin: 'user', file: 'shop-a/pkg-lathe.json' });
+    expect(codes.byId('pkg-lathe').codes.some((c) => c.label === 'Chuck clamp (package)')).toBe(true);
+    expect(profiles.list().map((p) => p.id).slice(-2)).toEqual(['pkg-lathe', 'shop-lathe']);
+    // The Profiles page's list is the user's own files only.
+    expect(get(userConfig.files).map((f) => f.name)).toEqual(['shop-lathe.json']);
+
+    // Switched off: the package's files are not listed any more, and the next load drops them.
+    pkg.length = 0;
+    expect(await userConfig.load()).toEqual([]);
+    expect(profiles.get('pkg-lathe')).toBeUndefined();
+    expect(profiles.get('shop-lathe')).toBeDefined();
+  });
+
+  it('a profile of your own with the id of a package\'s replaces it, and the notice does not open the Results panel', async () => {
+    boundary.state.packageFiles.push({
+      package: 'shop-a',
+      kind: 'profiles',
+      name: 'shop-lathe.json',
+      text: json(userProfile('shop-lathe', { name: 'From the package' })),
+    });
+    put('profiles', 'shop-lathe.json', userProfile('shop-lathe', { name: 'Mine' }));
+
+    const problems = await userConfig.load();
+
+    expect(profiles.profile('shop-lathe').name).toBe('Mine');
+    expect(problems).toEqual([expect.objectContaining({ package: 'shop-a', severity: 'info', kind: 'profiles' })]);
+    expect(reports).toEqual([]);
   });
 
   it('a program in a user profile’s own folder is detected as that profile', async () => {

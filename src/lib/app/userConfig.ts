@@ -13,7 +13,14 @@
 //      message for the load), and one that was moved off a profile that comes back — a typo
 //      saved and fixed again — goes back to it, unless the user picked a dialect meanwhile
 //      (the picker calls `forget`, so even picking the dialect it was moved to counts);
-//   5. the problems (an unreadable file, a broken profile or database with its JSON path)
+//   5. P4g (§6.9 rules 11 and 12): the files of the enabled script packages (`package_files_list`)
+//      are laid under the user's own: `codes.reload` and `profiles.reload` get the packages' files
+//      first (by package, then by name) and the user's after them, each marked with its
+//      `package`. The load signature includes them, so a switch or an edit makes the next load
+//      run. The service also keeps the packages' list (`packages`, from `packages_list`) for the
+//      Packages page and the Scripts menu. A package that cannot be listed stops the load like an
+//      unreadable user folder does: nothing changes and the user is told why.
+//   6. the problems (an unreadable file, a broken profile or database with its JSON path)
 //      go to the Results panel when there are any, and stay in `problems`. A problem with
 //      `severity: 'info'` is a notice (a code entry that changes what a built-in code means):
 //      it is listed with the problems and never opens the Results panel on its own.
@@ -44,7 +51,17 @@ import { results as appResults } from '$lib/stores/results';
 import { status as appStatus } from '$lib/app/status';
 import { files as appFiles } from '$lib/app/fileOps';
 import { editor as appEditor } from '$lib/monaco/editorService';
-import { userFilesList, type ConfigPaths, type UserFile, type UserFileKind } from '$lib/platform/commands';
+import {
+  packageFilesList,
+  packagesList,
+  userFilesList,
+  type ConfigPaths,
+  type PackageFile,
+  type PackageList,
+  type UserFile,
+  type UserFileKind,
+} from '$lib/platform/commands';
+import { layerSorted } from '$lib/core/packages/packages';
 import { isMacPlatform, isTauriRuntime, isWindowsPlatform } from '$lib/utils/platform';
 import { t } from '$lib/i18n';
 import type { ProfileProblem } from '$lib/core/profiles/types';
@@ -72,6 +89,10 @@ export interface UserConfigDeps {
   /** False outside Tauri: nothing is read then. */
   available(): boolean;
   list(kind: UserFileKind): Promise<UserFile[]>;
+  /** The enabled packages' files of a kind (P4g). Unset: there are no packages. */
+  listPackageFiles?(kind: UserFileKind): Promise<PackageFile[]>;
+  /** Every package folder with its manifest (P4g), for the page and the menu. Unset: none. */
+  listPackages?(): Promise<PackageList>;
   codes: Pick<CodeDbService, 'reload'>;
   profiles: Pick<ProfileRegistry, 'reload' | 'get' | 'detect' | 'defaultId'>;
   /** The open documents. */
@@ -87,10 +108,27 @@ export interface UserConfigDeps {
   backslashSeparator: boolean;
 }
 
-/** The text of one user file, as `reload` takes it. */
-function usable(files: UserFile[]): { name: string; text: string }[] {
-  const out: { name: string; text: string }[] = [];
-  for (const f of files) if (f.text !== null) out.push({ name: f.name, text: f.text });
+/** What the service offers beyond the §7.3 contract (P4g): the list of the script packages. */
+export interface UserConfigPackages {
+  /** The package folders of the last load with their manifests; null until the first load has asked. */
+  readonly packages: Readable<PackageList | null>;
+}
+
+/** One file of the user's own folder or of a package, as it was listed. */
+interface Listed {
+  name: string;
+  text: string | null;
+  error: string | null;
+  /** The package folder; unset for the user's own file. */
+  package?: string;
+}
+
+/** The text of the usable files, as `reload` takes it, in the order the registries read them. */
+function usable(files: Listed[]): { name: string; text: string; package?: string }[] {
+  const out: { name: string; text: string; package?: string }[] = [];
+  for (const f of layerSorted(files)) {
+    if (f.text !== null) out.push({ name: f.name, text: f.text, ...(f.package === undefined ? {} : { package: f.package }) });
+  }
   return out;
 }
 
@@ -130,7 +168,7 @@ export function capProblems(problems: ProfileProblem[]): { problems: ProfileProb
     const perFile = new Map<string, { kept: number; left: number; sample: ProfileProblem }>();
     for (const problem of problems) {
       if ((problem.severity === 'info') !== info) continue;
-      const key = `${problem.kind ?? ''}/${problem.file ?? ''}/${problem.file === null ? (problem.profileId ?? '') : ''}`;
+      const key = `${problem.kind ?? ''}/${problem.package ?? ''}/${problem.file ?? ''}/${problem.file === null ? (problem.profileId ?? '') : ''}`;
       let entry = perFile.get(key);
       if (entry === undefined) {
         entry = { kept: 0, left: 0, sample: problem };
@@ -154,6 +192,7 @@ export function capProblems(problems: ProfileProblem[]): { problems: ProfileProb
         message: t('userConfig.load.more', { count: left }),
         ...(info ? { severity: 'info' as const } : {}),
         ...(sample.kind === undefined ? {} : { kind: sample.kind }),
+        ...(sample.package === undefined ? {} : { package: sample.package }),
       });
     }
   }
@@ -181,7 +220,7 @@ function reportOf(problems: ProfileProblem[], dropped = 0): ReportData {
       { key: 'problem', label: t('userConfig.load.report.problem') },
     ],
     rows: problems.map((p) => ({
-      file: p.file ?? '',
+      file: p.package === undefined ? (p.file ?? '') : t('packagesPage.problemFile', { package: p.package, file: p.file ?? '' }),
       at: [p.profileId, p.path].filter((part): part is string => typeof part === 'string' && part !== '').join(' · '),
       problem: isError(p) ? p.message : `${t('userConfig.load.report.note')} ${p.message}`,
     })),
@@ -189,11 +228,25 @@ function reportOf(problems: ProfileProblem[], dropped = 0): ReportData {
   };
 }
 
-export function createUserConfig(deps: UserConfigDeps): UserConfigService {
+/** What a load saw: the user's files and the packages' files of both kinds. */
+function signatureOf(
+  listing: { kind: UserFileKind; files: Listed[] }[],
+  packaged: { kind: UserFileKind; files: Listed[] }[],
+): string {
+  const of = (list: { kind: UserFileKind; files: Listed[] }[]): unknown[] =>
+    list.map(({ kind, files }) => [kind, files.map((f) => [f.package ?? null, f.name, f.text, f.error])]);
+  return packaged.every(({ files }) => files.length === 0) ? JSON.stringify(of(listing)) : JSON.stringify([of(listing), of(packaged)]);
+}
+
+export function createUserConfig(deps: UserConfigDeps): UserConfigService & UserConfigPackages {
   const fileList = writable<UserFileEntry[]>([]);
   const problemList = writable<ProfileProblem[]>([]);
+  const packageList = writable<PackageList | null>(null);
   /** What the last load saw, so a byte-identical one does nothing. No files is the starting state. */
-  let lastSignature = JSON.stringify(KINDS.map((kind) => [kind, []]));
+  let lastSignature = signatureOf(
+    KINDS.map((kind) => ({ kind, files: [] })),
+    [],
+  );
   /** The queue: a load starts when the one before it has finished. */
   let tail: Promise<unknown> = Promise.resolve();
   /**
@@ -266,13 +319,37 @@ export function createUserConfig(deps: UserConfigDeps): UserConfigService {
     return moved;
   }
 
+  /** Asks for the packages' list; a failure keeps the last one. */
+  async function refreshPackages(): Promise<void> {
+    if (deps.listPackages === undefined) return;
+    try {
+      packageList.set(await deps.listPackages());
+    } catch (error) {
+      console.error('The list of the script packages could not be read', error);
+    }
+  }
+
   async function run(): Promise<ProfileProblem[]> {
     if (!deps.available()) return get(problemList);
 
-    const listing: { kind: UserFileKind; files: UserFile[] }[] = [];
+    let listing: { kind: UserFileKind; files: Listed[] }[];
+    let packaged: { kind: UserFileKind; files: Listed[] }[] = [];
+    // One wave of round trips (WY-CODE-4): the user lists, the packages' lists and the packages'
+    // own list are asked together, not one after the other. The packages' list never rejects.
+    const packages = refreshPackages();
     try {
-      for (const kind of KINDS) listing.push({ kind, files: [...(await deps.list(kind))].sort(byName) });
+      const [mine, theirs] = await Promise.all([
+        Promise.all(KINDS.map(async (kind) => ({ kind, files: [...(await deps.list(kind))].sort(byName) }))),
+        deps.listPackageFiles === undefined
+          ? Promise.resolve([])
+          : Promise.all(
+              KINDS.map(async (kind) => ({ kind, files: layerSorted(await deps.listPackageFiles!(kind)) })),
+            ),
+      ]);
+      listing = mine;
+      packaged = theirs;
     } catch (error) {
+      await packages;
       // The folder cannot be listed: nothing changes, and the user is told why.
       const message = `the folder could not be read: ${error instanceof Error ? error.message : String(error)}`;
       const problems = [{ origin: 'user' as const, file: null, profileId: null, path: '', message }];
@@ -280,14 +357,18 @@ export function createUserConfig(deps: UserConfigDeps): UserConfigService {
       return problems;
     }
 
-    const signature = JSON.stringify(listing.map(({ kind, files }) => [kind, files.map((f) => [f.name, f.text, f.error])]));
+    // The packages' list (manifests, counts) follows every load, even one that changes nothing.
+    await packages;
+
+    const signature = signatureOf(listing, packaged);
     if (signature === lastSignature) return get(problemList);
 
     fileList.set(listing.flatMap(({ kind, files }) => files.map((f) => ({ kind, name: f.name, error: f.error }))));
 
     const problems: ProfileProblem[] = [];
-    for (const { kind, files } of listing) {
+    for (const { kind, files } of [...packaged, ...listing]) {
       for (const f of files) {
+        const where = f.package === undefined ? {} : { package: f.package };
         if (f.text === null) {
           problems.push({
             origin: 'user',
@@ -296,6 +377,7 @@ export function createUserConfig(deps: UserConfigDeps): UserConfigService {
             path: '',
             message: f.error ?? 'the file could not be read',
             kind,
+            ...where,
           });
         } else if (nestingOf(f.text) > MAX_NESTING) {
           // Not handed on (CODE-2): a deeply nested file would overflow the stack of whatever
@@ -307,14 +389,17 @@ export function createUserConfig(deps: UserConfigDeps): UserConfigService {
             path: '',
             message: t('userConfig.load.tooDeep', { max: MAX_NESTING }),
             kind,
+            ...where,
           });
         }
       }
     }
-    const of = (kind: UserFileKind): { name: string; text: string }[] =>
-      usable(listing.find((entry) => entry.kind === kind)?.files ?? []).filter(
-        (f) => nestingOf(f.text) <= MAX_NESTING,
-      );
+    // The packages' files first, the user's own after them (§6.9 rule 11).
+    const of = (kind: UserFileKind): { name: string; text: string; package?: string }[] =>
+      usable([
+        ...(packaged.find((entry) => entry.kind === kind)?.files ?? []),
+        ...(listing.find((entry) => entry.kind === kind)?.files ?? []),
+      ]).filter((f) => nestingOf(f.text) <= MAX_NESTING);
 
     // A failure that names no file (a registry that threw) is not remembered: the same bytes
     // are tried again by the next load, instead of "nothing changed" for ever.
@@ -355,6 +440,7 @@ export function createUserConfig(deps: UserConfigDeps): UserConfigService {
   return {
     files: { subscribe: fileList.subscribe },
     problems: { subscribe: problemList.subscribe },
+    packages: { subscribe: packageList.subscribe },
 
     load(): Promise<ProfileProblem[]> {
       const next = tail.then(run, run).catch((error: unknown) => {
@@ -385,9 +471,11 @@ export function createUserConfig(deps: UserConfigDeps): UserConfigService {
 }
 
 /** The application-wide user configuration. */
-export const userConfig: UserConfigService = createUserConfig({
+export const userConfig: UserConfigService & UserConfigPackages = createUserConfig({
   available: isTauriRuntime,
   list: userFilesList,
+  listPackageFiles: packageFilesList,
+  listPackages: packagesList,
   codes: appCodes,
   profiles: appProfiles,
   docs: () => appDocs.all(),

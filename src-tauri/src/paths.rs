@@ -48,6 +48,15 @@ pub const RECOVERY_DIR_NAME: &str = "recovery";
 pub const PROFILES_DIR_NAME: &str = "profiles";
 /// `<config>/codes`, the user's own code files (M13, AD-29), one per dialect.
 pub const CODES_DIR_NAME: &str = "codes";
+/// `<config>/keybindings.json`, the user's key overrides (P4g, AD-55). Read and written by
+/// [`crate::keybindings`] only, under a fixed name.
+pub const KEYBINDINGS_FILE_NAME: &str = "keybindings.json";
+/// `<config>/packages`, the script packages (P4g, AD-56): one folder per package.
+pub const PACKAGES_DIR_NAME: &str = "packages";
+/// `<data>/import-backups`, the zips an import writes of what it is about to replace
+/// (P4g, `docs/planning/phase-4-implementation.md` §6.9 rule 30). Owner-only, like the
+/// other folders of unsaved or replaced work.
+pub const IMPORT_BACKUPS_DIR_NAME: &str = "import-backups";
 
 /// Whether this platform's file names are case-insensitive, and therefore
 /// whether two spellings of one path are the same file.
@@ -322,6 +331,22 @@ impl AppDirs {
         self.config.join(CODES_DIR_NAME)
     }
 
+    /// `<config>/keybindings.json` (P4g, AD-55). Not in [`ConfigPaths`]: the webview loads
+    /// and saves it through two commands and never names the path.
+    pub fn keybindings_file(&self) -> PathBuf {
+        self.config.join(KEYBINDINGS_FILE_NAME)
+    }
+
+    /// `<config>/packages` (P4g, AD-56). The Packages page learns it from `packages_list`.
+    pub fn packages_dir(&self) -> PathBuf {
+        self.config.join(PACKAGES_DIR_NAME)
+    }
+
+    /// `<data>/import-backups` (P4g): the zip of the files an import replaced.
+    pub fn import_backups_dir(&self) -> PathBuf {
+        self.data.join(IMPORT_BACKUPS_DIR_NAME)
+    }
+
     /// `<data>/backups` (M7). Not in [`ConfigPaths`]: the webview never names a
     /// backup, it only asks `files_backup` to make one.
     pub fn backups_dir(&self) -> PathBuf {
@@ -367,6 +392,8 @@ impl AppDirs {
             // the Profiles page can list them and "New profile from…" can write there.
             self.profiles_dir(),
             self.codes_dir(),
+            // P4g (AD-56): the folder a script package is copied into.
+            self.packages_dir(),
         ]
         .into_iter()
         .filter_map(|dir| match std::fs::create_dir_all(&dir) {
@@ -374,7 +401,11 @@ impl AppDirs {
             Err(err) => Some(format!("{}: {err}", dir.display())),
         })
         .collect();
-        for dir in [self.backups_dir(), self.recovery_dir()] {
+        for dir in [
+            self.backups_dir(),
+            self.recovery_dir(),
+            self.import_backups_dir(),
+        ] {
             match std::fs::create_dir_all(&dir).and_then(|()| restrict(&dir)) {
                 Ok(()) => {}
                 Err(err) => failures.push(format!("{}: {err}", dir.display())),
@@ -609,6 +640,9 @@ mod tests {
         assert!(dirs.user_scripts_dir().is_dir());
         // M13: the folders of the user's own profiles and code files.
         assert!(dirs.profiles_dir().is_dir() && dirs.codes_dir().is_dir());
+        // P4g: the folder a script package is copied into, and the one an import keeps
+        // its backup zips in.
+        assert!(dirs.packages_dir().is_dir() && dirs.import_backups_dir().is_dir());
         // M7: the backup and recovery roots exist before the window does, so the
         // first save and the first snapshot never have to create them.
         assert!(dirs.backups_dir().is_dir());
@@ -633,7 +667,11 @@ mod tests {
 
         assert_eq!(dirs.ensure(), Vec::<String>::new());
 
-        for dir in [dirs.backups_dir(), dirs.recovery_dir()] {
+        for dir in [
+            dirs.backups_dir(),
+            dirs.recovery_dir(),
+            dirs.import_backups_dir(),
+        ] {
             let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, OWNER_ONLY, "{} is {mode:o}", dir.display());
         }
@@ -653,11 +691,12 @@ mod tests {
             data: root.join("data"),
         };
         let failures = dirs.ensure();
-        // The config folder and the three folders under it (scripts, profiles, codes)
-        // fail; data works, and so do the two folders under it.
-        assert_eq!(failures.len(), 4, "{failures:?}");
+        // The config folder and the four folders under it (scripts, profiles, codes,
+        // packages) fail; data works, and so do the three folders under it.
+        assert_eq!(failures.len(), 5, "{failures:?}");
         assert!(dirs.data.is_dir());
         assert!(dirs.backups_dir().is_dir() && dirs.recovery_dir().is_dir());
+        assert!(dirs.import_backups_dir().is_dir());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

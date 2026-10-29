@@ -118,7 +118,8 @@
       "modal": true,
       "sets": { "motion": "feed" },
       "label": "Linear feed move",
-      "description": "Straight move to the target at the active feed."
+      "description": "Straight move to the target at the active feed. A chamfer (,C) or a corner rounding (,R) written at its end is cut between it and the next move.",
+      "params": [{ "address": ",C", "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign", "min": 0, "unit": "length" }, { "address": ",R", "label": "Corner rounding between this move and the next: its radius, without sign", "min": 0, "unit": "length" }]
     },
     {
       "code": "G2",
@@ -128,7 +129,7 @@
       "review": "pending",
       "label": "Circular move, clockwise",
       "description": "Arc to the target in the active plane, turning clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
-      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }]
+      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }, { "address": ",C", "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign", "min": 0, "unit": "length" }, { "address": ",R", "label": "Corner rounding between this move and the next: its radius, without sign", "min": 0, "unit": "length" }]
     },
     {
       "code": "G3",
@@ -138,7 +139,7 @@
       "review": "pending",
       "label": "Circular move, counter-clockwise",
       "description": "Arc to the target in the active plane, turning counter-clockwise. The centre comes from I, J and K measured from the arc start, or from a radius R. R is a size in the plane: a move or a turn keeps it, a scale would have to change it.",
-      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }]
+      "params": [{ "address": "R", "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees", "lengthAlong": "plane" }, { "address": ",C", "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign", "min": 0, "unit": "length" }, { "address": ",R", "label": "Corner rounding between this move and the next: its radius, without sign", "min": 0, "unit": "length" }]
     },
     {
       "code": "G4",
@@ -208,7 +209,7 @@
         },
         { "address": "K", "label": "Knot value, a real number", "unit": "count", "decimals": true },
         { "address": "R", "label": "Weight of the control point (1 when left out)", "unit": "count", "decimals": true },
-        { "address": "F", "label": "Feed", "min": 0 }
+        { "address": "F", "label": "Feed", "min": 0, "unit": "feed" }
       ]
     },
     {
@@ -914,6 +915,8 @@
       "wordsAreData": true,
       "call": true,
       "alone": true,
+      "requires": ["P"],
+      "review": "pending",
       "label": "Macro call",
       "description": "Runs the macro program P once. The other words of the block are its arguments, handed over as local variables, not moves, feeds or speeds of this program.",
       "params": [
@@ -926,6 +929,8 @@
       "group": "macro",
       "modal": true,
       "wordsAreData": true,
+      "requires": ["P"],
+      "review": "pending",
       "label": "Modal macro call",
       "description": "Runs the macro program P after every following move until G67. The other words of this block are its arguments, not moves, feeds or speeds of this program.",
       "params": [
@@ -1077,6 +1082,7 @@
           "label": "Drilling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1135,6 +1141,7 @@
           "label": "Feed from the thread pitch",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1194,6 +1201,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1258,6 +1266,7 @@
           "label": "Drilling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1327,6 +1336,7 @@
           "label": "Drilling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1398,6 +1408,7 @@
           "label": "Drilling feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1456,6 +1467,7 @@
           "label": "Feed from the thread pitch",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1496,7 +1508,7 @@
         { "address": "Y", "label": "Hole position Y" },
         { "address": "Z", "label": "Hole bottom", "required": true },
         { "address": "R", "label": "R point: where the feed starts (G99 returns here)", "required": true, "position": "tool-axis" },
-        { "address": "F", "label": "Feed from the thread pitch", "required": true, "min": 0, "position": "none" },
+        { "address": "F", "label": "Feed from the thread pitch", "required": true, "min": 0, "unit": "feed", "position": "none" },
         { "address": "P", "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)", "min": 0, "unit": "count", "position": "none" },
         { "address": "L", "label": "Repeat count", "min": 0, "unit": "count", "position": "none" }
       ]
@@ -1516,7 +1528,7 @@
         { "address": "Y", "label": "Hole position Y" },
         { "address": "Z", "label": "Hole bottom", "required": true },
         { "address": "R", "label": "R point: where the feed starts (G99 returns here)", "required": true, "position": "tool-axis" },
-        { "address": "F", "label": "Feed from the thread pitch", "required": true, "min": 0, "position": "none" },
+        { "address": "F", "label": "Feed from the thread pitch", "required": true, "min": 0, "unit": "feed", "position": "none" },
         { "address": "P", "label": "Dwell at the bottom (least time increments: 1 ms on IS-B)", "min": 0, "unit": "count", "position": "none" },
         { "address": "L", "label": "Repeat count", "min": 0, "unit": "count", "position": "none" }
       ]
@@ -1559,6 +1571,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1621,6 +1634,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },
@@ -1686,6 +1700,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1744,6 +1759,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none"
         },
         {
@@ -1801,6 +1817,7 @@
           "label": "Boring feed",
           "required": true,
           "min": 0,
+          "unit": "feed",
           "position": "none",
           "expandRole": "feed"
         },

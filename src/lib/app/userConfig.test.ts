@@ -84,6 +84,37 @@ function setup(initial: { profiles?: UserFile[]; codes?: UserFile[] } = {}, over
 }
 
 describe('load', () => {
+  // WY-CODE-4: the lists are asked in one wave, not one after the other.
+  it('asks for the user lists, the package lists and the package list together', async () => {
+    const started: string[] = [];
+    const gates: (() => void)[] = [];
+    const delayed = <T>(name: string, value: T): Promise<T> => {
+      started.push(name);
+      return new Promise<T>((resolve) => gates.push(() => resolve(value)));
+    };
+    const s = setup(
+      {},
+      {
+        list: (kind) => delayed(`list ${kind}`, []),
+        listPackageFiles: (kind) => delayed(`package files ${kind}`, []),
+        listPackages: () => delayed('packages', { folder: '', packages: [], problems: [] }),
+      },
+    );
+    const loading = s.config.load();
+    await Promise.resolve();
+    await Promise.resolve();
+    // Every call is out before the first one has answered.
+    expect(started.sort()).toEqual([
+      'list codes',
+      'list profiles',
+      'package files codes',
+      'package files profiles',
+      'packages',
+    ]);
+    for (const open of gates) open();
+    expect(await loading).toEqual([]);
+  });
+
   it('reloads nothing when there are no user files, as at every start without any', async () => {
     const s = setup();
     expect(await s.config.load()).toEqual([]);

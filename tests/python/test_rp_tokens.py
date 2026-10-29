@@ -13,6 +13,7 @@ words. Every NC line is synthetic, written for gEdit.
 from __future__ import annotations
 
 import copy
+import sys
 import unittest
 
 from tests.python import helpers
@@ -20,6 +21,7 @@ from tests.python.test_gedit_nc import code_tokens, effective_profiles, golden_l
 from tests.python.test_program_checks import findings, run_text
 
 gedit_nc = helpers.import_gedit_nc()
+nc_lex = sys.modules["_nc_lex"]
 
 #: The M12.5 `syntax` fields (plan section 7.16 #179).
 RP_FIELDS = ["freeText", "colonWords", "callTargets", "labelAfter", "declareAfter", "plainTextRun", "tapeMarker"]
@@ -193,6 +195,57 @@ class TestTheEdgesOfTheNewRules(unittest.TestCase):
     def test_the_mask_leaves_a_text_token_as_it_is(self):
         line = "12 CYCL DEF 207 TAP.-RIGID NEW ;CHECK"
         self.assertEqual(gedit_nc.mask_comments(line, self.klartext), "12 CYCL DEF 207 TAP.-RIGID NEW       ")
+
+
+class TestTheExtraAxesOfAMachine(unittest.TestCase):
+    """P4h (plan section 6.10 rule 13; T123): ``syntax.extraAxisNames``, the extra axes a machine
+    names. One golden shared with ``tokenizer.test.ts``: ``tokens`` with the names, ``plain``
+    the profile as shipped (where nothing may change)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.golden = helpers.load_json(helpers.FIXTURES_DIR / "tokens" / "sinumerik-extra-axes.json")
+
+    def compiled_with_axes(self, profile_id):
+        names = self.golden["extraAxisNames"]
+        return compiled(profile_id, lambda syntax: syntax.__setitem__("extraAxisNames", list(names)))
+
+    def shaped(self, line, cp):
+        out = []
+        for token in code_tokens(gedit_nc.tokenize_line(line, cp)[0]):
+            entry = {"kind": token.kind, "text": token.text}
+            for key, attr in (("address", "address"), ("valueText", "value_text"), ("index", "index")):
+                value = getattr(token, attr)
+                if value is not None:
+                    entry[key] = value
+            if token.incremental:  # TypeScript leaves the flag out unless it is set
+                entry["incremental"] = True
+            out.append(entry)
+        return out
+
+    def test_every_line_tokenizes_the_way_typescript_does(self):
+        for profile_id in self.golden["profiles"]:
+            extra = self.compiled_with_axes(profile_id)
+            plain = compiled(profile_id)
+            for entry in self.golden["lines"]:
+                with self.subTest(profile=profile_id, line=entry["line"]):
+                    self.assertEqual(self.shaped(entry["line"], extra), entry["tokens"])
+                    self.assertEqual(self.shaped(entry["line"], plain), entry["plain"])
+
+    def test_the_fast_path_reads_an_extra_axis_word_as_the_loop_does(self):
+        # A profile whose fast path takes plain words (the Fanuc mill), given an extra axis: the
+        # guard sends every line with the name to the character loop.
+        cp = compiled("fanuc-gcode", lambda syntax: syntax.__setitem__("extraAxisNames", ["AA"]))
+        lines = ["G1 X10. AA90.", "AA-5. Y2.", "G0 X1. (AA90)", "N10 AA.5"]
+        saved = nc_lex._FAST_PATH
+        try:
+            fast = [shape(gedit_nc.tokenize_line(line, cp)[0]) for line in lines]
+            nc_lex._FAST_PATH = False
+            loop = [shape(gedit_nc.tokenize_line(line, cp)[0]) for line in lines]
+        finally:
+            nc_lex._FAST_PATH = saved
+        self.assertEqual(fast, loop)
+        self.assertEqual([t.address for t in code_tokens(gedit_nc.tokenize_line("G1 X10. AA90.", cp)[0])], ["G", "X", "AA"])
 
 
 class TestTheCheckRowsTheFieldsRemove(unittest.TestCase):

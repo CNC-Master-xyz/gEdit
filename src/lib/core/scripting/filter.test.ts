@@ -113,6 +113,42 @@ describe('groupScripts', () => {
   });
 });
 
+describe('groupScripts: the sections of packages (P4g, §6.9 rule 10)', () => {
+  it('gives every package and subfolder a section of its own, after the ungrouped one, in listing order', () => {
+    const entries = [
+      entry('bundled:a.py'),
+      entry('pkg-shop-a:facing.py'),
+      entry('pkg-shop-a:finish/chamfer.py', { group: 'finish' }),
+      entry('pkg-shop-b:facing.py'),
+      entry('user:c.py'),
+      entry('user:finish/d.py', { group: 'finish' }),
+    ];
+    expect(groupScripts(entries)).toEqual([
+      { group: null, scripts: [entries[0], entries[4]] },
+      { group: null, package: 'shop-a', scripts: [entries[1]] },
+      { group: 'finish', package: 'shop-a', scripts: [entries[2]] },
+      { group: null, package: 'shop-b', scripts: [entries[3]] },
+      { group: 'finish', scripts: [entries[5]] },
+    ]);
+  });
+
+  it('does not put a package folder and a user folder of one name into one section', () => {
+    const entries = [entry('pkg-shop-a:turning/a.py', { group: 'turning' }), entry('user:turning/b.py', { group: 'turning' })];
+    const sections = groupScripts(entries);
+    expect(sections).toHaveLength(2);
+    expect(sections.map((section) => section.package)).toEqual(['shop-a', undefined]);
+  });
+
+  it('leaves a package out of a section that is not one (a root named like a package but not a package name)', () => {
+    expect(groupScripts([entry('pkg-Shop:a.py')]).map((section) => section.package)).toEqual([undefined]);
+  });
+
+  it('keeps a shadowed package script out of the offered list, like any other', () => {
+    const entries = [entry('pkg-shop-a:facing.py', { shadowed: true }), entry('user:facing.py')];
+    expect(scriptsForProfile(entries, null).map((s) => s.id)).toEqual(['user:facing.py']);
+  });
+});
+
 describe('scriptLabel', () => {
   it('is the header name', () => {
     expect(scriptLabel(entry('bundled:scale_feed.py'))).toBe('Scale feed rates');

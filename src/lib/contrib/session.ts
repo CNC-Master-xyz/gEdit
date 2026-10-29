@@ -29,7 +29,12 @@
 // not hold the window back. `restore()` is contracted never to reject.
 
 import { awaitRestoreDecision } from '$lib/app/recovery';
-import { session, startFileTracker } from '$lib/app/session';
+import {
+  claimSessionRestore,
+  markSessionRestored,
+  session,
+  startFileTracker,
+} from '$lib/app/session';
 import type { Contribution, Disposable } from '$lib/app/types';
 
 export default {
@@ -38,6 +43,9 @@ export default {
     const stopTracker = startFileTracker();
     let stopSession: Disposable | undefined;
     let disposed = false;
+    // Synchronously: from here on files handed over by the system (`contrib/openRequests.ts`)
+    // wait for `markSessionRestored()`, whatever the file-name order of the contributions.
+    claimSessionRestore();
 
     void (async () => {
       try {
@@ -51,6 +59,9 @@ export default {
         // `restore()` is contracted never to reject; this is the belt to those braces,
         // and it must not stop the tracking that follows.
         console.warn('the last session could not be restored', err);
+      } finally {
+        // Also when the restore is off, failed or was disposed: the front tab is as it will be.
+        markSessionRestored();
       }
       if (disposed) return;
       stopSession = session.start();

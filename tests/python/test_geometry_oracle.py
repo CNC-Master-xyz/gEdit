@@ -752,7 +752,12 @@ def assert_clean(test: unittest.TestCase, outcome: Outcome) -> None:
 
 
 def golden_subject(case: Any) -> Subject:
-    return Subject("%s/%s" % (case.script, case.name), case.input_text(), helpers.geometry_context(case))
+    context = helpers.geometry_context(case)
+    scope = context.get("input")
+    if isinstance(scope, dict) and scope.get("scope") == "selection":
+        # Wave Y (FZ-5): a golden's selection ends the document, so no lines stand below it.
+        scope.setdefault("followingLines", [])
+    return Subject("%s/%s" % (case.script, case.name), case.input_text(), context)
 
 
 # ---------------------------------------------------------------------------

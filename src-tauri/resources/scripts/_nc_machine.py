@@ -171,7 +171,9 @@ def machine_params(ctx: Dict[str, Any]) -> Dict[str, Any]:
 # The class order of `number_class_of` is fixed by AD-31 and the first match wins:
 #   1. the `unit` of a `CodeParam` of a code in this block (`increment`, `count`, or a
 #      class named outright) — the table in §8.2 is the one place these are written down;
-#      codes that declare the word with different units give it no class (T212);
+#      codes that declare the word with different units give it no class (T212), and so do
+#      the two blocks of a two-block cycle that declare it with different units while the
+#      block (`cycle_block`) is not known (P4h, T118: the `G76` `P`);
 #      then (M9) the same of a code **in force** (`in_force`: the modal cycle, the motion
 #      code, a mode such as `G63`). A thread lead is declared this way (`F` with `unit:
 #      'feedPerRev'`), and so is the per-minute feed of Okuma `G101`-`G103`;
@@ -268,7 +270,11 @@ def _dec_text(value: Decimal) -> str:
     """
     if value == _ZERO:
         return "0"
-    return format(value.normalize(), "f")
+    # P4h parity D2: `normalize` rounds to the context's precision (28 digits by default),
+    # so a value of 29 or more digits needs room for every one of them.
+    with localcontext() as context:
+        context.prec = max(context.prec, len(value.as_tuple().digits))
+        return format(value.normalize(), "f")
 
 
 def _multiply(left: Decimal, right: Decimal) -> Decimal:
@@ -298,7 +304,12 @@ def _divide(left: Decimal, right: Decimal) -> Decimal:
 def _tenth_of(text: Any) -> Optional[str]:
     """``text`` divided by ten, exactly: the digits stay, the point moves."""
     value = _decimal(text)
-    return None if value is None else _dec_text(value.scaleb(-1))
+    if value is None:
+        return None
+    # P4h parity D2: `scaleb` rounds to the context's precision too.
+    with localcontext() as context:
+        context.prec = max(context.prec, len(value.as_tuple().digits))
+        return _dec_text(value.scaleb(-1))
 
 
 # --- the literal -------------------------------------------------------------
@@ -361,7 +372,7 @@ def _feed_class_of(unit: Any) -> Optional[str]:
 _CONFLICT = object()
 
 
-def _declared_unit(codes: "Sequence[Dict[str, Any]]", word: str) -> Any:
+def _declared_unit(codes: "Sequence[Dict[str, Any]]", word: str, cycle_block: Optional[int] = None) -> Any:
     """The ``unit`` ``codes`` declare for ``word`` among their parameters.
 
     ``None`` when none does, ``_CONFLICT`` when two of them say different things. The answer
@@ -369,18 +380,28 @@ def _declared_unit(codes: "Sequence[Dict[str, Any]]", word: str) -> Any:
     block with two codes that declare one address with different units was read by
     whichever the caller listed first, and M13's user databases can write such a pair.
 
-    B1: a two-block cycle (``G71``, ``G76``) may declare an address once per block, with its
-    own label in each; the two declarations have the same ``unit`` (the loader refuses a
-    database where they differ), so they never conflict.
+    The block-aware unit (P4h, plan §6.10 rule 11; T118). A two-block cycle (``blocks: 2``)
+    may declare an address once per block with a different ``unit`` — the ``G76`` ``P`` is a
+    packed count in the first block and the thread height in increments in the second. With
+    ``cycle_block`` known, only that block's declarations and those without a ``block`` are
+    read; with it ``None`` both are, and two different units are the same "cannot tell" as
+    above: no class, never the other block's unit. Every other entry is read whole. The twin
+    of ``declaredUnit`` in ``numbers.ts``.
+
+    T210: the feed marker ``unit: 'feed'`` declares nothing here: it says the parameter is a
+    feed rate in the unit in force, which is how the word is read without it.
     """
     found = None
     for entry in codes:
+        per_block = cycle_block in (1, 2) and entry.get("blocks") == 2
         params = entry.get("params")
         for param in params if isinstance(params, list) else []:
             if not isinstance(param, dict):
                 continue
+            if per_block and param.get("block") is not None and param.get("block") != cycle_block:
+                continue
             param_address = param.get("address")
-            if not isinstance(param_address, str) or param_address.upper() != word or param.get("unit") is None:
+            if not isinstance(param_address, str) or param_address.upper() != word or param.get("unit") in (None, "feed"):
                 continue
             if found is not None and found != param["unit"]:
                 return _CONFLICT
@@ -399,6 +420,7 @@ def number_class_of(
     block_codes: "Sequence[Dict[str, Any]]",
     pitch_feed: bool = False,
     in_force: "Optional[Sequence[Dict[str, Any]]]" = None,
+    cycle_block: Optional[int] = None,
 ) -> Optional[str]:
     """The number class of one address in one block, or ``None`` when it has none.
 
@@ -409,7 +431,12 @@ def number_class_of(
     that is active carries a pitch feed. ``in_force`` (M9) are the entries of the codes in
     force that the block does not write — the modal cycle, the motion code, a mode such as
     ``G63``; a caller without them passes nothing, and a pitch it flags is then one it
-    could not name (rule 3).
+    could not name (rule 3). ``cycle_block`` (P4h, plan §6.10 rule 11; T118) is the block of
+    a two-block cycle of ``block_codes`` this block is (``_nc_modal.block_cycle_of`` of the
+    block's entries and the tokens of the whole block), or ``None`` when that cannot be told:
+    a parameter declared with another unit per block (the ``G76`` ``P``) is read with this
+    block's unit, and gets no class while the block is not known. The codes in force are
+    always read as if the block were not known (the two-block cycles are not modal).
 
     The answer is a class, ``'increment'`` or ``'count'`` (both from ``CodeParam.unit``),
     or ``None``. The order is the one in the header of this section, and the first match
@@ -423,7 +450,8 @@ def number_class_of(
 
     # 1. what the code database says about this parameter of this code, then of the code
     #    in force: a lead is declared here (`F` with `unit: 'feedPerRev'`), never inferred
-    declared = _declared_unit(codes, word)
+    block = cycle_block if cycle_block in (1, 2) and not isinstance(cycle_block, bool) else None
+    declared = _declared_unit(codes, word, block)
     if declared is None:
         declared = _declared_unit(active, word)
     if declared is _CONFLICT:

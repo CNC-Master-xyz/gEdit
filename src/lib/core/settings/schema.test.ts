@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULTS, SETTINGS_VERSION, SETTING_FIELDS, type Settings } from './schema';
 import { mergeSettings } from './merge';
+import { LOCALES, offersLanguageChoice } from '$lib/i18n/locale';
 import { validateFields } from '$lib/core/forms/validate';
 import type { FieldSpec } from '$lib/core/forms/types';
 
@@ -36,11 +37,17 @@ describe('settings schema', () => {
     }
   });
 
-  it('gives every choice field its options, except the profile list', () => {
+  it('gives every choice field its options, except the lists known only at run time: the profiles and the languages that ship', () => {
     const empty = SETTING_FIELDS.filter(
       (f) => f.field.type === 'choice' && (f.field.choices ?? []).length === 0,
     );
-    expect(empty.map((f) => f.key)).toEqual(['files.defaultProfile']);
+    expect(empty.map((f) => f.key)).toEqual(['files.defaultProfile', 'ui.language']);
+  });
+
+  it('has the user role colours as a palette, empty by default', () => {
+    expect(DEFAULTS['appearance.roleColors']).toEqual({});
+    expect(Object.isFrozen(DEFAULTS['appearance.roleColors'])).toBe(true);
+    expect(SETTING_FIELDS.find((f) => f.key === 'appearance.roleColors')?.category).toBe('appearance');
   });
 
   it('freezes the defaults, arrays included', () => {
@@ -92,6 +99,16 @@ describe('settings schema', () => {
   });
 
   it('keeps every key out of the dialog only on purpose', () => {
-    expect(SETTING_FIELDS.filter((f) => !f.dialog).map((f) => f.key)).toEqual(['editor.rulers']);
+    // `editor.rulers` is edited in the file; the role colours have their own editor
+    // (`RoleColorRows.svelte`) that the Appearance page draws under the theme choice. P4g: the language joins the Appearance page when a second language ships (P4.37), and the
+    // switched-off packages are edited on the Packages page (plan §6.9 rules 12 and 37).
+    expect(SETTING_FIELDS.filter((f) => !f.dialog).map((f) => f.key)).toEqual(['appearance.roleColors', 'editor.rulers', ...(offersLanguageChoice() ? [] : ['ui.language']), 'packages.disabled']);
+  });
+
+  it('shows the language row exactly when a second language ships (§6.9 rule 41)', () => {
+    const row = SETTING_FIELDS.find((f) => f.key === 'ui.language');
+    expect(row?.category).toBe('appearance');
+    expect(row?.dialog).toBe(offersLanguageChoice());
+    expect(row?.dialog).toBe(LOCALES.length > 1);
   });
 });

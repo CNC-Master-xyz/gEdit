@@ -118,10 +118,24 @@
     },
     {
       "code": "G1",
-      "description": "Straight move to the target at the active feed.",
+      "description": "Straight move to the target at the active feed. A chamfer (,C) or a corner rounding (,R) written at its end is cut between it and the next move.",
       "group": "motion",
       "label": "Linear feed move",
       "modal": true,
+      "params": [
+        {
+          "address": ",C",
+          "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign",
+          "min": 0,
+          "unit": "length"
+        },
+        {
+          "address": ",R",
+          "label": "Corner rounding between this move and the next: its radius, without sign",
+          "min": 0,
+          "unit": "length"
+        }
+      ],
       "sets": {
         "motion": "feed"
       }
@@ -137,6 +151,18 @@
           "address": "R",
           "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees",
           "lengthAlong": "plane"
+        },
+        {
+          "address": ",C",
+          "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign",
+          "min": 0,
+          "unit": "length"
+        },
+        {
+          "address": ",R",
+          "label": "Corner rounding between this move and the next: its radius, without sign",
+          "min": 0,
+          "unit": "length"
         }
       ],
       "review": "pending",
@@ -157,6 +183,18 @@
           "address": "R",
           "label": "Arc radius, written instead of I, J and K; negative for an arc over 180 degrees",
           "lengthAlong": "plane"
+        },
+        {
+          "address": ",C",
+          "label": "Chamfer between this move and the next: the distance from the corner to each end of the chamfer, without sign",
+          "min": 0,
+          "unit": "length"
+        },
+        {
+          "address": ",R",
+          "label": "Corner rounding between this move and the next: its radius, without sign",
+          "min": 0,
+          "unit": "length"
         }
       ],
       "review": "pending",
@@ -259,7 +297,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -1151,6 +1190,10 @@
           "min": 1
         }
       ],
+      "requires": [
+        "P"
+      ],
+      "review": "pending",
       "wordsAreData": true
     },
     {
@@ -1172,6 +1215,10 @@
           "min": 1
         }
       ],
+      "requires": [
+        "P"
+      ],
+      "review": "pending",
       "wordsAreData": true
     },
     {
@@ -1420,7 +1467,8 @@
           "block": 2,
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "S",
@@ -1500,7 +1548,8 @@
           "block": 2,
           "label": "Feed",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         }
       ],
       "pitchFeedAmbiguous": true,
@@ -1513,7 +1562,7 @@
     {
       "blocks": 2,
       "code": "G76",
-      "description": "Cuts a thread in several passes, taking less material each time. Written in two blocks: the finishing passes, the pull-out chamfer and the insert angle packed into P, the smallest depth of cut and the finishing allowance first; then the end point, the taper, the thread height, the depth of the first cut and the lead. The block with X (U) and Z (W) runs the cycle; P, Q and R mean different things in the two blocks, and each of them stays in force until it is written again. F is the thread lead per revolution, not a feed rate. gEdit shows both P values as written: the packed digits of the first block must never be converted.",
+      "description": "Cuts a thread in several passes, taking less material each time. Written in two blocks: the finishing passes, the pull-out chamfer and the insert angle packed into P, the smallest depth of cut and the finishing allowance first; then the end point, the taper, the thread height, the depth of the first cut and the lead. The block with X (U) and Z (W) runs the cycle; P, Q and R mean different things in the two blocks, and each of them stays in force until it is written again. F is the thread lead per revolution, not a feed rate. gEdit shows the packed P of the first block as written and never converts it; the thread height P of the second block is read in least increments, like Q.",
       "group": "cycle",
       "label": "Multi-pass threading cycle",
       "params": [
@@ -1568,10 +1617,10 @@
         {
           "address": "P",
           "block": 2,
-          "label": "Thread height, a radius value in least increments without a point (µm on a metric IS-B machine); shown as written",
+          "label": "Thread height, a radius value in least increments without a point (µm on a metric IS-B machine)",
           "min": 0,
           "position": "none",
-          "unit": "count"
+          "unit": "increment"
         },
         {
           "address": "Q",
@@ -1644,7 +1693,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1747,7 +1797,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1799,7 +1850,8 @@
           "label": "Drilling feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -1890,7 +1942,8 @@
           "label": "Boring feed",
           "min": 0,
           "position": "none",
-          "required": true
+          "required": true,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -2479,7 +2532,8 @@
         {
           "address": "U",
           "block": 1,
-          "label": "Depth of cut per pass, a radius value without sign"
+          "label": "Depth of cut per pass, a radius value without sign",
+          "min": 0
         },
         {
           "address": "R",
@@ -2520,7 +2574,8 @@
           "block": 2,
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "S",
@@ -2551,7 +2606,8 @@
         {
           "address": "W",
           "block": 1,
-          "label": "Depth of cut per pass, a radius value without sign"
+          "label": "Depth of cut per pass, a radius value without sign",
+          "min": 0
         },
         {
           "address": "R",
@@ -2592,7 +2648,8 @@
           "block": 2,
           "label": "Roughing feed (a feed inside the profile blocks is not used)",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         },
         {
           "address": "S",
@@ -2672,7 +2729,8 @@
           "block": 2,
           "label": "Feed",
           "min": 0,
-          "position": "none"
+          "position": "none",
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -2703,7 +2761,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending",
@@ -2778,7 +2837,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ],
       "review": "pending",

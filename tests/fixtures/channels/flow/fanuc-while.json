@@ -1,0 +1,77 @@
+{
+  "comment": "Written for gEdit (synthetic, not for a machine); see README.md here.",
+  "description": "Fanuc two-path: path 1 waits on M901 inside WHILE[#1LT2]DO1 ... END1, whose condition reads a variable; path 2 writes M901 twice. Not a counted loop: the count stays not checked.",
+  "rule": "F3 F5",
+  "profile": "fanuc-lathe",
+  "preset": "fanuc-2path",
+  "program": {
+    "1": [
+      "%",
+      "O3006 (PATH 1)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0101",
+      "#1=0",
+      "WHILE[#1LT2]DO1",
+      "N20 M901 P3",
+      "#1=#1+1",
+      "END1",
+      "N30 M30",
+      "%"
+    ],
+    "2": [
+      "%",
+      "O3006 (PATH 2)",
+      "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)",
+      "N10 T0202",
+      "N20 M901 P3",
+      "N30 M901 P3",
+      "N40 M30",
+      "%"
+    ]
+  },
+  "expect": {
+    "flow": {
+      "1": {
+        "jumps": [],
+        "loops": [],
+        "opaque": [
+          6,
+          9
+        ]
+      },
+      "2": {
+        "jumps": [],
+        "loops": [],
+        "opaque": []
+      }
+    },
+    "before": [
+      {
+        "kind": "count-not-checked",
+        "channel": "2",
+        "line": 6,
+        "mark": "M901",
+        "other": "1",
+        "otherLine": 7,
+        "counts": {
+          "channel": 2,
+          "other": 1
+        }
+      }
+    ],
+    "after": [
+      {
+        "kind": "count-not-checked",
+        "channel": "2",
+        "line": 6,
+        "mark": "M901",
+        "other": "1",
+        "otherLine": 7,
+        "counts": {
+          "channel": 2,
+          "other": 1
+        }
+      }
+    ]
+  }
+}

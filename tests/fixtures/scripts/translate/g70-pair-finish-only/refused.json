@@ -1,0 +1,11 @@
+{
+  "message": "Nothing was changed: 1 block cannot be moved by Z-5: 1 roughing or finishing cycle split from its contour. No machine chosen: a word whose reading depends on the machine would refuse the run.",
+  "findings": [
+    {
+      "line": 12,
+      "severity": "error",
+      "message": "G70 P10 Q20: a roughing or finishing cycle and the contour it names (G70 to G73 with P and Q, an Okuma LAP shape) only move together, and this selection holds the cycle without the whole contour, or part of the contour without every cycle that names it. Select the cycles and the whole contour together, or run Translate on the whole program.",
+      "reason": "contour-split"
+    }
+  ]
+}

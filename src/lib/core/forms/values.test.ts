@@ -152,9 +152,12 @@ describe('the returned record is the form to edit', () => {
   });
 
   it('starts every settings field at its default, and that form validates', () => {
-    const specs = SETTING_FIELDS.map((meta) => ({ ...meta.field, label: meta.key }));
+    // The fields the dialog renders: `appearance.roleColors` is an object drawn by its own editor
+    // (P4.41) and `editor.rulers` is edited in the file, so neither goes through the form renderer.
+    const shown = SETTING_FIELDS.filter((meta) => meta.dialog);
+    const specs = shown.map((meta) => ({ ...meta.field, label: meta.key }));
     const values = initialValues(specs);
-    for (const meta of SETTING_FIELDS) expect(values[meta.key]).toEqual(DEFAULTS[meta.key]);
+    for (const meta of shown) expect(values[meta.key]).toEqual(DEFAULTS[meta.key]);
     expect(validateFields(specs, values)).toEqual({});
   });
 });

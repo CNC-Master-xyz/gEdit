@@ -9,7 +9,7 @@
 // commands (implemented by WP2.1). M4: the scripting commands (implemented by WP4.5).
 // M5 removes the two v1 script commands, which never had a wrapper here.
 
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import type { FieldSpec } from '$lib/core/forms/types';
 // Type-only, and the one import that points "up" from this module: the M7 snapshot
 // metadata is made of the document types of §7.2 (`FileEncoding`, `Eol`, `NulInfo`,
@@ -675,4 +675,363 @@ export function scriptCopyToUser(scriptId: string): Promise<string> {
 /** The granted path behind an id, for editing. A `bundled:` id is refused. */
 export function scriptSourcePath(scriptId: string): Promise<string> {
   return invoke<string>('script_source_path', { scriptId });
+}
+
+// ---------------------------------------------------------------------------
+// P4g: keys, packages and the configuration zip (Phase 4 plan §6.9)
+//
+// Written by the P4g prelude. `keybindings_*` (src-tauri/src/keybindings.rs, P4.34): the file
+// `<config>/keybindings.json`, loaded and saved whole, never by path. `packages_list` and
+// `package_files_list` (src-tauri/src/packages.rs, P4.35): the folders under `<config>/packages`.
+// `config_export`, `config_import_preview` and `config_import_apply` (src-tauri/src/configzip.rs,
+// P4.36): the paths are files the user picked in the save or open dialog, and the fs scope has
+// to allow them; nothing is granted by any of them.
+// ---------------------------------------------------------------------------
+
+/** What `keybindings_load` answers. `keybindings` is `{}` for a missing or unusable file. */
+export interface KeybindingsLoad {
+  keybindings: Record<string, unknown>;
+  /** English detail for a file that could not be used (AD-14). */
+  error: string | null;
+  /** Written by a newer gEdit: read, never overwritten. */
+  readOnly: boolean;
+}
+
+/** Reads `<config>/keybindings.json` (the whole object, `$version` included). */
+export function keybindingsLoad(): Promise<KeybindingsLoad> {
+  return invoke<KeybindingsLoad>('keybindings_load');
+}
+
+/**
+ * Replaces `<config>/keybindings.json` with `keybindings` (an object of at most 1 MiB whose
+ * `bindings` member is an object of at most 1000 entries), atomically; rejects when the file on
+ * disk is from a newer gEdit. An unusable previous file is kept as `keybindings.json.bak`.
+ */
+export function keybindingsSave(keybindings: Record<string, unknown>): Promise<void> {
+  return invoke<void>('keybindings_save', { keybindings });
+}
+
+/** One script package folder, enabled or not. */
+export interface PackageInfo {
+  /** The folder name: the identity of the package and what `packages.disabled` lists. */
+  name: string;
+  /** The display name from `package.json`, or the folder name. */
+  title: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  scripts: number;
+  profiles: number;
+  codes: number;
+  /** Why the folder is not a usable package; nothing of it loads then. */
+  error: string | null;
+  /** Problems with `package.json` (the package still loads). */
+  problems: string[];
+}
+
+/** Every package folder, by name. */
+export interface PackageList {
+  /** `<config>/packages`, to show where a package folder goes. */
+  folder: string;
+  packages: PackageInfo[];
+  problems: string[];
+}
+
+/** One profile or code file of an enabled package; `text` is null when it could not be read. */
+export interface PackageFile {
+  package: string;
+  name: string;
+  text: string | null;
+  error: string | null;
+}
+
+/** The package folders with their manifests and counts (Packages page). */
+export function packagesList(): Promise<PackageList> {
+  return invoke<PackageList>('packages_list');
+}
+
+/** The profile or code files of the enabled packages, read under the user-file limits. */
+export function packageFilesList(kind: UserFileKind): Promise<PackageFile[]> {
+  return invoke<PackageFile[]>('package_files_list', { kind });
+}
+
+/** Why an archive or one entry is refused; the ids of `configuration.refusal.<id>` messages. */
+export type ConfigRefusalReason =
+  | 'not-zip'
+  | 'archive-too-big'
+  | 'too-many-entries'
+  | 'name-encoding'
+  | 'name-too-long'
+  | 'too-deep'
+  | 'absolute'
+  | 'backslash'
+  | 'colon'
+  | 'control'
+  | 'parent-dir'
+  | 'empty-segment'
+  | 'bad-segment'
+  | 'duplicate'
+  | 'link'
+  | 'special-file'
+  | 'encrypted'
+  | 'method'
+  | 'too-big'
+  | 'total-too-big'
+  | 'ratio'
+  | 'inconsistent'
+  | 'corrupt'
+  | 'no-manifest'
+  | 'bad-manifest'
+  | 'newer-format';
+
+export interface ConfigRefusal {
+  /** The entry; empty for the archive as a whole. */
+  path: string;
+  reason: ConfigRefusalReason;
+}
+
+/** What an import does to a file. */
+export type ConfigFileAction = 'new' | 'replace' | 'same';
+
+/** One line inside a file: a settings key or a machine, as text. */
+export interface ConfigImportItem {
+  label: string;
+  from: string | null;
+  to: string | null;
+}
+
+export interface ConfigImportFile {
+  /** The entry name, which is also the path below the configuration folder. */
+  path: string;
+  action: ConfigFileAction;
+  bytes: number;
+  items: ConfigImportItem[];
+  notes: string[];
+}
+
+/** `settings`, `keys`, `machines`, `profiles`, `codes`, `scripts` or `package:<name>`. */
+export interface ConfigImportGroup {
+  id: string;
+  /** Holds a script: the import needs the user's trust. */
+  runnable: boolean;
+  files: ConfigImportFile[];
+}
+
+/** The answer of `config_import_preview`. Nothing was written. */
+export interface ConfigImportPreview {
+  /** False when the archive is refused as a whole. */
+  ok: boolean;
+  fingerprint: string;
+  manifest: { appVersion: string; created: string; platform: string };
+  groups: ConfigImportGroup[];
+  /** `"<path>: <reason>"`, at most 50. */
+  ignored: string[];
+  ignoredCount: number;
+  refusals: ConfigRefusal[];
+  needsTrust: boolean;
+  /** Settings keys the zip holds and the import never takes (the interpreter and extra script folders). */
+  keptSettings: string[];
+}
+
+export interface ConfigImportResult {
+  written: number;
+  unchanged: number;
+  /** The backup zip's file name in the data folder, or null when nothing was replaced. */
+  backup: string | null;
+}
+
+export interface ConfigExportResult {
+  files: number;
+  bytes: number;
+  skipped: { path: string; reason: string }[];
+}
+
+/** Writes the configuration zip to `dest`, a path the user picked in the save dialog. */
+export function configExport(dest: string): Promise<ConfigExportResult> {
+  return invoke<ConfigExportResult>('config_export', { dest });
+}
+
+/** Step 1 of an import: what the zip at `src` would do. Writes nothing. */
+export function configImportPreview(src: string): Promise<ConfigImportPreview> {
+  return invoke<ConfigImportPreview>('config_import_preview', { src });
+}
+
+/**
+ * Step 2: applies the ticked `groups` of the zip at `src` whose preview had `fingerprint`.
+ * `acceptScripts` is the user's trust, required when a ticked group is runnable. Writes a backup
+ * zip of everything it replaces first.
+ */
+export function configImportApply(
+  src: string,
+  fingerprint: string,
+  groups: string[],
+  acceptScripts: boolean,
+): Promise<ConfigImportResult> {
+  return invoke<ConfigImportResult>('config_import_apply', { src, fingerprint, groups, acceptScripts });
+}
+
+// ---------------------------------------------------------------------------
+// P4f: folders and files from the system (src-tauri/src/{folders,open_requests}.rs; plan
+// section 6.8, AD-53, AD-54). Written by the P4f prelude; the folder commands are built (P4.27), the
+// open requests follow with P4.29. The limits below are the Rust constants (a test holds them equal
+// to the plan). Every refusal is a fixed English sentence from a closed list in `folders.rs`: show it
+// as it is, and never build a decision on its text.
+// ---------------------------------------------------------------------------
+
+/** The limits of `folder_search` and `folder_siblings` (`src-tauri/src/folders.rs`). */
+export const FOLDER_LIMITS = {
+  maxPathChars: 4096,
+  maxDepth: 16,
+  maxEntries: 200_000,
+  maxDirEntries: 50_000,
+  maxFilesRead: 20_000,
+  maxFileBytes: 16 * 1024 * 1024,
+  maxTotalBytes: 1024 * 1024 * 1024,
+  maxSentBytes: 256 * 1024 * 1024,
+  maxSeconds: 600,
+  binaryProbeBytes: 8192,
+  maxPatterns: 16,
+  maxPatternChars: 128,
+  maxContainsBytes: 256,
+  maxListedNames: 20,
+  maxSiblingNames: 5_000,
+  minSiblingLiterals: 2,
+} as const;
+
+/** `contains` of a request: a text every matching line holds verbatim (ASCII, 1 to 256 bytes). */
+export interface FolderContains {
+  text: string;
+  caseSensitive: boolean;
+}
+
+export interface FolderSearchRequest {
+  /** `^[a-z0-9-]{1,64}$`. */
+  id: string;
+  /** An absolute folder the user picked or dropped. */
+  root: string;
+  recursive: boolean;
+  namePatterns: string[];
+  /** Milliseconds since the epoch; `after` inclusive, `before` exclusive. */
+  modifiedAfter: number | null;
+  modifiedBefore: number | null;
+  contains: FolderContains | null;
+}
+
+/** A message of the stream that is JSON; a `file` message is followed by one raw message of `bytes` bytes. */
+export type FolderEvent =
+  | { kind: 'file'; index: number; path: string; rel: string; bytes: number; mtimeMs: number | null }
+  | { kind: 'progress'; entriesSeen: number; filesRead: number };
+
+export type FolderStop = 'cancelled' | 'entries' | 'files' | 'bytes' | 'time';
+
+export interface FolderSkipped {
+  binary: number;
+  tooLarge: number;
+  unreadable: number;
+  links: number;
+  hidden: number;
+  tooDeep: number;
+  bigFolders: number;
+}
+
+export interface FolderSummary {
+  entriesSeen: number;
+  filesRead: number;
+  filesSent: number;
+  bytesRead: number;
+  skipped: FolderSkipped;
+  stoppedBy: FolderStop | null;
+  tooLargeNames: string[];
+}
+
+/** What the webview gets of one file: the metadata and its bytes. */
+export interface FolderFile {
+  index: number;
+  path: string;
+  rel: string;
+  bytes: number;
+  mtimeMs: number | null;
+  data: Uint8Array;
+}
+
+/**
+ * Walks `req.root` and calls `onFile` for every file that passed the checks, in order. The
+ * promise ends with the summary; `onProgress` is told every 250 ms. A `file` JSON message and the
+ * raw message after it are paired here, so a caller never sees half a file. Rejects when the
+ * request is refused (the root is not allowed, a limit of the request, a search is running). A search
+ * that is cancelled answers at once with `stoppedBy: 'cancelled'`, even when the walk is stuck on a
+ * share that does not answer; `folderSearchCancel` is how a caller stops one.
+ */
+export async function folderSearch(
+  req: FolderSearchRequest,
+  onFile: (file: FolderFile) => void,
+  onProgress?: (entriesSeen: number, filesRead: number) => void,
+): Promise<FolderSummary> {
+  const channel = new Channel<ArrayBuffer | FolderEvent>();
+  let waiting: Extract<FolderEvent, { kind: 'file' }> | null = null;
+  let delivered = 0;
+  channel.onmessage = (message) => {
+    if (message instanceof ArrayBuffer) {
+      if (waiting === null) return;
+      const meta = waiting;
+      waiting = null;
+      delivered += 1;
+      onFile({ index: meta.index, path: meta.path, rel: meta.rel, bytes: meta.bytes, mtimeMs: meta.mtimeMs, data: new Uint8Array(message) });
+    } else if (message.kind === 'file') {
+      waiting = message;
+    } else {
+      onProgress?.(message.entriesSeen, message.filesRead);
+    }
+  };
+  const summary = await invoke<FolderSummary>('folder_search', { req, onEvent: channel });
+  // The channel's messages and the command's answer travel separately, so the last files can arrive
+  // after the summary. A caller must not see the summary first: wait (bounded) until every file the
+  // summary counts has been handed over.
+  const expected = summary.filesSent ?? 0;
+  const until = Date.now() + FOLDER_DRAIN_MS;
+  while (delivered < expected && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 5));
+  return summary;
+}
+
+/** How long `folderSearch` waits for files still on their way after the summary arrived. */
+const FOLDER_DRAIN_MS = 10_000;
+
+/** Stops the search `id`; answers whether one with that id was running. */
+export function folderSearchCancel(id: string): Promise<boolean> {
+  return invoke<boolean>('folder_search_cancel', { id });
+}
+
+export interface FolderSiblings {
+  names: string[];
+  truncated: boolean;
+  unavailable: boolean;
+}
+
+/**
+ * The plain file names in the folder of the open document `path` that fit `pattern` (`*` and `?`,
+ * at least two literal characters). Names only. Rejects when `path` is not in the fs scope.
+ */
+export function folderSiblings(path: string, pattern: string): Promise<FolderSiblings> {
+  return invoke<FolderSiblings>('folder_siblings', { path, pattern });
+}
+
+/** Grants the one file `path` found below `root`, so it can be opened. Rejects for anything else. */
+export function folderGrant(root: string, path: string): Promise<void> {
+  return invoke<void>('folder_grant', { root, path });
+}
+
+/** What `open_requests_ready` answers: paths that waited, and how many were dropped on the way. */
+export interface OpenRequestsReady {
+  paths: string[];
+  dropped: number;
+  /** Arguments of the hand-overs that were not paths of existing files. */
+  refused: number;
+}
+
+/** The event the backend emits for a file the system asks us to open: payload `{ paths: string[]; refused: number }`. */
+export const OPEN_REQUESTS_EVENT = 'gedit-open-requests';
+
+/** Call once, **after** the listener for `OPEN_REQUESTS_EVENT` is registered. */
+export function openRequestsReady(): Promise<OpenRequestsReady> {
+  return invoke<OpenRequestsReady>('open_requests_ready');
 }

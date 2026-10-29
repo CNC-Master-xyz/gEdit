@@ -64,7 +64,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -133,7 +134,8 @@
         {
           "address": "F",
           "label": "Feed",
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         }
       ]
     },
@@ -241,7 +243,8 @@
           "position": "none",
           "label": "Drilling feed",
           "required": true,
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -328,7 +331,8 @@
           "position": "none",
           "label": "Boring feed",
           "required": true,
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -378,7 +382,8 @@
           "position": "none",
           "label": "Drilling feed",
           "required": true,
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "K",
@@ -465,7 +470,8 @@
           "position": "none",
           "label": "Boring feed",
           "required": true,
-          "min": 0
+          "min": 0,
+          "unit": "feed"
         },
         {
           "address": "K",

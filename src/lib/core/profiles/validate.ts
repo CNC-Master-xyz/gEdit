@@ -40,6 +40,7 @@
 //     hand passes them, and a caller that does not simply does not get those two checks.
 
 import { normalizeCode } from '$lib/core/codes/lookup';
+import { paletteProblems } from '$lib/core/grammar/contrast';
 import { COMPARE_OPTION_KEYS } from '$lib/core/compare/types';
 import type { Eol } from '$lib/app/types';
 import type { NumberClass, NumberReading, ParamSource } from '$lib/core/machines/types';
@@ -115,6 +116,15 @@ const RESERVED_HEAD_CHARS = new Set('();/"\'%$<>+-.,=[]#*'.split(''));
 
 /** P9. An exponent marker: letters only (`EX`). */
 const LETTERS = /^[A-Za-z]+$/;
+
+/** P4h (plan §6.10 rule 13; T123): an extra axis name, letters only, two to eight of them. */
+export const EXTRA_AXIS_NAME = /^[A-Za-z]{2,8}$/;
+/** P4h (§6.10 rule 13): the most extra axis names a profile or a machine may list. */
+export const MAX_EXTRA_AXES = 16;
+/** P4h (§6.10 rule 9; Q4-19): the bounds of `editing.tabWidth` and `editing.rulers`. */
+export const MAX_TAB_WIDTH = 16;
+export const MAX_RULERS = 8;
+export const MAX_RULER_COLUMN = 1000;
 
 /** A profile id is also a Monaco language id, so it stays plain. */
 const PROFILE_ID = /^[a-z0-9][a-z0-9._-]*$/;
@@ -716,6 +726,8 @@ function checkSyntax(value: unknown, p: Problems): void {
   // Review round (D6-4, NC-9): two notes of Translate.
   optBool(syntax.tcpTableCoordinates, 'syntax.tcpTableCoordinates', p);
   optStrArr(syntax.cycleRAbsoluteWith, 'syntax.cycleRAbsoluteWith', p, { min: 1, allow: /^[a-z0-9][a-z0-9-]*$/ });
+  // P4h (§6.10 rule 13; T123): the machine's axis names read with the value packed behind.
+  checkExtraAxisNames(syntax.extraAxisNames, p);
   optPattern(syntax.header, 'syntax.header', p);
   // M8 integration (§7.16): the names a program gives itself, one token each.
   optPattern(syntax.names, 'syntax.names', p);
@@ -755,6 +767,20 @@ function checkSyntax(value: unknown, p: Problems): void {
   optNum(syntax.maxWordDigits, 'syntax.maxWordDigits', p, { int: true, min: 1 });
   optNum(syntax.maxMCodes, 'syntax.maxMCodes', p, { int: true, min: 1 });
   checkTextFields(syntax, caseSensitive, p);
+}
+
+/** P4h (§6.10 rule 13): `syntax.extraAxisNames`, letters only, no name twice (ignoring case). */
+function checkExtraAxisNames(value: unknown, p: Problems): void {
+  if (value === undefined) return;
+  const before = p.list.length;
+  strArr(value, 'syntax.extraAxisNames', p, { allow: EXTRA_AXIS_NAME, cap: MAX_EXTRA_AXES });
+  if (p.list.length !== before || !Array.isArray(value)) return;
+  const seen = new Set<string>();
+  value.forEach((name, i) => {
+    const key = String(name).toUpperCase();
+    if (seen.has(key)) p.add(`syntax.extraAxisNames[${i}]`, `"${String(name)}" is already listed`);
+    seen.add(key);
+  });
 }
 
 /** M12.5: a colon word's name, `VCONST`, `HSC-MODE` — letters, digits, `_` and `-`, starting with a letter. */
@@ -839,73 +865,77 @@ function checkSymbolAddresses(syntax: Record<string, unknown>, p: Problems): voi
   });
 }
 
-function checkAddresses(value: unknown, p: Problems): void {
-  const addresses = obj(value, 'addresses', p);
+/**
+ * `addresses`. `at` and `complete` serve a variant overlay (P4.39a agreement fix): there the
+ * members are checked with the same shapes at the overlay's path, and none is required.
+ */
+function checkAddresses(value: unknown, p: Problems, at = 'addresses', complete = true): void {
+  const addresses = complete ? obj(value, at, p) : optObj(value, at, p);
   if (!addresses) return;
   for (const key of ['tool', 'feed', 'rapid', 'spindle'] as const) {
-    optStr(addresses[key], `addresses.${key}`, p, ADDRESS);
+    optStr(addresses[key], `${at}.${key}`, p, ADDRESS);
   }
-  strArr(addresses.axes, 'addresses.axes', p, { min: 1, allow: ADDRESS });
-  optStrArr(addresses.arcCenter, 'addresses.arcCenter', p, { allow: ADDRESS });
-  optEnum(addresses.arcCenterMode, 'addresses.arcCenterMode', p, ['incremental', 'absolute'] as const);
+  (complete ? strArr : optStrArr)(addresses.axes, `${at}.axes`, p, { min: 1, allow: ADDRESS });
+  optStrArr(addresses.arcCenter, `${at}.arcCenter`, p, { allow: ADDRESS });
+  optEnum(addresses.arcCenterMode, `${at}.arcCenterMode`, p, ['incremental', 'absolute'] as const);
 
   // M6 (§7.1). `incremental` says which axis an incremental address moves, so its value
   // has to be one of the axes: `{ U: 'X' }` is what makes `U2.` a step along X, and a typo
   // there would move the wrong axis in every extent and every arithmetic answer.
   const axes = Array.isArray(addresses.axes) ? addresses.axes : [];
-  const incremental = optObj(addresses.incremental, 'addresses.incremental', p);
+  const incremental = optObj(addresses.incremental, `${at}.incremental`, p);
   if (incremental) {
     for (const [word, axis] of Object.entries(incremental)) {
-      const at = `addresses.incremental.${word}`;
-      if (!ADDRESS.test(word)) p.add(at, 'has to be an address letter');
-      const target = str(axis, at, p, ADDRESS);
+      const where = `${at}.incremental.${word}`;
+      if (!ADDRESS.test(word)) p.add(where, 'has to be an address letter');
+      const target = str(axis, where, p, ADDRESS);
       if (target !== null && axes.length > 0 && !axes.includes(target)) {
-        p.add(at, `"${target}" is not in addresses.axes`);
+        p.add(where, `"${target}" is not in addresses.axes`);
       }
     }
   }
-  optStrArr(addresses.diameter, 'addresses.diameter', p, { allow: ADDRESS });
-  optStrArr(addresses.angular, 'addresses.angular', p, { allow: ADDRESS });
+  optStrArr(addresses.diameter, `${at}.diameter`, p, { allow: ADDRESS });
+  optStrArr(addresses.angular, `${at}.angular`, p, { allow: ADDRESS });
 
   // P8. `LIMS` is an address, not a code: it has to look like one so that a script can
   // find it and leave it alone.
-  optStrArr(addresses.speedLimitWords, 'addresses.speedLimitWords', p, { allow: ADDRESS });
+  optStrArr(addresses.speedLimitWords, `${at}.speedLimitWords`, p, { allow: ADDRESS });
   // P4a fix B1 (NC-17): offset numbers that are no position (Sinumerik `D`).
-  optStrArr(addresses.offsetWords, 'addresses.offsetWords', p, { allow: ADDRESS });
+  optStrArr(addresses.offsetWords, `${at}.offsetWords`, p, { allow: ADDRESS });
   // 2026-09: the main spindle's number, as a spindle word writes it (`S1=` is spindle 1).
-  optStr(addresses.mainSpindle, 'addresses.mainSpindle', p, /^[A-Za-z0-9]+$/);
+  optStr(addresses.mainSpindle, `${at}.mainSpindle`, p, /^[A-Za-z0-9]+$/);
 
-  const feedUnitWords = optObj(addresses.feedUnitWords, 'addresses.feedUnitWords', p);
+  const feedUnitWords = optObj(addresses.feedUnitWords, `${at}.feedUnitWords`, p);
   if (feedUnitWords) {
     for (const [word, unit] of Object.entries(feedUnitWords)) {
-      const at = `addresses.feedUnitWords.${word}`;
-      if (!ADDRESS.test(word)) p.add(at, 'has to be an address or a keyword');
-      enumOf(unit, at, p, FEED_UNITS);
+      const where = `${at}.feedUnitWords.${word}`;
+      if (!ADDRESS.test(word)) p.add(where, 'has to be an address or a keyword');
+      enumOf(unit, where, p, FEED_UNITS);
     }
   }
 
   // Phase 4 (P4a prelude, plan §6.2): the direction words of an arc (Klartext `DR+`, `DR-`).
   // A mirror swaps a word for the one of the other direction, so each direction may have
   // one word at most; the word is an address and a sign, nothing after it.
-  const directionWords = optObj(addresses.arcDirectionWords, 'addresses.arcDirectionWords', p);
+  const directionWords = optObj(addresses.arcDirectionWords, `${at}.arcDirectionWords`, p);
   if (directionWords) {
     const seen = new Set<string>();
     const spelled = new Set<string>();
     for (const [word, direction] of Object.entries(directionWords)) {
-      const at = `addresses.arcDirectionWords.${word}`;
+      const where = `${at}.arcDirectionWords.${word}`;
       if (!DIRECTION_WORD.test(word)) {
-        p.add(at, 'has to be an address followed by + or -');
+        p.add(where, 'has to be an address followed by + or -');
         continue;
       }
       // A program is read in upper case, so `DR+` and `dr+` are one word.
       if (spelled.has(word.toUpperCase())) {
-        p.add(at, 'the same word as an earlier one, apart from upper and lower case');
+        p.add(where, 'the same word as an earlier one, apart from upper and lower case');
         continue;
       }
       spelled.add(word.toUpperCase());
-      const value = enumOf(direction, at, p, ARC_DIRECTIONS);
+      const value = enumOf(direction, where, p, ARC_DIRECTIONS);
       if (value === null) continue;
-      if (seen.has(value)) p.add(at, `a second word for the direction ${value}`);
+      if (seen.has(value)) p.add(where, `a second word for the direction ${value}`);
       seen.add(value);
     }
   }
@@ -963,18 +993,21 @@ function checkModalCode(group: string, code: unknown, path: string, p: Problems)
   if (canonical !== written) p.add(at, `has to be written as "${canonical}"`);
 }
 
-function checkToolCall(value: unknown, p: Problems): void {
-  const toolCall = obj(value, 'toolCall', p);
+/** `toolCall`; `at` and `complete` as in [`checkAddresses`] (a variant overlay requires nothing). */
+function checkToolCall(value: unknown, p: Problems, at = 'toolCall', complete = true): void {
+  const toolCall = complete ? obj(value, at, p) : optObj(value, at, p);
   if (!toolCall) return;
-  pattern(toolCall.trigger, 'toolCall.trigger', p);
-  pattern(toolCall.tool, 'toolCall.tool', p);
+  (complete ? pattern : optPattern)(toolCall.trigger, `${at}.trigger`, p);
+  (complete ? pattern : optPattern)(toolCall.tool, `${at}.tool`, p);
   // The program map and the tool list read the number out of the named group.
   if (typeof toolCall.tool === 'string' && !toolCall.tool.includes('(?<tool>')) {
-    p.add('toolCall.tool', 'has to carry the named group (?<tool>…)');
+    p.add(`${at}.tool`, 'has to carry the named group (?<tool>…)');
   }
-  enumOf(toolCall.toolFrom, 'toolCall.toolFrom', p, ['same-line', 'same-line-or-last', 'last-before'] as const);
+  if (complete || toolCall.toolFrom !== undefined) {
+    enumOf(toolCall.toolFrom, `${at}.toolFrom`, p, ['same-line', 'same-line-or-last', 'last-before'] as const);
+  }
   // M6 (§7.1): a trigger line whose masked text also matches this is not a tool change.
-  optPattern(toolCall.ignore, 'toolCall.ignore', p);
+  optPattern(toolCall.ignore, `${at}.ignore`, p);
 }
 
 function checkOutline(value: unknown, p: Problems): void {
@@ -991,64 +1024,67 @@ function checkOutline(value: unknown, p: Problems): void {
   });
 }
 
-function checkNumbering(value: unknown, p: Problems): void {
-  const numbering = obj(value, 'numbering', p);
+/** `numbering`; `at` and `complete` as in [`checkAddresses`] (a variant overlay requires nothing). */
+function checkNumbering(value: unknown, p: Problems, at = 'numbering', complete = true): void {
+  const numbering = complete ? obj(value, at, p) : optObj(value, at, p);
   if (!numbering) return;
-  optEnum(numbering.mode, 'numbering.mode', p, ['free', 'consecutive'] as const);
-  num(numbering.start, 'numbering.start', p, { int: true, min: 0 });
-  num(numbering.step, 'numbering.step', p, { int: true, min: 1 });
-  optNum(numbering.digits, 'numbering.digits', p, { int: true, min: 0, max: 12 });
-  optNum(numbering.max, 'numbering.max', p, { int: true, min: 1 });
-  optEnum(numbering.onOverflow, 'numbering.onOverflow', p, ['wrap', 'stop'] as const);
-  optNum(numbering.spacesAfter, 'numbering.spacesAfter', p, { int: true, min: 0, max: 16 });
-  optStrArr(numbering.skipStartingWith, 'numbering.skipStartingWith', p);
-  optBool(numbering.skipEmpty, 'numbering.skipEmpty', p);
-  optBool(numbering.restartAtProgramStart, 'numbering.restartAtProgramStart', p);
-  optBool(numbering.onlyNumbered, 'numbering.onlyNumbered', p);
+  optEnum(numbering.mode, `${at}.mode`, p, ['free', 'consecutive'] as const);
+  (complete ? num : optNum)(numbering.start, `${at}.start`, p, { int: true, min: 0 });
+  (complete ? num : optNum)(numbering.step, `${at}.step`, p, { int: true, min: 1 });
+  optNum(numbering.digits, `${at}.digits`, p, { int: true, min: 0, max: 12 });
+  optNum(numbering.max, `${at}.max`, p, { int: true, min: 1 });
+  optEnum(numbering.onOverflow, `${at}.onOverflow`, p, ['wrap', 'stop'] as const);
+  optNum(numbering.spacesAfter, `${at}.spacesAfter`, p, { int: true, min: 0, max: 16 });
+  optStrArr(numbering.skipStartingWith, `${at}.skipStartingWith`, p);
+  optBool(numbering.skipEmpty, `${at}.skipEmpty`, p);
+  optBool(numbering.restartAtProgramStart, `${at}.restartAtProgramStart`, p);
+  optBool(numbering.onlyNumbered, `${at}.onlyNumbered`, p);
   // P4d (plan §6.6 rules 1–6): the advanced options, each optional; a profile that leaves
   // them out renumbers exactly as before.
-  optBool(numbering.fitToMax, 'numbering.fitToMax', p);
-  optNum(numbering.alignColumn, 'numbering.alignColumn', p, { int: true, min: 0, max: MAX_ALIGN_COLUMN });
-  optNum(numbering.everyNth, 'numbering.everyNth', p, { int: true, min: 1, max: MAX_EVERY_NTH });
+  optBool(numbering.fitToMax, `${at}.fitToMax`, p);
+  optNum(numbering.alignColumn, `${at}.alignColumn`, p, { int: true, min: 0, max: MAX_ALIGN_COLUMN });
+  optNum(numbering.everyNth, `${at}.everyNth`, p, { int: true, min: 1, max: MAX_EVERY_NTH });
   // P4d review CODE-6: the form field is a space-separated list, so a text with a blank in
   // it would come back from the form as two texts; it is refused here instead.
-  optStrArr(numbering.skipContaining, 'numbering.skipContaining', p, { max: MAX_SKIP_TEXT, cap: MAX_PATTERN_LIST, allow: NO_BLANK });
-  optNum(numbering.skipFirst, 'numbering.skipFirst', p, { int: true, min: 0, max: MAX_SKIP_LINES });
-  optNum(numbering.skipLast, 'numbering.skipLast', p, { int: true, min: 0, max: MAX_SKIP_LINES });
+  optStrArr(numbering.skipContaining, `${at}.skipContaining`, p, { max: MAX_SKIP_TEXT, cap: MAX_PATTERN_LIST, allow: NO_BLANK });
+  optNum(numbering.skipFirst, `${at}.skipFirst`, p, { int: true, min: 0, max: MAX_SKIP_LINES });
+  optNum(numbering.skipLast, `${at}.skipLast`, p, { int: true, min: 0, max: MAX_SKIP_LINES });
   // An empty text is "from the first line", the same as leaving it out.
   if (numbering.startTrigger !== undefined && numbering.startTrigger !== '') {
-    str(numbering.startTrigger, 'numbering.startTrigger', p, undefined, MAX_SKIP_TEXT);
+    str(numbering.startTrigger, `${at}.startTrigger`, p, undefined, MAX_SKIP_TEXT);
   }
-  optBool(numbering.startAfterTrigger, 'numbering.startAfterTrigger', p);
+  optBool(numbering.startAfterTrigger, `${at}.startAfterTrigger`, p);
 
   if (numbering.references !== undefined) {
-    const references = patternArr(numbering.references, 'numbering.references', p);
+    const references = patternArr(numbering.references, `${at}.references`, p);
     references?.forEach((entry, i) => {
-      const rule = obj(entry, `numbering.references[${i}]`, p);
+      const rule = obj(entry, `${at}.references[${i}]`, p);
       if (!rule) return;
-      pattern(rule.trigger, `numbering.references[${i}].trigger`, p);
-      strArr(rule.addresses, `numbering.references[${i}].addresses`, p, { min: 1, allow: ADDRESS });
+      pattern(rule.trigger, `${at}.references[${i}].trigger`, p);
+      strArr(rule.addresses, `${at}.references[${i}].addresses`, p, { min: 1, allow: ADDRESS });
       // M6 (§7.1, F42): `false` means "report, do not rewrite" — a Fanuc `M99 P` may name
       // a block in the caller, which a renumber of this file cannot see.
-      optBool(rule.rewrite, `numbering.references[${i}].rewrite`, p);
+      optBool(rule.rewrite, `${at}.references[${i}].rewrite`, p);
       // P4d (§6.6 rule 8): which program's block the value names.
-      optEnum(rule.program, `numbering.references[${i}].program`, p, REFERENCE_PROGRAMS);
+      optEnum(rule.program, `${at}.references[${i}].program`, p, REFERENCE_PROGRAMS);
     });
   }
 
   // P4d (§6.6 rule 9): the lines that call another program, and the word that names it.
   if (numbering.calls !== undefined) {
-    const calls = patternArr(numbering.calls, 'numbering.calls', p);
+    const calls = patternArr(numbering.calls, `${at}.calls`, p);
     calls?.forEach((entry, i) => {
-      const rule = obj(entry, `numbering.calls[${i}]`, p);
+      const rule = obj(entry, `${at}.calls[${i}]`, p);
       if (!rule) return;
-      pattern(rule.trigger, `numbering.calls[${i}].trigger`, p);
-      str(rule.address, `numbering.calls[${i}].address`, p, ADDRESS);
-      optNum(rule.maxDigits, `numbering.calls[${i}].maxDigits`, p, { int: true, min: 1, max: 16 });
-      optStr(rule.repeatAddress, `numbering.calls[${i}].repeatAddress`, p, ADDRESS);
+      pattern(rule.trigger, `${at}.calls[${i}].trigger`, p);
+      str(rule.address, `${at}.calls[${i}].address`, p, ADDRESS);
+      optNum(rule.maxDigits, `${at}.calls[${i}].maxDigits`, p, { int: true, min: 1, max: 16 });
+      optStr(rule.repeatAddress, `${at}.calls[${i}].repeatAddress`, p, ADDRESS);
       // P4d review NC-1 and NC-2: the word of a local call, and a call that is an interrupt.
-      optStr(rule.localAddress, `numbering.calls[${i}].localAddress`, p, ADDRESS);
-      optBool(rule.interrupt, `numbering.calls[${i}].interrupt`, p);
+      optStr(rule.localAddress, `${at}.calls[${i}].localAddress`, p, ADDRESS);
+      optBool(rule.interrupt, `${at}.calls[${i}].interrupt`, p);
+      // Wave Y G5: a call of a program on an external device (Fanuc `M198`).
+      optBool(rule.external, `${at}.calls[${i}].external`, p);
     });
   }
 }
@@ -1158,9 +1194,11 @@ function increment(value: unknown, path: string, p: Problems, required = false):
  * rule, the numbering and the addresses, and nothing else. It is checked here and again in
  * `applyMachine`, which drops anything else before it merges.
  *
- * The merge result goes through this validator in full when the variant is chosen, so this
- * pass only checks what would otherwise first fail on the user's document: the members it
- * may set, its power-on codes, and that its patterns compile.
+ * The merge result goes through this validator in full when the variant is chosen. This pass
+ * checks the members it may set, its power-on codes, and every member of `toolCall`,
+ * `numbering` and `addresses` with the shape the profile's own member has (none of them is
+ * required: the overlay is merged over a complete profile), so a mistake in an overlay is
+ * reported with the profile and not first on the user's document.
  */
 function checkOverlay(value: unknown, path: string, p: Problems): void {
   const overlay = optObj(value, path, p);
@@ -1180,31 +1218,13 @@ function checkOverlay(value: unknown, path: string, p: Problems): void {
     }
   }
 
-  const toolCall = optObj(overlay.toolCall, `${path}.toolCall`, p);
-  if (toolCall) {
-    for (const key of ['trigger', 'tool', 'ignore'] as const) {
-      optPattern(toolCall[key], `${path}.toolCall.${key}`, p);
-    }
-  }
-
-  const numbering = optObj(overlay.numbering, `${path}.numbering`, p);
-  const references = numbering?.references;
-  if (Array.isArray(references) && references.length > MAX_PATTERN_LIST) {
-    p.add(`${path}.numbering.references`, `lists more than ${MAX_PATTERN_LIST} entries`);
-  } else if (Array.isArray(references)) {
-    references.forEach((entry, i) => {
-      if (isRecord(entry)) optPattern(entry.trigger, `${path}.numbering.references[${i}].trigger`, p);
-    });
-  }
-  // P4d (§6.6 rule 9): an overlay's call rules hold patterns too.
-  const calls = numbering?.calls;
-  if (Array.isArray(calls) && calls.length > MAX_PATTERN_LIST) {
-    p.add(`${path}.numbering.calls`, `lists more than ${MAX_PATTERN_LIST} entries`);
-  } else if (Array.isArray(calls)) {
-    calls.forEach((entry, i) => {
-      if (isRecord(entry)) optPattern(entry.trigger, `${path}.numbering.calls[${i}].trigger`, p);
-    });
-  }
+  // P4.39a agreement fix (§6.10 rule 2): the three other members are checked with the shapes
+  // of the profile's own `toolCall`, `numbering` and `addresses`, none of them required, so the
+  // profile schema and this validator give one answer on an overlay. A wrong `toolFrom` or a
+  // non-list `addresses.diameter` used to pass here and fail first on the user's document.
+  checkToolCall(overlay.toolCall, p, `${path}.toolCall`, false);
+  checkNumbering(overlay.numbering, p, `${path}.numbering`, false);
+  checkAddresses(overlay.addresses, p, `${path}.addresses`, false);
 }
 
 /** One `machineParams.variants` entry (§7.15): the choices, their databases and their rules. */
@@ -1337,6 +1357,7 @@ function checkMachineParams(root: Record<string, unknown>, p: Problems, o: Profi
   }
 
   checkChannelPresets(decl.channels, p);
+  checkBuilderDecls(decl, p);
 
   const numberInput = optObj(decl.numberInput, 'machineParams.numberInput', p);
   if (!numberInput) return;
@@ -1420,6 +1441,25 @@ function checkChannelPresets(value: unknown, p: Problems): void {
   });
 }
 
+/**
+ * P4h (plan §6.10 rules 13 and 14; T123): that a machine of this profile may name extra axes
+ * and list the machine builder's codes. Both are only offers; the values are the machine's.
+ */
+function checkBuilderDecls(decl: Record<string, unknown>, p: Problems): void {
+  const axes = optObj(decl.extraAxes, 'machineParams.extraAxes', p);
+  if (axes) {
+    optStr(axes.source, 'machineParams.extraAxes.source', p);
+    optBool(axes.verify, 'machineParams.extraAxes.verify', p);
+  }
+  const codes = optObj(decl.builderCodes, 'machineParams.builderCodes', p);
+  if (codes) {
+    strArr(codes.letters, 'machineParams.builderCodes.letters', p, { min: 1, allow: /^[A-Z]$/ });
+    optStr(codes.example, 'machineParams.builderCodes.example', p);
+    optStr(codes.source, 'machineParams.builderCodes.source', p);
+    optBool(codes.verify, 'machineParams.builderCodes.verify', p);
+  }
+}
+
 function checkNumberFormat(value: unknown, p: Problems): void {
   const fmt = optObj(value, 'numberFormat', p);
   if (!fmt) return;
@@ -1464,9 +1504,10 @@ function checkCompare(value: unknown, p: Problems): void {
 }
 
 /**
- * P13 (AD-30), P4c (plan §6.5). `forceUppercase`, `preventLineJoin`, `autoSpace` and
- * `autoNumber` are optional booleans (an absent one is off); any other member (`tabWidth`
- * on `fanuc-gcode`, a field of a later phase) is carried unread.
+ * P13 (AD-30), P4c (plan §6.5), P4h (§6.10 rule 9). `forceUppercase`, `preventLineJoin`,
+ * `autoSpace` and `autoNumber` are optional booleans (an absent one is off); `tabWidth` a whole
+ * number from 1 to 16; `rulers` at most 8 different whole numbers from 1 to 1000. Any other
+ * member (a field of a later phase) is carried unread.
  */
 function checkEditing(value: unknown, p: Problems): void {
   const editing = optObj(value, 'editing', p);
@@ -1475,6 +1516,30 @@ function checkEditing(value: unknown, p: Problems): void {
   optBool(editing.preventLineJoin, 'editing.preventLineJoin', p);
   optBool(editing.autoSpace, 'editing.autoSpace', p);
   optBool(editing.autoNumber, 'editing.autoNumber', p);
+  optNum(editing.tabWidth, 'editing.tabWidth', p, { int: true, min: 1, max: MAX_TAB_WIDTH });
+  if (editing.rulers === undefined) return;
+  const rulers = arr(editing.rulers, 'editing.rulers', p);
+  if (!rulers) return;
+  if (rulers.length > MAX_RULERS) {
+    p.add('editing.rulers', `lists more than ${MAX_RULERS} rulers`);
+    return;
+  }
+  const seen = new Set<unknown>();
+  rulers.forEach((column, i) => {
+    num(column, `editing.rulers[${i}]`, p, { int: true, min: 1, max: MAX_RULER_COLUMN });
+    if (seen.has(column)) p.add(`editing.rulers[${i}]`, `${String(column)} is already listed`);
+    seen.add(column);
+  });
+}
+
+/**
+ * P4h (plan §6.10 rule 6). `colors`: only `dark` and `light`, only roles, only `#rrggbb` values
+ * that reach the contrast limit against the editor background of their theme
+ * (`core/grammar/contrast.ts`). A colour that cannot be read is refused, never shown.
+ */
+function checkColors(value: unknown, p: Problems): void {
+  if (value === undefined) return;
+  for (const [path, message] of paletteProblems(value)) p.add(path === '' ? 'colors' : `colors.${path}`, message);
 }
 
 // ---------------------------------------------------------------------------
@@ -1533,6 +1598,7 @@ export function validateProfile(raw: unknown, o: ProfileValidationOptions = {}):
   checkToolList(root.toolList, p);
   checkCompare(root.compare, p);
   checkEditing(root.editing, p);
+  checkColors(root.colors, p);
 
   return p.list.length === 0 ? { ok: true, profile: raw as Profile } : { ok: false, errors: p.list };
 }

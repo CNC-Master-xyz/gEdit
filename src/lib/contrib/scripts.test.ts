@@ -32,6 +32,8 @@ const fake = vi.hoisted(() => ({
   pickValue: undefined as string | undefined,
   /** What `dialogs.confirm` answers. */
   confirmValue: false,
+  /** What `dialogs.confirm` was asked. */
+  confirmed: [] as { title: string; message: string }[],
   /** What `dialogs.pickFolder` answers. */
   folderValue: null as string | null,
   reset(): void {
@@ -42,6 +44,7 @@ const fake = vi.hoisted(() => ({
     fake.promptValue = undefined;
     fake.pickValue = undefined;
     fake.confirmValue = false;
+    fake.confirmed = [];
     fake.folderValue = null;
   },
 }));
@@ -111,8 +114,9 @@ vi.mock('$lib/platform/commands', async (original) => ({
 
 vi.mock('$lib/app/dialogs', () => ({
   dialogs: {
-    confirm: async () => {
+    confirm: async (options: { title: string; message: string }) => {
       fake.calls.push('confirm');
+      fake.confirmed.push({ title: options.title, message: options.message });
       return fake.confirmValue;
     },
     error: async () => {
@@ -540,6 +544,23 @@ describe('managing scripts', () => {
     expect(fake.calls).toEqual(['confirm', 'scriptCopyToUser:bundled:a.py', 'rescan']);
     expect(fake.opened).toEqual(['/cfg/scripts/copy.py']);
     expect(fake.messages).toEqual([t('scripts.copied', { script: 'Scale feed' })]);
+  });
+
+  it('says "a package script" when it offers the copy of a package script (P4g)', async () => {
+    scriptList.set([entry('pkg-shop-a:finish.py', { meta: meta({ name: 'Finish' }), editable: false })]);
+    fake.confirmValue = true;
+    await run('script.openSource', 'pkg-shop-a:finish.py');
+    expect(fake.confirmed).toHaveLength(1);
+    expect(fake.confirmed[0].message).toContain('a package script');
+    expect(fake.confirmed[0].message).toContain('shop-a');
+    expect(fake.confirmed[0].message).not.toContain('ships with gEdit');
+    expect(fake.calls).toEqual(['confirm', 'scriptCopyToUser:pkg-shop-a:finish.py', 'rescan']);
+  });
+
+  it('keeps the bundled wording for a bundled script', async () => {
+    scriptList.set([entry('bundled:a.py')]);
+    await run('script.openSource', 'bundled:a.py');
+    expect(fake.confirmed[0].message).toContain('ships with gEdit');
   });
 
   it('copies a bundled script and opens the copy, because that is what the grant is for', async () => {

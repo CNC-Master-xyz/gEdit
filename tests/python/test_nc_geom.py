@@ -460,7 +460,7 @@ class FindingTest(unittest.TestCase):
             {
                 "line": 7,
                 "severity": "error",
-                "message": "G71 U2. R0.5: a roughing cycle that works from a contour (its finishing allowance along Z has a direction); gEdit does not mirror it yet.",
+                "message": "G71 U2. R0.5: a roughing cycle that works from a contour (its finishing allowance along Z has a direction): gEdit mirrors G70 to G73 only together with both their blocks and their whole contour, and does not mirror the Okuma LAP.",
                 "reason": "roughing-cycle",
             },
         )
@@ -813,6 +813,10 @@ class HandRolesTest(RolesCases, unittest.TestCase):
 TRANSLATE = _nc_geom.Translate({"X": D(1), "Y": D(1), "Z": D(1)})
 ROTATE = _nc_geom.Rotate((D(0), D(0)), D(90))
 MIRROR = _nc_geom.Mirror((D(0), D(0)), D(90))
+#: Wave Y (T016): the rounding operations, under which a tangential arc or an arc through a
+#: point is still refused.
+ROTATE_30 = _nc_geom.Rotate((D(0), D(0)), D(30))
+MIRROR_30 = _nc_geom.Mirror((D(0), D(0)), D(30))
 LATHE = _nc_geom.LatheZMirror()
 
 
@@ -835,8 +839,8 @@ class ReasonsCases:
         ("rotary-word", "fanuc-gcode", "G90 G17 G21\nG0 X0. Y0. B0.\nG1 X10. B30. F100.", 3, ROTATE),
         ("cycle-position", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 TOOL CALL 1 Z S3000\n2 CYCL DEF 254 CIRCULAR SLOT ~\n  Q216=+50 ~\n  Q217=+50\n3 END PGM P MM", 3, TRANSLATE),
         ("fk-contour", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 TOOL CALL 1 Z S3000\n2 L X+0 Y+0 RL F100\n3 FL LEN 10 AN+0\n4 END PGM P MM", 4, ROTATE),
-        ("arc-tangential", "sinumerik-mill", "G90 G17 G71\nG0 X0 Y0\nCIP X10 Y0 I1=5 J1=5", 3, MIRROR),
-        ("arc-unsupported", "okuma-osp", "G90 G18\nG0 X40 Z2\nG2 X50 Z-10 L20", 3, LATHE),
+        ("arc-tangential", "sinumerik-mill", "G90 G17 G71\nG0 X0 Y0\nCIP X10 Y0 I1=5 J1=5", 3, MIRROR_30),
+        ("arc-unsupported", "okuma-osp", "G90 G18\nG0 X40 Z2\nG102 X50 Z-10 L20", 3, LATHE),
         ("plane", "fanuc-gcode", "G90 G18 G21\nG0 X0. Z0.\nG1 X10. F100.", 3, ROTATE),
         ("lathe-rotate", "fanuc-lathe", "G18 G21\nG0 X40. Z2.", 2, ROTATE),
         ("lathe-x-mirror", "fanuc-lathe", "G18 G21\nG0 X40. Z2.", 2, MIRROR),
@@ -871,7 +875,7 @@ class ReasonsCases:
         ("cycle-plane", "fanuc-gcode", "G90 G18 G21\nG0 X0. Y0. Z5.\nG81 X10. Z-5. R2. F100.", 3, TRANSLATE),
         # v1.2.0 (NCR-9b): an empty retract plane is 0, which a Z shift cannot move.
         ("cycle-level-empty", "sinumerik-mill", "G17 G90 G71\nG0 X0 Y0 Z50\nCYCLE81(,0,2,-10)", 3, TRANSLATE),
-        ("arc-tangential", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 L X+0 Y+0 R0 FMAX\n2 CT X+10 Y+10\n3 END PGM P MM", 3, ROTATE),
+        ("arc-tangential", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 L X+0 Y+0 R0 FMAX\n2 CT X+10 Y+10\n3 END PGM P MM", 3, ROTATE_30),
         ("arc-unsupported", "okuma-osp", "G90 G18\nG0 X40 Z2 C0\nG102 X30 C90 L5 F100", 3, TRANSLATE),
         ("swap-unknown", "fanuc-gcode", "G90 G17 G21\nG0 X0. Y0.\nG41.2 D1 G1 X10. Y0. F100.", 3, MIRROR),
         ("pole-unknown", "heidenhain-klartext", "0 BEGIN PGM P MM\n1 L X+0 Y+0 R0 FMAX\n2 LP PR+5 PA+30\n3 END PGM P MM", 3, ROTATE),
@@ -1181,7 +1185,10 @@ def run_geo(script, text, profile_id, params, preceding=None, preset=None, varia
     lines = text.split("\n")
     if preceding is not None:
         start = len(preceding) + 1
-        context["input"] = {"scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding}
+        # FZ-5 (Wave Y): the selection ends the document, so there are no lines below it.
+        context["input"] = {
+            "scope": "selection", "startLine": start, "endLine": start + len(lines) - 1, "precedingLines": preceding, "followingLines": [],
+        }
     else:
         context["input"] = {"scope": "document", "startLine": 1, "endLine": len(lines)}
     out = helpers.run_script(script + ".py", stdin=text, context=context)
@@ -2217,3 +2224,90 @@ class ReviewRoundGTest(unittest.TestCase):
         # A shift of nothing moves no block, and adds no note either.
         result = run_patched("translate", self.DRILL, helpers.with_pointless_feeds(base, "series-15"), {"dx": 0, "dz": 0})
         self.assertEqual([f for f in result["findings"] if f["reason"] == "cycle-r-left"], [])
+
+
+class LaterVersionTest(unittest.TestCase):
+    """Wave Y, BL-NC-geometry: the later-version transforms in the rules. Each test fails
+    without its change."""
+
+    def refusals(self, profile_id, text, line, op, preset=None):
+        context, tracker, steps = walk(text, profile_id, preset=preset, upto=line)
+        step = steps[line - 1]
+        return [r.reason for r in _nc_geom.refusals_of(step, _nc_geom.roles_of(step, tracker), tracker, op, context)]
+
+    def roles(self, profile_id, text, line, preset=None):
+        _, tracker, steps = walk(text, profile_id, preset=preset, upto=line)
+        return [(r.role, r.token.text.strip()) for r in _nc_geom.roles_of(steps[line - 1], tracker)]
+
+    def test_t018_the_polar_approach_and_departure_codes(self) -> None:
+        # TNC 640 Klartext manual (2019): p.148 lists APPR PLT, PLN, PCT, PLCT and DEP PLCT as the
+        # polar forms of the contour point, p.171 writes them with PR and PA about CC.
+        text = "0 BEGIN PGM P MM\n1 TOOL CALL 1 Z S3000\n2 CC X+50 Y+50\n3 LP PR+60 PA+180 R0 FMAX\n4 APPR PLCT PR+45 PA+180 R5 RL F250\n5 DEP PLCT PR+60 PA+180 R5 F1000\n6 END PGM P MM"
+        self.assertEqual(
+            self.roles("heidenhain-klartext", text, 5),
+            [("polar-radius", "PR+45"), ("polar-angle", "PA+180"), ("radius", "R5"), ("code-comp", "RL"), ("untouched", "F250")],
+        )
+        for op in (TRANSLATE, ROTATE, MIRROR, _nc_geom.Rotate((D(0), D(0)), D(30))):
+            with self.subTest(op=op):
+                self.assertEqual(self.refusals("heidenhain-klartext", text, 5, op), [])
+                self.assertEqual(self.refusals("heidenhain-klartext", text, 6, op), [])
+        plt = "0 BEGIN PGM P MM\n1 TOOL CALL 1 Z S3000\n2 CC X+50 Y+50\n3 L X+0 Y+0 Z+5 R0 FMAX\n4 APPR PLT PR+45 PA+180 LEN12 RL F250\n5 END PGM P MM"
+        self.assertEqual(self.roles("heidenhain-klartext", plt, 5)[2], ("length", "LEN12"))
+        # Without the pole the polar contour point is not known.
+        nopole = plt.replace("2 CC X+50 Y+50\n", "2 L Z+5 FMAX\n")
+        self.assertIn("pole-unknown", self.refusals("heidenhain-klartext", nopole, 5, ROTATE))
+
+    def test_t016_tangential_arcs_and_arcs_through_a_point_turn_under_the_exact_operations(self) -> None:
+        cip = "G90 G17 G71\nG0 X0 Y0\nG1 X5 Y0 F100\nCIP X10 Y0 I1=5 J1=5"
+        ct = "0 BEGIN PGM P MM\n1 L X+0 Y+0 R0 FMAX\n2 L X+5 Y+0 F100\n3 CT X+10 Y+10\n4 END PGM P MM"
+        for op in (ROTATE, MIRROR, _nc_geom.Rotate((D(1), D(2)), D(270)), _nc_geom.Mirror((D(3), D(0)), D(0))):
+            with self.subTest(op=op):
+                self.assertNotIn("arc-tangential", self.refusals("sinumerik-mill", cip, 4, op))
+                self.assertNotIn("arc-tangential", self.refusals("heidenhain-klartext", ct, 4, op))
+        for op in (ROTATE_30, MIRROR_30, _nc_geom.Mirror((D(0), D(0)), D(45))):
+            with self.subTest(op=op):
+                self.assertIn("arc-tangential", self.refusals("sinumerik-mill", cip, 4, op))
+        turning = "G18 G90 G71\nG0 X20 Z2\nG1 X30 Z-5 F0.2\nCT X40 Z-10"
+        self.assertNotIn("arc-tangential", self.refusals("sinumerik", turning, 4, LATHE))
+
+    def test_t017_an_okuma_arc_by_its_l_radius_under_the_exact_operations(self) -> None:
+        # OSP-P300 programming manual (LG33-019-R22, p.44-46): L is the radius, written positive,
+        # the arc under 180 degrees unless CALRG is written beside it. The radius and CALRG stay,
+        # the end points move and the Z mirror swaps G2 and G3.
+        text = "G90 G18\nG0 X40 Z2\nG2 X50 Z-10 L20\nG3 X60 Z-20 L8 CALRG"
+        for op in (LATHE, _nc_geom.Translate({"X": D(1), "Z": D(1)})):
+            with self.subTest(op=op):
+                self.assertEqual(self.refusals("okuma-osp", text, 3, op, "okuma-1mm"), [])
+                self.assertEqual(self.refusals("okuma-osp", text, 4, op, "okuma-1mm"), [])
+        # CALRG is a code of the database (a marker of the larger arc), no word nobody describes.
+        self.assertEqual([role for role, _ in self.roles("okuma-osp", text, 4, "okuma-1mm")], ["code-arc", "point", "point", "radius"])
+
+    #: The skeptic's probes t017z and t017y: the C axis connected (M110), then a plane code.
+    Y_AXIS_MODE = "G90 G18 G50 S2000\nG0 X100. Z5. C0\nM110\n%s\nG1 X40. Y0 Z-2. F100\n%s\nG1 X-40.\nG18\nG0 X200. Z200.\nM02"
+
+    def test_d8_an_okuma_arc_in_the_planes_of_the_y_axis_mode_is_refused_by_the_z_mirror(self) -> None:
+        # Okuma OSP-P300 MacTurn/Multus (LG32-163-R10, p.222-223): in the Y-axis mode G00-G03
+        # also move in G17 (XY) and G19 (YZ); G119 is a plane of its own. t017z: with Y kept,
+        # X and Y of the arc stay, so swapping G2 for G3 would cut the other arc; the mirror
+        # refuses the arc instead, whichever way the machine takes Y.
+        text = self.Y_AXIS_MODE % ("G17", "G02 X0 Y20. L20.")
+        context = helpers.effective_context("okuma-osp", preset="okuma-1mm")
+        for choice in ("turns", "stays"):
+            with self.subTest(counterSpindleY=choice):
+                result = run_patched("mirror", text, with_variant(context, "counterSpindleY", choice), LATHE_Z[1])
+                self.assertIn((6, "arc-unsupported"), errors(result))
+                self.assertNotIn("G03", result.get("text") or "")
+        for plane, arc in (
+            ("G17", "G2 X0 Y20. I-20. J0"),
+            ("G17", "G2 X0 Z-22. L20."),
+            ("G19", "G2 X40. Z-22. I0 K-10."),
+            ("G119", "G2 X0 Z-22. L20."),
+        ):
+            for op in (LATHE, _nc_geom.LatheZMirror(D(0), False)):
+                with self.subTest(plane=plane, arc=arc, op=op):
+                    self.assertIn("arc-unsupported", self.refusals("okuma-osp", self.Y_AXIS_MODE % (plane, arc), 6, op, "okuma-1mm"))
+        # A translate moves the end points and keeps the arc, in any plane.
+        self.assertEqual(self.refusals("okuma-osp", self.Y_AXIS_MODE % ("G17", "G2 X0 Z-22. L20."), 6, _nc_geom.Translate({"X": D(1), "Z": D(1)}), "okuma-1mm"), [])
+        # G18 written again: the turning plane, the T017 case.
+        text = "G90 G18\nG0 X40 Z2\nG17\nG18\nG2 X50 Z-10 L20"
+        self.assertEqual(self.refusals("okuma-osp", text, 5, LATHE, "okuma-1mm"), [])

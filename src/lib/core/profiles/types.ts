@@ -24,6 +24,7 @@ import type { Eol } from '$lib/app/types';
 import type { NumberInput, ParamSource } from '$lib/core/machines/types';
 import type { ProfileCompare } from '$lib/core/compare/types';
 import type { ChannelParams } from '$lib/core/channels/types';
+import type { Role } from '$lib/core/grammar/roles';
 
 /** A regular expression as ECMAScript source, without delimiters and without flags. */
 export type Pattern = string;
@@ -167,6 +168,13 @@ export interface CallRule {
    * interrupted, so this call never proves which program an `M99 P` in it returns to.
    */
   interrupt?: boolean;
+  /**
+   * Wave Y geometry fix G5 (§7 row): the rule runs a program from an external device or a data
+   * server (Fanuc `M198 P…`), not a program of the open document that happens to have the same
+   * number. Such a call is read (its word is a program number), but no program of the document
+   * is its target: it proves no caller and no reference resolves to it.
+   */
+  external?: boolean;
 }
 
 /** `profile.numberFormat`, read by `formatNumber` (WP3.2) and the M4 transforms. */
@@ -210,6 +218,36 @@ export interface ProfileEditing {
   preventLineJoin?: boolean;
   autoSpace?: boolean;
   autoNumber?: boolean;
+  /**
+   * P4h (plan §6.10 rule 9; Q4-19). The tab width of this profile's documents, 1 to 16. Present,
+   * it wins over the setting `editor.tabWidth` for a document of this profile; absent, the
+   * setting applies. No built-in profile sets it (P4.42 removes the unread `4` of `fanuc-gcode`).
+   */
+  tabWidth?: number;
+  /**
+   * P4h (§6.10 rule 9; Q4-19). Column rulers of this profile's documents: at most 8 whole
+   * numbers from 1 to 1000, no number twice. Present (an empty list too), it replaces the setting
+   * `editor.rulers` for a document of this profile; absent, the setting applies.
+   */
+  rulers?: number[];
+}
+
+/**
+ * P4h (plan §6.10 rule 6). Role colours of one theme: a role to a `#rrggbb` value. Every value
+ * reaches the contrast limit against the editor background of its theme
+ * (`core/grammar/contrast.ts`, `MIN_ROLE_CONTRAST`); the validators refuse one that does not.
+ */
+export type RoleColorMap = Partial<Record<Role, string>>;
+
+/**
+ * P4h (§6.10 rule 6). `profile.colors`, and the same shape as the setting
+ * `appearance.roleColors`: a palette per theme. A colour here wins over the user's role colour
+ * and over the built-in one, for this profile's documents only (the theme rule
+ * `<role>.<profile id>`).
+ */
+export interface ProfileColors {
+  dark?: RoleColorMap;
+  light?: RoleColorMap;
 }
 
 /**
@@ -594,6 +632,16 @@ export interface Profile {
      * tape marker).
      */
     tapeMarker?: boolean;
+    /**
+     * P4h (plan §6.10 rule 13; T123). Axis names of more than one letter that this machine reads
+     * with the value written straight behind them (`AA90`, a lone `QQ0`), letters only, 2 to 8
+     * of them. Written by `applyMachine` from the machine's `extraAxes` (or by a user profile).
+     * Both tokenizers read such a name, followed by a value, as one `word` with the name as its
+     * address; without the setting `AA90` stays one `unknown` token and `QQ0` a call. An
+     * assignment (`AA=10`), a call with its bracket (`AA(`) and a longer name (`AAX1`) keep
+     * their own readings. The grammar (the colours) does not read it.
+     */
+    extraAxisNames?: string[];
   };
   addresses: {
     tool?: string;
@@ -707,6 +755,12 @@ export interface Profile {
    * on `fanuc-gcode`) are carried, not read (§2.1: per-profile tab width is deferred).
    */
   editing?: ProfileEditing;
+  /**
+   * P4h (plan §6.10 rule 6). This profile's own role colours, per theme. Absent: the user's role
+   * colours (`appearance.roleColors`) and the built-in palette. Merged by `extends` like every
+   * other object (a child's role replaces the parent's role, the other roles stay).
+   */
+  colors?: ProfileColors;
   /** Fields of later phases are preserved, not interpreted (see the note above). */
   [p2Field: string]: unknown;
 }
@@ -848,6 +902,33 @@ export interface MachineParamsDecl {
    * its own copy; editing a preset later changes no machine.
    */
   channels?: ChannelPresetsDecl;
+  /**
+   * P4h (plan §6.10 rule 13; T123). A machine of this profile may name extra axes (the machine
+   * builder's axis names of more than one letter). Absent: the machine page offers no such field
+   * and a stored `extraAxes` is a problem of the record.
+   */
+  extraAxes?: ExtraAxesDecl;
+  /**
+   * P4h (§6.10 rule 14; T123). A machine of this profile may list the machine builder's own codes
+   * (Sinumerik reserves `G810`–`G829` for them). Absent: no such field.
+   */
+  builderCodes?: BuilderCodesDecl;
+}
+
+/** `machineParams.extraAxes` (§6.10 rule 13): that the setting is offered, and where the manual says so. */
+export interface ExtraAxesDecl {
+  source?: string;
+  verify?: boolean;
+}
+
+/** `machineParams.builderCodes` (§6.10 rule 14). */
+export interface BuilderCodesDecl {
+  /** The address letters a builder code may have, upper case (`["G"]`). */
+  letters: string[];
+  /** Data, shown as the field's example (`"G810-G829"`). */
+  example?: string;
+  source?: string;
+  verify?: boolean;
 }
 
 /** `machineParams.channels` (§8.9). */
@@ -918,6 +999,8 @@ export interface CompiledProfile {
       localAddress?: string | null;
       /** P4d review NC-2: `CallRule.interrupt`; optional for a hand-built profile. */
       interrupt?: boolean;
+      /** Wave Y G5: `CallRule.external`; optional for a hand-built profile. */
+      external?: boolean;
     }[];
     commentFilter?: RegExp;
   };
@@ -983,4 +1066,6 @@ export interface ProfileProblem {
   kind?: 'profiles' | 'codes';
   /** Which source it was, for a file that has no id and no name to be called by. */
   index?: number;
+  /** P4g (§6.9 rule 11): the script package the file is in, for "in package shop-a: lathe.json"; `origin` stays `'user'`. */
+  package?: string;
 }

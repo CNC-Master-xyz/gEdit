@@ -136,6 +136,7 @@ change. They open with `sinumerik-mill`, and with its margin over the turning pr
 | `h03-speed-only.h` | `TOOL CALL Z S5000` and `TOOL CALL S6000 F900`, which change the speed but not the tool. |
 | `h04-cycle-feeds.h` | Cycle 200 with a numeric `Q206` and with `Q206=FAUTO`, cycle 207 with the pitch `Q239`, and the feeds `FAUTO`, `FZ`, `FU`, `FQ50` and `F` with a `Q50 =` assignment. |
 | `h05-tool-axis.h` | The same tool number twice: `TOOL CALL 4 S6500` with no axis (a speed change) and `TOOL CALL 4 Z S7000` with one (a sister-tool swap, a real call). |
+| `h06-same-tool-speed.h` | The tool in the spindle called again only for a new speed: `TOOL CALL 4 S4000` after `TOOL CALL 4 Z`, the same with a named tool `"DRILL_8"`, and `TOOL CALL 12 S1900` after `TOOL CALL 12.1` (another tool) then `TOOL CALL 12 S2000` (speed only). |
 | `detect-heidenhain.txt` | A complete program in a `.txt` file. |
 
 ## `nc/okuma/`: Okuma OSP turning programs
@@ -359,6 +360,14 @@ The multi-channel programs (Fanuc multi-path, Okuma two turrets, Sinumerik two c
 ## `p4e/`: the P4e side-by-side programs
 
 `p4e/channels/twin-sections.nc` (two channels in one file) and `p4e/channels/threepath.NC1` to `.NC3` (one file per path) with the owner's wait codes `M901P12` and `M910P123`, read by the runtime scenario `p4-channels`; see [`p4e/README.md`](p4e/README.md). Like `channels/` they are not under `nc/` (builder wait codes), and no unit test walks them.
+
+## `i18n/`: test message sets (P4.37)
+
+Made-up message sets for `src/lib/i18n/locale.test.ts` and `src/lib/app/language.test.ts`: `de` and `de-CH`
+(partial German sets that follow English), `pl` (every kind of mistake the set checks report, and the
+Polish plural forms), `broken` (a file that holds no messages). They are **never shipped**: nothing
+imports them but those tests, which hand them to `loadLocale` as loaders. A language ships only with a
+folder `src/lib/i18n/<tag>/` and a row in `LOCALES` (plan §6.9 rule 38); none does in v1.2.0.
 
 ## Expectations and golden files
 

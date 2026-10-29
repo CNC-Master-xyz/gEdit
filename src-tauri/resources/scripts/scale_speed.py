@@ -225,22 +225,41 @@ Everything outside the values it scales — line endings, encoding, the trailing
 spacing, block numbers, skip marks and comments — is handed back byte for byte, because
 the only edits made are the value spans of spindle word tokens.
 
-`scale_feed.py` is the same script for `F` words, and deliberately stands on its own: a
-bundled script is one file, so the two share `gedit_nc` and nothing else.
+A block, not a line
+-------------------
+A block may run over several lines (Klartext `~`, Okuma `$`), and a code on any of them
+counts for the whole block (T090): a speed on the first line of a block whose `$` line
+writes a tapping code is that tap's speed. So the run reads a block to its end before it
+decides about one of its words (`_nc_block.BlockReader`, `_nc_block.BlockFlags`).
+
+`scale_feed.py` is the same script for `F` words. The two, and the tool list, share what
+reads a block and its words through `_nc_block` (Wave Y, T209), so a fix lands once.
 """
 
 from __future__ import annotations
 
 import re
 import sys
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import gedit_nc
-
-#: At most this many findings; the rest are counted in the message. A 100k-line program
-#: under G96 would otherwise hand the results panel tens of thousands of rows.
-MAX_FINDINGS = 200
+import _nc_block
+from _nc_block import (
+    Findings,
+    apply_edits,
+    as_dict,
+    block_entries,
+    call_arguments,
+    choice_param,
+    count_text,
+    decimal_param,
+    decimals_param,
+    exact_value,
+    lower_first,
+    power_on_state,
+    trim,
+)
 
 #: A cycle parameter whose code-database label names it a speed. The label is display text
 #: out of the database we ship, and it only decides what is **listed**: a cycle argument is
@@ -256,92 +275,6 @@ INDEX = re.compile(r"^\[\s*([^\]]*?)\s*\]$")
 #: be told about. It almost never fires on the default whole-number output, where speeds
 #: are in the hundreds or thousands; it is "As written" on a small value that needs it.
 ROUNDING_NOTICE = Decimal("0.05")
-
-
-def as_dict(value: Any) -> Dict[str, Any]:
-    """``value`` when it is a dictionary, else an empty one — the context arrives as JSON."""
-    return value if isinstance(value, dict) else {}
-
-
-def decimal_text(value: Any) -> Optional[str]:
-    """A parameter value as an exact decimal string, or ``None`` when it is not a number.
-
-    Form values arrive as JSON, so a percentage can be an int, a float or text. A float is
-    read through its ``repr``, which is the shortest string that reads back as the same
-    double, and is written without an exponent so that it parses as an NC number.
-    """
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        try:
-            number = Decimal(repr(value))
-        except InvalidOperation:
-            return None
-        if not number.is_finite():
-            return None
-        return format(number, "f")
-    if isinstance(value, str):
-        text = value.strip()
-        return text if gedit_nc.parse_number(text) is not None else None
-    return None
-
-
-def decimal_param(values: Dict[str, Any], key: str, label: str, default: Optional[str] = None) -> Optional[str]:
-    """One numeric parameter as a decimal string. An unusable value is an error, not a guess."""
-    value = values.get(key)
-    if value is None or value == "":
-        return default
-    text = decimal_text(value)
-    if text is None:
-        raise ValueError("%s: %r is not a number." % (label, value))
-    return text
-
-
-def decimals_param(value: Any, default: Any) -> Any:
-    """``'keep'`` or a decimal count. Anything else is an error."""
-    if value is None or value == "":
-        return default
-    if value == "keep":
-        return "keep"
-    if isinstance(value, bool):
-        raise ValueError("Decimal places: %r is not a number of decimals." % (value,))
-    if isinstance(value, int):
-        count = value
-    elif isinstance(value, str) and value.strip().isdigit():
-        count = int(value.strip(), 10)
-    else:
-        raise ValueError("Decimal places: %r is not a number of decimals." % (value,))
-    if count < 0 or count > 10:
-        raise ValueError("Decimal places: %d is outside 0 to 10." % count)
-    return count
-
-
-def trim(value: Decimal) -> str:
-    """A decimal as short text, never in exponent form: ``Decimal('90.0')`` is ``'90'``."""
-    return format(value.normalize(), "f")
-
-
-def choice_param(value: Any, default: str = "auto") -> str:
-    """An ``auto`` / ``yes`` / ``no`` option, from the form or from an older context.
-
-    Phase 1 declared this option as a ``bool``; the form engine turns a remembered ``false``
-    into the field's default when a field becomes a ``choice`` (plan F33), so the app never
-    sends one. A context written by hand or by an older build still can, and a run that says
-    ``true`` or ``false`` meant it, so both are honoured rather than quietly turned into
-    ``auto``.
-    """
-    if value is True:
-        return "yes"
-    if value is False:
-        return "no"
-    return value if value in ("auto", "yes", "no") else default
-
-
-def count_text(count: int, singular: str, plural: Optional[str] = None) -> str:
-    """``1 spindle speed`` / ``4 spindle speeds``."""
-    return "%s %s" % ("{:,}".format(count), singular if count == 1 else (plural or singular + "s"))
 
 
 class Params:
@@ -365,17 +298,13 @@ class Params:
         self.only_above = None if above is None else Decimal(above)
         self.only_below = None if below is None else Decimal(below)
 
-        self.fmt = gedit_nc.number_format_of(profile)
         # A spindle speed is a whole number of revolutions unless the run says otherwise.
         self.decimals = decimals_param(values.get("decimals"), 0)
-        if self.decimals != "keep":
-            self.fmt["decimals"] = self.decimals
-
-        syntax = as_dict(profile.get("syntax"))
-        self.decimal_point_significant = syntax.get("decimalPointSignificant") is True
-        #: A fixed decimal count would give a point-less value a point; see the docstring.
-        self.whole_fmt = dict(self.fmt)
-        self.whole_fmt["decimals"] = 0
+        #: The number format, and the rule that a point-less value is never given a point
+        #: where the point is significant (see the docstring).
+        self.numbers = _nc_block.NumberFormat(profile, self.decimals)
+        self.fmt = self.numbers.fmt
+        self.decimal_point_significant = self.numbers.decimal_point_significant
 
         addresses = as_dict(profile.get("addresses"))
         spindle = addresses.get("spindle")
@@ -430,40 +359,8 @@ class Params:
         return gedit_nc.same_spindle(spindle, self.main_spindle)
 
     def format_for(self, token: gedit_nc.Token) -> Tuple[Dict[str, Any], bool]:
-        """The number format for this value, and whether it had to be kept whole.
-
-        A fixed decimal count is dropped for a value the file wrote without a decimal
-        point in a dialect where the point is significant: giving it one changes what the
-        control reads.
-        """
-        if (
-            self.decimal_point_significant
-            and self.decimals != "keep"
-            and self.decimals > 0
-            and token.value is not None
-            and not token.value.has_point
-        ):
-            return self.whole_fmt, True
-        return self.fmt, False
-
-
-class Findings:
-    """The findings of a run, capped so that a huge program cannot flood the panel."""
-
-    def __init__(self, limit: int = MAX_FINDINGS) -> None:
-        self.items: List[Dict[str, Any]] = []
-        self.dropped = 0
-        self.limit = limit
-
-    def add(self, line: int, severity: str, message: str) -> None:
-        if len(self.items) >= self.limit:
-            self.dropped += 1
-            return
-        self.items.append({"line": line, "severity": severity, "message": message})
-
-    def in_line_order(self) -> List[Dict[str, Any]]:
-        """The findings, by line. Python's sort is stable, so one line keeps its order."""
-        return sorted(self.items, key=lambda finding: finding["line"])
+        """The number format for this value, and whether it had to be kept whole."""
+        return self.numbers.format_for(token)
 
 
 class Counts:
@@ -512,53 +409,13 @@ class Counts:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
 
 
-def apply_edits(line: str, edits: Sequence[Tuple[int, int, str]]) -> str:
-    """Replaces the given spans of ``line``. The spans come from tokens, so they never overlap."""
-    out: List[str] = []
-    at = 0
-    for start, end, text in edits:
-        out.append(line[at:start])
-        out.append(text)
-        at = end
-    out.append(line[at:])
-    return "".join(out)
+def plain_assignment(token: gedit_nc.Token) -> bool:
+    """An address written with `=` and without an index: `S3=2400`, `SB=2000`, `LIMS=3000`.
 
-
-def power_on_state(
-    tracker: gedit_nc.FeedModeTracker, cp: gedit_nc.CompiledProfile
-) -> List[Dict[str, Any]]:
-    """Puts the tracker into the state the control powers on in (plan AD-19 rule 8, AD-31).
-
-    `FeedModeTracker` is Phase 1's API: it is built from a code database alone, so it starts
-    every run in feed per minute and in rpm — which is what a milling control powers on in,
-    and what Phase 1 assumed everywhere. A turning control does not: a Fanuc lathe in G-code
-    system A powers on in `G99`, feed **per revolution**, in system B in `G95`, and the
-    document's machine may say something else again (plan §7.15).
-
-    The **effective** profile carries that state in `modal.initial`, so the run walks those
-    codes through the tracker as the block before the first one. A feed-mode or spindle-mode
-    code in the program then overrides it exactly as it overrides a code on an earlier line,
-    and a dialect that declares no power-on state (Klartext) is untouched. Answers the
-    database entries of those codes, so a finding can name the one in force.
+    The address is exactly what stands in front of the `=`, so `S3` is not `S`. An indexed
+    word (`S[2]=300`, `SVC[2]=80`) is read on its own path in :func:`speed_words`.
     """
-    initial = as_dict(as_dict(cp.profile.get("modal")).get("initial"))
-    codes = [value for value in initial.values() if isinstance(value, str) and value != ""]
-    if not codes:
-        return []
-    tokens, _ = gedit_nc.tokenize_line(" ".join(codes), cp, None)
-    tracker.update(tokens)
-    return block_entries(tokens, tracker)
-
-
-def assignment_word(token: gedit_nc.Token) -> bool:
-    """True for an address written with `=` (plan §7.5): `S3=2400`, `SB=2000`, `LIMS=3000`.
-
-    The address is exactly what stands in front of the `=`, so `S3` is not `S`.
-    """
-    if token.kind != "word" or not token.address:
-        return False
-    head, sep, _ = token.text.partition("=")
-    return sep == "=" and head.strip().upper() == token.address.upper()
+    return token.index is None and _nc_block.assignment_word(token)
 
 
 def colon_word(token: gedit_nc.Token) -> bool:
@@ -571,29 +428,6 @@ def colon_word(token: gedit_nc.Token) -> bool:
         return False
     head, sep, _ = token.text.partition(":")
     return sep == ":" and head.strip().upper() == token.address.upper()
-
-
-def block_entries(
-    tokens: Sequence[gedit_nc.Token], tracker: gedit_nc.FeedModeTracker
-) -> List[Dict[str, Any]]:
-    """The code-database entries of the codes this block writes, in written order.
-
-    The same reading as the modal interpreter's: an address word is a code unless it is
-    written with `=` (`M3=3` is not `M33`), a call is the code of its identifier
-    (`CYCLE84(…)`), and a keyword is a code by its name.
-    """
-    out: List[Dict[str, Any]] = []
-    for token in tokens:
-        if token.kind == "word":
-            written = (token.address or "") + (token.value_text or "") if token.address and not assignment_word(token) else ""
-        elif token.kind in ("call", "keyword"):
-            written = token.address or token.text or ""
-        else:
-            continue
-        entry = tracker.entry(written) if written else None
-        if entry is not None:
-            out.append(entry)
-    return out
 
 
 def code_with(entries: Sequence[Dict[str, Any]], test: Any) -> Optional[str]:
@@ -690,7 +524,7 @@ def speed_words(tokens: Sequence[gedit_nc.Token], params: Params) -> List[SpeedW
                     out.append(SpeedWord(kind, name, tokens[k], number, text.upper() + "[]", text.upper()))
                     i = k + 1
                     continue
-        if token.kind == "word" and address in params.surface_words and (assignment_word(token) or colon_word(token)):
+        if token.kind == "word" and address in params.surface_words and (plain_assignment(token) or colon_word(token)):
             # `SVC=100`, Klartext `VC:120` (`FUNCTION TURNDATA SPIN VCONST:ON VC:120`): the
             # tool's cutting speed on the master spindle. Only the number behind the `=` or
             # the `:` is rewritten, so the form stays as written.
@@ -754,7 +588,7 @@ def speed_words(tokens: Sequence[gedit_nc.Token], params: Params) -> List[SpeedW
             i += 1
             continue
         rest = address[len(spindle) :] if address.startswith(spindle) else ""
-        if assignment_word(token) and address not in params.angular and rest != "":
+        if plain_assignment(token) and address not in params.angular and rest != "":
             if rest.isdigit() and int(rest) == 0:
                 # `S0=` addresses the master spindle, which is what the plain S does.
                 out.append(SpeedWord("speed", text, token, None, address))
@@ -872,41 +706,6 @@ def list_call_speeds(
         )
 
 
-def call_arguments(text: Optional[str]) -> List[str]:
-    """The arguments of a call as written, split at the commas between them.
-
-    An empty argument keeps its place, because a cycle reads its arguments by position; a
-    comma inside a string, a bracket or a nested call does not split.
-    """
-    if text is None:
-        return []
-    out: List[str] = []
-    current: List[str] = []
-    depth = 0
-    quoted = False
-    for char in text:
-        if quoted:
-            quoted = char != '"'
-        elif char == '"':
-            quoted = True
-        elif char in "([":
-            depth += 1
-        elif char in ")]":
-            depth -= 1
-        elif char == "," and depth == 0:
-            out.append("".join(current).strip())
-            current = []
-            continue
-        current.append(char)
-    out.append("".join(current).strip())
-    return out
-
-
-def lower_first(label: str) -> str:
-    """``Spindle speed while tapping`` → ``spindle speed while tapping``."""
-    return label[:1].lower() + label[1:] if label[1:2].islower() else label
-
-
 #: `(line index, value start)` of a speed word -> `(code, line, how)`: the tapping code, the
 #: line of the tapping block, and ``'block'`` for a word of that block or ``'in-force'`` for
 #: the speed in force when it runs (:func:`tap_speeds`).
@@ -950,119 +749,103 @@ def tap_speeds(
     axes = axis_letters(cp.profile)
     above = list(preceding or ())
     first = len(above)
-    state: Optional[gedit_nc.LineState] = None
     #: `(index, value start)` of the speed word written last, whichever spindle it names.
     last: Optional[Tuple[int, int]] = None
     #: `(code, line)` of a tapping cycle a keyword defined, until another cycle is.
     armed: Optional[Tuple[str, int]] = None
     #: `(code, line)` while a modal call of a tapping call repeats.
     repeat: Optional[Tuple[str, int]] = None
-    #: The tapping block that is still open and has no speed word yet: `(code, line, the
-    #: speed word written last before it)`. A block may run over several lines (Okuma `$`,
-    #: Klartext `~`), so the speed it runs at is only known once the block is over.
-    pending: Optional[Tuple[str, int, Optional[Tuple[int, int]]]] = None
-    #: The speed word written last before the block that is open.
-    before: Optional[Tuple[int, int]] = None
-    #: Whether the open block writes a tapping code or moves an axis, so far.
-    acts = False
 
-    def settle() -> None:
-        """The open tapping block ended without a speed of its own: it runs at the last one."""
-        if pending is not None and pending[2] is not None and pending[2][0] >= 0:
-            marks.setdefault(pending[2], (pending[0], pending[1], "in-force"))
-
-    continued = False
-    for walked, line in enumerate(above + list(lines)):
-        head = gedit_nc.continues_block(line, cp)
-        same_block = continued or head
-        tokens, state = gedit_nc.tokenize_line(line, cp, state)
-        continued = state.continuation if state is not None else False
-        tracker.update(tokens, continued=head)
-        index = walked - first
-        if not same_block:
-            settle()
-            pending = None
-            before = last
-            acts = False
-        number = base_line + index
-        written_codes = tracker.written
+    # A block may run over several lines (Okuma `$`, Klartext `~`), and a code on any of
+    # them counts for the whole block (T090): a speed on the first line of a block whose
+    # `$` line taps is that tap's speed. So each block is read to its end first.
+    reader = _nc_block.BlockReader(cp)
+    for block in reader.blocks(above + list(lines), start=-first):
+        #: The speed word written last before this block: what it runs at without one.
+        before = last
+        flags = _nc_block.BlockFlags(tracker)
         repeating = repeat
-
         runs = False
-        for entry, kind in written_codes:
-            code = entry.get("code") if isinstance(entry.get("code"), str) else ""
-            cycle = sets_of(entry).get("cycle")
-            # M9 (WP9.5b): a keyword that defines a cycle for a later call (Klartext
-            # `CYCL DEF 207`) is `sets.cycle: 'define'` now (plan section 7.4); it arms
-            # the tap exactly as its old `'start'` did.
-            if cycle in ("start", "define"):
-                defined = kind == "keyword" and entry.get("modal") is not True and entry.get("tapping") is True
-                armed = (code, number) if defined else None
-            elif entry.get("group") == "cycle":
-                # Another definition under the keyword that defined the armed cycle
-                # (`CYCL DEF 7` datum shift, `CYCL DEF 19`, `CYCL DEF 32`, `CYCL DEF 247`
-                # after a `CYCL DEF 207`) is active on definition: it calls nothing, and
-                # the next `CYCL CALL` still runs the tap. Review finding NC3: it counted as
-                # running the tap, so after one tap every later speed was refused.
-                if armed is not None and kind == "keyword" and another_definition(code, armed[0]):
-                    continue
-                runs = True
-        keywords = [
-            entry for entry, kind in written_codes
-            if kind == "keyword" and sets_of(entry).get("cycle") == "call-modal-next"
-        ]
-        calls = [entry for entry, kind in written_codes if kind == "call"]
-        if keywords:
-            if calls:
-                # A new modal call replaces the one before it, whether it taps or not.
-                call = calls[0]
-                repeat = (str(call.get("code") or ""), number) if call.get("tapping") is True else None
-            else:
-                repeat = None
+        #: Whether the block writes a tapping code or moves an axis.
+        acts = False
+        for line in block:
+            _nc_block.read_line(tracker, line, owners=False)
+            flags.add(line)
+            number = base_line + line.index
+            for entry, kind in line.written:
+                code = entry.get("code") if isinstance(entry.get("code"), str) else ""
+                cycle = sets_of(entry).get("cycle")
+                # M9 (WP9.5b): a keyword that defines a cycle for a later call (Klartext
+                # `CYCL DEF 207`) is `sets.cycle: 'define'` now (plan section 7.4); it arms
+                # the tap exactly as its old `'start'` did.
+                if cycle in ("start", "define"):
+                    defined = kind == "keyword" and entry.get("modal") is not True and entry.get("tapping") is True
+                    armed = (code, number) if defined else None
+                elif entry.get("group") == "cycle":
+                    # Another definition under the keyword that defined the armed cycle
+                    # (`CYCL DEF 7` datum shift, `CYCL DEF 19`, `CYCL DEF 32`, `CYCL DEF 247`
+                    # after a `CYCL DEF 207`) is active on definition: it calls nothing, and
+                    # the next `CYCL CALL` still runs the tap. Review finding NC3: it counted
+                    # as running the tap, so after one tap every later speed was refused.
+                    if armed is not None and kind == "keyword" and another_definition(code, armed[0]):
+                        continue
+                    runs = True
+            keywords = [
+                entry for entry, kind in line.written
+                if kind == "keyword" and sets_of(entry).get("cycle") == "call-modal-next"
+            ]
+            calls = [entry for entry, kind in line.written if kind == "call"]
+            if keywords:
+                if calls:
+                    # A new modal call replaces the one before it, whether it taps or not.
+                    call = calls[0]
+                    repeat = (str(call.get("code") or ""), number) if call.get("tapping") is True else None
+                else:
+                    repeat = None
+            # A modal tapping code in force (`G84` left without `G80`, `G331`/`G332`, the
+            # tapping mode `G63`) taps in a block that writes it again or moves an axis. A
+            # block of only S, M or T words (`S1100 M3` of the next tool) runs no tap: its
+            # speed is the speed in force for the next block that does (review finding NC8).
+            acts = acts or moves_axis(line.tokens, axes) or any(
+                entry.get("tapping") is True or entry.get("tappingElsewhere") is True for entry, _ in line.written
+            )
 
-        # A modal tapping code in force (`G84` left without `G80`, `G331`/`G332`, the
-        # tapping mode `G63`) taps in a block that writes it again or moves an axis. A
-        # block of only S, M or T words (`S1100 M3` of the next tool) runs no tap: its
-        # speed is the speed in force for the next block that does (review finding NC8).
-        acts = acts or moves_axis(tokens, axes) or any(
-            entry.get("tapping") is True or entry.get("tappingElsewhere") is True for entry, _ in written_codes
-        )
-        code = tracker.tapping_code if acts else None
-        if code is None and acts and tracker.ambiguous_code is not None:
+        number = base_line + block[0].index
+        code = flags.tapping_code if acts else None
+        if code is None and acts and flags.ambiguous_code is not None:
             # A code that is a tap on the other kind of machine (`tappingElsewhere`: Okuma
             # `G84`, the tapping cycle of the machining centres whose programs open with the
             # Okuma profile). Scale feed refuses its F, so its speed is left as well, or the
             # pair would come out mismatched (review finding NC1).
-            ambiguous = tracker.entry(tracker.ambiguous_code)
+            ambiguous = tracker.entry(flags.ambiguous_code)
             if ambiguous is not None and ambiguous.get("tappingElsewhere") is True:
-                code = tracker.ambiguous_code
+                code = flags.ambiguous_code
         if code is None and runs and armed is not None:
             code = armed[0]
         if code is None and repeating is not None:
             code = repeating[0]
 
         # What is no speed: a clamp, a dwell's revolutions, a macro call's argument.
-        clamp = any(sets_of(entry).get("speedLimit") is True for entry, _ in written_codes)
-        if tracker.f_not_feed or tracker.data_code is not None or clamp:
-            words: List[SpeedWord] = []
-        else:
-            words = [word for word in speed_words(tokens, params) if word.kind != "limit"]
+        clamp = any(sets_of(entry).get("speedLimit") is True for entry, _ in flags.written)
+        words: List[Tuple[int, SpeedWord]] = []
+        if not (flags.f_not_feed or flags.data_code is not None or clamp):
+            for line in block:
+                words.extend(
+                    (line.index, word) for word in speed_words(line.tokens, params) if word.kind != "limit"
+                )
         if code is not None:
-            if index >= 0:
-                blocks[index] = code
+            for line in block:
+                if line.index >= 0:
+                    blocks[line.index] = code
             if words:
-                pending = None
-                if index >= 0:
-                    for word in words:
+                for index, word in words:
+                    if index >= 0:
                         marks.setdefault((index, word.value.start), (code, number, "block"))
-            elif pending is None and (not same_block or before is last):
-                pending = (code, number, before)
-        elif words:
-            # A speed on a line of the block that does not tap is not the tap's.
-            pending = None
+            elif before is not None and before[0] >= 0:
+                # A tapping block without a speed of its own runs at the last one.
+                marks.setdefault(before, (code, number, "in-force"))
         if words:
-            last = (index, words[-1].value.start)
-    settle()
+            last = (words[-1][0], words[-1][1].value.start)
     return marks, blocks
 
 
@@ -1312,7 +1095,7 @@ def scale_token(
         return None
 
     limited, limit_text, limit_label = clamp(scaled, params)
-    new_text, whole = write(limited, token, params)
+    new_text, whole = params.numbers.write(limited, token)
 
     # A spindle speed of zero is not a slow spindle, it is a spindle that does not turn.
     # The finding names which of the two ways the run got there: a value rounded away
@@ -1327,7 +1110,7 @@ def scale_token(
                 trim(params.percent),
                 token.value_text,
                 trim(exact_value(limited)),
-                result_precision(token, params),
+                params.numbers.result_precision(token),
                 new_text,
             )
             advice = " Ask for more decimal places to scale it."
@@ -1355,7 +1138,7 @@ def scale_token(
                     trim(params.percent),
                     token.value_text,
                     trim(exact_value(limited)),
-                    result_precision(token, params),
+                    params.numbers.result_precision(token),
                     new_text,
                 ),
             )
@@ -1367,7 +1150,7 @@ def scale_token(
             line,
             "info",
             "%s would become %s; the %s (%s) was used instead."
-            % (word, write(scaled, token, params)[0], limit_label, limit_text),
+            % (word, params.numbers.write(scaled, token)[0], limit_label, limit_text),
         )
     else:
         # The value moved, but rounding moved it further than was asked for.
@@ -1380,7 +1163,7 @@ def scale_token(
                 "warning",
                 "%s becomes %s, not %s: the result was rounded to %s. Ask for more "
                 "decimal places if that is too coarse."
-                % (word, new_text, trim(exact), result_precision(token, params)),
+                % (word, new_text, trim(exact), params.numbers.result_precision(token)),
             )
     if whole:
         counts.whole += 1
@@ -1417,49 +1200,6 @@ def scale_token(
     return (token.end - len(token.value_text), token.end, new_text)
 
 
-def exact_value(number: Any) -> Decimal:
-    """The exact value of a token's literal or of a written number (`gedit_nc.decimal_of`).
-
-    Not ``Decimal(literal.raw)``: a Klartext decimal comma stays in ``raw`` (`F500,5`) so
-    that the rewrite writes it back, and ``Decimal("500,5")`` raises. Only ever called with
-    a number the tokenizer or ``format_number`` produced, so ``None`` cannot come back.
-    """
-    value = gedit_nc.decimal_of(number)
-    if value is None:  # pragma: no cover - the tokenizer and format_number write numbers
-        raise ValueError("not a number: %r" % (number,))
-    return value
-
-
-def decimals_text(count: int) -> str:
-    """``no decimals`` / ``1 decimal`` / ``3 decimals``."""
-    if count <= 0:
-        return "no decimals"
-    return "1 decimal" if count == 1 else "%d decimals" % count
-
-
-def written_precision(token: gedit_nc.Token) -> str:
-    """How this value was written: ``no decimals``, ``1 decimal`` ..."""
-    if token.value is None or not token.value.has_point:
-        return "no decimals"
-    return decimals_text(len(token.value.frac_part or ""))
-
-
-def result_precision(token: gedit_nc.Token, params: Params) -> str:
-    """How the **result** was written, which is what a finding has to name.
-
-    With ``decimals = "keep"`` that is the precision the value already had; otherwise it is
-    the run's count, unless the count had to be dropped to keep a point-less value
-    point-less (:meth:`Params.format_for`). Naming the wrong one turns an honest warning
-    into a wrong explanation of a right number.
-    """
-    _, whole = params.format_for(token)
-    if whole:
-        return "no decimals"
-    if params.decimals == "keep":
-        return written_precision(token)
-    return decimals_text(params.decimals)
-
-
 def clamp(scaled: str, params: Params) -> Tuple[str, Optional[str], str]:
     """``scaled`` inside the run's limits, plus the limit that was applied."""
     value = Decimal(scaled)
@@ -1468,16 +1208,6 @@ def clamp(scaled: str, params: Params) -> Tuple[str, Optional[str], str]:
     if params.max_speed is not None and value > params.max_speed:
         return params.max_text, params.max_text, "largest speed"
     return scaled, None, ""
-
-
-def write(value: str, token: gedit_nc.Token, params: Params) -> Tuple[str, bool]:
-    """A decimal string written the way the profile and the original literal ask for.
-
-    The second half of the answer says whether a fixed decimal count had to be dropped to
-    keep a point-less value point-less.
-    """
-    fmt, whole = params.format_for(token)
-    return gedit_nc.format_number(value, token.value, fmt, params.decimal_point_significant), whole
 
 
 def inherited_text(
@@ -1597,21 +1327,26 @@ def run(
     #: A tap is not among them: its speed is never scaled, so there is nothing to warn of.
     thread_block = primed and (tracker.pitch_feed or tracker.pitch_feed_ambiguous) and not tracker.tapping
 
-    for index, line in enumerate(lines):
-        tokens, state = gedit_nc.tokenize_line(line, cp, state)
-        # An Okuma `$` line belongs to the block above it, thread cycle and all.
-        tracker.update(tokens, continued=gedit_nc.continues_block(line, cp))
-        number = base_line + index
-        entries = block_entries(tokens, tracker)
-        css_code = code_with(entries, lambda e: sets_of(e).get("speedUnit") == "surface") or css_code
-        block = Block(
-            code_with(entries, lambda e: e.get("pitchFeed") is True) or tracker.active_cycle or tracker.pitch_mode,
+    # T090: a block is read to its end before a word of it is decided, because a code on
+    # any of its lines counts for the whole block (`_nc_block`): an Okuma `$` line belongs
+    # to the block above it, thread cycle and all.
+    reader = _nc_block.BlockReader(cp, state)
+    for block in reader.blocks(lines):
+        flags = _nc_block.BlockFlags(tracker)
+        for line in block:
+            _nc_block.read_line(tracker, line, owners=False)
+            flags.add(line)
+            css_code = code_with(line.entries, lambda e: sets_of(e).get("speedUnit") == "surface") or css_code
+        number = base_line + block[0].index
+        indexes = [line.index for line in block]
+        block_info = Block(
+            code_with(flags.entries, lambda e: e.get("pitchFeed") is True) or flags.active_cycle or flags.pitch_mode,
             css_code,
         )
         # Which code makes this block's `S` a clamp is the database's answer, not this
         # file's: `G50` in Fanuc's G-code system A, `G92` in system B, `G25` and `G26` on a
         # Sinumerik (plan AD-19 rule 4, F24).
-        limit_code = gedit_nc.speed_limit_of(codes, tokens)
+        limit_code = gedit_nc.speed_limit_of(codes, flags.tokens)
         # M9: which side of the speed range the limit bounds; a lower one is no clamp.
         lower = limit_code is not None and gedit_nc.speed_limit_bound_of(tracker.entry(limit_code)) == "lower"
 
@@ -1619,17 +1354,18 @@ def run(
         # cuts the thread was set further up, so the warning has to point here.
         # A block under a tapping code that runs no tap (`S1100 M3` after `G332`, review
         # finding NC8) cuts no thread either.
-        idle_tap = tracker.tapping and index not in tap_blocks
-        thread_now = (tracker.pitch_feed or tracker.pitch_feed_ambiguous) and index not in tap_blocks and not idle_tap
+        tap_block = any(index in tap_blocks for index in indexes)
+        idle_tap = flags.tapping and not tap_block
+        thread_now = (flags.pitch_feed or flags.pitch_feed_ambiguous) and not tap_block and not idle_tap
         if thread_now and not thread_block and last_speed is not None:
             counts.thread += 1
-            if tracker.pitch_feed:
+            if flags.pitch_feed:
                 findings.add(
                     number,
                     "warning",
                     "This thread block (%s) runs at %s, which was scaled on line %d: the "
                     "feed follows from the speed and the pitch, so check this block by "
-                    "hand." % (block.pitch_code, last_speed[1], last_speed[0]),
+                    "hand." % (block_info.pitch_code, last_speed[1], last_speed[0]),
                 )
             else:
                 findings.add(
@@ -1640,98 +1376,104 @@ def run(
                     "G-code system: if "
                     "this is a lathe program the thread is cut at the changed speed, so "
                     "check the block by hand."
-                    % (last_speed[1], last_speed[0], tracker.ambiguous_code),
+                    % (last_speed[1], last_speed[0], flags.ambiguous_code),
                 )
         thread_block = thread_now
 
-        edits: List[Tuple[int, int, str]] = []
-        for word in speed_words(tokens, params):
-            # A plain S while another spindle is the master drives that spindle; a word that
-            # names the main spindle (`S1=`) drives the main spindle whoever the master is.
-            elsewhere = word.kind == "other" or (word.kind == "speed" and master is not None)
-            spindle = word.spindle if word.kind not in ("speed", "main") else (master[0] if master is not None and word.kind == "speed" else None)
-            if tracker.f_not_feed and word.kind != "limit":
-                # A dwell block (`fNotFeed`): an S counts spindle revolutions (`G4 S2`, and
-                # `G4 S2=10` for spindle 2). It is a time, not a speed, so it is neither
-                # scaled nor counted as one.
-                counts.dwell += 1
-                continue
-            if tracker.data_code is not None and word.kind != "limit":
-                # `wordsAreData` (`G65 P9010 S500`): an argument of the call or a value the
-                # block writes somewhere, not a speed of this program.
-                counts.data += 1
-                findings.add(
-                    number,
-                    "info",
-                    "%s is an argument or a data value of %s, not a spindle speed of this "
-                    "program, so it is left as written." % (word.name, tracker.data_code),
-                )
-                continue
-            if word.kind == "limit":
-                # A clamp word (`LIMS=`, `LIMS[2]=`) is a limit wherever it stands; it names
-                # itself.
-                counts.total += 1
-                edit = scale_token(word.value, tracker, "", params, number, findings, counts, word.name, word.spindle, block, tokens=tokens)
-                if edit is not None:
-                    edits.append(edit)
-                continue
-            if elsewhere and limit_code is not None:
-                # In a limit block every speed word is a limit, another spindle's too
-                # (`G26 S3000 S2=2000`): the limit option decides, not the spindle.
+        for line in block:
+            index = line.index
+            tokens = line.tokens
+            number = base_line + index
+            edits: List[Tuple[int, int, str]] = []
+            for word in speed_words(tokens, params):
+                # A plain S while another spindle is the master drives that spindle; a word
+                # that names the main spindle (`S1=`) drives the main spindle whoever the
+                # master is.
+                elsewhere = word.kind == "other" or (word.kind == "speed" and master is not None)
+                spindle = word.spindle if word.kind not in ("speed", "main") else (master[0] if master is not None and word.kind == "speed" else None)
+                if flags.f_not_feed and word.kind != "limit":
+                    # A dwell block (`fNotFeed`): an S counts spindle revolutions (`G4 S2`,
+                    # and `G4 S2=10` for spindle 2). It is a time, not a speed, so it is
+                    # neither scaled nor counted as one.
+                    counts.dwell += 1
+                    continue
+                if flags.data_code is not None and word.kind != "limit":
+                    # `wordsAreData` (`G65 P9010 S500`): an argument of the call or a value
+                    # the block writes somewhere, not a speed of this program.
+                    counts.data += 1
+                    findings.add(
+                        number,
+                        "info",
+                        "%s is an argument or a data value of %s, not a spindle speed of this "
+                        "program, so it is left as written." % (word.name, flags.data_code),
+                    )
+                    continue
+                if word.kind == "limit":
+                    # A clamp word (`LIMS=`, `LIMS[2]=`) is a limit wherever it stands; it
+                    # names itself.
+                    counts.total += 1
+                    edit = scale_token(word.value, flags, "", params, number, findings, counts, word.name, word.spindle, block_info, tokens=tokens)
+                    if edit is not None:
+                        edits.append(edit)
+                    continue
+                if elsewhere and limit_code is not None:
+                    # In a limit block every speed word is a limit, another spindle's too
+                    # (`G26 S3000 S2=2000`): the limit option decides, not the spindle.
+                    counts.total += 1
+                    edit = scale_token(
+                        word.value, flags, limit_code, params, number, findings, counts, word.name, spindle, block_info,
+                        lower=lower, tokens=tokens,
+                    )
+                    if edit is not None:
+                        edits.append(edit)
+                    continue
+                if elsewhere and not params.other_spindles:
+                    report_other(word, master if word.kind == "speed" else None, number, findings, counts, params.main_spindle)
+                    # Another spindle has a speed of its own now (a driven tool's `SB=`, a
+                    # spindle named by its number): a thread cut next may run on it, so
+                    # which speed that thread runs at is no longer the S this run changed.
+                    last_speed = None
+                    continue
+                tap = taps.get((index, word.value.start)) if limit_code is None else None
+                if tap is not None:
+                    # The speed of a tap: left exactly as written (owner decision of
+                    # 2026-09-27).
+                    counts.total += 1
+                    entry = tracker.entry(tap[0])
+                    elsewhere = entry is not None and entry.get("tappingElsewhere") is True and entry.get("tapping") is not True
+                    report_tap(word, tap, number, findings, counts, elsewhere)
+                    last_speed = None
+                    in_force = None
+                    continue
                 counts.total += 1
                 edit = scale_token(
-                    word.value, tracker, limit_code, params, number, findings, counts, word.name, spindle, block,
-                    lower=lower, tokens=tokens,
+                    word.value, flags, limit_code if word.kind in ("speed", "main") else None, params, number,
+                    findings, counts, word.name, spindle if limit_code is not None else None, block_info, word.surface,
+                    idle_tap, lower=lower and word.kind in ("speed", "main"), tokens=tokens,
                 )
                 if edit is not None:
                     edits.append(edit)
-                continue
-            if elsewhere and not params.other_spindles:
-                report_other(word, master if word.kind == "speed" else None, number, findings, counts, params.main_spindle)
-                # Another spindle has a speed of its own now (a driven tool's `SB=`, a
-                # spindle named by its number): a thread cut next may run on it, so which
-                # speed that thread runs at is no longer the S this run changed.
-                last_speed = None
-                continue
-            tap = taps.get((index, word.value.start)) if limit_code is None else None
-            if tap is not None:
-                # The speed of a tap: left exactly as written (owner decision of 2026-09-27).
-                counts.total += 1
-                entry = tracker.entry(tap[0])
-                elsewhere = entry is not None and entry.get("tappingElsewhere") is True and entry.get("tapping") is not True
-                report_tap(word, tap, number, findings, counts, elsewhere)
-                last_speed = None
-                in_force = None
-                continue
-            counts.total += 1
-            edit = scale_token(
-                word.value, tracker, limit_code if word.kind in ("speed", "main") else None, params, number,
-                findings, counts, word.name, spindle if limit_code is not None else None, block, word.surface,
-                idle_tap, lower=lower and word.kind in ("speed", "main"), tokens=tokens,
-            )
-            if edit is not None:
-                edits.append(edit)
+                    if limit_code is None:
+                        last_speed = (number, word.name)
                 if limit_code is None:
-                    last_speed = (number, word.name)
-            if limit_code is None:
-                in_force = (number, word.name) if edit is not None else None
+                    in_force = (number, word.name) if edit is not None else None
 
-        # A block that chooses the master spindle stands alone, so it changes the words of
-        # the blocks after it.
-        choice = spindle_choice(tokens, tracker)
-        if choice is not None:
-            # `SETMS(1)` hands the plain S back to the main spindle, as `SETMS` does.
-            master = None if choice[0] is None or params.is_main(choice[0]) else (choice[0], number, choice[1])
+            # A block that chooses the master spindle stands alone, so it changes the words
+            # of the blocks after it.
+            choice = spindle_choice(tokens, tracker)
+            if choice is not None:
+                # `SETMS(1)` hands the plain S back to the main spindle, as `SETMS` does.
+                master = None if choice[0] is None or params.is_main(choice[0]) else (choice[0], number, choice[1])
 
-        # A cycle written as a call: its speeds are arguments, listed and never scaled.
-        for token in tokens:
-            if token.kind != "call" or not token.address:
-                continue
-            entry = tracker.entry(token.address)
-            if entry is not None:
-                list_call_speeds(entry, token, number, findings, counts)
+            # A cycle written as a call: its speeds are arguments, listed and never scaled.
+            for token in tokens:
+                if token.kind != "call" or not token.address:
+                    continue
+                entry = tracker.entry(token.address)
+                if entry is not None:
+                    list_call_speeds(entry, token, number, findings, counts)
 
-        out.append(apply_edits(line, edits) if edits else line)
+            out.append(apply_edits(line.text, edits) if edits else line.text)
 
     if counts.whole:
         findings.add(

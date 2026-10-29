@@ -21,11 +21,13 @@ can copy them to another computer.
 | [Where the files are](#where-the-files-are) | Folders, file names, limits |
 | [The Profiles page](#the-profiles-page) | New, Open, Import, Export, Remove, Reload |
 | [An example profile](#an-example-profile) | A profile for one lathe, line by line |
+| [Editing a profile in a form](#editing-a-profile-in-a-form) | The form with a live preview, instead of the JSON |
 | [When your profile is used](#when-your-profile-is-used) | How a program ends up with it |
 | [Code files](#code-files-your-own-g-and-m-codes) | Adding to a built-in set, or a set of your own, with an M-code table |
 | [Testing a profile on a program](#testing-a-profile-on-a-program) | What every rule finds, line by line |
 | [When a file has a problem](#when-a-file-has-a-problem) | What happens to a broken file |
 | [Typing options](#typing-options-in-a-profile) | Upper case and joined blocks, per profile |
+| [Colours, tab width and rulers](#colours-tab-width-and-rulers-in-a-profile) | What a profile can set for the editor |
 
 ## Profile or machine?
 
@@ -81,6 +83,16 @@ folders itself.
   problem; copy the real file into the folder instead.
 - gEdit never overwrites a file of that name when it creates or imports one.
 
+**The `$schema` line.** A profile, a code file or a machines file that gEdit creates starts with a
+`"$schema"` line that points at the description of the file in the public repository (the files
+`profile.schema.json`, `codes.schema.json` and `machines.schema.json` in its `schemas` folder). gEdit
+never reads that line; it is there for the editor you write the file in. An editor that
+knows JSON, such as VS Code, takes the description from it and underlines a wrong value, shows the
+help of each member and completes names while you type. A file that exists is never changed to add
+it: copy the line from a new file if you want it in an older one. The description is checked
+against the same files gEdit reads, but it is only a help; the check at load, with the
+places in the file, is what decides whether a profile is used.
+
 Everything is JSON, so the usual rules apply: double quotes around every word, a comma
 between members, no comma after the last one, and no comments. On Windows write a folder
 with forward slashes (`D:/CAM/lathe2`); a backslash would have to be written twice.
@@ -104,6 +116,7 @@ lists three things:
 | **New profile from…** (on the page, or on a built-in row as **New profile from this…**) | Asks which profile to start from and what to call the file, writes a small starting file and opens it as a document. Save it to use it |
 | **New code file from…** | The same for a code file: pick a built-in set, name the file. See [Code files](#code-files-your-own-g-and-m-codes) for what the name means |
 | **Import profile…**, **Import code file…** | Copies a file you pick into the folder (under a lower-case version of its name), without changing a byte. The original stays where it is. It does not overwrite a file of the same name |
+| **Edit in form** | On a profile of yours: opens it in [the form](#editing-a-profile-in-a-form), below the list |
 | **Open** | Opens the file as a document |
 | **Export…** | Saves a copy where you choose |
 | **Remove…** | Deletes the file, after asking. This cannot be undone. Documents that were using a removed profile are read as whatever gEdit detects for them |
@@ -118,7 +131,7 @@ file you copy into the folder yourself, from outside gEdit, is picked up by **Re
 
 The same commands are in the palette (`F1`): **New Profile From…**, **Open Profile File…**,
 **Import Profile File…**, **Export Profile File…**, **Reload Profiles**,
-**Test Profile on Document** and **Manage Profiles…**. From the palette each asks whether you
+**Test Profile on Document**, **Edit Profile in Form** and **Manage Profiles…**. From the palette each asks whether you
 mean a profile or a code file. None has a keyboard shortcut. **Test Profile on Document** is
 also on the **Tools** tab, in the **Profiles** group.
 
@@ -223,6 +236,7 @@ replaces the parent's whole.
 | `calls[].maxDigits` | Up to this many digits the value is the program number; a longer value without the repeat word is a repeat count followed by a program number of this many digits (Fanuc `M98 P21010` is `O1010` twice, with `4`) |
 | `calls[].repeatAddress` | The address that holds the repeat count (`L`); with it, a longer program number is read whole |
 | `calls[].localAddress` | The address that makes a line without the program word a **local call** (Fanuc `M98 Q30`: the program runs its own blocks from `N30` up to the next return). A local call proves the caller only of a `caller` reference inside the part it runs. A rule without it calls nothing on a line that lacks its program word (a bare `M96` or `G65`) |
+| `calls[].external` | `true`: the called program runs from an external device or a data server (Fanuc `M198 P2000`), not from this file. A program of the same number in the open file is not what a block word on that line names, so Renumber and Update References do not follow the call into it. The call still counts as a caller for the returns (`M99`) of that program |
 | `calls[].interrupt` | `true`: the called program is started by an interrupt (Fanuc `M96 P2000`) and returns into whichever program it interrupted, so this call never proves the caller of a `caller` reference |
 
 If two rules fire on one word and name different programs, the word is reported and left
@@ -235,6 +249,54 @@ are reported with the reason, never rewritten. The built-in Fanuc profiles carry
 (Python) read just the `trigger` and `addresses` of `numbering.references`, so a script that
 asks where block numbers are named does not know which program a value belongs to or whether
 a rule never rewrites it.
+
+## Editing a profile in a form
+
+A profile is a JSON file, and you can write it as one. The form is the other way: **Edit in
+form** on a row of the Profiles page, or **Edit Profile in Form** in the palette (`F1`), which
+opens the profile of the open program when it is one of yours. A built-in profile opens read-only
+with **Duplicate as a user profile**, which starts a file of your own from it. On the Profiles
+page the form opens below the list, because the Settings window cannot open another window over
+itself.
+
+The form is made from the description of the file (the schema), so it has a section for each
+group of members, with the title and the help of each field in plain words. A field is the
+right kind for its value: a switch, a number, a choice, a list with one entry to a line, a
+pattern (with the **pattern tester** beside it, which says whether the pattern is valid and
+whether it carries the group the field needs). The rarely used fields are behind **More…**.
+
+- **It edits the file, not the whole profile.** A field that the file does not write shows
+  the value it has from the profile it starts from (*From fanuc-lathe: …*). Typing a value writes
+  it into your file and so overrides the parent's; **Use the parent's value** takes the member
+  out of your file again. The rules of [what you write is laid over what the parent
+  has](#an-example-profile) apply to every field.
+- **What the form does not offer.** `extends` (the profile this one starts from) cannot be changed in
+  the form, and neither can `id` once the file exists (renaming is done on the Profiles page).
+  A few members that are lists of rules too long for a field are shown as written, with **Open as
+  JSON**: the variants, the channel settings, the references and calls of the numbering and the
+  cycle names of the compare. Edit them in the file's own tab.
+- **A profile built on another needs its own name.** `name` and `shortName` are not inherited. If you
+  empty one of them the form says *A profile built on another one needs its own name* and does
+  not save.
+- **Live preview.** To the right of the fields a small read-only editor shows a short sample
+  program written for this editor, of the profile's dialect and machine type (milling or turning;
+  one for each of ISO, Klartext, Okuma and Sinumerik). It is coloured with the profile **as you are
+  changing it**: change the comment mark, a block-number letter or a colour and the sample follows
+  within a third of a second. The sample writes its comment, block numbers and block skip the
+  way the profile does. If what you typed is not valid, the preview keeps the last version that
+  worked and says what is wrong above it.
+- **Saving.** **Save** writes the file as one undo step in its own tab, through the same path as
+  any other save: the backup copy, the check for a change made outside gEdit, and then the profile
+  is read again. A problem is shown at its field, and nothing is written while one is open. If the
+  file is open in a tab with changes you have not saved, the form asks you to save or close
+  that tab first, and if the file was changed after the form read it, to close the form and open it again.
+- **Leaving with changes.** Closing the Settings window, or going to another page of it, while a form
+  has changes that are not saved asks *Discard changes?* first, the way a half-filled machine does.
+  **Cancel** in the form asks too.
+- **Ruler at the longest block.** In the field for the rulers, when the dialect has a longest
+  block (`syntax.maxLineLength`, the length the control accepts), a link **Ruler at the longest
+  block (n)** adds that column to the list in one click. It does nothing when the column is
+  there already.
 
 ## When your profile is used
 
@@ -358,7 +420,7 @@ used.
 | `aliases` | Other spellings of the same code (`M021`). A spelling that differs only by capitals or leading zeros needs no alias |
 | `group` | A free word to sort by (`coolant`, `auxiliary`). The groups the built-in sets use for the modal state (`motion`, `plane`, `distance`, …) are best left to them |
 | `modal` | `true` when the code stays in force until another of its group replaces it |
-| `params` | The words the code takes: a list of `{ "address": "P", "label": "…" }`, with `"required": true`, `"min"` and `"max"` where they apply. `"unit": "count"` says the value is shown and kept exactly as written, never converted, and is a whole number (a repeat count, a block number); add `"decimals": true` when such a value is a real number all the same (an angle or a direction component such as the `I`, `J`, `K` of `G68.2`), so the inspector and the cycle form accept `45.5`. `decimals` without `"unit": "count"` is reported. On a cycle written in two blocks, `"block": 1` or `"block": 2` says which block a word belongs to ([below](#cycles-written-in-two-blocks)) |
+| `params` | The words the code takes: a list of `{ "address": "P", "label": "…" }`, with `"required": true`, `"min"` and `"max"` where they apply. `"unit": "count"` says the value is shown and kept exactly as written, never converted, and is a whole number (a repeat count, a block number); add `"decimals": true` when such a value is a real number all the same (an angle or a direction component such as the `I`, `J`, `K` of `G68.2`), so the inspector and the cycle form accept `45.5`. `decimals` without `"unit": "count"` is reported. `"unit": "feed"` says the word is a feed rate (the `F` of a drilling cycle, the plunging feed `Q206` of a Klartext cycle): Scale feed rates lists such a cycle feed as left unchanged, and a word is only a feed where its code says so — the label is never read for it. The value is still read in the feed unit in force. On a cycle written in two blocks, `"block": 1` or `"block": 2` says which block a word belongs to ([below](#cycles-written-in-two-blocks)) |
 | `blocks` | `2` for a cycle written in two blocks with the same code, such as the lathe's `G71` and `G76` |
 | `ownWords` | A list of addresses, such as `["F"]`: words of those addresses written **behind** the code in its block belong to the code itself and are not ordinary values. The built-in Klartext set uses it for the `F` of `M128`, `M140`, `PLANE …` and cycle 19, which is a feed for that function only; Scale Feed leaves such a word as written, the tool list does not count it as a feed, and the inspector's state, the hover and the state scripts read keep showing the feed of the path |
 | `call` | `true` says the code runs another program, or a section of this one, and comes back (Fanuc `G65`, `G66`, Klartext `CALL LBL`, `CALL PGM`, Sinumerik `CALL`, Okuma `CALL`). Address arithmetic refuses a block of such a code that writes a chosen address with a number, because the called program may read it as a position; Expand Drilling Cycles refuses such a block while a cycle is in force, and the time estimate leaves it out. A cycle code is never read as a call |
@@ -548,6 +610,47 @@ Typing on there. The
 example above turns the join guard off for lathe 2 and leaves upper case on. A profile with
 `forceUppercase` on also makes **Convert Case…** ask before it writes lower case
 ([Convert Case…](transformations.md#convert-case)).
+
+## Colours, tab width and rulers in a profile
+
+Three things the profile can set for the editor, each only for the documents read with that
+profile:
+
+```json
+"editing": { "tabWidth": 4, "rulers": [72, 80] },
+"colors": {
+  "dark":  { "gcode": "#7fb2ff", "comment": "#8a9a8a" },
+  "light": { "gcode": "#1b4fa0" }
+}
+```
+
+**Tab width and rulers.** `editing.tabWidth` is a number from 1 to 16, and `editing.rulers` is a list
+of at most 8 columns from 1 to 1000. When the profile has one, it **wins over the same
+setting in Settings ▸ Editor** for a document of that profile; when it does not, the setting
+applies. `"rulers": []` is a choice too: no ruler for that profile. The rulers follow the pane: in a
+split editor each pane draws the rulers of the profile of the document it shows, and the
+setting's again when it shows a document whose profile has none. The tab width belongs to the
+document. No built-in profile sets either, so nothing changes until you do. The
+[aligned compare view](README.md#the-aligned-view) is not a document of a profile and uses the **rulers of the
+settings**.
+
+**Colours.** `colors` gives a colour per kind of word (the names are the ones the form lists:
+`blockNumber`, `skip`, `gcode`, `mcode`, `axis`, `arcCenter`, `feed`, `spindle`, `tool`, `variable`, `keyword`,
+`comment`, `section`, `programMarker`, `number`, `string`, `operator` and `invalid`; the same kinds as the
+[code colours](README.md#settings) of the settings), written `#rrggbb`, for the dark and the light theme separately.
+There are three layers, and the later one wins: the colours that come with gEdit, then
+**your own code colours** in Settings ▸ Appearance, then the colours of the profile. A kind of
+word that the profile leaves out keeps the colour of the layer below. Every colour has to be
+readable: its contrast against the editor background of its theme must be at least **4.5 to 1**.
+A profile with a colour below that is **not used** and the place is reported like any other
+problem of a file (`colors.dark.comment`), so a profile cannot make the code unreadable. The
+form's **Colours** section has the same colour rows as Settings, with the contrast beside each,
+and shows the result in its preview.
+
+**The print uses the same colours.** [Print and Export as HTML](editing.md#print-and-export-as-html) colour a program with
+the light colours, so the print takes your own light code colours and then the profile's light
+colours, in that order. Black on white is kept for a kind of word whose colour would be too pale on
+paper (below 3 to 1 against white), and *Black only* in the print dialog still prints no colour.
 
 ## Sharing and backing up
 

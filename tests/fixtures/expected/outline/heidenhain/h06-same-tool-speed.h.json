@@ -1,0 +1,14 @@
+{
+  "profile": "heidenhain-klartext",
+  "items": [
+    {"kind":"program","line":1,"text":"BEGIN PGM H06_SAME_TOOL MM","endLine":18},
+    {"kind":"comment","line":2,"text":"WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE"},
+    {"kind":"section","line":3,"text":"THE TOOL IN THE SPINDLE CALLED AGAIN, ONLY FOR A NEW SPEED","endLine":3},
+    {"kind":"tool","line":4,"text":"T4 — THE TOOL IN THE SPINDLE CALLED AGAIN, ONLY FOR A NEW SPEED","tool":"4","endLine":7},
+    {"kind":"tool","line":8,"text":"DRILL_8","tool":"\"DRILL_8\"","endLine":11},
+    {"kind":"tool","line":12,"text":"T12.1","tool":"12.1","endLine":12},
+    {"kind":"tool","line":13,"text":"T12","tool":"12","endLine":18},
+      {"kind":"end","line":16,"text":"M30"},
+      {"kind":"end","line":17,"text":"END PGM"}
+  ]
+}

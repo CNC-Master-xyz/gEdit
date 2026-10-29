@@ -137,6 +137,28 @@ export interface MachineParams {
   motion?: MachineMotion;
   /** Phase 4 (P4b prelude; plan §6.4, AD-46): top spindle speeds and axis travel; as `motion`. */
   limits?: MachineLimits;
+  /**
+   * P4h (plan §6.10 rule 13; T123). The machine builder's axis names of more than one letter,
+   * at most 16, each with its kind. Unlike `motion` it changes how a program is read, so it is
+   * part of `EffectiveMachine.params` and of `effectiveKey` — **present only when the machine
+   * sets at least one**, so the key of every other machine stays as it was. `applyMachine`
+   * writes the names into `syntax.extraAxisNames` and `addresses.axes` (a rotary one also into
+   * `addresses.angular`). Only from the machine: no profile default, no detection.
+   */
+  extraAxes?: ExtraAxis[];
+  /**
+   * P4h (§6.10 rule 14; T123). The machine builder's own codes, in the plain list form of the wait
+   * codes (`"G810-G829"`, `channels/codes.ts` `parseWaitCodes`). Hover and the inspector name such
+   * a code as the builder's; every script and both modal interpreters keep reading it as a code
+   * gEdit does not know. Present only when set (as `extraAxes`).
+   */
+  builderCodes?: string;
+}
+
+/** P4h (§6.10 rule 13). One extra axis: `AA`, `QQ` (2–8 letters, upper case) and whether it moves in degrees. */
+export interface ExtraAxis {
+  name: string;
+  kind: 'linear' | 'rotary';
 }
 
 /**
@@ -181,10 +203,11 @@ export interface EffectiveMachine {
   name: string | null;
   /**
    * Why this machine: `document` = chosen for this document or remembered for its file
-   * (`id` null = an explicit "none"); `default` = the profile's default machine; `none` =
-   * nothing chosen and no default.
+   * (`id` null = an explicit "none"); `folder` = no choice of its own, and the document's file
+   * lies in a folder of a machine (P4f, `MachineConfig.folders`); `default` = the profile's
+   * default machine; `none` = nothing chosen and no default.
    */
-  choice: 'document' | 'default' | 'none';
+  choice: 'document' | 'folder' | 'default' | 'none';
   params: MachineParams;
   source: {
     numberInput: ParamSource;
@@ -222,6 +245,22 @@ export interface MachineConfig {
   params: Partial<MachineParams>;
   /** ≤ 500 characters. */
   notes?: string;
+  /**
+   * Phase 4 (P4f prelude; plan section 6.8, D53): the folders whose programs this machine runs,
+   * for example the DNC folder of the machine. A document opened from a file in one of them
+   * (and with no choice of its own) uses this machine. Additive: `MACHINES_VERSION` stays 1; an
+   * older build keeps the member as an unknown one. A broken list costs the list, never the
+   * record (`foldersOf`, `core/machines/folderRules.ts`).
+   */
+  folders?: MachineFolder[];
+}
+
+/** One folder of `MachineConfig.folders`. */
+export interface MachineFolder {
+  /** An absolute folder path as the user wrote or picked it (1–1,024 characters). */
+  path: string;
+  /** Also the folders below it. Default true. */
+  subfolders?: boolean;
 }
 
 /** `<config>/machines.json` (AD-31, D50). Rust owns the file; this is its shape. */
