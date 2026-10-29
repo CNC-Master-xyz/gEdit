@@ -172,8 +172,9 @@ export interface BootstrapDeps {
   /** `machines.load(configLoad)` (P6, §7.15): the same round trip, no second read. */
   loadMachines: () => Promise<unknown>;
   /**
-   * `loadUserKeys()` (P4g, P4.34): `keybindings.json` into the command registry, after the
-   * machines and before the contributions register. Never throws; the defaults stay on a failure.
+   * `loadUserKeys()` (P4g, P4.34): `keybindings.json` into the command registry, before the
+   * contributions register, started together with the user files (WY-CODE-4). Never throws;
+   * the defaults stay on a failure.
    */
   loadUserKeys: () => Promise<unknown>;
   /** `channels.start()` (P12, §7.17): right after the machines; never throws. */
@@ -230,26 +231,35 @@ async function loadPersisted(
   } catch (err) {
     console.error('the saved UI state could not be loaded', err);
   }
-  try {
-    await deps.loadUserConfig();
-  } catch (err) {
-    // The service reports a broken file itself and is contracted not to throw; a rejection
-    // here means the folders could not be listed, and the built-ins are what is in use.
-    console.error('the user profiles and code files could not be loaded', err);
-  }
-  try {
-    await deps.loadMachines();
-  } catch (err) {
-    // The machine service reports a broken file itself; a rejection here means the
-    // round trip failed, and a document then runs on its profile's defaults.
-    console.error('the machine configurations could not be loaded', err);
-  }
-  try {
-    await deps.loadUserKeys();
-  } catch (err) {
-    // Contracted not to throw; the default keys are what is in force if it does.
-    console.error('the user key bindings could not be loaded; using the default keys', err);
-  }
+  // The user files and the key bindings are independent of each other (the keys need the
+  // registry and the language only), so their round trips go out together (WY-CODE-4).
+  await Promise.all([
+    (async () => {
+      try {
+        await deps.loadUserConfig();
+      } catch (err) {
+        // The service reports a broken file itself and is contracted not to throw; a rejection
+        // here means the folders could not be listed, and the built-ins are what is in use.
+        console.error('the user profiles and code files could not be loaded', err);
+      }
+      // After the user files: a machine whose base is a user profile is valid at the first open.
+      try {
+        await deps.loadMachines();
+      } catch (err) {
+        // The machine service reports a broken file itself; a rejection here means the
+        // round trip failed, and a document then runs on its profile's defaults.
+        console.error('the machine configurations could not be loaded', err);
+      }
+    })(),
+    (async () => {
+      try {
+        await deps.loadUserKeys();
+      } catch (err) {
+        // Contracted not to throw; the default keys are what is in force if it does.
+        console.error('the user key bindings could not be loaded; using the default keys', err);
+      }
+    })(),
+  ]);
 }
 
 export function createStartApp(deps: BootstrapDeps): () => Promise<Disposable> {
