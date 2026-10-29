@@ -190,6 +190,9 @@ scenario('p4f-folder-stop', { timeout: 420 }, async (h) => {
   })
 })
 
+/** The runaway expression of p4f-folder-regex: a-ok.nc line 2 (xxy) is its one hit. */
+const SLOW = 'x*x*x*x*y$'
+
 scenario('p4f-folder-regex', { timeout: 240 }, async (h) => {
   const ctx = context(h)
   await ready(h)
@@ -197,21 +200,23 @@ scenario('p4f-folder-regex', { timeout: 240 }, async (h) => {
   await writeAll(h, root, {
     'a-ok.nc': '(x)\nxxy\nM30\n',
     'b-quick.nc': 'G0\nM30\n',
-    // V8 (Windows, WebView2) runs away on the first of these lines. WebKit (macOS, Linux) does not: it ends a match
-    // after about 100 million steps (about half a second here) and answers "no match", so one line is never slow
-    // enough for the guard's 2 s budget. Sixteen lines are: the pattern runs away on each engine, and the guard
-    // stops it on each.
-    'z-slow.nc': `G0\n${`${'x'.repeat(40)}!\n`.repeat(16)}M30\n`,
+    // A pattern that really takes long on every engine. A nested repeat such as (x+x+)+y is not safe for this: harness run 2
+    // finished the same search in under a second on the runner's WebKit, which gives up on it (or ends it) at once and
+    // answers "no match", so the guard never saw it run. A run of plain repeats is polynomial work that no engine shortcuts:
+    // x*x*x*x*y$ on 150 x's and a "!" takes about 0.4 s in JavaScriptCore and about 2 s in V8 (measured with jsc and node), and
+    // the file holds 40 such lines, so the guard's 2 s budget runs out on each engine. The "y" in the line keeps a
+    // required-letter shortcut away too; the "!" after the x's makes every start fail.
+    'z-slow.nc': `G0\n${`${'x'.repeat(150)}!y!\n`.repeat(40)}M30\n`,
   })
   const ipcCount = (/** @type {string} */ cmd) => h.rec.ipc.calls[cmd] ?? 0
 
   await guard(h, 'A. a pattern that runs away is stopped on the file it ran away on', async () => {
     const started = Date.now()
-    const r = await findInFolder(h, root, { names: '*.nc', query: '(x+x+)+y', regex: true })
+    const r = await findInFolder(h, root, { names: '*.nc', query: SLOW, regex: true })
     const seconds = (Date.now() - started) / 1000
     h.check('the hit before the slow file stays (a-ok.nc line 2); nothing from z-slow.nc', sameJson(hitsOf(r), ['a-ok.nc:2']), hitsOf(r))
     h.check('the report names the file the expression took too long on, and says nothing else was skipped', r.message === ctx.t('findInFolder.stoppedSlow', { file: 'z-slow.nc' }), r.message)
-    h.check('and counts "at least"', r.title === ctx.t('findInFolder.titleAtLeast', { count: 1, query: '(x+x+)+y', folder: 'rx' }), r.title)
+    h.check('and counts "at least"', r.title === ctx.t('findInFolder.titleAtLeast', { count: 1, query: SLOW, folder: 'rx' }), r.title)
     h.check('the stop came from the guard (a budget of seconds), not from a hung page', seconds < 90, seconds)
   })
 
