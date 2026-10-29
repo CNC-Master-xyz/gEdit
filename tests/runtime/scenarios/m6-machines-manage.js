@@ -37,6 +37,7 @@ import {
   machinesFile,
   machineText,
   openMachinesPage,
+  MACHINES_SCHEMA,
   ready,
   sameJson,
 } from './m6-common.js'
@@ -89,8 +90,9 @@ const record = (/** @type {string} */ id, /** @type {string} */ name, /** @type 
   params: { numberInput, units: 'mm', diameter: 'on', variants: { ...LATHE_VARIANTS }, ...rest },
 })
 
-/** The whole file, as Rust hands it back. */
+/** The whole file, as Rust hands it back. A file gEdit made starts with the `$schema` line (Wave Y, owner answer Q4h-2). */
 const file = (/** @type {ReturnType<typeof record>[]} */ machines, /** @type {Record<string, string>} */ defaults = {}) => ({
+  $schema: MACHINES_SCHEMA,
   $version: 1,
   machines,
   defaults,
@@ -169,7 +171,9 @@ scenario('m6-machines-manage-1', { timeout: 420, vars: { HOME: HOME_1 } }, async
   })
   // P4.8 (Wave X) ended the machine form with the page "Motion and limits" (`machine-motion-step`, fields
   // `units`, `rapid.*`, `travel.*`, ...); `p4-machines` drives it. The fields counted here are the machine's own.
-  const formFields = h.qa('form-field').filter((e) => !e.closest('[data-testid="machine-motion-step"]')).map((e) => e.dataset.field)
+  // P4h (T084/P4.43a, Wave Y): the choice of the number rules is followed by the table "Numbers" (`machine-number-row`,
+  // fields `length.mode`, `length.increment`, ...); `p4-machines-numbers` drives it.
+  const formFields = h.qa('form-field').filter((e) => !e.closest('[data-testid="machine-motion-step"]') && !e.closest('[data-testid="machine-number-row"]')).map((e) => e.dataset.field)
   // M12 (an intentional change, plan "Intentional behavior changes in M12"): a lathe machine's
   // form ends with the Channels step, whose layout choice is a field of the same form engine.
   // The step is the only addition; `m12-channels-config` drives it.

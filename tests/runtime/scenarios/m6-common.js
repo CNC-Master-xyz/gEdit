@@ -215,12 +215,19 @@ export const machinesFile = (/** @type {Harness} */ h) => h.config.read('machine
 // ---------------------------------------------------------------- the machines file
 
 /**
+ * The `$schema` line every machines file written by gEdit starts with (Wave Y, P4h, owner answer Q4h-2; CHANGELOG, Unreleased:
+ * "new files written by gEdit start with a `$schema` line"). A golden spells it out, so a file that lost it is seen.
+ */
+export const MACHINES_SCHEMA = 'https://raw.githubusercontent.com/CNC-Master-xyz/gEdit/main/schemas/machines.schema.json'
+
+/**
  * The record shape `machines.json` holds, spelled out once so a golden is written the
  * way Rust writes it: `$version` first, then every key sorted (`serde_json` without
  * `preserve_order`), `machines` in file order and `defaults` keyed by profile id.
  * @param {{ machines?: unknown[], defaults?: Record<string, string> }} o
  */
 export const machinesJson = ({ machines = [], defaults = {} } = {}) => ({
+  $schema: MACHINES_SCHEMA,
   $version: 1,
   defaults,
   machines,

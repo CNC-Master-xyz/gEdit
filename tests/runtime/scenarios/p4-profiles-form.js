@@ -42,6 +42,7 @@ import {
   guard,
   openProfilesPage,
   previewColour,
+  previewSpanInfo,
   previewLines,
   profileAction,
   profileFileText,
@@ -99,7 +100,7 @@ scenario('p4-profiles-form', { timeout: 480, files: REPO_FILE }, async (h) => {
     // The live preview.
     await h.waitFor(() => previewLines(h).some((line) => /^N10 /.test(line)), { timeout: 15000 })
     h.check('the preview shows a sample program with the profile’s block numbers (N10)', previewLines(h).some((line) => /^N10 /.test(line)), previewLines(h).slice(0, 4))
-    typeInForm(h, 'syntax.blockNumber.prefix', 'L')
+    await typeInForm(h, 'syntax.blockNumber.prefix', 'L')
     await h.waitFor(() => previewLines(h).some((line) => /^L10 /.test(line)), { timeout: 8000 })
     h.check('a field changed in the form changes the preview (block number letter L)', previewLines(h).some((line) => /^L10 /.test(line)) && !previewLines(h).some((line) => /^N10 /.test(line)), previewLines(h).slice(0, 4))
     h.check('and the draft is marked as changed, Save is on', formDirty(h) && formSave(h)?.disabled === false)
@@ -112,7 +113,7 @@ scenario('p4-profiles-form', { timeout: 480, files: REPO_FILE }, async (h) => {
     const before = previewColour(h, 'F250.')
     await typeColour(h, cell, '#ffaa00')
     await h.waitFor(() => previewColour(h, 'F250.') === rgbOf('#ffaa00'), { timeout: 10000 })
-    h.check('a colour set for the profile is drawn in the preview at once', previewColour(h, 'F250.') === rgbOf('#ffaa00') && before !== rgbOf('#ffaa00'), { before, now: previewColour(h, 'F250.') })
+    h.check('a colour set for the profile is drawn in the preview at once', previewColour(h, 'F250.') === rgbOf('#ffaa00') && before !== rgbOf('#ffaa00'), { before, now: previewColour(h, 'F250.'), span: previewSpanInfo(h, 'F250.'), file: formDirty(h) })
     h.check('the cell says the colour is this profile’s', cell?.dataset.layer === 'profile' && formDirty(h), cell?.dataset.layer)
     await typeColour(h, cell, '#222222')
     h.check('a colour too faint to read on the dark background is refused with its ratio', cellProblem(cell) === ctx.t('appearance.codeColors.tooFaint', { theme: 'dark', ratio: cell?.dataset.ratio ?? '', min: '4.5' }), cellProblem(cell))
@@ -121,19 +122,19 @@ scenario('p4-profiles-form', { timeout: 480, files: REPO_FILE }, async (h) => {
     h.check('typed again, the colour is accepted and Save is on', cellProblem(cell) === '' && formSave(h)?.disabled === false, cellProblem(cell))
 
     // A profile built on another needs its own name and short name.
-    typeInForm(h, 'name', '')
+    await typeInForm(h, 'name', '')
     h.check('a profile built on another cannot be saved without its own name: the problem sits at the field and Save is off', formProblem(h, 'name') === ctx.t('profileForm.problem.ownField') && formSave(h)?.disabled === true, formProblem(h, 'name'))
-    typeInForm(h, 'name', 'Shop mill 2')
-    typeInForm(h, 'shortName', '')
+    await typeInForm(h, 'name', 'Shop mill 2')
+    await typeInForm(h, 'shortName', '')
     h.check('nor without its own short name', formProblem(h, 'shortName') === ctx.t('profileForm.problem.ownField') && formSave(h)?.disabled === true, formProblem(h, 'shortName'))
-    typeInForm(h, 'shortName', 'SHOP 2')
+    await typeInForm(h, 'shortName', 'SHOP 2')
     h.check('with both names written the problem is gone and Save is on', formProblem(h, 'name') === '' && formProblem(h, 'shortName') === '' && formSave(h)?.disabled === false)
 
     // Numbers, and the ruler at the longest block.
-    typeInForm(h, 'numbering.step', '5')
-    typeInForm(h, 'editing.tabWidth', '3')
+    await typeInForm(h, 'numbering.step', '5')
+    await typeInForm(h, 'editing.tabWidth', '3')
     h.check('before a longest block is written there is no one-click ruler', formRulerButton(h) === null)
-    typeInForm(h, 'syntax.maxLineLength', '80')
+    await typeInForm(h, 'syntax.maxLineLength', '80')
     const ruler = await h.waitFor(() => formRulerButton(h), { timeout: 5000 })
     h.check('with a longest block of 80 the rulers field offers "Ruler at the longest block (80)"', !!ruler && ruler.dataset.column === '80' && (ruler.textContent ?? '').trim() === ctx.t('profileForm.rulerAtLongest', { count: 80 }), ruler?.textContent)
     h.click(ruler)
@@ -219,14 +220,14 @@ scenario('p4-profiles-form-page', { timeout: 420, files: REPO_FILE }, async (h) 
     h.check('it is the form of shop-mill.json with nothing changed', formRoot(h)?.dataset.profile === 'shop-mill' && formRoot(h)?.dataset.readonly === 'false' && !formDirty(h) && formSave(h)?.disabled === true)
     h.check('the preview editor is there and has drawn the sample', !!h.q('profile-preview') && (await h.waitFor(() => previewLines(h).some((line) => /^N10 /.test(line)), { timeout: 15000 })) === true, previewLines(h).slice(0, 3))
 
-    typeInForm(h, 'numbering.step', '7')
+    await typeInForm(h, 'numbering.step', '7')
     h.check('a changed field marks the form changed and turns Save on', formDirty(h) && formSave(h)?.disabled === false)
     h.click(formUseParent(h, 'numbering.step'))
     await h.frame()
     h.check('"Use the parent’s value" gives the parent’s value back; the form is clean again', formField(h, 'numbering.step')?.dataset.inherited === 'true' && !formDirty(h), formValue(h, 'numbering.step'))
 
-    typeInForm(h, 'editing.tabWidth', '2')
-    typeInForm(h, 'name', 'Shop mill B')
+    await typeInForm(h, 'editing.tabWidth', '2')
+    await typeInForm(h, 'name', 'Shop mill B')
     h.check('two fields changed', formDirty(h) && formSave(h)?.disabled === false)
     h.click(formSave(h))
     await h.waitFor(() => !formRoot(h), { timeout: 20000 })

@@ -219,7 +219,10 @@ scenario('p4g-keys', { timeout: 420, files: seed({ 'keybindings.json': json(STAR
   h.check('the file lost the keys of this system and kept the members of the other one', JSON.stringify(afterAll['bookmark.toggle']) === JSON.stringify({ other: 'Mod+S' }) && JSON.stringify(afterAll['bookmark.next']) === JSON.stringify({ other: 'Mod+D' }) && !(inspector in afterAll), afterAll)
   h.check('and the entries that were not this system’s are still there', afterAll['nav.goto'] === 'G' && JSON.stringify(afterAll['misc.gone']) === JSON.stringify({ other: 'Mod+Alt+9' }), afterAll)
   h.check('the page follows: no row is the user’s on this system any more', h.qa('keyboard-row').every((e) => e.dataset.source === 'default' || e.dataset.command === 'misc.gone'), h.qa('keyboard-row').filter((e) => e.dataset.source === 'user').map((e) => e.dataset.command))
-  h.check('and no conflict is listed', h.qa('keyboard-conflict').length === 0, h.qa('keyboard-conflict').map((e) => textOf(e)))
+  // Reset all keeps the members of the other system (checked above), so Toggle Bookmark still has Mod+S there and Save loses it there: that
+  // conflict is the other system's and stays listed. This system (the Mac) has none left.
+  const left = h.qa('keyboard-conflict')
+  h.check('and no conflict is listed for this system: the one left is the other system’s, whose entries Reset all kept', left.every((e) => e.dataset.platform === 'other') && left.length === 1 && textOf(left[0]).includes(ctx.t('keyboardPage.platformOther')), left.map((e) => `${e.dataset.platform}: ${textOf(e)}`))
   await closeSettings(h, again)
 
   // ============================================================ E. Cmd+S saves again
