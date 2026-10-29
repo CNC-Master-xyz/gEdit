@@ -340,6 +340,16 @@
     return structuredClone(now);
   }
 
+  /**
+   * The keys "Reset category" puts back: the page's rows, plus the code colours on the
+   * Appearance page (they are edited there but are not a row, `dialog: false`).
+   */
+  export function resetKeysOf(category: string, metas: readonly SettingFieldMeta[]): (keyof Settings)[] {
+    const keys: (keyof Settings)[] = metas.map((meta) => meta.key);
+    if (category === 'appearance' && !keys.includes('appearance.roleColors')) keys.push('appearance.roleColors');
+    return keys;
+  }
+
   /** The keys of `metas` put back to their defaults, as a patch for the pending values. */
   export function defaultValues(metas: readonly SettingFieldMeta[]): Record<string, unknown> {
     const values: Record<string, unknown> = {};
@@ -789,7 +799,7 @@
     if (!confirmed) return;
     busy = true;
     try {
-      await settings.reset(page.metas.map((meta) => meta.key));
+      await settings.reset(resetKeysOf(page.category, page.metas));
     } catch (err) {
       status.show(t('settings.resetFailed'), { error: true, detail: detailOf(err) });
       return;
@@ -798,6 +808,7 @@
     }
     // The written values are the defaults, so the form can follow without re-reading.
     current = { ...current, ...defaultValues(page.metas) };
+    if (page.category === 'appearance') colors = structuredClone(DEFAULTS['appearance.roleColors']);
     status.show(t('settings.resetDone', { category: label }));
   }
 

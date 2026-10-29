@@ -26,6 +26,7 @@ import SettingsDialog, {
   LIST_KEYS,
   changedValues,
   defaultValues,
+  resetKeysOf,
   isListKey,
   pagesOf,
   rebasePalette,
@@ -398,6 +399,21 @@ describe('rebaseValues (the live settings move while the dialog is open)', () =>
     // The instance needs a DOM to run; the real flow (import inside Settings, then Save) is a runtime scenario.
     const source = readFileSync(fileURLToPath(new URL('./SettingsDialog.svelte', import.meta.url)), 'utf8');
     expect(source).toMatch(/settings\.values\.subscribe\(\(after\)[\s\S]{0,200}rebaseValues\(current, synced, after\)/);
+  });
+});
+
+describe('Reset category on the Appearance page (WY-CODE-5)', () => {
+  it('also resets the code colours, which are not a row', () => {
+    const metas = pagesOf().find((p) => p.category === 'appearance')!.metas;
+    expect(metas.some((m) => m.key === 'appearance.roleColors')).toBe(false);
+    expect(resetKeysOf('appearance', metas)).toContain('appearance.roleColors');
+    expect(resetKeysOf('scripts', SETTING_FIELDS.filter((m) => m.category === 'scripts'))).not.toContain('appearance.roleColors');
+  });
+
+  it('is wired: the keys come from the helper and the pending colours are cleared', () => {
+    const source = readFileSync(fileURLToPath(new URL('./SettingsDialog.svelte', import.meta.url)), 'utf8');
+    expect(source).toMatch(/settings\.reset\(resetKeysOf\(page\.category, page\.metas\)\)/);
+    expect(source).toMatch(/page\.category === 'appearance'\) colors = structuredClone\(DEFAULTS\['appearance\.roleColors'\]\)/);
   });
 });
 

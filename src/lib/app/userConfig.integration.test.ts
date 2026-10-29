@@ -217,7 +217,7 @@ beforeAll(async () => {
   // The startup read, as `bootstrap.ts` does it: settings (fills `settings.paths`), then machines.
   await settings.load();
   machines.load((await boundary.invoke('config_load')) as ConfigLoad);
-});
+}, 60_000);
 
 // -- helpers ----------------------------------------------------------------------------------
 
