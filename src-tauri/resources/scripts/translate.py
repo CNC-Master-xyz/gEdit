@@ -83,7 +83,9 @@ Settled defaults (the owner's answers of 2026-10-12, plan §9; the same as `_nc_
   `syntax.extraAxisNames`: `AA`) is no X, Y or Z, so its words are left as written; the run
   does not refuse for them. One information row per such axis, at its first word, names it and
   how many of its words were left (`extra-axis`), so a user whose `AA` runs along X sees that it
-  did not move. A rotary extra axis is left as silently as `C` is.
+  did not move. A rotary extra axis is read like `A`, `B` and `C` (round Y review WY-NC-2):
+  its words are left without a row, and while it stands away from 0 the moves under it are
+  refused (`rotary-turned`), since gEdit cannot know what it turns.
 
 What moves and what stays
 -------------------------

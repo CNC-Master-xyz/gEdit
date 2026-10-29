@@ -95,6 +95,37 @@ def run_selection(
     return out.json()
 
 
+#: Round Y review (WY-NC-2): a Sinumerik milling program on the machine of the golden
+#: ``translate/extra-axis-sinumerik-mill`` (``AA`` linear, ``QQ`` rotary); ``{}`` is the rotary
+#: word of line 2 (``QQ90``, ``QQ0`` or ``C90``).
+EXTRA_AXES_PROGRAM = ["N10 G17 G90 G71 G54", "N50 G0 X0 Y0 Z50 {}", "N60 G1 X10 Y5 Z-2 F200", "N70 M30"]
+
+
+def run_extra_axes(
+    script: str, params: Dict[str, Any], rotary: str, selection: Optional[Tuple[int, int]] = None,
+) -> Dict[str, Any]:
+    """One run of ``script`` on :data:`EXTRA_AXES_PROGRAM` with ``rotary`` on line 2, on the
+    machine with the extra axes ``AA`` and ``QQ``: the whole program, or the lines
+    ``selection`` (1-based, both ends) with the lines above and below it."""
+    context = helpers.effective_context(golden=helpers.SCRIPT_FIXTURES_DIR / "translate/extra-axis-sinumerik-mill/case.json")
+    context["params"] = dict(params)
+    lines = [line.format(rotary) for line in EXTRA_AXES_PROGRAM]
+    if selection is None:
+        context["input"] = {"scope": "document", "startLine": 1, "endLine": len(lines)}
+        text = "\n".join(lines)
+    else:
+        start, end = selection
+        context["input"] = {
+            "scope": "selection", "startLine": start, "endLine": end,
+            "precedingLines": lines[: start - 1], "followingLines": lines[end:],
+        }
+        text = "\n".join(lines[start - 1 : end])
+    out = helpers.run_script(script, stdin=text, context=context)
+    if not out.ok:
+        raise AssertionError(out.stderr)
+    return out.json()
+
+
 def errors_of(result: Dict[str, Any]) -> List[Tuple[int, str]]:
     return [(f["line"], f["reason"]) for f in result.get("findings", []) if f.get("severity") == "error"]
 
@@ -670,6 +701,23 @@ class WalkCountTest(unittest.TestCase):
         self.assertEqual(len(trackers.made), 2)
         self.assertEqual([f["reason"] for f in result["findings"]], ["arc-check"])
         self.assertEqual(result["text"], case.input_text())
+
+
+class RotaryExtraAxisTest(unittest.TestCase):
+    """Round Y review WY-NC-2 (owner decision 2026-10-29): a rotary extra axis of the machine
+    (``QQ``) standing away from 0 turns the lines below it as ``C`` does. Rotate refused the
+    ``QQ90`` block itself but rotated a selection below it; now that selection is refused too."""
+
+    def test_a_selection_below_a_turned_rotary_extra_axis_is_refused(self) -> None:
+        for rotary in ("QQ90", "C90"):
+            result = run_extra_axes(SCRIPT, {"angle": 90}, rotary, selection=(3, 3))
+            self.assertEqual(errors_of(result), [(3, "rotary-word")], rotary)
+            self.assertEqual(result["text"], "N60 G1 X10 Y5 Z-2 F200")
+
+    def test_at_zero_the_selection_still_turns(self) -> None:
+        result = run_extra_axes(SCRIPT, {"angle": 90}, "QQ0", selection=(3, 3))
+        self.assertFalse(refused(result), result["findings"])
+        self.assertEqual(result["text"], "N60 G1 X-5 Y10 Z-2 F200")
 
 
 if __name__ == "__main__":

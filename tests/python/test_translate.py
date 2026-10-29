@@ -26,6 +26,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from tests.python import helpers
+from tests.python.test_rotate import run_extra_axes
 
 try:
     import tomllib  # noqa: F401
@@ -1186,7 +1187,8 @@ class ContourNamedOutsideTest(unittest.TestCase):
 class ExtraAxisRowTest(unittest.TestCase):
     """P4h fix round, Q-5 (plan section 6.10 rule 13): Translate leaves the words of a machine's
     linear extra axis as written, and says so in one information row per axis (no refusal), so a
-    user whose AA runs along X sees that it did not move. A rotary extra axis gets no row."""
+    user whose AA runs along X sees that it did not move. A rotary extra axis gets no row (and,
+    standing away from 0, refuses the run as C does: :class:`RotaryExtraAxisTest`)."""
 
     HEAD = ["; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE", "N10 G17 G90 G71 G54", "N20 T1 D1", "N30 M6"]
 
@@ -1225,7 +1227,9 @@ class ExtraAxisRowTest(unittest.TestCase):
         self.assertIn("so it left AA1, AA2, AA3, AA4, AA5 and 3 more words as written", rows[0][2])
 
     def test_a_rotary_extra_axis_and_a_program_without_one_get_no_row(self) -> None:
-        self.assertEqual(self.rows(self.run_on(["N40 G0 X0 Y0 Z50 QQ90", "N50 M30"], {"dx": 1})), [])
+        rotary = self.run_on(["N40 G0 X0 Y0 Z50 QQ0", "N50 M30"], {"dx": 1})
+        self.assertFalse(refused(rotary), rotary["findings"])
+        self.assertEqual(self.rows(rotary), [])
         result = self.run_on(["N40 G0 X0 Y0 Z50", "N50 M30"], {"dx": 1})
         self.assertEqual(self.rows(result), [])
         self.assertNotIn("extra axis", result["message"])
@@ -1239,6 +1243,31 @@ class ExtraAxisRowTest(unittest.TestCase):
         lines = self.HEAD + ["N40 G0 X0 Y0 Z50 AA=7", "N50 M30"]
         result = run_inline("\n".join(lines), "sinumerik-mill", {"dx": 1})
         self.assertEqual(self.rows(result), [])
+
+
+class RotaryExtraAxisTest(unittest.TestCase):
+    """Round Y review WY-NC-2 (owner decision 2026-10-29): a rotary extra axis of the machine
+    (``QQ``, listed as rotary) standing away from 0 stops Translate as A, B and C do: gEdit cannot
+    know what it turns, so the X, Y and Z words under it are no longer positions in the part.
+    Before the fix the whole run moved two words under ``QQ90``."""
+
+    D = {"dx": 5, "dy": 0, "dz": 0}
+
+    def test_the_whole_run_and_a_selection_under_qq90_are_refused(self) -> None:
+        for rotary in ("QQ90", "C90"):
+            result = run_extra_axes(SCRIPT, self.D, rotary)
+            self.assertEqual(
+                [(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"],
+                [(2, "rotary-turned"), (3, "rotary-turned")], rotary,
+            )
+            self.assertIn("N60 G1 X10 Y5 Z-2 F200", result["text"].split("\n"))
+            result = run_extra_axes(SCRIPT, self.D, rotary, selection=(3, 3))
+            self.assertEqual([(f["line"], f["reason"]) for f in result["findings"] if f["severity"] == "error"], [(3, "rotary-turned")])
+
+    def test_at_zero_the_run_still_moves(self) -> None:
+        result = run_extra_axes(SCRIPT, self.D, "QQ0")
+        self.assertFalse(refused(result), result["findings"])
+        self.assertEqual(result["text"].split("\n")[1:3], ["N50 G0 X5 Y0 Z50 QQ0", "N60 G1 X15 Y5 Z-2 F200"])
 
 
 if __name__ == "__main__":

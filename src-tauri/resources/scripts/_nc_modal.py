@@ -1772,6 +1772,9 @@ class ModalInterpreter:
             self._distance,
             self._units.get("value"),
             self._plane,
+            # Round Y review (WY-NC-3): a plane code with no `sets.plane` (Okuma G17/G18/G119,
+            # group `plane` only) is read here, so a jump that skips it is seen.
+            (self._groups.get("plane") or {}).get("code"),
             tuple(f["code"] for f in self._frames) if self._frames else (),
             self._tcp["code"] if self._tcp is not None else None,
             diameter,
@@ -2459,7 +2462,9 @@ class RotaryState:
 
     The answer is per linear axis (:meth:`turning`): a rotary axis turns the linear axes of
     ISO 841 (:data:`_TURNS`), so a C-axis lathe can still shift ``Z``; on a **lathe** the
-    spindle axis ``C`` does not turn ``X`` either, which is a radius about it.
+    spindle axis ``C`` does not turn ``X`` either, which is a radius about it. A rotary axis
+    ISO 841 does not name (a machine's extra axis listed as rotary, such as ``QQ``) turns
+    every linear axis: what it turns is not known, so it is read as turning all of them.
 
     A rotary axis the program has not written yet is **unwritten**: where it stands is not
     known, but a program that never writes it (a three-axis program on a profile that lists
@@ -2477,7 +2482,10 @@ class RotaryState:
         addresses = (profile or {}).get("addresses") or {}
         axes = {str(a).upper() for a in addresses.get("axes") or [] if isinstance(a, str)}
         angular = {str(a).upper() for a in addresses.get("angular") or [] if isinstance(a, str)}
-        self.rotary = frozenset(a for a in axes & angular if a in _TURNS)
+        # Round Y review (WY-NC-2): every rotary axis of the profile, also an extra axis the
+        # machine lists as rotary (a Sinumerik `QQ`); :meth:`turning` reads one that ISO 841
+        # does not name as turning every linear axis, since gEdit cannot know what it turns.
+        self.rotary = frozenset(axes & angular)
         self.twins = {
             twin: axis for twin, axis in incremental_axes(profile).items() if axis in self.rotary
         }
@@ -2501,7 +2509,9 @@ class RotaryState:
         if found is None:
             axis = _PARALLEL.get(linear, linear)
             found = frozenset(
-                r for r in self.rotary if axis in _TURNS[r] and not (self.lathe and r == "C" and axis == "X")
+                r
+                for r in self.rotary
+                if axis in _TURNS.get(r, ("X", "Y", "Z")) and not (self.lathe and r == "C" and axis == "X")
             )
             self._turning[linear] = found
         return found
