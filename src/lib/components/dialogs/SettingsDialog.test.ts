@@ -404,7 +404,7 @@ describe('rebaseValues (the live settings move while the dialog is open)', () =>
 
 describe('Reset category on the Appearance page (WY-CODE-5)', () => {
   it('also resets the code colours, which are not a row', () => {
-    const metas = SETTING_FIELDS.filter((m) => m.category === 'appearance');
+    const metas = pagesOf().find((p) => p.category === 'appearance')!.metas;
     expect(metas.some((m) => m.key === 'appearance.roleColors')).toBe(false);
     expect(resetKeysOf('appearance', metas)).toContain('appearance.roleColors');
     expect(resetKeysOf('scripts', SETTING_FIELDS.filter((m) => m.category === 'scripts'))).not.toContain('appearance.roleColors');
