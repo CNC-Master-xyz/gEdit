@@ -51,6 +51,7 @@ export default {
     inactive_other: '{count} cannot be used yet: their dialect is not loaded or does not accept them (see the list).',
     skipped_one: '{count} was not valid and was left out.',
     skipped_other: '{count} were not valid and were left out.',
+    foldersNotTaken: 'Machine folders belong to one computer and were not imported.',
     full: 'A machines file holds at most {max} machines.',
     unreadable: 'That file is not a machines file',
     notJson: 'That file is not valid JSON',

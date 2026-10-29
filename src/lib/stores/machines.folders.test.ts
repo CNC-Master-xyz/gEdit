@@ -226,6 +226,26 @@ describe('editing the folders of a machine', () => {
     expect(eff(h, 'd1')).toMatchObject({ id: 'lathe-b', choice: 'folder' });
   });
 
+  it('an imported record keeps no folders; the original still decides its programs', async () => {
+    const h = harness([LATHE('/dnc/b/part.nc')]);
+    // The file of a restored copy or of another computer: the same folders as Lathe B.
+    const summary = await h.machines.importMachines({
+      $version: 1,
+      machines: [
+        { id: 'lathe-b-copy', name: 'Lathe B copy', profile: 'fanuc-lathe', params: {}, folders: [{ path: '/dnc/b' }, { path: 'D:\\DNC\\B' }] },
+        { id: 'lathe-d', name: 'Lathe D', profile: 'fanuc-lathe', params: {} },
+      ],
+      defaults: {},
+    });
+    expect(summary.imported).toBe(2);
+    const written = h.saved.at(-1)?.machines as { id: string; folders?: unknown }[];
+    expect(written.find((m) => m.id === 'lathe-b-copy')).toBeDefined();
+    expect('folders' in written.find((m) => m.id === 'lathe-b-copy')!).toBe(false);
+    expect(written.find((m) => m.id === 'lathe-b')?.folders).toEqual([{ path: '/dnc/b' }, { path: '/dnc/shared' }]);
+    expect(eff(h, 'd1')).toMatchObject({ id: 'lathe-b', choice: 'folder' });
+    expect(h.notes.at(-1)).toContain('Machine folders belong to one computer');
+  });
+
   it('removing a machine takes its folders with it', async () => {
     const h = harness([LATHE('/dnc/b/part.nc')]);
     await h.machines.remove('lathe-b');
