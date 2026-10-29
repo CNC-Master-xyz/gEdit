@@ -228,7 +228,10 @@ scenario('m12-channels-single', { timeout: 240, files: REPO_FILE }, async (h) =>
   h.check('the first is the header and channel 1\'s two sections, in document order', got1 === want1, { got: got1.split('\n').length, want: want1.split('\n').length })
   h.check('the second is the header and channel 2\'s two sections', got2 === want2, { got: got2.split('\n').length, want: want2.split('\n').length })
   h.check('the shared subprogram is in neither', !got1.includes('O9001 (SHARED') && !got2.includes('O9001 (SHARED'))
-  h.check('the first of them is on screen, and they are named after the program and the channel', activeId(h) === split[0].id && /Channel 1/.test(split[0].title) && /Channel 2/.test(split[1].title), split.map((d) => d.title))
+  // Named as Save Channel Files proposes them (P4f, owner decision: docs/user/channels.md): the program
+  // name, an underscore, the channel's id and the extension (`PART_1.MPF`), not the channel's free-text name.
+  const wantNames = ['c10-alternating_1.nc', 'c10-alternating_2.nc']
+  h.check('the first of them is on screen, and they are named after the program and the channel (PART_1.MPF form)', activeId(h) === split[0].id && split[0].title === wantNames[0] && split[1].title === wantNames[1], split.map((d) => d.title))
   h.check('a message says how many were made', /2 documents/.test(message(h)), message(h))
   h.check('and nothing was written: the folder holds the same files', JSON.stringify(await listDir(h, dir)) === JSON.stringify(before), { before, after: await listDir(h, dir) })
   for (const d of split) {
