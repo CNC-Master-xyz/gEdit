@@ -436,7 +436,7 @@ the list described above, unchanged.
 Lists what a program does that the control or the machine will not like, before the
 program goes to the machine. It changes nothing: the result is a table in the **Results**
 panel, one row per finding, in line order, with the line, the check, a severity and the
-finding. Click a row to jump to the line.
+finding. Click a row to jump to the line. Check Program reads the program from top to bottom and does not follow jumps (`GOTO`, `IF`), unlike Check Wait Codes; a problem that only happens when a jump skips a line is not found.
 
 It is **a reading of the text, not a simulation**. It does not know where the tool is, what
 the stock looks like or whether the tool fits the hole; it finds what a program says about
