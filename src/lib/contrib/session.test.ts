@@ -41,6 +41,8 @@ vi.mock('$lib/app/recovery', () => ({
 }));
 
 vi.mock('$lib/app/session', () => ({
+  claimSessionRestore: (): void => void fake.log.push('session claimed'),
+  markSessionRestored: (): void => void fake.log.push('session restored'),
   session: {
     start: () => {
       fake.log.push('session.start');
@@ -76,7 +78,8 @@ describe('the startup order', () => {
   it('starts the per-file memory synchronously, before anything is opened', () => {
     contribution.activate();
     // Not awaited: the tracker's `onDidOpen` handler has to exist before the restore.
-    expect(fake.log).toEqual(['tracker.start']);
+    // The claim too (WY-CODE-1): files from the system wait on it from here on.
+    expect(fake.log).toEqual(['tracker.start', 'session claimed']);
   });
 
   it('reopens nothing until the restore dialog has been answered', async () => {
@@ -84,14 +87,16 @@ describe('the startup order', () => {
     await settle();
     // The dialog is still on screen. Reopening the crashed file from disk here is what
     // would leave the recovered document unbound.
-    expect(fake.log).toEqual(['tracker.start']);
+    expect(fake.log).toEqual(['tracker.start', 'session claimed']);
 
     fake.decide?.();
     await settle();
     expect(fake.log).toEqual([
       'tracker.start',
+      'session claimed',
       'restore dialog answered',
       'session.restore',
+      'session restored',
       'session.start',
     ]);
   });
@@ -100,7 +105,13 @@ describe('the startup order', () => {
     fake.claimed = false;
     contribution.activate();
     await settle();
-    expect(fake.log).toEqual(['tracker.start', 'session.restore', 'session.start']);
+    expect(fake.log).toEqual([
+      'tracker.start',
+      'session claimed',
+      'session.restore',
+      'session restored',
+      'session.start',
+    ]);
   });
 
   it('still follows the documents when the restore itself fails', async () => {
@@ -111,6 +122,8 @@ describe('the startup order', () => {
     fake.decide?.();
     await settle();
     expect(fake.log).toContain('session.start');
+    // A failed restore still ends the wait of the files handed over by the system.
+    expect(fake.log).toContain('session restored');
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
@@ -126,5 +139,7 @@ describe('the startup order', () => {
     expect(fake.log).not.toContain('session.restore');
     expect(fake.log).not.toContain('session.start');
     expect(fake.log).toContain('tracker.stop');
+    // Disposed: nothing is coming, so nobody may wait for the restore.
+    expect(fake.log).toContain('session restored');
   });
 });

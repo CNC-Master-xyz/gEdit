@@ -13,6 +13,7 @@ import { keybindingRemovals } from '$lib/app/registry/keybindings';
 import { panels } from '$lib/app/registry/panels';
 import { ribbon } from '$lib/app/registry/ribbon';
 import { statusItems } from '$lib/app/registry/statusItems';
+import { contributionsLoaded, markContributionsLoaded } from '$lib/app/contributionsLoaded';
 import type { Contribution, Disposable } from '$lib/app/types';
 
 function dispose(disposers: Disposable[]): void {
@@ -45,19 +46,25 @@ async function register(c: Contribution): Promise<Disposable[] | undefined> {
   }
 }
 
+export { contributionsLoaded };
+
 /**
  * Registers `list` in order. The returned disposer undoes every registration in reverse
  * order and is safe to call twice.
  */
 export async function registerContributions(list: Contribution[]): Promise<Disposable> {
   const disposers: Disposable[] = [];
-  for (const c of list) {
-    if (!c || typeof c.id !== 'string' || !c.id) {
-      console.error('contribution: the default export has no id', c);
-      continue;
+  try {
+    for (const c of list) {
+      if (!c || typeof c.id !== 'string' || !c.id) {
+        console.error('contribution: the default export has no id', c);
+        continue;
+      }
+      const local = await register(c);
+      if (local) disposers.push(...local);
     }
-    const local = await register(c);
-    if (local) disposers.push(...local);
+  } finally {
+    markContributionsLoaded();
   }
   let disposed = false;
   return () => {
