@@ -197,7 +197,11 @@ scenario('p4f-folder-regex', { timeout: 240 }, async (h) => {
   await writeAll(h, root, {
     'a-ok.nc': '(x)\nxxy\nM30\n',
     'b-quick.nc': 'G0\nM30\n',
-    'z-slow.nc': `G0\n${'x'.repeat(40)}!\nM30\n`,
+    // V8 (Windows, WebView2) runs away on the first of these lines. WebKit (macOS, Linux) does not: it ends a match
+    // after about 100 million steps (about half a second here) and answers "no match", so one line is never slow
+    // enough for the guard's 2 s budget. Sixteen lines are: the pattern runs away on each engine, and the guard
+    // stops it on each.
+    'z-slow.nc': `G0\n${`${'x'.repeat(40)}!\n`.repeat(16)}M30\n`,
   })
   const ipcCount = (/** @type {string} */ cmd) => h.rec.ipc.calls[cmd] ?? 0
 
