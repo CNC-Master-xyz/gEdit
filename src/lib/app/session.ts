@@ -633,6 +633,47 @@ export const session: SessionService = createSessionService({
   debounceMs: SESSION_DEBOUNCE_MS,
 });
 
+// ---------------------------------------------------------------------------
+// When the restore is over
+// ---------------------------------------------------------------------------
+
+let sessionRestoredResolve: () => void = () => {};
+
+/** Settles when `contrib/session.ts` has finished (or skipped) the session restore. */
+const sessionRestored: Promise<void> = new Promise<void>((resolve) => {
+  sessionRestoredResolve = resolve;
+});
+
+/** Whether `contrib/session.ts` started and so will say when its restore is over. */
+let sessionRestoreClaimed = false;
+
+/**
+ * Says that the session restore will run and be marked as over, so `awaitSessionRestore()`
+ * has somebody to wait for. Called synchronously from `contrib/session.ts`'s `activate()`
+ * (the pattern of `claimRestoreDecision`: no claim, nobody to ask, go ahead).
+ */
+export function claimSessionRestore(): void {
+  sessionRestoreClaimed = true;
+}
+
+/**
+ * Settles `sessionRestored`. Called from a `finally` in `contrib/session.ts` once
+ * `session.restore()` has returned (the tab in front is up; the rest follows behind it),
+ * also when the restore is off or failed, so nothing waits for a restore that is not coming.
+ */
+export function markSessionRestored(): void {
+  sessionRestoredResolve();
+}
+
+/**
+ * What files handed over by the system wait on, so the file the user double-clicked ends up
+ * in front of the old session's tabs. Resolves at once when `contrib/session.ts` never
+ * started.
+ */
+export function awaitSessionRestore(): Promise<void> {
+  return sessionRestoreClaimed ? sessionRestored : Promise.resolve();
+}
+
 /**
  * The editor half of the per-file memory: the cursor and the viewport of the document on screen,
  * and putting them back. Every line is a document line and the focused group answers (the

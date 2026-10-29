@@ -35,6 +35,7 @@ from tests.python.test_rotate import (
     run_long,
     run_owner_public,
     run_selection,
+    run_extra_axes,
     run_text,
 )
 
@@ -684,6 +685,43 @@ class SkepticGeometryTest(unittest.TestCase):
         result = run_selection(SCRIPT, "fanuc-lathe", self.Z, self.FINISH, 5, 17)
         self.assertEqual(errors_of(result), [])
         self.assertIn("G71 P10 Q20 U0.4 W-0.1 F0.25", result["text"].split("\n"))
+
+
+class RoundYReviewTest(unittest.TestCase):
+    """Round Y review. WY-NC-2 (owner decision 2026-10-29): a rotary extra axis of the machine
+    (``QQ``) standing away from 0 stops Mirror on the lines below it as ``C`` does. WY-NC-3: an
+    Okuma plane code (``G17``/``G18``, group ``plane`` without ``sets.plane``) that a jump skips
+    is seen by the meeting check, so the arc the jump reaches under ``G17`` is not mirrored as
+    if it ran under ``G18``."""
+
+    Z = {"about": "z", "z0": 0}
+
+    @staticmethod
+    def okuma(jump: str) -> str:
+        return "\n".join([
+            "O1000 (WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE)", "G17 G90", "G0 X50. Z2.",
+            jump, "G18 G90", "NLAB1 G2 X40. Z-5. L5. F0.2", "G1 Z-20.", "M02",
+        ])
+
+    def test_nc2_a_selection_below_a_turned_rotary_extra_axis_is_refused(self) -> None:
+        for rotary in ("QQ90", "C90"):
+            result = run_extra_axes(SCRIPT, {"about": "x-axis"}, rotary, selection=(3, 3))
+            self.assertEqual(errors_of(result), [(3, "rotary-word")], rotary)
+
+    def test_nc2_at_zero_the_selection_is_still_mirrored(self) -> None:
+        result = run_extra_axes(SCRIPT, {"about": "x-axis"}, "QQ0", selection=(3, 3))
+        self.assertFalse(refused(result), result["findings"])
+        self.assertEqual(result["text"], "N60 G1 X10 Y-5 Z-2 F200")
+
+    def test_nc3_a_jump_over_an_okuma_plane_change_is_refused(self) -> None:
+        for jump in ("IF [V1 EQ 1] NLAB1", "GOTO NLAB1", "IF [V1 EQ 1] GOTO NLAB1"):
+            result = run_text(SCRIPT, "okuma-osp", self.Z, self.okuma(jump), preset="okuma-1mm")
+            self.assertEqual(errors_of(result), [(6, "jump")], jump)
+
+    def test_nc3_without_the_jump_the_arc_is_mirrored(self) -> None:
+        result = run_text(SCRIPT, "okuma-osp", self.Z, self.okuma("(NO JUMP)"), preset="okuma-1mm")
+        self.assertFalse(refused(result), result["findings"])
+        self.assertIn("NLAB1 G3 X40. Z5. L5. F0.2", result["text"].split("\n"))
 
 
 if __name__ == "__main__":

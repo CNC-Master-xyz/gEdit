@@ -777,7 +777,8 @@ The scripts that move a program treat an extra axis like the axes they do not mo
 mill's `U`, `V` or `W`): **Translate, Rotate and Mirror leave its words as written.** Translate
 says so in an information row that names the words it left, so that a user whose `AA` runs along
 `X` sees that it did not move and changes it by hand. A rotary extra axis is left without a row,
-as `C` is. A script that cannot tell what a word is still refuses; nothing here makes it guess.
+as `C` is, and while it stands away from 0 it stops Translate, Rotate, Mirror and Address
+Arithmetic as `A`, `B` and `C` do: gEdit cannot know what it turns. A script that cannot tell what a word is still refuses; nothing here makes it guess.
 
 **Machine builder codes.** The control reserves two groups of G codes for the machine builder,
 `G810` to `G819` and `G820` to `G829`, and `OEMIPO1` and `OEMIPO2` for the same purpose among the

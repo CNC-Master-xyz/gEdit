@@ -87,6 +87,8 @@ profiles and code files needs no tick.
 - Machines are merged by machine: a machine in the file replaces yours of the same id,
   new ones are added, your other machines stay. A file from a newer version of the machine
   format is refused.
+  The folders of a machine are not taken from the file: a machine of yours that is replaced
+  keeps the folders it has on this computer, and a machine that is added starts without any.
 - Every other file (a profile, a code file, a script, a package file) replaces your file of the
   same name.
 - **Import never deletes a file**, so a zip with three profiles does not remove the others
