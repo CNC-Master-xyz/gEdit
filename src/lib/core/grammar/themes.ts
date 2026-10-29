@@ -79,6 +79,16 @@ export function layeredRoleColor(
   return { value: ROLE_COLORS[mode][role], layer: 'builtin' };
 }
 
+/**
+ * The language id as Monarch writes it into a token's class: `feed` of language `a_b` is `feed.a-b`. Monarch replaces `_`, `&`,
+ * `<`, `>`, `'` and `"` by `-` in everything it emits (`sanitize` in monarchCommon); a theme rule written with the id as it
+ * stands does not find such a token. Profile ids are `[a-z0-9-]` and pass unchanged; the live preview of the profile form is the
+ * language `_profile-preview` and needs it.
+ */
+export function tokenScope(languageId: string): string {
+  return languageId.replace(/[&<>'"_]/g, '-');
+}
+
 /** One theme: the role rules (the user's colours in their place), then whatever a profile overrides for itself. */
 function themeFor(mode: 'light' | 'dark', profiles: readonly Profile[], user: unknown): GeneratedTheme {
   const rules: ThemeRule[] = [];
@@ -91,7 +101,7 @@ function themeFor(mode: 'light' | 'dark', profiles: readonly Profile[], user: un
     const overrides = profileOverrides(profile, mode);
     for (const role of ROLES) {
       const foreground = overrides[role];
-      if (foreground !== undefined) rules.push({ token: `${role}.${profile.id}`, foreground, ...styleOf(role) });
+      if (foreground !== undefined) rules.push({ token: `${role}.${tokenScope(profile.id)}`, foreground, ...styleOf(role) });
     }
   }
   return {

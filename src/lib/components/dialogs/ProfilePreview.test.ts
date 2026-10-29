@@ -92,8 +92,8 @@ describe('createPreviewController', () => {
     controller.update(withColors);
     const ids = raw.editor.defineTheme.mock.calls.map((c) => c[0]);
     expect(ids).toEqual(['gedit-dark', 'gedit-light']);
-    expect(themeRules(raw, 0)).toContain('feed._profile-preview');
-    expect(themeRules(raw, 1)).toContain('feed._profile-preview');
+    expect(themeRules(raw, 0)).toContain('feed.-profile-preview');
+    expect(themeRules(raw, 1)).toContain('feed.-profile-preview');
     // The role rules of the built-in palette stay, and nothing is written for a profile without colours.
     expect(themeRules(raw, 0)).toContain('feed');
     expect(themeRules(raw, 0).filter((token) => token.endsWith('.fanuc-gcode'))).toEqual([]);
@@ -136,7 +136,7 @@ describe('createPreviewController', () => {
     expect(editor.dispose).toHaveBeenCalledTimes(1);
     expect(model.dispose).toHaveBeenCalledTimes(1);
     expect(raw.editor.defineTheme).toHaveBeenCalledTimes(2);
-    expect(themeRules(raw, 0).some((token) => token.includes('_profile-preview'))).toBe(false);
+    expect(themeRules(raw, 0).some((token) => token.includes('-profile-preview'))).toBe(false);
     expect(states).toEqual([true, false]);
     // Nothing after the end: an update that arrives late is ignored, and a second dispose does nothing.
     controller.update(withColors);

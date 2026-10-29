@@ -3,7 +3,7 @@
   editor with a sample program for the draft's grammar and machine type, coloured by the draft.
 
   The draft is registered as the language `_profile-preview` (which no profile id can be) with its
-  grammar, and its own colours are theme rules `<role>._profile-preview`; no real profile's
+  grammar, and its own colours are theme rules `<role>.-profile-preview` (Monarch writes the `_` of the id as `-`, `tokenScope`); no real profile's
   documents are touched. The preview is brought up to date at most every 300 ms while the user
   types, and a draft that does not validate keeps the last good preview with the problem above it.
   The editor is made with the options every editor shares and without a `theme` option (F118): the
@@ -103,7 +103,7 @@
           PREVIEW_LANGUAGE_ID,
           generateGrammar(draft, sources.codeDb(profile)) as Parameters<typeof monaco.languages.setMonarchTokensProvider>[1],
         );
-        // The draft's own colours are the rules `<role>._profile-preview` of the two themes.
+        // The draft's own colours are the rules `<role>.-profile-preview` of the two themes (see `tokenScope`).
         const others = sources.profiles();
         const user = sources.userColors();
         const signature = JSON.stringify([user, (draft as { colors?: unknown }).colors ?? null, others.map((p) => [p.id, (p as { colors?: unknown }).colors ?? null])]);
