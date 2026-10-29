@@ -2775,8 +2775,12 @@ mod tests {
     #[test]
     fn a_job_that_is_refused_by_its_root_frees_the_slot() {
         let registry = SearchRegistry::default();
-        let refused = supervise(&registry, "s-1", &Limits::default(), |_| {
-            resolve_root("/nowhere-at-all", &|_| false).map(|_| FolderSummary::default())
+        // An absolute path on this system (`/x` is not absolute on Windows), so the scope check
+        // is what refuses it.
+        let nowhere = std::env::temp_dir().join("nowhere-at-all");
+        let nowhere = nowhere.to_str().unwrap().to_owned();
+        let refused = supervise(&registry, "s-1", &Limits::default(), move |_| {
+            resolve_root(&nowhere, &|_| false).map(|_| FolderSummary::default())
         });
         assert_eq!(refused.unwrap_err(), E_NOT_ALLOWED);
         assert!(registry.lock().running.is_none());

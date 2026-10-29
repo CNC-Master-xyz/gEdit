@@ -3043,8 +3043,10 @@ mod tests {
         assert!(read_archive_file("relative.zip", allow).is_err());
         assert!(read_archive_file("/a/../etc/x.zip", allow).is_err());
         assert!(read_archive_file("/a/b\0.zip", allow).is_err());
+        // Absolute on this system too (`/tmp/x` is not absolute on Windows).
+        let absolute = std::env::temp_dir().join("not-allowed.zip");
         assert_eq!(
-            read_archive_file("/tmp/not-allowed.zip", |_: &Path| false),
+            read_archive_file(absolute.to_str().unwrap(), |_: &Path| false),
             Err("path is not allowed".to_string())
         );
     }
@@ -3107,11 +3109,12 @@ mod tests {
             let Ok(read) = fs::read_dir(dir) else { return };
             for entry in read.filter_map(Result::ok) {
                 let path = entry.path();
+                // Keys are written with `/` on every system (`\` is the Windows separator).
                 let rel = path
                     .strip_prefix(base)
                     .unwrap()
                     .to_string_lossy()
-                    .into_owned();
+                    .replace('\\', "/");
                 let meta = fs::symlink_metadata(&path).unwrap();
                 if meta.file_type().is_symlink() {
                     let target = fs::read_link(&path).unwrap();
