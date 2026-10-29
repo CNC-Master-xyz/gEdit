@@ -1,5 +1,5 @@
 {
-  "message": "Added 0.5 to Z in 1 word on 1 block. Left 2 blocks as written: 2 cycles started above the selection. No machine chosen: words whose reading depends on the machine are left alone.",
+  "message": "Added 0.5 to Z in 1 word on 1 block. Left 2 blocks as written: 2 cycles partly outside the selection. No machine chosen: words whose reading depends on the machine are left alone.",
   "findings": [
     {
       "line": 7,

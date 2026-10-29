@@ -364,7 +364,7 @@ REASON_TEXT = {
     "machine-position": ("machine position", "machine positions"),
     "frame": ("inside a frame", None),
     "rotary-without-tcp": ("rotary move without tool centre point control", "rotary moves without tool centre point control"),
-    "cycle-outside": ("cycle started above the selection", "cycles started above the selection"),
+    "cycle-outside": ("cycle partly outside the selection", "cycles partly outside the selection"),
     "cycle-not-reviewed": ("cycle not reviewed", "cycles not reviewed"),
     "cycle-position": ("cycle call with positions of its own", "cycle calls with positions of their own"),
     "cycle-mode": ("cycle in another mode", "cycles in another mode"),
@@ -376,6 +376,8 @@ REASON_TEXT = {
     "pole": ("block around a pole that cannot be moved", "blocks around a pole that cannot be moved"),
     "arc-geometry": ("arc whose centre or intermediate point cannot be moved", "arcs whose centre or intermediate point cannot be moved"),
     "not-scaled": ("block a multiply or divide does not scale", "blocks a multiply or divide does not scale"),
+    # v1.2.0 Wave Y (WY-NC-1): a block that is no cycle and goes on below the selection.
+    "selection": ("block partly outside the selection", "blocks partly outside the selection"),
     "unreadable": ("word that cannot be read", "words that cannot be read"),
     "data": ("data word", "data words"),
     "incremental": ("incremental word", "incremental words"),
@@ -1294,6 +1296,31 @@ class Run:
         if pending:
             self.finish(pending)
         self.end_state = state
+
+    def refuse_end(self, last_number: int) -> None:
+        """v1.2.0 Wave Y (WY-NC-1): the other edge of the start rule (`collect_findings`). A
+        selection that ends inside a block that goes on below it (a Klartext `~` at the end of
+        its last line, an Okuma `$` line below it) holds only part of that block: the words
+        below are not seen, so judging the block from its selected lines would shift it in
+        part (cycle 233 moving its `Q227` start level but not its `Q386` end level). The block
+        holding the selection's last line is left as written and said so, before `settle`, so
+        a cycle it belongs to is left whole. Without the lines below (``input.followingLines``)
+        only a trailing marker can tell."""
+        goes_on = bool(self.end_state is not None and self.end_state.continuation)
+        if not goes_on and self.following:
+            goes_on = gedit_nc.continues_block(self.following[0], self.cp)
+        if not goes_on:
+            return
+        for block in reversed(self.blocks):
+            if block.lines[-1].number != last_number:
+                continue
+            if block.inside and block.refusal is None:
+                block.refusal = (
+                    "cycle-outside" if block.group is not None else "selection",
+                    "the block goes on below the selection (line %d), so it is left as written" % (last_number + 1),
+                )
+                block.clear()
+            return
 
     def walk_below(self, following: Optional[Sequence[str]], first_number: int) -> None:
         """v1.2.0 Wave Y (D5, FZ-5): the lines below a selection, read for the rotary axes only:
@@ -3321,7 +3348,7 @@ SHORT = {
     "machine-position": "a machine position",
     "frame": "inside a frame",
     "rotary-without-tcp": "a rotary move without tool centre point control",
-    "cycle-outside": "above the selection",
+    "cycle-outside": "partly outside the selection",
     "cycle-not-reviewed": "not reviewed",
     "cycle-position": "positions of its own",
     "cycle-mode": "another mode",
@@ -3454,7 +3481,7 @@ def summary(run: Run, findings: Findings) -> str:
         if left_words:
             what.append(count_text(left_words, "word"))
         parts = []
-        for reason in BLOCK_REASONS:
+        for reason in BLOCK_REASONS + ("selection",):
             if block_counts.get(reason):
                 singular, plural = REASON_TEXT[reason]
                 parts.append("%s %s" % ("{:,}".format(block_counts[reason]), singular if block_counts[reason] == 1 or plural is None else plural))
@@ -3613,6 +3640,7 @@ def main() -> int:
     run.following = following_lines(context)
     run.walk(list(preceding) + lines, base_line - len(preceding), len(preceding))
     if run.is_selection:
+        run.refuse_end(base_line + len(lines) - 1)
         end = scope.get("endLine")
         below = end + 1 if isinstance(end, int) and not isinstance(end, bool) and end >= base_line else base_line + len(lines)
         run.walk_below(run.following, below)
