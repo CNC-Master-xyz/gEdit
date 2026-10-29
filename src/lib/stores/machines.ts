@@ -220,12 +220,13 @@ function nameOf(raw: unknown): string | null {
 }
 
 /** The one status message of an import, in plain words. */
-function summaryText(summary: MachineImportSummary): string {
+function summaryText(summary: MachineImportSummary, foldersDropped = 0): string {
   if (summary.imported === 0 && summary.skipped.length === 0) return t('machines.transfer.none');
   const parts = [t('machines.transfer.done', { count: summary.imported })];
   if (summary.renamed > 0) parts.push(t('machines.transfer.renamed', { count: summary.renamed }));
   if (summary.inactive > 0) parts.push(t('machines.transfer.inactive', { count: summary.inactive }));
   if (summary.skipped.length > 0) parts.push(t('machines.transfer.skipped', { count: summary.skipped.length }));
+  if (foldersDropped > 0) parts.push(t('machines.transfer.foldersNotTaken'));
   return parts.join(' ');
 }
 
@@ -871,6 +872,8 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
         })),
       };
       const added: MachineConfig[] = [];
+      /** Records that came with folders; the folders are this computer's and are not taken. */
+      let foldersDropped = 0;
       /** The id each imported record got, by the id it had in the file. */
       const idMap = new Map<string, string>();
       let room = MAX_MACHINES - file.machines.length - file.invalid.length;
@@ -882,7 +885,11 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
         }
         const id = takenIds.has(source.id) ? freeId(source.name, takenIds) : source.id;
         const name = freeName(source.name, takenNames);
-        const machine: MachineConfig = { ...source, id, name, params: structuredClone(source.params) };
+        // A machine's folders are places on the computer that wrote the file; two machines
+        // claiming one folder is the conflict the Machines page shows, so none are taken.
+        const { folders: sourceFolders, ...rest } = source;
+        if (sourceFolders !== undefined) foldersDropped += 1;
+        const machine: MachineConfig = { ...rest, id, name, params: structuredClone(source.params) };
         // Checked like a hand edit: a record the base profile does not accept (yet) is kept
         // and listed with its problem, so importing before the profile exists loses nothing.
         const known = deps.profiles.get(machine.profile) !== undefined;
@@ -904,7 +911,7 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
       }
 
       if (added.length === 0) {
-        deps.notify(summaryText(summary));
+        deps.notify(summaryText(summary, foldersDropped));
         return summary;
       }
 
@@ -918,7 +925,7 @@ export function createMachineService(deps: MachineServiceDeps): MachineService {
       }
 
       await persist(withMachines([...file.machines, ...added], defaults));
-      deps.notify(summaryText(summary));
+      deps.notify(summaryText(summary, foldersDropped));
       return summary;
     },
 

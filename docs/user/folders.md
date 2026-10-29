@@ -7,7 +7,7 @@ Two things in gEdit start from a folder or from outside the window:
   file manager, and what happens when gEdit is already running.
 
 A machine can also own a folder, so that every program saved there uses that machine. That is
-in [Machines](machines.md#folders-of-a-machine).
+in [Machines](machines.md#folders-of-a-machine). The folders of a machine belong to this computer: importing a configuration or a machines file never takes them from the file.
 
 ## Find in Folder
 
