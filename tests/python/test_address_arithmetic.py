@@ -1957,6 +1957,8 @@ class TestEveryReasonHasItsWords(unittest.TestCase):
         self.assertEqual(set(module.WORD_REASONS), WORD_REASONS)
         self.assertEqual([r for r in list(module.BLOCK_REASONS) + list(module.WORD_REASONS) if not module.REASON_TEXT.get(r, (None,))[0]], [])
         self.assertEqual([r for r in module.BLOCK_REASONS if not module.SHORT.get(r)], [])
+        # WY-NC-1: a block that is no cycle and goes on below the selection is counted too.
+        self.assertTrue(module.REASON_TEXT.get("selection", (None,))[0])
 
 
 class TestD4CycleStartLevel(unittest.TestCase):
@@ -2365,3 +2367,148 @@ class TestReviewRoundCodeValueOnAnAxisAddress(unittest.TestCase):
         payload = self.okuma("G33 X40. Z-20. F1.5 C90.", addresses=["Z"], operand=-1)
         self.assertEqual(lines_of(payload)[2], "G33 X40. Z-21. F1.5 C90.")
         self.assertEqual(payload["findings"], [])
+
+
+class TestWyNc1SelectionEndsInsideABlock(unittest.TestCase):
+    """v1.2.0 Wave Y review, WY-NC-1: the other edge of the start rule. A selection that ends
+    inside a block that goes on below it (a Klartext `~` at the end of its last line, an Okuma
+    `$` line below it) holds only part of that block. Judged from its selected lines it was
+    shifted in part: cycle 233 moved its `Q227` start level but not its `Q386` end level, and
+    the two together give the depth (TNC 620 cycles manual, 2015, p.171-172: both absolute,
+    equal means depth 0). Such a block is left as written with a warning, and a cycle it
+    belongs to is left whole; a whole run still moves every word of it."""
+
+    FACE = "\n".join([
+        "0 BEGIN PGM FACE MM",
+        "1 ; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "2 TOOL CALL 1 Z S2000",
+        "3 L X+0 Y+0 Z+100 R0 FMAX",
+        "4 CYCL DEF 233 PLANFRAESEN ~",
+        "  Q215=+0 ;BEARBEITUNGS-UMFANG ~",
+        "  Q389=+0 ;FRAESSTRATEGIE ~",
+        "  Q350=+1 ;FRAESRICHTUNG ~",
+        "  Q218=+100 ;1. SEITEN-LAENGE ~",
+        "  Q219=+50 ;2. SEITEN-LAENGE ~",
+        "  Q227=+2 ;STARTPUNKT 3. ACHSE ~",
+        "  Q386=+0 ;ENDPUNKT 3. ACHSE ~",
+        "  Q369=+0 ;AUFMASS TIEFE ~",
+        "  Q202=+1 ;MAX. ZUSTELL-TIEFE ~",
+        "  Q370=+1 ;BAHN-UEBERLAPPUNG ~",
+        "  Q207=+500 ;VORSCHUB FRAESEN ~",
+        "  Q385=+500 ;VORSCHUB SCHLICHTEN ~",
+        "  Q253=+750 ;VORSCHUB VORPOS. ~",
+        "  Q357=+2 ;SI.-ABSTAND SEITE ~",
+        "  Q200=+2 ;SICHERHEITS-ABST. ~",
+        "  Q204=+50 ;2. SICHERHEITS-ABST. ~",
+        "  Q347=+0 ;1. BEGRENZUNG ~",
+        "  Q348=+0 ;2. BEGRENZUNG ~",
+        "  Q349=+0 ;3. BEGRENZUNG ~",
+        "  Q220=+2 ;ECKENRADIUS ~",
+        "  Q368=+0 ;AUFMASS SEITE ~",
+        "  Q338=+0 ;ZUST. SCHLICHTEN ~",
+        "  Q367=+0 ;LAGE FLAECHE",
+        "5 CYCL CALL M3",
+        "6 END PGM FACE MM",
+    ])
+
+    CONTOUR = "\n".join([
+        "0 BEGIN PGM SL MM",
+        "1 ; WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM, NOT FOR A MACHINE",
+        "2 TOOL CALL 1 Z S3000",
+        "3 L Z+100 R0 FMAX",
+        "4 CYCL DEF 20 CONTOUR DATA ~",
+        "  Q1=-20 ;MILLING DEPTH ~",
+        "  Q2=1 ;TOOL PATH OVERLAP ~",
+        "  Q3=+0.2 ;ALLOWANCE FOR SIDE ~",
+        "  Q4=+0.1 ;ALLOWANCE FOR FLOOR ~",
+        "  Q5=+30 ;SURFACE COORDINATE ~",
+        "  Q6=2 ;SET-UP CLEARANCE ~",
+        "  Q7=+80 ;CLEARANCE HEIGHT ~",
+        "  Q8=0.5 ;ROUNDING RADIUS ~",
+        "  Q9=+1 ;ROTATIONAL DIRECTION",
+        "5 L X+50 Y+50 R0 FMAX",
+        "6 CYCL CALL M3",
+        "7 END PGM SL MM",
+    ])
+
+    #: An Okuma LAP call whose change point runs over two `$` lines (OSP-P200 alarm list
+    #: LG37-005-R4, 2008, p.281: a line that starts with `$` belongs to the block above it).
+    LAP = "\n".join([
+        "O1000",
+        "(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM)",
+        "G90 G00 X100. Z5.",
+        "G85 NAT01 D4. F0.3 U0.4 W0.2",
+        "$ G84 XA=60. DA=2.",
+        "$ ZA=-20. FA=0.2",
+        "NAT01 G81",
+        "G01 X40. Z0.",
+        "Z-30.",
+        "X80.",
+        "G80",
+        "G00 X200. Z100.",
+        "M02",
+    ])
+
+    def select(self, text, start, end, profile, preset=None, below=True, **params):
+        lines = text.split("\n")
+        context = helpers.effective_context(profile, preset=preset) if preset else helpers.effective_context(profile)
+        context["params"] = dict({"operation": "add", "operand": -1, "addresses": ["Z"]}, **params)
+        context["input"] = {"scope": "selection", "startLine": start, "endLine": end, "precedingLines": lines[: start - 1]}
+        if below:
+            context["input"]["followingLines"] = lines[end:]
+        result = helpers.run_script(SCRIPT, stdin="\n".join(lines[start - 1 : end]), context=context)
+        self.assertTrue(result.ok, result.stderr)
+        return result.json()
+
+    def test_cycle_233_ending_after_q227_is_left_with_a_warning(self):
+        lines = self.FACE.split("\n")
+        for below in (True, False):
+            with self.subTest(below=below):
+                payload = self.select(self.FACE, 1, 11, "heidenhain-klartext", below=below)
+                self.assertEqual(lines_of(payload)[4:11], lines[4:11])
+                finding = finding_at(payload, 5)
+                self.assertEqual((finding["severity"], finding["reason"]), ("warning", "cycle-outside"))
+                self.assertEqual(
+                    finding["message"],
+                    '4 CYCL DEF 233 PLANFRAESEN ~: the block goes on below the selection (line 12), so it is left as written.',
+                )
+                self.assertIn("1 cycle partly outside the selection", payload["message"])
+                self.assertNotIn("as written: .", payload["message"])
+
+    def test_a_whole_run_still_moves_q227_and_q386_together(self):
+        payload = run(self.FACE, profile="heidenhain-klartext", operand=-1, addresses=["Z"])
+        self.assertEqual(lines_of(payload)[10:12], ["  Q227=+1 ;STARTPUNKT 3. ACHSE ~", "  Q386=-1 ;ENDPUNKT 3. ACHSE ~"])
+        payload = self.select(self.FACE, 1, 30, "heidenhain-klartext")
+        self.assertEqual(lines_of(payload)[10:12], ["  Q227=+1 ;STARTPUNKT 3. ACHSE ~", "  Q386=-1 ;ENDPUNKT 3. ACHSE ~"])
+        self.assertNotIn("cycle-outside", reasons(payload))
+
+    def test_cycle_20_ending_at_q5_is_left(self):
+        lines = self.CONTOUR.split("\n")
+        payload = self.select(self.CONTOUR, 1, 10, "heidenhain-klartext")
+        self.assertEqual(lines_of(payload)[4:10], lines[4:10])
+        self.assertEqual(finding_at(payload, 5)["reason"], "cycle-outside")
+        self.assertIn("goes on below the selection (line 11)", finding_at(payload, 5)["message"])
+        # The whole cycle in the selection moves Q5 and Q7 together.
+        payload = self.select(self.CONTOUR, 1, 17, "heidenhain-klartext")
+        self.assertEqual(lines_of(payload)[9:12:2], ["  Q5=+29 ;SURFACE COORDINATE ~", "  Q7=+79 ;CLEARANCE HEIGHT ~"])
+
+    def test_an_okuma_block_whose_dollar_line_lies_below_is_left(self):
+        payload = self.select(self.LAP, 1, 5, "okuma-osp", preset="okuma-1mm", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[2:5], ["G90 G00 X102. Z7.", "G85 NAT01 D4. F0.3 U0.4 W0.2", "$ G84 XA=60. DA=2."])
+        finding = finding_at(payload, 4)
+        # This run reads a LAP call as a block of its own (no cycle group): the reason is the
+        # selection's, as at the start edge.
+        self.assertEqual((finding["severity"], finding["reason"]), ("warning", "selection"))
+        self.assertIn("the block goes on below the selection (line 6), so it is left as written", finding["message"])
+        # The whole block in the selection moves both coordinates of the change point.
+        payload = self.select(self.LAP, 1, 6, "okuma-osp", preset="okuma-1mm", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[4:6], ["$ G84 XA=62. DA=2.", "$ ZA=-18. FA=0.2"])
+
+    def test_a_plain_block_going_on_below_names_its_reason_in_the_summary(self):
+        text = "O1000\n(WRITTEN FOR GEDIT - SYNTHETIC TEST PROGRAM)\nG90 G00 X100.\n$ Z5.\nM02"
+        payload = self.select(text, 1, 3, "okuma-osp", preset="okuma-1mm", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[2], "G90 G00 X100.")
+        self.assertEqual(finding_at(payload, 3)["reason"], "selection")
+        self.assertIn("Left 1 block as written: 1 block partly outside the selection.", payload["message"])
+        payload = self.select(text, 1, 4, "okuma-osp", preset="okuma-1mm", operand=2, addresses=["X", "Z"])
+        self.assertEqual(lines_of(payload)[2:4], ["G90 G00 X102.", "$ Z7."])
