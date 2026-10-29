@@ -1231,9 +1231,23 @@ fn merge_keybindings(
     })
 }
 
+/// The note of the preview when a machine in the file carries `folders`.
+const MACHINE_FOLDERS_NOTE: &str =
+    "machine folders are this computer's: the ones on this computer are kept and the folders in the file are not imported";
+
+/// A machine record without its `folders`: the part of it an import may take.
+fn without_folders(machine: &Value) -> Value {
+    let mut machine = machine.clone();
+    if let Value::Object(object) = &mut machine {
+        object.remove("folders");
+    }
+    machine
+}
+
 /// `machines.json` by machine id: the zip's machine replaces the same id in place, a new id is
-/// added at the end, the user's other machines stay; `defaults` are merged key by key. `Err` is
-/// a skip reason.
+/// added at the end, the user's other machines stay; `defaults` are merged key by key. The
+/// `folders` of a machine name places on one computer: a replaced machine keeps the folders it
+/// has here, an added one gets none. `Err` is a skip reason.
 fn merge_machines(zip: &Map<String, Value>, current: &CurrentJson) -> Result<Merged, &'static str> {
     use crate::config::VERSION_KEY;
     use crate::machines::MACHINES_VERSION;
@@ -1276,29 +1290,41 @@ fn merge_machines(zip: &Map<String, Value>, current: &CurrentJson) -> Result<Mer
                 None => Vec::new(),
             };
             let mut without_id = 0usize;
+            let mut folders_in_file = false;
             for machine in theirs {
                 let Some(id) = id_of(machine) else {
                     without_id += 1;
                     continue;
                 };
+                folders_in_file |= machine.get("folders").is_some();
+                let incoming = without_folders(machine);
                 match machines
                     .iter()
                     .position(|m| id_of(m).as_deref() == Some(id.as_str()))
                 {
-                    Some(index) if machines[index] == *machine => {}
+                    Some(index) if without_folders(&machines[index]) == incoming => {}
                     Some(index) => {
                         items.push(item(
                             &id,
                             Some(&name_of(&machines[index])),
                             Some(&name_of(machine)),
                         ));
-                        machines[index] = machine.clone();
+                        let mut replaced = incoming;
+                        if let (Value::Object(object), Some(local)) =
+                            (&mut replaced, machines[index].get("folders"))
+                        {
+                            object.insert("folders".into(), local.clone());
+                        }
+                        machines[index] = replaced;
                     }
                     None => {
                         items.push(item(&id, None, Some(&name_of(machine))));
-                        machines.push(machine.clone());
+                        machines.push(incoming);
                     }
                 }
+            }
+            if folders_in_file {
+                notes.push(MACHINE_FOLDERS_NOTE.to_string());
             }
             if without_id > 0 {
                 notes.push(format!(
@@ -3736,6 +3762,77 @@ mod tests {
             after["defaults"],
             serde_json::json!({"fanuc":"m3","heidenhain":"m2"})
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn machine_folders_stay_as_on_this_computer() {
+        let (root, dirs) = scratch("machine-folders");
+        put(
+            &dirs,
+            "machines.json",
+            br#"{"$version":1,"machines":[{"id":"m1","name":"Lathe","profile":"fanuc","folders":[{"path":"/dnc/lathe"}]},{"id":"m2","name":"Mill","profile":"fanuc"},{"id":"m4","name":"Same","profile":"fanuc","folders":[{"path":"/dnc/same"}]}]}"#,
+        );
+        // m1 changes and comes with another computer's folders, m2 gains folders, m3 is new
+        // with folders, m4 differs from ours in its folders only.
+        let bytes = config_zip(&[(
+            "machines.json",
+            br#"{"$version":1,"machines":[{"id":"m1","name":"Lathe 2","profile":"fanuc","folders":[{"path":"D:\\DNC\\Lathe"}]},{"id":"m2","name":"Mill 2","profile":"fanuc","folders":[{"path":"D:\\DNC\\Mill"}]},{"id":"m3","name":"New","profile":"okuma","folders":[{"path":"D:\\DNC\\New"}]},{"id":"m4","name":"Same","profile":"fanuc","folders":[{"path":"D:\\DNC\\Other"}]}]}"#,
+        )]);
+        let p = previewed(&dirs, &bytes);
+        let file = &group(&p, "machines").files[0];
+        assert_eq!(file.action, FileAction::Replace);
+        let labels: Vec<&str> = file.items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, vec!["m1", "m2", "m3"], "m4 is the same as ours");
+        assert!(
+            file.notes
+                .iter()
+                .any(|n| n.contains("machine folders are this computer's")),
+            "the preview says the folders are not imported: {:?}",
+            file.notes
+        );
+        apply(&dirs, &bytes, &p.fingerprint, &["machines".into()], false).unwrap();
+        let after = json_of(&dirs, "machines.json");
+        let machines = after["machines"].as_array().unwrap();
+        assert_eq!(machines[0]["name"], "Lathe 2");
+        assert_eq!(
+            machines[0]["folders"],
+            serde_json::json!([{"path":"/dnc/lathe"}]),
+            "a replaced machine keeps the folders of this computer"
+        );
+        assert_eq!(machines[1]["name"], "Mill 2");
+        assert!(
+            machines[1].get("folders").is_none(),
+            "no folders here, none taken"
+        );
+        assert_eq!(
+            machines[2]["folders"],
+            serde_json::json!([{"path":"/dnc/same"}])
+        );
+        assert_eq!(machines[3]["id"], "m3", "added at the end");
+        assert!(
+            machines[3].get("folders").is_none(),
+            "an added machine gets no folders"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_machine_equal_except_for_its_folders_is_the_same() {
+        let (root, dirs) = scratch("machine-folders-same");
+        put(
+            &dirs,
+            "machines.json",
+            br#"{"$version":1,"machines":[{"id":"m1","name":"Lathe","profile":"fanuc","folders":[{"path":"/dnc/lathe"}]}],"defaults":{}}"#,
+        );
+        let bytes = config_zip(&[(
+            "machines.json",
+            br#"{"$version":1,"machines":[{"id":"m1","name":"Lathe","profile":"fanuc","folders":[{"path":"D:\\DNC"}]}],"defaults":{}}"#,
+        )]);
+        let p = previewed(&dirs, &bytes);
+        let file = &group(&p, "machines").files[0];
+        assert_eq!(file.action, FileAction::Same);
+        assert!(file.items.is_empty());
         let _ = fs::remove_dir_all(&root);
     }
 
