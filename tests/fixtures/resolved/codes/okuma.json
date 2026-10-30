@@ -1969,7 +1969,7 @@
           "address": "F",
           "label": "Drilling feed per minute",
           "min": 0,
-          "unit": "feed"
+          "unit": "feedPerMin"
         },
         {
           "address": "Q",
@@ -2023,7 +2023,7 @@
           "address": "F",
           "label": "Boring feed per minute",
           "min": 0,
-          "unit": "feed"
+          "unit": "feedPerMin"
         },
         {
           "address": "Q",
@@ -2089,7 +2089,7 @@
           "address": "F",
           "label": "Drilling feed per minute",
           "min": 0,
-          "unit": "feed"
+          "unit": "feedPerMin"
         },
         {
           "address": "Q",
@@ -2272,7 +2272,7 @@
           "address": "F",
           "label": "Reaming feed per minute",
           "min": 0,
-          "unit": "feed"
+          "unit": "feedPerMin"
         },
         {
           "address": "Q",

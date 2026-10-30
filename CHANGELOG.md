@@ -70,7 +70,8 @@ Wave Y: P4f, "Folders and channels" ([phase-4-implementation.md](docs/planning/p
 - **The extents follow `M98 P` to a program in the same file**, and forget a cycle called above a selection.
 - **Okuma plane codes are modal:** `G17`, `G18`, `G19` and `G119` stay in force like the other modal groups and the Okuma lathe starts in `G18`; arcs under `G17`/`G19` are left unresolved by the transforms.
 - **Okuma and Klartext data:** Klartext cycle 20 (contour data, `DEF`-active) and the pattern cycles 220, 221 and 233, the tool names `QS13` and `QS18` of cycles 21, 22 and 25, the `CHF` and `RND` feed moves, Okuma `G24`, `G25` and `G314`, Sinumerik `FP=` on `G75`, `CTOL=` and `OTOL=`, and a `G65`/`G66` that needs its `P` are described in the code data and read by Check Program, the extents and Address Arithmetic.
-- **Scale Feed scales only what the code data marks as a feed** (a *feed* unit on the parameter, 141 of them in the shipped data: Fanuc, Fanuc lathe, Okuma, Klartext and Sinumerik); the guess from a parameter's English label is gone. Parameters not marked (a Fanuc `R` point, a `G84` lead, `Q401`, `CYCLE83` `FRF`, `G93 F`) are left as written.
+- **Scale Feed scales only what the code data marks as a feed** (a *feed* unit on the parameter, 137 of them in the shipped data: Fanuc, Fanuc lathe, Okuma, Klartext and Sinumerik, besides the Okuma feeds that are always per minute); the guess from a parameter's English label is gone. Parameters not marked (a Fanuc `R` point, a `G84` lead, `Q401`, `CYCLE83` `FRF`, `G93 F`) are left as written.
+- **Okuma driven-tool drilling, boring, deep-hole drilling and reaming take their feed per minute:** the `F` of `G181`, `G182`, `G183` and `G189` is read as a feed per minute whatever feed mode is in force, because the control takes these feeds only under `G94` (mm/min). Scale Feed still scales it as a feed. The driven-tool tapping `G184` keeps its feed tied to the pitch.
 
 ### Changed
 

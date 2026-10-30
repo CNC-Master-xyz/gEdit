@@ -1072,7 +1072,7 @@
         { "address": "R", "label": "Infeed from the cutting start, instead of the depth" },
         { "address": "I", "label": "Rapid approach for a hole across the turning axis" },
         { "address": "K", "label": "Rapid approach for a hole in the face" },
-        { "address": "F", "label": "Drilling feed per minute", "min": 0, "unit": "feed" },
+        { "address": "F", "label": "Drilling feed per minute", "min": 0, "unit": "feedPerMin" },
         { "address": "Q", "label": "Number of holes spaced evenly around C", "min": 1, "unit": "count" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" }
       ]
@@ -1091,7 +1091,7 @@
         { "address": "R", "label": "Infeed from the cutting start, instead of the depth" },
         { "address": "I", "label": "Rapid approach for a hole across the turning axis" },
         { "address": "K", "label": "Rapid approach for a hole in the face" },
-        { "address": "F", "label": "Boring feed per minute", "min": 0, "unit": "feed" },
+        { "address": "F", "label": "Boring feed per minute", "min": 0, "unit": "feedPerMin" },
         { "address": "Q", "label": "Number of holes spaced evenly around C", "min": 1, "unit": "count" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" }
       ]
@@ -1112,7 +1112,7 @@
         { "address": "K", "label": "Rapid approach for a hole in the face" },
         { "address": "D", "label": "Peck depth", "min": 0, "unit": "length" },
         { "address": "L", "label": "Relief between the pecks", "min": 0, "unit": "length" },
-        { "address": "F", "label": "Drilling feed per minute", "min": 0, "unit": "feed" },
+        { "address": "F", "label": "Drilling feed per minute", "min": 0, "unit": "feedPerMin" },
         { "address": "Q", "label": "Number of holes spaced evenly around C", "min": 1, "unit": "count" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" }
       ]
@@ -1200,7 +1200,7 @@
         { "address": "R", "label": "Infeed from the cutting start, instead of the depth" },
         { "address": "I", "label": "Rapid approach for a hole across the turning axis" },
         { "address": "K", "label": "Rapid approach for a hole in the face" },
-        { "address": "F", "label": "Reaming feed per minute", "min": 0, "unit": "feed" },
+        { "address": "F", "label": "Reaming feed per minute", "min": 0, "unit": "feedPerMin" },
         { "address": "Q", "label": "Number of holes spaced evenly around C", "min": 1, "unit": "count" },
         { "address": "E", "label": "Dwell at the bottom", "min": 0, "unit": "dwell" }
       ]
