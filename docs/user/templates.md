@@ -91,7 +91,10 @@ template's name, with one field for every value the template needs:
   *Enter a value.*, *Enter a number.*, *Enter a whole number.*, *The smallest value is …*,
   *The largest value is …*, *At most … decimals.*, *Write it in upper case.*, *Choose one of
   the values.*, *The text cannot contain …* (a comment text with the comment's closing
-  mark in it), *Write it on one line.* and *This dialect has no comments.* A contour number
+  mark in it), *Write it on one line.* and *This dialect has no comments.* A name that is
+  too long or has a character the control does not take is refused (*At most 24 characters.*,
+  *Use only letters, digits, _ and -.* for a Klartext program name; an Okuma program name after
+  `O` is digits only, or a letter and then letters and digits, at most four). A contour number
   the program already has is refused too (*N100 is already on line 12. P and Q need a block
   number of their own.*; [Contour numbers](#contour-numbers)). Nothing is corrected for you.
   While a value is refused, **Insert** is disabled.

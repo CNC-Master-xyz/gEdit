@@ -1690,9 +1690,9 @@
           "id": "prog",
           "label": "Program name (O)",
           "type": "text",
-          "help": "At most four letters or digits after O; leave empty for none.",
+          "help": "At most four characters after O: digits only, or a letter, then letters and digits; leave empty for none.",
           "maxLength": 4,
-          "charset": "letters-digits",
+          "charset": "okuma-program",
           "default": "1001",
           "prefix": "O",
           "uppercase": true

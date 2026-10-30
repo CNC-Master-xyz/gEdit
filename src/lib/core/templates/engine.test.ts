@@ -737,6 +737,20 @@ describe('v1.2.0 T155: names checked for length and characters, never changed', 
     // An empty optional value is not checked: it drops its word.
     expect(error({ type: 'text', charset: 'name', maxLength: 2 }, '')).toBeUndefined();
   });
+
+  it('owner 2026-10-30: file-name takes letters, digits, _ and - only (a Klartext program name)', () => {
+    expect(error({ type: 'text', charset: 'file-name' }, 'Part_12-B')).toBeUndefined();
+    for (const bad of ['MY PART', 'PART.1', 'PART+1', 'TEIL\u00c4', 'A/B']) {
+      expect(error({ type: 'text', charset: 'file-name' }, bad)?.key, bad).toBe('templates.value.charsetFileName');
+    }
+  });
+
+  it('owner 2026-10-30: okuma-program takes digits only, or a letter first (a name that starts with a digit has no letter)', () => {
+    for (const ok of ['1001', '0001', 'A', 'AB12', 'ab12']) expect(error({ type: 'text', charset: 'okuma-program' }, ok), ok).toBeUndefined();
+    for (const bad of ['1A', '12AB', 'A-1', 'A 1']) {
+      expect(error({ type: 'text', charset: 'okuma-program' }, bad)?.key, bad).toBe('templates.value.charsetOkumaProgram');
+    }
+  });
 });
 
 describe('v1.2.0 T154: the unit goes beside the field, not into the program', () => {

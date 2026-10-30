@@ -1962,11 +1962,13 @@
         },
         "charset": {
           "title": "Allowed characters",
-          "description": "For a text: \"no-spaces\", \"letters-digits\" (A to Z and 0 to 9 only) or \"name\" (a letter, then letters and digits).",
+          "description": "For a text: \"no-spaces\", \"letters-digits\" (A to Z and 0 to 9 only), \"name\" (a letter, then letters and digits), \"file-name\" (letters, digits, _ and -) or \"okuma-program\" (digits only, or a letter, then letters and digits).",
           "enum": [
             "no-spaces",
             "letters-digits",
-            "name"
+            "name",
+            "file-name",
+            "okuma-program"
           ]
         },
         "unit": {

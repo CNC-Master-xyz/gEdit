@@ -133,6 +133,8 @@ export default {
     noSpaces: 'No spaces',
     lettersDigits: 'Letters and digits only',
     name: 'A letter, then letters and digits',
+    fileName: 'Letters, digits, _ and -',
+    okumaProgram: 'Digits only, or a letter, then letters and digits',
   },
   flag: {
     toolbar: 'Button on the Insert tab',

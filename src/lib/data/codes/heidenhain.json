@@ -3755,8 +3755,10 @@
           "id": "name",
           "label": "Program name",
           "type": "text",
-          "help": "The file name without .H, with no spaces; END PGM has to repeat it.",
+          "help": "The file name without .H, with no spaces: letters, digits, _ and -, at most 24; END PGM has to repeat it.",
           "required": true,
+          "maxLength": 24,
+          "charset": "file-name",
           "default": "NEW"
         },
         {
@@ -4599,8 +4601,10 @@
           "id": "name",
           "label": "Program name",
           "type": "text",
-          "help": "The same name as in BEGIN PGM.",
+          "help": "The same name as in BEGIN PGM: letters, digits, _ and -, at most 24.",
           "required": true,
+          "maxLength": 24,
+          "charset": "file-name",
           "default": "NEW"
         },
         {
