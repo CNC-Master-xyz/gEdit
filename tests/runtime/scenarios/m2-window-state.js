@@ -143,7 +143,9 @@ scenario('m2-window-state-2', { timeout: 180, vars: { HOME: HOME_2, ...KEEP } },
   // T188: the restore itself. The window is as big as the file says, and not the harness's own 1100x700.
   h.check('this window started at the size the file holds: the geometry was restored and applied', near(started.width, saved.width) && near(started.height, saved.height), { started, saved })
   h.check('and not at the harness\'s default size', !near(started.width, Math.round(1100 * started.scale)) && !near(started.height, Math.round(700 * started.scale)), { started })
-  h.check('the seeded file was read: its position is the one the window started from', saved.prev_x === SEED.x && saved.prev_y === SEED.y, { prev: [saved.prev_x, saved.prev_y], seed: [SEED.x, SEED.y] })
+  // The window opened where the seeded file put it. `prev_x`/`prev_y` are the plugin's own bookkeeping: on macOS 14 they held the
+  // restored position, on macOS 15 the position the window had before the restore moved it, so the started position is the proof.
+  h.check('the seeded file was read: its position is the one the window started from', near(started.x, SEED.x) && near(started.y, SEED.y), { started: [started.x, started.y], seed: [SEED.x, SEED.y], prev: [saved.prev_x, saved.prev_y] })
   h.check('`visible` is never restored, so a window cannot come back hidden (AD-9)', saved.visible === SEED.visible && !!(await h.disk.stat(stateFile)), saved.visible)
 
   // ------------------------------------------------------------ the settings

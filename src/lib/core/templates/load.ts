@@ -114,13 +114,15 @@ export function templatesForMachines(templates: readonly TemplateDef[] | undefin
 
 const TYPES: readonly TemplateParamType[] = ['number', 'integer', 'text', 'choice', 'formula'];
 /** T155: the charsets a text parameter may name. */
-export const TEMPLATE_CHARSETS: readonly TemplateCharset[] = ['no-spaces', 'letters-digits', 'name'];
+export const TEMPLATE_CHARSETS: readonly TemplateCharset[] = ['no-spaces', 'letters-digits', 'name', 'file-name', 'okuma-program'];
 const CHARSETS = TEMPLATE_CHARSETS;
 
 /** T155: true when `value` holds only what `charset` allows (the engine and the loader's default check share it). */
 export function charsetFits(value: string, charset: TemplateCharset): boolean {
   if (charset === 'no-spaces') return !/\s/.test(value);
   if (charset === 'letters-digits') return /^[A-Za-z0-9]*$/.test(value);
+  if (charset === 'file-name') return /^[A-Za-z0-9_-]*$/.test(value);
+  if (charset === 'okuma-program') return /^(?:[0-9]*|[A-Za-z][A-Za-z0-9]*)$/.test(value);
   return /^[A-Za-z][A-Za-z0-9]*$/.test(value);
 }
 const MACHINE_TYPES = ['mill', 'lathe'] as const;

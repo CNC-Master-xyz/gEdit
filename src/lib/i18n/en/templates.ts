@@ -82,5 +82,7 @@ export default {
     charsetNoSpaces: 'Write it without spaces.',
     charsetLettersDigits: 'Use only letters and digits.',
     charsetName: 'Start with a letter, then use only letters and digits.',
+    charsetFileName: 'Use only letters, digits, _ and -.',
+    charsetOkumaProgram: 'Use only digits, or start with a letter, then use only letters and digits.',
   },
 } as const satisfies Messages;

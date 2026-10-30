@@ -12,9 +12,12 @@ import {
   templateIdOfCommand,
   templateMemoKey,
   templatesForMachine,
+  TEMPLATE_CHARSETS,
   TEMPLATE_LIMITS,
   type TemplateProblem,
 } from './index';
+import codesSchema from '../../../../schemas/codes.schema.json';
+import { type Schema, schemasAt } from '../../../../tests/unit/helpers/jsonSchema';
 import { checkFormula, formulaRefs } from './formula';
 import { loadCodeDb, type CodeDbProblem } from '$lib/core/codes/load';
 
@@ -361,7 +364,20 @@ describe('v1.2.0 T155: the length and the characters of a text parameter (the fo
     const { templates, problems } = textParam({ maxLength: 4, charset: 'letters-digits', default: 'AB12' });
     expect(problems).toEqual([]);
     expect(templates[0].params?.[0]).toMatchObject({ maxLength: 4, charset: 'letters-digits', default: 'AB12' });
-    for (const charset of ['no-spaces', 'letters-digits', 'name']) expect(textParam({ charset }).problems).toEqual([]);
+    for (const charset of TEMPLATE_CHARSETS) expect(textParam({ charset }).problems).toEqual([]);
+  });
+
+  it('knows the same charsets as the schema (owner 2026-10-30 added file-name and okuma-program)', () => {
+    const at = schemasAt(codesSchema as unknown as Schema, ['templates', '[]', 'params', '[]', 'charset']);
+    expect(at.map((s) => s.enum)).toEqual([[...TEMPLATE_CHARSETS]]);
+    expect(TEMPLATE_CHARSETS).toEqual(expect.arrayContaining(['file-name', 'okuma-program']));
+  });
+
+  it('checks a default against the new charsets too', () => {
+    expect(textParam({ charset: 'file-name', default: 'PART_1-A' }).problems).toEqual([]);
+    expect(textParam({ charset: 'file-name', default: 'PART.1' }).problems.map((p) => p.path)).toEqual(['[0].params[0].default']);
+    expect(textParam({ charset: 'okuma-program', default: '1001' }).problems).toEqual([]);
+    expect(textParam({ charset: 'okuma-program', default: '12AB' }).problems.map((p) => p.path)).toEqual(['[0].params[0].default']);
   });
 
   it('refuses them anywhere else, out of range, an unknown charset and a default that does not fit', () => {

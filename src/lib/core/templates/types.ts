@@ -33,12 +33,14 @@ export type TemplateParamType = 'number' | 'integer' | 'text' | 'choice' | 'form
 export type TemplateDecimals = 'as-entered' | 'min1' | number;
 
 /**
- * v1.2.0 (T155): the characters a `text` parameter may hold. `'no-spaces'`: anything but a blank
- * (a Klartext program name); `'letters-digits'`: only the letters A–Z and the digits (an Okuma
- * program name); `'name'`: a letter, then letters and digits (a tape header name). The check
- * refuses, it never changes what was typed.
+ * v1.2.0 (T155): the characters a `text` parameter may hold. `'no-spaces'`: anything but a blank;
+ * `'letters-digits'`: only the letters A–Z and the digits; `'name'`: a letter, then letters and
+ * digits (a tape header name); `'file-name'`: letters, digits, `_` and `-` (a Klartext program
+ * name, TNC 640 Klartext manual 2019 p.105); `'okuma-program'`: digits only, or a letter, then
+ * letters and digits (an Okuma name after O: one that starts with a digit has no letter, OSP-P300
+ * programming manual LG33-019-R22 p.16). The check refuses, it never changes what was typed.
  */
-export type TemplateCharset = 'no-spaces' | 'letters-digits' | 'name';
+export type TemplateCharset = 'no-spaces' | 'letters-digits' | 'name' | 'file-name' | 'okuma-program';
 
 /** One option of a `choice` parameter: `label` is shown, `value` is inserted. */
 export interface TemplateChoice {

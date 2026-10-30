@@ -88,6 +88,8 @@
     ['no-spaces', 'templateManager.charset.noSpaces'],
     ['letters-digits', 'templateManager.charset.lettersDigits'],
     ['name', 'templateManager.charset.name'],
+    ['file-name', 'templateManager.charset.fileName'],
+    ['okuma-program', 'templateManager.charset.okumaProgram'],
   ] as const;
 
   const decimalChoices = [0, 1, 2, 3, 4, 5, 6];

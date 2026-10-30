@@ -76,7 +76,8 @@ describe('the feed marker (T210)', () => {
       'fanuc-lathe': 13,
       'fanuc-lathe-b': 6,
       heidenhain: 63,
-      okuma: 13,
+      // Owner 2026-10-30: G181, G182, G183 and G189 moved to feedPerMin (LG33-019-R22 p.210).
+      okuma: 9,
       sinumerik: 31,
     });
   });
@@ -92,6 +93,8 @@ describe('the feed marker (T210)', () => {
     expect(unit('fanuc', 'G81', 'F')).toBe('feed');
     expect(unit('fanuc', 'G81', 'R')).toBeUndefined();
     expect(unit('okuma', 'G101', 'F')).toBe('feedPerMin');
+    for (const code of ['G181', 'G182', 'G183', 'G189']) expect(unit('okuma', code, 'F'), code).toBe('feedPerMin');
+    expect(unit('okuma', 'G184', 'F')).toBe('feed');
     expect(unit('okuma', 'G84', 'FA')).toBe('feed');
   });
 });

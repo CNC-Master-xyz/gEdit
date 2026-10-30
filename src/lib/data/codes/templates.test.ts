@@ -437,15 +437,30 @@ describe('P3b fix NC: the content', () => {
     expect(keyOf(start, 'file', 'ABCDEFGHIJKLMNOPQ')).toBe('templates.value.tooLong');
     expect(keyOf(start, 'file', '1PART')).toBe('templates.value.charsetName');
     expect(keyOf(start, 'file', 'MY-PART')).toBe('templates.value.charsetName');
-    // The program name after O: at most four letters or digits.
+    // The program name after O: at most four characters, digits only or a letter first; a name
+    // that starts with a digit has no letter (LG33-019-R22 p.16, owner 2026-10-30).
     expect(keyOf(start, 'prog', '1001')).toBeUndefined();
     expect(keyOf(start, 'prog', 'AB12')).toBeUndefined();
     expect(keyOf(start, 'prog', '10001')).toBe('templates.value.tooLong');
-    expect(keyOf(start, 'prog', 'A-1')).toBe('templates.value.charsetLettersDigits');
+    expect(keyOf(start, 'prog', 'A-1')).toBe('templates.value.charsetOkumaProgram');
+    expect(keyOf(start, 'prog', '1A01')).toBe('templates.value.charsetOkumaProgram');
     // The LAP contour name: a sequence name, N and at most four letters or digits.
     expect(keyOf(lap, 'name', 'NLAP1')).toBeUndefined();
     expect(keyOf(lap, 'name', 'NLAP12')).toBe('templates.value.tooLong');
     expect(keyOf(lap, 'name', 'N LAP')).toBe('templates.value.charsetName');
+  });
+
+  it('T155, owner 2026-10-30: the Klartext program name takes only what the TNC 640 manual allows (letters, digits, _ and -; at most 24)', () => {
+    for (const id of ['program-start', 'program-end']) {
+      const t = templateOf('heidenhain', id);
+      const keyOf = (value: string) => validateTemplateValues(t, { ...defaults(t), name: value }).name?.key;
+      expect(keyOf('NEW'), id).toBeUndefined();
+      expect(keyOf('PART_12-B'), id).toBeUndefined();
+      expect(keyOf('A'.repeat(24)), id).toBeUndefined();
+      expect(keyOf('A'.repeat(25)), id).toBe('templates.value.tooLong');
+      expect(keyOf('MY PART'), id).toBe('templates.value.charsetFileName');
+      expect(keyOf('PART.1'), id).toBe('templates.value.charsetFileName');
+    }
   });
 
   it('NC-17: the R point, the lathe pecks and the tapping feed say what the control does', () => {

@@ -421,8 +421,13 @@ describe('the words a script must not scale', () => {
 type Unit = NonNullable<CodeParam['unit']>;
 
 const DRIVEN_TOOL: Record<string, Unit> = { Q: 'count', E: 'dwell' };
-/** T210: the feed marker on a driven-tool cycle's feed (its F is a feed rate in the unit in force). */
+/** T210: the feed marker on the driven-tool tapping feed (its F is tied to the pitch). */
 const DRIVEN_TOOL_FEED: Record<string, Unit> = { ...DRIVEN_TOOL, F: 'feed' };
+/**
+ * Owner 2026-10-30: the drilling, boring, deep-hole and reaming cycles of the driven tool take
+ * their feed per minute only; a feed per revolution is not allowed (LG33-019-R22 p.210, note 2).
+ */
+const DRIVEN_TOOL_FEED_PER_MIN: Record<string, Unit> = { ...DRIVEN_TOOL, F: 'feedPerMin' };
 
 const PARAM_UNITS: Record<string, Record<string, Unit>> = {
   G2: { L: 'length' },
@@ -463,15 +468,15 @@ const PARAM_UNITS: Record<string, Record<string, Unit>> = {
   // B1: the side contour arcs, whose format gives F in mm/min (LG33-019 chapter 9).
   G132: { L: 'length', F: 'feedPerMin' },
   G133: { L: 'length', F: 'feedPerMin' },
-  G181: DRIVEN_TOOL_FEED,
-  G182: DRIVEN_TOOL_FEED,
-  G183: { ...DRIVEN_TOOL_FEED, D: 'length', L: 'length' },
+  G181: DRIVEN_TOOL_FEED_PER_MIN,
+  G182: DRIVEN_TOOL_FEED_PER_MIN,
+  G183: { ...DRIVEN_TOOL_FEED_PER_MIN, D: 'length', L: 'length' },
   G184: DRIVEN_TOOL_FEED,
   G185: { F: 'feedPerRev' },
   G186: { F: 'feedPerRev' },
   G187: { F: 'feedPerRev' },
   G188: { F: 'feedPerRev' },
-  G189: DRIVEN_TOOL_FEED,
+  G189: DRIVEN_TOOL_FEED_PER_MIN,
   CALL: { Q: 'count' },
   MODIN: { Q: 'count' },
 };
@@ -546,6 +551,13 @@ describe('the parameter units', () => {
   it('reads F by the feed mode, and as a lead in a thread block whatever the mode', () => {
     expect(classOf('F', [], 'per-minute')).toBe('feedPerMin');
     expect(classOf('F', ['G181'], 'per-minute')).toBe('feedPerMin');
+    // Owner 2026-10-30 (LG33-019-R22 p.210): the driven-tool drilling, boring, deep-hole and
+    // reaming feeds are per minute whatever the feed mode says; the tapping feed follows it.
+    for (const code of ['G181', 'G182', 'G183', 'G189']) {
+      expect(classOf('F', [code], 'per-rev'), code).toBe('feedPerMin');
+      expect(classOf('F', [code], 'unknown'), code).toBe('feedPerMin');
+    }
+    expect(classOf('F', ['G184'], 'per-rev')).toBe('feedPerRev');
     expect(classOf('F', ['G33'], 'per-minute')).toBe('feedPerRev');
     expect(classOf('F', ['G71'], 'per-minute')).toBe('feedPerRev');
     expect(classOf('F', [], 'unknown')).toBeNull();

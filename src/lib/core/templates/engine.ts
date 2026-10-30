@@ -89,6 +89,8 @@ const CHARSET_MESSAGES: Record<TemplateCharset, string> = {
   'no-spaces': 'charsetNoSpaces',
   'letters-digits': 'charsetLettersDigits',
   name: 'charsetName',
+  'file-name': 'charsetFileName',
+  'okuma-program': 'charsetOkumaProgram',
 };
 
 /** A control character other than a tab (a line break has its own message). */
