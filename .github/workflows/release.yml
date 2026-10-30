@@ -112,7 +112,7 @@ jobs:
         include:
           # One universal binary (Apple Silicon and Intel in a single .dmg)
           - name: macOS
-            os: macos-14
+            os: macos-15
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             tauri-args: --target universal-apple-darwin
             bundle-dir: src-tauri/target/universal-apple-darwin/release/bundle

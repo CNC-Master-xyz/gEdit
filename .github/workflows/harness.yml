@@ -10,11 +10,11 @@
 # keyboard handling and a maintainer wants the answer before merging. The manual run takes an optional `scenarios`
 # field (scenario or suite names, space-separated) to run part of the suite; empty runs it all, as a push does.
 #
-# What the runner is: macOS 14 on arm64 with a live, unlocked desktop session, Accessibility
+# What the runner is: macOS 15 on arm64 with a live, unlocked desktop session, Accessibility
 # already granted to the job's shell, and bash as the login shell. The harness needs nothing
 # else (the spike behind this file found no harness change necessary). The owner's own Mac
 # stays the machine for the G7 budgets and for the newest macOS; this job proves the suite on
-# macOS 14 and catches a regression without anyone sitting at a Mac.
+# macOS 15 and catches a regression without anyone sitting at a Mac.
 
 name: Harness
 
@@ -46,8 +46,8 @@ env:
 
 jobs:
   harness:
-    name: Runtime harness (macOS 14)
-    runs-on: macos-14
+    name: Runtime harness (macOS 15)
+    runs-on: macos-15
     # 45 before P4a (the runs took 39 to 41 minutes), 75 in the first P4a version, 150 now. What the job holds: the
     # suite as it was, 41 minutes with the build; p4-geometry, 2 minutes; and p4-perf, which runs five scripts on 300,000
     # lines (translate, rotate 90 and mirror in X on the straight-line program, then rotate and mirror at 30 degrees

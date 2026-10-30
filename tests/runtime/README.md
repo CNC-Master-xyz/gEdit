@@ -81,7 +81,7 @@ tests/runtime/suite.sh tests/runtime/suites/m0.txt   # run a suite and print the
 
 ## On a hosted runner
 
-`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e,p4f,p4g,p4h}.txt` on `macos-14`
+`harness.yml` runs `sync.sh` and then `suite.sh tests/runtime/suites/{m{0..12},rp,m13,p3a,p3b,b1,p4a,p4b,p4c,p4d,p4e,p4f,p4g,p4h}.txt` on `macos-15`
 (150 minute limit since P4a; it was 45: `p4-perf` runs five scripts on 300,000 lines, about 100 minutes for the job, see the comment in `harness.yml`; its P4e sections D to F add about ten minutes of key presses and three programs opened), always uploads `$GEDIT_RH_DIR/out`, the app logs and the sync logs, and
 caches the build directory. A run started by hand can be limited to some scenarios or suites (the
 `scenarios` input: space-separated names, scenario names and/or suite names such as `p4e`, letters, digits, `.`, `_`, `-` only;
@@ -95,7 +95,7 @@ What differs from the owner's Mac, and how the scenarios deal with it:
 
 - The runner has a live, unlocked session with Accessibility already granted, so no setup
   step is needed. The harness is unchanged.
-- The login shell is bash and the runner is macOS 14. The workflow sets `SHELL=/bin/zsh`; the
+- The login shell is bash and the runner is macOS 15 (macOS 14 until GitHub retired that image on 2026-11-02). The workflow sets `SHELL=/bin/zsh`; the
   Python lookup scenarios (`m0-py3-default`, `m0-py3-zdotdir`) write zsh profiles and pin
   `SHELL` to `/bin/zsh` themselves, so they mean the same on both machines.
 - Button order read back from an alert is the OS's business: `m0-encoding` checks the set of
